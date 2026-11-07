@@ -395,7 +395,7 @@ try {
             $earlyQuiesce = if($useEarlyQuiescence){'1'}else{'0'}
             $wixArguments += @('-d',"EarlyServiceQuiescence=$earlyQuiesce")
             $wixArguments += @('-d',"IncludeMingwUiRuntime=$includeMingwUiRuntime",'-bindpath',"InstallUi=$installerUiRoot")
-            $wixArguments += @('-bindpath',"WhisperRuntimeDir=$whisperRuntimeRoot")
+            $wixArguments += @('-d',"WhisperRuntimeDir=$whisperRuntimeRoot")
             $wixArguments += @('-bindpath',"PrivilegedBroker=$brokerBuildRoot")
             $wixArguments += @('-d',"BrokerSha256=$brokerSha256")
             $rollbackInjection = if($InjectPostActivationFailure){'1'}else{'0'}
