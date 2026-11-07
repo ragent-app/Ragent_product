@@ -179,7 +179,13 @@ export function createLocalVoiceServer({
     isReady() { return Boolean(enabled && current?.ready && !current.closed); },
     async setEnabled(value) {
       if (typeof value !== 'boolean') throw failure('VOICE_CONFIG_INVALID');
-      if (enabled === value && !value) return false;
+      if (enabled === value) {
+        if (!value) return false;
+        // Repeated enable requests must join the existing startup instead of
+        // invalidating it by advancing the generation while the model loads.
+        await ensureStarted();
+        return true;
+      }
       enabled = value;
       generation += 1;
       if (!value) {
