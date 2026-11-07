@@ -1,127 +1,99 @@
-# Android voice recognition and computer Whisper management
+# Android 语音识别与电脑 Whisper 管理方案
 
-## Product behavior
+## 目标
 
-Voice recognition is local to either the Android phone or the computer hosting
-the selected Ragent session. It only fills the current chat draft. It never
-sends a message automatically and never sends microphone audio to a cloud
-speech service.
+用户在 Android 聊天输入框点语音按钮后，Ragent 根据当前聊天和用户设置选择识别设备，把识别出的文字放入草稿。用户检查后仍需手动发送。语音识别可以在 Android 手机本地运行，也可以在承载会话的 Windows Ragent 电脑上运行 Whisper。
 
-The phone route uses Android's on-device `SpeechRecognizer` with network
-fallback disabled. The computer route records mono 16 kHz audio on the phone,
-then sends a bounded WAV through the existing authenticated Ragent target
-connection to that computer's loopback-only Whisper service. Only transcript
-text returns to Android.
+Android 还要能查看每台已配对电脑的 Whisper 状态，并远程安装、启动或停止该电脑上的 Whisper。Whisper 安装包由目标 Windows 电脑上的 Ragent 下载和校验；手机只发起固定的安装操作，不传任意命令或下载地址。
 
-## User controls
+## 用户可控的三层设置
 
-Android has two places to control voice behavior:
+### 1. Android 本机识别
 
-1. **Settings → Voice recognition** controls Android on-device recognition
-   independently, and lists every paired computer. For each computer it shows
-   connection and Whisper status, offers **Install** when the computer is a
-   supported Windows Ragent without Whisper, and offers an on/off switch after
-   Whisper is installed. Stopping Whisper retains the installation.
-2. **The chat's top-right three-dot menu → Voice processing device** chooses
-   **Automatic**, **This phone**, or a paired computer. This choice is saved per
-   chat and does not alter another chat's choice.
+Android 设置页提供独立的“在手机上进行语音识别”开关。开启后，手机使用 Android 本地 `SpeechRecognizer`，关闭网络回退，音频和识别过程留在手机。是否开启本机识别不改变任何电脑上的 Whisper 设置。
 
-The computer status distinguishes offline, not installed, installing,
-installed but stopped, starting, ready, and error. Unsupported computers do
-not show the Windows installer action.
+### 2. 每台电脑的 Whisper 服务
 
-## Automatic routing
+Android 的“语音识别设置”列出已配对电脑。每台电脑单独显示在线状态、操作系统、Whisper 是否已安装、服务是否开启、是否就绪，以及当前安装或启动进度。
 
-Each chat starts in **Automatic** mode. For every voice input, the app uses the
-following order:
+- 支持的 Windows Ragent 未安装 Whisper 时显示“安装 Whisper”。用户点击后，目标电脑下载、校验并安装固定版本，安装成功后默认启用并启动服务。
+- 已安装时显示该电脑自己的开关。关闭服务只停止识别，不卸载文件；再次开启会启动服务。此设置按电脑保存并跨 Ragent 重启保留。
+- 暂不支持远程安装的系统显示状态，不展示 Windows 安装操作。第一阶段只承诺支持 Windows Ragent。
 
-1. If the active session's computer is connected and its Whisper setting is
-   enabled, keep that computer selected. If Whisper is still starting, Ragent
-   waits for it to become ready to transcribe the captured audio; do not
-   silently switch to another recognizer during startup.
-2. If the session computer is offline, has no Whisper installation, or has
-   Whisper turned off, use Android's on-device recognizer when it is enabled
-   and available on the phone.
-3. If neither route can run, leave the draft untouched and explain which
-   device setting needs attention.
+服务状态至少区分：离线、未安装、安装中、已安装但已关闭、启动中、就绪、错误。不能把“已安装”“已开启”和“当前就绪”合并成一个状态。
 
-A manual phone/computer choice stays fixed for that chat. If the chosen device
-is unavailable, show an error and let the user change the selection; do not
-silently reroute. Changing sessions only recalculates Automatic mode.
+### 3. 每个聊天的语音处理设备
 
-## Windows Whisper installation and lifecycle
+聊天页右上角三点菜单增加“语音处理设备”，选择只影响当前聊天并持久化：
 
-- A fresh Windows Ragent setup selects the Whisper runtime and multilingual
-  base model by default. The user can clear the option to omit them. When
-  included, a missing preference defaults to enabled, so Ragent starts the
-  local recognizer and keeps its model available after service startup.
-- Upgrade setup reflects whether Whisper is already installed. A saved
-  `enabled: false` preference remains authoritative across upgrade and service
-  restart; setup must not turn it back on. If the component is present and
-  enabled, Ragent starts it. Users can also turn it off without uninstalling.
-- On a supported Windows computer that lacks Whisper, Android's **Install**
-  action starts a fixed Ragent operation. The phone sends no command, path,
-  download URL, or installer arguments. The Windows service downloads only
-  the pinned Whisper release and model, enforces byte limits and SHA-256
-  checks, extracts an allowlist of runtime files, adds the required licenses,
-  and writes a file manifest. It stages under the instance's protected Ragent
-  configuration directory and atomically activates the new runtime. The
-  running service identity already has access to that managed directory, so
-  this operation does not rerun MSI or elevate an arbitrary process.
-- Installation status is durable and polled by Android. An interrupted
-  operation is reported as failed after Ragent restarts. A failed activation
-  restores the previous runtime. A successful operation saves Whisper as
-  enabled, starts it, and reports success after the recognizer is ready.
-- Downloads happen on the Windows computer, not through the phone or an
-  application cloud service. The Windows service must be able to reach the
-  pinned release/model hosts (using the configured system proxy where set).
+- **自动**：默认值，按下文的自动路由规则决定。
+- **此手机**：固定使用 Android 本机识别。
+- **某台已配对电脑**：固定使用所选电脑的 Whisper。可选择当前会话电脑，也可选择其他已配对电脑；目标电脑必须在线且 Whisper 已安装并开启。
 
-## API contract
+菜单项显示可读状态，例如“自动（当前使用：工作电脑）”“工作电脑（就绪）”“家用电脑（离线）”。用户选定的手机或电脑暂不可用时，提示原因并让用户手动改选；手动选择不暗中切换到别的设备。未安装 Whisper 的电脑提示前往语音设置安装。
 
-The Android app reaches these routes through its existing authenticated,
-target-bound Ragent connection:
+## 自动选择规则
 
-- `GET /api/local-voice-settings` returns `installed`, `enabled`, `running`,
-  `ready`, `installing`, and `installable`.
-- `PATCH /api/local-voice-settings` accepts exactly
-  `{ "enabled": boolean }` to start or stop an installed service.
-- `POST /api/local-voice-install` accepts exactly `{}` and returns an
-  operation ID for the fixed Windows Whisper install.
-- `GET /api/local-voice-install/:operationId` reports `queued`,
-  `downloading_runtime`, `downloading_model`, `extracting`, `activating`,
-  `starting`, `succeeded`, or `failed`.
-- `POST /api/local-voice-recognition` accepts bounded, validated WAV data and
-  returns transcript text only when the local Whisper service is enabled.
+每个聊天初始为“自动”。每次语音输入时按此顺序判断：
 
-The Android client does not transmit audio to the computer settings or
-installation endpoints. Computer transcription is sent only to the selected
-target; phone transcription remains on the phone. The computer recognizer
-binds to loopback, and neither audio nor transcript is persisted by the
-recognition API.
+1. 读取当前聊天会话实际连接的 Ragent 电脑。
+2. 如果该电脑已安装 Whisper 且用户已开启，自动将识别任务路由到这台电脑。Whisper 正在启动时由目标电脑按需启动；Android 显示处理中并等待服务就绪后完成识别，不可因为模型尚未载入就改走另一台设备。
+3. 如果会话电脑离线、没有安装 Whisper 或 Whisper 已关闭，则在 Android 本机识别开关已开启且系统识别器可用时，改用手机本地识别。
+4. 两条自动路线都不可用时，不发送音频，不改动输入草稿，并明确提示用户应开启哪项设置或连接哪台电脑。
 
-## Acceptance criteria
+因此，用户在一台已开启 Whisper 的电脑上打开或继续聊天时，“自动”就使用该会话电脑处理；手机本机识别开关不会抢占这条路线。切换会话后，自动模式重新依据新会话的电脑状态判断。若 Whisper 启动或识别时报错，显示该电脑的错误并允许重试或手动切到手机；不在一次录音中偷偷改用另一条路线。若手机识别被关闭而电脑 Whisper 不可用，语音输入会明确失败，不会转交云端。
 
-| Scenario | Expected result |
+## 语音数据路径与隐私
+
+电脑识别时，Android 负责采集麦克风，并将有大小上限的单声道 16 kHz WAV 音频通过现有、已认证且绑定目标电脑的 Ragent 连接发送到所选电脑；电脑上的 Ragent 转发给仅监听 `127.0.0.1` 的 Whisper 服务，并只把识别文字返回 Android。音频和临时转写内容只在请求处理期间使用，不写入会话历史或由语音 API 持久化。
+
+手机识别时，音频只交给 Android 本机识别器，并关闭网络回退。两种路线都只把文字插入当前草稿，不自动发送，也不把音频提交给应用云服务。用户手动选择另一台电脑时，请求通过该电脑自己的已认证连接发送，不能借用当前聊天电脑的凭据或连接冒充目标设备。
+
+## Android 发起电脑安装与服务控制
+
+1. Android 设置页从已配对 Ragent 查询各电脑的 `installed / enabled / running / ready / installing / installable` 状态。
+2. 用户对支持的 Windows 电脑点“安装 Whisper”。服务端检查当前用户对目标电脑的管理权限，并创建可查询进度的安装操作。
+3. 目标电脑上的 Ragent 下载固定版本的 Whisper 运行时和模型，限制字节数、校验 SHA-256，只解压允许的文件，写入许可证和清单，再在 Ragent 管理的目录中原子启用。
+4. 安装成功后保存该电脑的 Whisper 为开启状态，启动服务；只有识别服务就绪后，才向 Android 报告完成。Android 展示下载、校验、解压、启动、成功或可理解的失败原因。
+5. Ragent 重启时将未完成的安装操作标记为失败；安装或启动失败时清理暂存并恢复原来的运行时。重复点击同一台电脑的安装不能启动重复下载。
+6. Android 的电脑开关只允许更改 `{ enabled: true/false }`；它不卸载 Whisper。安装 API 只接受空请求体，不接受任意路径、URL、命令行参数或脚本。
+
+下载在目标 Windows 电脑执行，使用该系统配置的代理访问固定资源地址。安装结果和状态按目标 Ragent 实例保存。安装和开关 API 都需要现有的配对身份认证与目标授权。
+
+## Windows 安装器默认值
+
+- **全新安装**：安装界面默认勾选 Whisper 运行时及多语言基础模型。保持默认值会安装并默认启用服务；用户可取消勾选，选择不安装、不启动。
+- **升级且原来未安装 Whisper**：升级界面也默认勾选 Whisper，可取消。接受默认项后安装并默认启用。
+- **升级且已经安装 Whisper**：保留现有安装；若用户之前明确关闭服务，升级、重启后仍保持关闭。安装器不能把显式的关闭偏好重置为开启。
+- **安装后生命周期**：安装器将 Whisper 设为已启用并随 Ragent 服务启动。以后可从 Windows Ragent 设置或 Android 配对电脑列表关闭/开启；关闭只停服务，保留已安装文件。
+
+## 接口边界
+
+- `GET /api/local-voice-settings`：返回目标电脑的安装、启用、运行、就绪、安装中和是否可安装状态。
+- `PATCH /api/local-voice-settings`：只接受 `{ "enabled": boolean }`，用于启动或停止已安装服务。
+- `POST /api/local-voice-install`：只接受 `{}`，发起固定的 Windows Whisper 安装并返回操作 ID。
+- `GET /api/local-voice-install/:operationId`：返回排队、下载运行时、下载模型、解压、启用、启动、成功或失败状态。
+- `POST /api/local-voice-recognition`：仅接收有大小上限且通过格式校验的 WAV；要求 Whisper 已启用，返回识别文字。
+
+Android 继续使用现有目标连接和认证机制，不直接连模型服务端口。电脑 Whisper 仅监听回环地址；语音识别 API 不保存音频和识别文本。
+
+## 验收标准
+
+| 场景 | 结果 |
 | --- | --- |
-| Fresh Windows install accepts the default Whisper option | Runtime and model install; the service enables Whisper and reaches ready. |
-| Fresh Windows install clears the Whisper option | Whisper does not run; Automatic uses phone-local recognition if enabled. |
-| Upgrade has a previously saved Whisper-off setting | Upgrade and restart keep Whisper off. |
-| Android opens Voice Settings with a paired Windows Ragent lacking Whisper | It shows Install and a clear installation state. |
-| Owner starts installation from Android | Fixed verified payload installs on that Windows computer, starts by default, and reports ready. |
-| Installation is interrupted or a hash/start check fails | Android gets a useful failure; incomplete staging is removed and an existing runtime is restored. |
-| Session is hosted on a connected computer with Whisper enabled | Automatic selects that computer, waiting for readiness if needed. |
-| Session computer is offline, lacks Whisper, or has it off | Automatic uses phone-local recognition if enabled and available. |
-| User selects a device manually in the chat menu | That chat persists the selection and reports unavailable routes without silently switching. |
-| A Mac or other unsupported computer has no Whisper | Android does not offer the Windows installer action. |
-| Both routes are unavailable | No audio is sent and the draft is unchanged. |
-| Recognition succeeds | Transcript enters the draft; it is sent only after the user taps Send. |
+| Android 本机识别开启、电脑 Whisper 关闭 | 自动模式使用手机，文字进入草稿，不自动发送 |
+| 当前会话电脑已安装且开启 Whisper | 自动模式使用该电脑；不会因手机识别开启而改用手机 |
+| 当前会话电脑 Whisper 正在启动 | 显示等待状态，服务就绪后继续识别 |
+| 当前会话电脑离线、未安装、关闭或报错 | 自动模式回退到已开启且可用的手机识别 |
+| 用户在三点菜单固定选手机或某台电脑 | 当前聊天记住选择；路线不可用时提示，不暗中切换 |
+| Android 对未安装 Whisper 的 Windows 电脑点安装 | 目标电脑校验并安装固定载荷，默认开启，报告就绪 |
+| 安装中断、哈希错误或服务启动失败 | 显示明确失败状态，清理暂存并保留/恢复之前版本 |
+| 新装 Windows 并接受默认选项 | 默认安装并启动 Whisper；取消勾选则不安装、不运行 |
+| 升级时该电脑之前明确关闭 Whisper | 升级和重启后继续关闭 |
+| 两种识别路线均不可用 | 不发送音频、不改草稿，提示需要采取的操作 |
 
-## Implementation and verification status
+## 当前实现与验收状态
 
-The current `main` worktree contains Android capture and local recognition,
-separate phone/computer settings, per-chat routing, Windows default-on setup
-behavior, and the fixed Windows install-operation path. Automated Node tests
-cover pinned-download verification, failure rollback, duplicate requests,
-owner authorization, and lifecycle defaults. Windows installer/service build
-and signed-in Android-to-Windows end-to-end acceptance are still required
-before calling the feature release-verified.
+当前主线已包含 Android 录音和本机识别、按聊天保存路由、三点菜单设备选择、按电脑管理和远程安装 Whisper、Windows 安装器默认安装行为，以及固定载荷校验和失败回滚。Node 安装流程测试、Android 编译与单元测试、Windows ServiceHost 和安装器构建已通过。
+
+仍需完成 Android 已登录并配对到 Windows Ragent 后的端到端验收，重点验证从手机安装未安装的 Whisper、服务自动启动、自动路由到当前会话电脑，以及切换到手机或其他电脑。未完成该项前，不把功能称为已通过发布级真机验收。
