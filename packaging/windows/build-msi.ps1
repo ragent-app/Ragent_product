@@ -106,6 +106,18 @@ try {
         if ($runtimeSource.sourceRevision -cne $frozenRevision -or $buildSource.sourceRevision -cne $frozenRevision -or (& git -C $SourceRoot rev-parse HEAD).Trim() -cne $frozenRevision) { throw 'Committed source changed during Windows staging.' }
         $scriptRoot = Join-Path $payloadRoot 'packaging\windows'
     }
+    $whisperRuntimeRoot = ''
+    if ($fullOwnerActivation) {
+        Assert-BuildFreeSpace 'before optional Whisper staging'
+        $whisperRuntimeRoot = Join-Path $staging 'whisper-runtime'
+        $whisperCacheRoot = Join-Path $staging 'whisper-download-cache'
+        & (Join-Path $scriptRoot 'stage-whisper-runtime.ps1') -OutputDirectory $whisperRuntimeRoot -CacheDirectory $whisperCacheRoot
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $whisperRuntimeRoot 'whisper-server.exe') -PathType Leaf) -or
+            -not (Test-Path -LiteralPath (Join-Path $whisperRuntimeRoot 'ggml-base-q5_1.bin') -PathType Leaf)) {
+            throw 'The optional local voice runtime could not be staged.'
+        }
+        Assert-BuildFreeSpace 'after optional Whisper staging'
+    }
     $brandRoot = Join-Path $staging ('brand-' + [guid]::NewGuid().ToString('N'))
     & (Join-Path $scriptRoot 'generate-brand-assets.ps1') -SourceRoot $buildInputRoot -OutputDirectory $brandRoot
     $installerUiRoot = ''
@@ -296,16 +308,21 @@ try {
     # Preserve the established uncompressed installer ceiling. The Electron
     # renderer is counted inside this payload; declaration pruning above keeps
     # normal runtime and browser assets inside the budget without dropping code.
-    $payloadBytes = (Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Force |
+    $payloadBytes = [long](Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Force |
         Measure-Object Length -Sum).Sum
+    $whisperPayloadBytes = if ($whisperRuntimeRoot) {
+        [long](Get-ChildItem -LiteralPath $whisperRuntimeRoot -Recurse -File -Force | Measure-Object Length -Sum).Sum
+    } else { 0L }
+    $completePayloadBytes = $payloadBytes + $whisperPayloadBytes
     $desktopPayloadBytes = (Get-ChildItem -LiteralPath (Join-Path $payloadRoot 'Desktop') -Recurse -File -Force |
         Measure-Object Length -Sum).Sum
     Write-Output ('Electron desktop payload: {0:N0} bytes' -f $desktopPayloadBytes)
     Write-Output ('Core Windows payload: {0:N0} bytes' -f ($payloadBytes - $desktopPayloadBytes))
     $maxPayloadBytes = if ($fullOwnerActivation) { 900MB } else { 600MB }
-    Write-Output ('Complete MSI payload: {0:N0} bytes ({1:N0} MiB maximum)' -f $payloadBytes, ($maxPayloadBytes / 1MB))
-    if ($payloadBytes -gt $maxPayloadBytes) {
-        throw ('Staged MSI payload is {0:N0} MiB, above the {1:N0} MiB runtime budget.' -f ($payloadBytes / 1MB), ($maxPayloadBytes / 1MB))
+    Write-Output ('Optional Whisper payload: {0:N0} bytes' -f $whisperPayloadBytes)
+    Write-Output ('Complete MSI payload: {0:N0} bytes ({1:N0} MiB maximum)' -f $completePayloadBytes, ($maxPayloadBytes / 1MB))
+    if ($completePayloadBytes -gt $maxPayloadBytes) {
+        throw ('Staged MSI payload is {0:N0} MiB, above the {1:N0} MiB runtime budget.' -f ($completePayloadBytes / 1MB), ($maxPayloadBytes / 1MB))
     }
     Assert-BuildFreeSpace 'before MSI compilation'
     # Compile the service host from the same frozen staged source, never reuse
@@ -341,6 +358,21 @@ try {
 </Wix>
 "@ | Set-Content -LiteralPath $payloadWxs -Encoding UTF8
     if (-not (Test-Path $payloadWxs)) { throw 'WiX directory authoring failed.' }
+    $localVoiceWxs = ''
+    if ($fullOwnerActivation) {
+        $localVoiceWxs = Join-Path $staging 'local-voice.wxs'
+        @"
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <ComponentGroup Id="LocalVoicePayload" Directory="LOCALVOICEFOLDER">
+      <Files Include="`$(var.WhisperRuntimeDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>
+"@ | Set-Content -LiteralPath $localVoiceWxs -Encoding UTF8
+        if (-not (Test-Path $localVoiceWxs)) { throw 'WiX local voice authoring failed.' }
+    }
     New-Item -ItemType Directory -Force (Split-Path -Parent $OutputPath) | Out-Null
     foreach ($extension in @('WixToolset.UI.wixext/7.0.0', 'WixToolset.Util.wixext/7.0.0')) {
         & wix.exe --acceptEula wix7 extension add --global $extension
@@ -350,7 +382,9 @@ try {
     if($ManagedOwnerPreparation -or $fullOwnerActivation){
         & (Join-Path $installScriptRoot 'build-managed-owner-msi-bridge.ps1') -OutputPath (Join-Path $staging 'AgentoC.ManagedOwnerMsiBridge.exe')
         $managedWxs = if($fullOwnerActivation){Join-Path $installScriptRoot 'AgentoC.ActivatedOwner.wxs'}else{Join-Path $installScriptRoot 'AgentoC.ManagedOwner.wxs'}
-        $wixArguments = @('--acceptEula','wix7','build','-arch','x64',$managedWxs,$payloadWxs,'-d',"ProductVersion=$Version",'-d',"DisplayVersion=$displayVersion",'-d',"MsiProductVersion=$MsiProductVersion",'-d',"ProductCode=$ProductCode",'-d',"MsiUpgradeLane=$MsiUpgradeLane",'-d',"MsiUpgradeStrategy=$msiUpgradeStrategy",'-d',"SourceDir=$payloadDir",'-bindpath',"ServiceHost=$serviceHostDir",'-bindpath',"ManagedBridge=$staging",'-bindpath',"BrandAsset=$brandRoot",'-ext','WixToolset.UI.wixext/7.0.0','-ext','WixToolset.Util.wixext/7.0.0','-o',$OutputPath)
+        $wixSources = @($managedWxs, $payloadWxs)
+        if ($fullOwnerActivation) { $wixSources += $localVoiceWxs }
+        $wixArguments = @('--acceptEula','wix7','build','-arch','x64') + $wixSources + @('-d',"ProductVersion=$Version",'-d',"DisplayVersion=$displayVersion",'-d',"MsiProductVersion=$MsiProductVersion",'-d',"ProductCode=$ProductCode",'-d',"MsiUpgradeLane=$MsiUpgradeLane",'-d',"MsiUpgradeStrategy=$msiUpgradeStrategy",'-d',"SourceDir=$payloadDir",'-bindpath',"ServiceHost=$serviceHostDir",'-bindpath',"ManagedBridge=$staging",'-bindpath',"BrandAsset=$brandRoot",'-ext','WixToolset.UI.wixext/7.0.0','-ext','WixToolset.Util.wixext/7.0.0','-o',$OutputPath)
         if($fullOwnerActivation){
             # The guarded major-upgrade transaction has passed real upgrade
             # and injected rollback verification. Use it for ordinary Owner
@@ -360,6 +394,7 @@ try {
             $earlyQuiesce = if($useEarlyQuiescence){'1'}else{'0'}
             $wixArguments += @('-d',"EarlyServiceQuiescence=$earlyQuiesce")
             $wixArguments += @('-d',"IncludeMingwUiRuntime=$includeMingwUiRuntime",'-bindpath',"InstallUi=$installerUiRoot")
+            $wixArguments += @('-bindpath',"WhisperRuntimeDir=$whisperRuntimeRoot")
             $wixArguments += @('-bindpath',"PrivilegedBroker=$brokerBuildRoot")
             $wixArguments += @('-d',"BrokerSha256=$brokerSha256")
             $rollbackInjection = if($InjectPostActivationFailure){'1'}else{'0'}

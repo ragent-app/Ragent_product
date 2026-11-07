@@ -1432,6 +1432,16 @@ body.composer-fullscreen-open .messages::-webkit-scrollbar {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.composer-voice-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.composer-voice-status[hidden] { display: none; }
+.composer-voice-status button { font: inherit; cursor: pointer; }
 .composer-add-menu-main {
   min-width: 0;
   overflow: hidden;

@@ -47,6 +47,7 @@ constexpr UINT kButtonInstall = 4104;
 constexpr UINT kButtonCancel = 4105;
 constexpr UINT kButtonFinish = 4106;
 constexpr UINT kButtonLaunchOption = 4107;
+constexpr UINT kButtonWhisperOption = 4108;
 constexpr UINT kInstallEdit = 4201;
 constexpr UINT kLanguageSelect = 4202;
 
@@ -62,11 +63,14 @@ struct InstallerState {
     HWND cancelButton = nullptr;
     HWND finishButton = nullptr;
     HWND launchOption = nullptr;
+    HWND whisperOption = nullptr;
     HWND languageSelect = nullptr;
     Page page = Page::Welcome;
     bool closing = false;
     bool installSucceeded = false;
     bool openAfterInstall = true;
+    bool installWhisper = false;
+    bool whisperFeatureAvailable = false;
     bool updating = false;
     bool minorUpdate = false;
     int progress = 0;
@@ -271,8 +275,9 @@ void LayoutControls() {
     Position(g.languageSelect, right - Px(170), Px(35), Px(170), Px(250), true);
 
     Position(g.pathEdit, left + margin, Px(270), width - left - margin * 2 - Px(120), Px(46), g.page == Page::Location);
-    Position(g.browseButton, right - Px(108), Px(270), Px(108), Px(46), g.page == Page::Location);
-    Position(g.launchOption, left + margin, Px(334), width - left - margin * 2, Px(28), g.page == Page::Location);
+    Position(g.browseButton, right - Px(108), Px(270), Px(108), Px(46), g.page == Page::Location && !g.updating);
+    Position(g.launchOption, left + margin, Px(334), width - left - margin * 2, Px(28), g.page == Page::Location && !g.updating);
+    Position(g.whisperOption, left + margin, Px(g.updating ? 334 : 370), width - left - margin * 2, Px(28), g.page == Page::Location && g.whisperFeatureAvailable);
     Position(g.welcomeButton, right - buttonW, footerY, buttonW, buttonH, g.page == Page::Welcome);
     Position(g.installButton, right - buttonW, footerY, buttonW, buttonH, g.page == Page::Location);
     Position(g.backButton, right - buttonW * 2 - gap, footerY, buttonW, buttonH, g.page == Page::Location);
@@ -481,19 +486,23 @@ void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left
         break;
     }
     case Page::Location: {
-        DrawText(graphics, Text(L"Choose an install folder", L"选择安装文件夹"), x, y + Px(44), width, Px(29), ink, true);
-        DrawText(graphics, Text(L"Select a folder for the Ragent application files.", L"请选择 Ragent 应用程序文件的安装位置。"),
+        DrawText(graphics, g.updating ? Text(L"Choose update options", L"选择更新选项") : Text(L"Choose an install folder", L"选择安装文件夹"), x, y + Px(44), width, Px(29), ink, true);
+        DrawText(graphics, g.updating
+            ? Text(L"Keep the existing folder and choose whether to install local voice recognition.", L"保留现有文件夹，并选择是否安装本地语音识别。")
+            : Text(L"Select a folder for the Ragent application files.", L"请选择 Ragent 应用程序文件的安装位置。"),
             x, y + Px(96), width, Px(14), muted);
-        DrawText(graphics, Text(L"You can choose an existing folder or create a new one.", L"可以选择已有文件夹，也可以新建文件夹。"),
+        DrawText(graphics, g.updating ? Text(L"Your account, settings, and existing data will be kept.", L"你的账号、设置和现有数据将会保留。")
+            : Text(L"You can choose an existing folder or create a new one.", L"可以选择已有文件夹，也可以新建文件夹。"),
             x, y + Px(122), width, Px(13), muted);
-        DrawText(graphics, Text(L"Installation folder", L"安装文件夹"), x, y + Px(202), width, Px(12), ink, true);
+        DrawText(graphics, g.updating ? Text(L"Current installation folder", L"当前安装文件夹") : Text(L"Installation folder", L"安装文件夹"), x, y + Px(202), width, Px(12), ink, true);
 
         Gdiplus::SolidBrush noteFill(Color(239, 242, 248));
-        FillRounded(graphics, Gdiplus::RectF(x, y + Px(319), width, Px(50)), Px(9), noteFill);
-        const std::wstring note = g.errorDetail.empty()
-            ? Text(L"Protected service data remains in C:\\ProgramData\\AgentoC.", L"受保护的服务数据仍保存在 C:\\ProgramData\\AgentoC。")
-            : g.errorDetail;
-        DrawText(graphics, note, x + Px(14), y + Px(335), width - Px(28), Px(12),
+        FillRounded(graphics, Gdiplus::RectF(x, y + Px(365), width, Px(42)), Px(9), noteFill);
+        const std::wstring note = !g.errorDetail.empty() ? g.errorDetail
+            : g.whisperFeatureAvailable
+                ? Text(L"Whisper is optional. Ragent will not start it until you enable computer voice recognition in Settings.", L"Whisper 为可选组件。只有你在设置中启用电脑语音识别后，Ragent 才会启动它。")
+                : Text(L"Protected service data remains in C:\\ProgramData\\AgentoC.", L"受保护的服务数据仍保存在 C:\\ProgramData\\AgentoC。");
+        DrawText(graphics, note, x + Px(14), y + Px(376), width - Px(28), Px(12),
             g.errorDetail.empty() ? muted : Color(166, 66, 52));
         break;
     }
@@ -555,13 +564,14 @@ void UpdateWindowTitle() {
 
 void UpdateLocalizedControls() {
     for (const auto& item : std::vector<std::pair<HWND, std::wstring>>{
-        {g.welcomeButton, g.updating ? Text(L"Update", L"更新") : Text(L"Continue", L"继续")},
+        {g.welcomeButton, g.updating && !g.whisperFeatureAvailable ? Text(L"Update", L"更新") : Text(L"Continue", L"继续")},
         {g.backButton, Text(L"Back", L"上一步")},
         {g.browseButton, Text(L"Browse…", L"浏览…")},
         {g.installButton, Text(L"Install", L"安装")},
         {g.cancelButton, Text(L"Cancel", L"取消")},
         {g.finishButton, Text(L"Finish", L"完成")},
-        {g.launchOption, Text(L"Open Ragent when setup finishes", L"安装完成后打开 Ragent")}}) {
+        {g.launchOption, Text(L"Open Ragent when setup finishes", L"安装完成后打开 Ragent")},
+        {g.whisperOption, Text(L"Install optional local voice recognition (Whisper)", L"安装可选的本地语音识别（Whisper）")}}) {
         if (item.first) SetWindowTextW(item.first, item.second.c_str());
     }
     if (g.pathEdit) SendMessageW(g.pathEdit, EM_SETCUEBANNER, TRUE,
@@ -692,7 +702,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             SendMessageW(g.pathEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g.font), TRUE);
             SendMessageW(g.pathEdit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(Text(L"Choose a folder — nothing is preselected", L"请选择文件夹（未预填任何路径）").c_str()));
         }
-        g.welcomeButton = MakeButton(window, kButtonWelcome, g.updating ? Text(L"Update", L"更新") : Text(L"Continue", L"继续"));
+        g.welcomeButton = MakeButton(window, kButtonWelcome,
+            g.updating && !g.whisperFeatureAvailable ? Text(L"Update", L"更新") : Text(L"Continue", L"继续"));
         g.backButton = MakeButton(window, kButtonBack, Text(L"Back", L"上一步"));
         g.browseButton = MakeButton(window, kButtonBrowse, Text(L"Browse…", L"浏览…"));
         g.installButton = MakeButton(window, kButtonInstall, Text(L"Install", L"安装"));
@@ -702,12 +713,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0, 1, 1, window,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonLaunchOption)), gModule, nullptr);
         if (g.launchOption) SendMessageW(g.launchOption, BM_SETCHECK, BST_CHECKED, 0);
+        g.whisperOption = CreateWindowExW(0, L"BUTTON", Text(L"Install optional local voice recognition (Whisper)", L"安装可选的本地语音识别（Whisper）").c_str(),
+            WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0, 1, 1, window,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonWhisperOption)), gModule, nullptr);
+        if (g.whisperOption) SendMessageW(g.whisperOption, BM_SETCHECK, g.installWhisper ? BST_CHECKED : BST_UNCHECKED, 0);
+        if (g.updating && g.pathEdit) {
+            SetWindowTextW(g.pathEdit, g.installPath.c_str());
+            EnableWindow(g.pathEdit, FALSE);
+        }
         g.languageSelect = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
             0, 0, 1, 1, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kLanguageSelect)), gModule, nullptr);
         for (const wchar_t* label : {L"English", L"简体中文", L"繁體中文", L"日本語", L"한국어", L"Français", L"Español"})
             SendMessageW(g.languageSelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
         SendMessageW(g.languageSelect, CB_SETCURSEL, gLanguage.load(), 0);
-        for (HWND control : {g.welcomeButton, g.backButton, g.browseButton, g.installButton, g.cancelButton, g.finishButton, g.launchOption, g.languageSelect}) {
+        for (HWND control : {g.welcomeButton, g.backButton, g.browseButton, g.installButton, g.cancelButton, g.finishButton, g.launchOption, g.whisperOption, g.languageSelect}) {
             if (control) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g.font), TRUE);
         }
 
@@ -758,12 +777,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             InvalidateRect(window, nullptr, TRUE);
             return 0;
         }
-        if (id == kButtonWelcome) { if (g.updating) SubmitInstall(); else { SetPage(Page::Location); LayoutControls(); UpdateWindowTitle(); } return 0; }
+        if (id == kButtonWelcome) {
+            if (g.updating && !g.whisperFeatureAvailable) SubmitInstall();
+            else { SetPage(Page::Location); LayoutControls(); UpdateWindowTitle(); }
+            return 0;
+        }
         if (id == kButtonBack) { SetPage(Page::Welcome); LayoutControls(); UpdateWindowTitle(); return 0; }
         if (id == kButtonBrowse) { BrowseForFolder(); return 0; }
         if (id == kButtonInstall) { SubmitInstall(); return 0; }
         if (id == kButtonLaunchOption) {
             g.openAfterInstall = SendMessageW(g.launchOption, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            return 0;
+        }
+        if (id == kButtonWhisperOption) {
+            g.installWhisper = SendMessageW(g.whisperOption, BM_GETCHECK, 0, 0) == BST_CHECKED;
             return 0;
         }
         if (id == kButtonCancel) {
@@ -1022,6 +1049,22 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
         return ERROR_INSTALL_FAILURE;
     g.minorUpdate = installed;
     g.updating = installed || !previousProduct.empty();
+    wchar_t localVoiceFeature[8]{}; DWORD localVoiceFeatureLength = static_cast<DWORD>(std::size(localVoiceFeature));
+    if (MsiGetPropertyW(install, L"AGENTOC_LOCAL_VOICE_FEATURE", localVoiceFeature, &localVoiceFeatureLength) != ERROR_SUCCESS)
+        return ERROR_INSTALL_FAILURE;
+    g.whisperFeatureAvailable = wcscmp(localVoiceFeature, L"1") == 0;
+    g.installWhisper = false;
+    if (g.whisperFeatureAvailable && g.updating) {
+        const LPCWSTR priorProduct = g.minorUpdate ? productCode : previousProduct.c_str();
+        MSIHANDLE priorInstall = 0;
+        if (MsiOpenProductW(priorProduct, &priorInstall) == ERROR_SUCCESS) {
+            INSTALLSTATE installedState = INSTALLSTATE_UNKNOWN;
+            INSTALLSTATE actionState = INSTALLSTATE_UNKNOWN;
+            if (MsiGetFeatureStateW(priorInstall, L"LocalVoice", &installedState, &actionState) == ERROR_SUCCESS)
+                g.installWhisper = installedState == INSTALLSTATE_LOCAL || installedState == INSTALLSTATE_SOURCE;
+            MsiCloseHandle(priorInstall);
+        }
+    }
 
     const LANGID userLanguage = GetUserDefaultUILanguage();
     switch (PRIMARYLANGID(userLanguage)) {
@@ -1095,7 +1138,14 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
         return ERROR_INSTALL_FAILURE;
     }
 
-    UINT propertyResult = MsiSetPropertyW(install, L"AGENTOC_INSTALLFOLDER", g.installPath.c_str());
+    UINT propertyResult = ERROR_SUCCESS;
+    if (g.whisperFeatureAvailable) {
+        propertyResult = MsiSetInstallLevel(install, 0);
+        if (propertyResult == ERROR_SUCCESS)
+            propertyResult = MsiSetFeatureStateW(install, L"LocalVoice", g.installWhisper ? INSTALLSTATE_LOCAL : INSTALLSTATE_ABSENT);
+    }
+    if (propertyResult == ERROR_SUCCESS)
+        propertyResult = MsiSetPropertyW(install, L"AGENTOC_INSTALLFOLDER", g.installPath.c_str());
     if (propertyResult == ERROR_SUCCESS && g.updating)
         propertyResult = MsiSetPropertyW(install, L"INSTALLFOLDER", g.installPath.c_str());
     if (propertyResult == ERROR_SUCCESS && g.minorUpdate)
@@ -1105,7 +1155,9 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
     const UINT launchPropertyResult = MsiSetPropertyW(install, L"AGENTOC_LAUNCH", g.openAfterInstall ? L"1" : L"");
     if (propertyResult == ERROR_SUCCESS && launchPropertyResult != ERROR_SUCCESS) propertyResult = launchPropertyResult;
     if (propertyResult != ERROR_SUCCESS) {
-        PostUiText(3, Text(L"Windows Installer could not read the selected installation folder.", L"Windows Installer 无法读取所选安装文件夹。"));
+        PostUiText(3, g.whisperFeatureAvailable
+            ? Text(L"Windows Installer could not apply the selected setup options.", L"Windows Installer 无法应用所选安装选项。")
+            : Text(L"Windows Installer could not read the selected installation folder.", L"Windows Installer 无法读取所选安装文件夹。"));
         g.closing = true;
         if (HWND window = gUiWindow.load()) PostMessageW(window, WM_CLOSE, 0, 0);
         WaitForSingleObject(gUiThread, INFINITE);

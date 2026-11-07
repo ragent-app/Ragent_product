@@ -27,6 +27,7 @@
     <Icon Id="AgentoCIcon" SourceFile="!(bindpath.BrandAsset)\agentoc.ico" />
     <Property Id="ARPPRODUCTICON" Value="AgentoCIcon" />
     <Property Id="AGENTOC_INSTALLFOLDER" Secure="yes" />
+    <Property Id="AGENTOC_LOCAL_VOICE_FEATURE" Value="1" />
     <Property Id="AGENTOC_RECOVERY_SOURCE" Secure="yes" />
     <Property Id="AGENTOC_LAUNCH" Secure="yes" />
     <CustomAction Id="SetSelectedInstallFolder" Directory="INSTALLFOLDER" Value="[AGENTOC_INSTALLFOLDER]" />
@@ -246,6 +247,11 @@
       <?endif ?>
     </InstallExecuteSequence>
 
+    <Feature Id="LocalVoice" Title="Local voice recognition (Whisper)" Level="2" Description="Install the optional on-device speech recognition runtime and multilingual model.">
+      <ComponentRef Id="LocalVoiceEnvironment" />
+      <ComponentGroupRef Id="LocalVoicePayload" />
+    </Feature>
+
     <Feature Id="Main" Title="Ragent" Level="1">
       <ComponentRef Id="ManagedServiceHost" />
       <ComponentRef Id="ManagedStartMenuShortcut" />
@@ -260,9 +266,16 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="AgentoC">
         <Directory Id="BROKERINSTALLFOLDER" Name="Broker" />
+        <Directory Id="LOCALVOICEFOLDER" Name="voice" />
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder"><Directory Id="ApplicationProgramsFolder" Name="Ragent" /></StandardDirectory>
+
+    <Component Id="LocalVoiceEnvironment" Directory="LOCALVOICEFOLDER" Guid="{3291A475-A4AE-4F3A-9B4D-0518F12CF783}">
+      <Environment Id="LocalVoiceExecutable" Name="AGENTOC_LOCAL_VOICE_EXECUTABLE" Value="[LOCALVOICEFOLDER]whisper-server.exe" Action="set" Part="all" System="yes" />
+      <Environment Id="LocalVoiceModel" Name="AGENTOC_LOCAL_VOICE_MODEL" Value="[LOCALVOICEFOLDER]ggml-base-q5_1.bin" Action="set" Part="all" System="yes" />
+      <RegistryValue Root="HKLM" Key="Software\AgentoC\LocalVoice" Name="WhisperInstalled" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
 
     <Component Id="ManagedStartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
       <Shortcut Id="AgentoCStartMenuShortcut" Name="Ragent" Target="[INSTALLFOLDER]payload\Desktop\AgentoC.exe" WorkingDirectory="INSTALLFOLDER" Icon="AgentoCIcon" IconIndex="0" Advertise="no" />
