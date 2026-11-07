@@ -1,9 +1,10 @@
 # Optional computer voice recognition
 
 Computer voice recognition uses a resident, loopback-only `whisper-server` on
-the connected computer. The optional runtime and multilingual base model are
-installed by the Windows setup package when selected. Installation alone does
-not start Whisper.
+the connected computer. The Windows setup package installs the runtime and
+multilingual base model by default; clear the Whisper option to omit them. An
+upgrade keeps the existing component choice initially and lets the user change
+it. Installation alone does not start Whisper.
 
 An owner must enable **Computer voice recognition** in Ragent Settings on the
 computer that will process audio. With the option off, the Whisper process is

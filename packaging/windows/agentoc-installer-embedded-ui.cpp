@@ -69,7 +69,7 @@ struct InstallerState {
     bool closing = false;
     bool installSucceeded = false;
     bool openAfterInstall = true;
-    bool installWhisper = false;
+    bool installWhisper = true;
     bool whisperFeatureAvailable = false;
     bool updating = false;
     bool minorUpdate = false;
@@ -500,7 +500,7 @@ void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left
         FillRounded(graphics, Gdiplus::RectF(x, y + Px(365), width, Px(42)), Px(9), noteFill);
         const std::wstring note = !g.errorDetail.empty() ? g.errorDetail
             : g.whisperFeatureAvailable
-                ? Text(L"Whisper is optional. Ragent will not start it until you enable computer voice recognition in Settings.", L"Whisper 为可选组件。只有你在设置中启用电脑语音识别后，Ragent 才会启动它。")
+            ? Text(L"Whisper is selected by default. Clear this option to omit it. Ragent will not start it until you enable computer voice recognition in Settings.", L"Whisper 默认安装。取消勾选即可不安装；只有在设置中启用电脑语音识别后，Ragent 才会启动它。")
                 : Text(L"Protected service data remains in C:\\ProgramData\\AgentoC.", L"受保护的服务数据仍保存在 C:\\ProgramData\\AgentoC。");
         DrawText(graphics, note, x + Px(14), y + Px(376), width - Px(28), Px(12),
             g.errorDetail.empty() ? muted : Color(166, 66, 52));
@@ -1053,7 +1053,7 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
     if (MsiGetPropertyW(install, L"AGENTOC_LOCAL_VOICE_FEATURE", localVoiceFeature, &localVoiceFeatureLength) != ERROR_SUCCESS)
         return ERROR_INSTALL_FAILURE;
     g.whisperFeatureAvailable = wcscmp(localVoiceFeature, L"1") == 0;
-    g.installWhisper = false;
+    g.installWhisper = true;
     if (g.whisperFeatureAvailable && g.updating) {
         const LPCWSTR priorProduct = g.minorUpdate ? productCode : previousProduct.c_str();
         MSIHANDLE priorInstall = 0;

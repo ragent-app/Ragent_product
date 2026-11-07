@@ -247,7 +247,7 @@
       <?endif ?>
     </InstallExecuteSequence>
 
-    <Feature Id="LocalVoice" Title="Local voice recognition (Whisper)" Level="2" Description="Install the optional on-device speech recognition runtime and multilingual model.">
+    <Feature Id="LocalVoice" Title="Local voice recognition (Whisper)" Level="1" Description="Install the optional on-device speech recognition runtime and multilingual model.">
       <ComponentRef Id="LocalVoiceEnvironment" />
       <ComponentGroupRef Id="LocalVoicePayload" />
     </Feature>
