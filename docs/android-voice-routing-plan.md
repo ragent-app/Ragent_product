@@ -105,4 +105,4 @@ Android 的远程开关请求仅允许 `{ "enabled": true|false }`。安装请�
 
 主线已包含 Android 手机识别开关、逐台电脑的 Whisper 状态与启停、Android 发起远程安装、聊天级路由选择及三点菜单、Windows 安装器默认选装、安装载荷校验和失败回滚。Node 安装/路由/服务测试 15 项通过；Android 构建和应用、Workbench 单元测试通过。
 
-Honor 真机已验证 Android 能发现配对 Windows 电脑、发起 Whisper 安装并显示就绪，菜单能保存自动/手动设备选择；合成语音已通过已安装 Whisper 服务得到非空识别结果。重复启用导致模型加载中的 Whisper 启动被取消的竞态已修复，新增回归测试通过；包含修复的 Windows Ragent 0.0.42 MSI 已升级安装，三项 Windows 服务正常，Whisper 进程数为 1，Android 重连后显示“Ready for voice recognition”。Honor 麦克风到 Whisper 的真实语音转写仍待最后验收，因此目前还不能称为发布级真机验收通过。
+Honor 真机已验证 Android 能发现配对 Windows 电脑、发起 Whisper 安装并显示就绪；聊天三点菜单中的“自动”显示为当前选项，路由选择页标记为 Active，手动设备选择也可保存。合成语音已通过已安装 Whisper 服务得到非空识别结果。重复启用导致模型加载中的 Whisper 启动被取消的竞态已修复，新增回归测试通过；包含修复的 Windows Ragent 0.0.42 MSI 已升级安装，三项 Windows 服务正常，Whisper 进程数为 1，Android 重连后显示“Ready for voice recognition”。Honor 麦克风到 Whisper 的真实语音转写仍待最后验收，因此目前还不能称为发布级真机验收通过。
