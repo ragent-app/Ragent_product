@@ -305,9 +305,10 @@ try {
     $runtimeVerifierRoot = if ($CommittedTree) { $payloadRoot } else { $SourceRoot }
     & $node.Source (Join-Path $runtimeVerifierRoot 'scripts\verify-runtime-payload.mjs') $payloadRoot
     if ($LASTEXITCODE -ne 0) { throw 'Final Windows runtime secret/state verification failed.' }
-    # Preserve the established uncompressed installer ceiling. The Electron
-    # renderer is counted inside this payload; declaration pruning above keeps
-    # normal runtime and browser assets inside the budget without dropping code.
+    # Preserve an explicit uncompressed installer ceiling. The full Owner MSI
+    # carries the optional Whisper feature payload even when users leave the
+    # feature unchecked, so its budget allows 1 GiB. The Electron renderer is
+    # counted inside this payload; declaration pruning keeps normal assets lean.
     $payloadBytes = [long](Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Force |
         Measure-Object Length -Sum).Sum
     $whisperPayloadBytes = if ($whisperRuntimeRoot) {
@@ -318,7 +319,7 @@ try {
         Measure-Object Length -Sum).Sum
     Write-Output ('Electron desktop payload: {0:N0} bytes' -f $desktopPayloadBytes)
     Write-Output ('Core Windows payload: {0:N0} bytes' -f ($payloadBytes - $desktopPayloadBytes))
-    $maxPayloadBytes = if ($fullOwnerActivation) { 900MB } else { 600MB }
+    $maxPayloadBytes = if ($fullOwnerActivation) { 1024MB } else { 600MB }
     Write-Output ('Optional Whisper payload: {0:N0} bytes' -f $whisperPayloadBytes)
     Write-Output ('Complete MSI payload: {0:N0} bytes ({1:N0} MiB maximum)' -f $completePayloadBytes, ($maxPayloadBytes / 1MB))
     if ($completePayloadBytes -gt $maxPayloadBytes) {
