@@ -53,7 +53,7 @@ Android 的“语音识别设置”列出已配对电脑。每台电脑单独显
 
 1. Android 设置页从已配对 Ragent 查询各电脑的 `installed / enabled / running / ready / installing / installable` 状态。
 2. 用户对支持的 Windows 电脑点“安装 Whisper”。服务端检查当前用户对目标电脑的管理权限，并创建可查询进度的安装操作。
-3. 目标电脑上的 Ragent 下载固定版本的 Whisper 运行时和模型，限制字节数、校验 SHA-256，只解压允许的文件，写入许可证和清单，再在 Ragent 管理的目录中原子启用。
+3. 目标电脑上的 Ragent 下载固定版本的 Whisper 运行时和模型，限制字节数、校验 SHA-256，只解压允许的文件，写入许可证和清单，再在 Ragent 管理的目录中原子启用。默认使用该实例受保护的配置目录；Windows 管理员可通过 `HKLM\\Software\\AgentoC\\LocalVoiceSettings\\RuntimeDirectory` 指定另一个本地绝对路径，以便把大模型放到其他本地盘。运行时、暂存和安装操作记录写入该目录及其操作子目录，语音偏好仍保存在实例配置目录。替代目录只允许 Ragent ControlPlane 服务身份、SYSTEM 和管理员写入。
 4. 安装成功后保存该电脑的 Whisper 为开启状态，启动服务；只有识别服务就绪后，才向 Android 报告完成。Android 展示下载、校验、解压、启动、成功或可理解的失败原因。
 5. Ragent 重启时将未完成的安装操作标记为失败；安装或启动失败时清理暂存并恢复原来的运行时。重复点击同一台电脑的安装不能启动重复下载。
 6. Android 的电脑开关只允许更改 `{ enabled: true/false }`；它不卸载 Whisper。安装 API 只接受空请求体，不接受任意路径、URL、命令行参数或脚本。

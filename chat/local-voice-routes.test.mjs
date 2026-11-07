@@ -2,7 +2,23 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import test from 'node:test';
-import { createLocalVoiceRoutes } from './local-voice-routes.mjs';
+import { createLocalVoiceRoutes, resolveLocalVoiceRuntimeDirectory } from './local-voice-routes.mjs';
+
+test('managed Whisper runtime can use an absolute local-drive override while settings remain per-instance', () => {
+  const directory = resolveLocalVoiceRuntimeDirectory('C:\\ProgramData\\AgentoC\\instances\\owner\\config', {
+    AGENTOC_LOCAL_VOICE_RUNTIME_DIRECTORY: 'G:\\AgentoCapp\\local-voice\\voice-runtime',
+  });
+  assert.equal(directory, 'G:\\AgentoCapp\\local-voice\\voice-runtime');
+});
+
+test('managed Whisper runtime override rejects relative and network paths', () => {
+  assert.throws(() => resolveLocalVoiceRuntimeDirectory('/instance/config', {
+    AGENTOC_LOCAL_VOICE_RUNTIME_DIRECTORY: 'voice-runtime',
+  }), { code: 'VOICE_INSTALL_CONFIG_INVALID' });
+  assert.throws(() => resolveLocalVoiceRuntimeDirectory('/instance/config', {
+    AGENTOC_LOCAL_VOICE_RUNTIME_DIRECTORY: '\\\\server\\share\\voice-runtime',
+  }), { code: 'VOICE_INSTALL_CONFIG_INVALID' });
+});
 
 function requestFor(method, body = '') {
   const req = Readable.from(body ? [Buffer.from(body)] : []);

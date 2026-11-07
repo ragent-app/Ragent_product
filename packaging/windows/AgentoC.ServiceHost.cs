@@ -14,6 +14,7 @@ using Microsoft.Win32.SafeHandles;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Microsoft.Win32;
 
 namespace AgentoC.ServiceHost
 {
@@ -720,6 +721,30 @@ namespace AgentoC.ServiceHost
             info.EnvironmentVariables["ProgramData"] = ProgramDataPath();
             info.EnvironmentVariables["AGENTOC_INSTALL_ROOT"] = productRoot;
             info.EnvironmentVariables["AGENTOC_CONFIG_DIR"] = configDirectory;
+            if (role == "control" && !initializing)
+            {
+                string voiceRuntimeDirectory = null;
+                try
+                {
+                    using (RegistryKey settings = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\AgentoC\LocalVoiceSettings", false))
+                    {
+                        string configured = settings == null ? null : settings.GetValue(
+                            "RuntimeDirectory", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                        if (!String.IsNullOrWhiteSpace(configured))
+                        {
+                            if (!Path.IsPathRooted(configured) || configured.StartsWith(@"\\", StringComparison.Ordinal))
+                                throw new InvalidOperationException("The runtime directory must be an absolute local path.");
+                            voiceRuntimeDirectory = Path.GetFullPath(configured);
+                        }
+                    }
+                }
+                catch (Exception error)
+                {
+                    throw new InvalidOperationException("The Windows local voice runtime directory setting is invalid.", error);
+                }
+                if (!String.IsNullOrEmpty(voiceRuntimeDirectory))
+                    info.EnvironmentVariables["AGENTOC_LOCAL_VOICE_RUNTIME_DIRECTORY"] = voiceRuntimeDirectory;
+            }
             info.EnvironmentVariables["AGENTOC_INSTANCE_ROOT"] = instanceRoot;
             // Managed supervisor config is private but spool/provider roots
             // remain on the same explicitly pinned instance as the controller.

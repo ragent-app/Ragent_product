@@ -28,8 +28,21 @@ assets into its protected per-instance configuration directory, activates
 them atomically, enables the service, and reports completion after it is
 ready. The phone sends only a fixed install request; it does not send commands
 or download payloads. Windows Ragent is the only platform that offers this
-remote installation action. For development or manually managed installations,
-set both absolute paths before starting Ragent:
+remote installation action.
+
+For a managed Windows installation that needs model files on another local
+volume, an administrator can set
+`HKLM\Software\AgentoC\LocalVoiceSettings\RuntimeDirectory` to an absolute
+local path before starting Ragent. The Whisper runtime, model, install staging,
+and operation records use that directory and its sibling operation folder;
+voice preferences remain in the per-instance configuration directory. Grant
+write access only to the Ragent ControlPlane service identity, SYSTEM, and
+Administrators because the service executes the installed runtime. Network
+share paths and relative paths are rejected. Without this override, Ragent
+uses the protected per-instance configuration directory.
+
+For development or manually managed installations, set both absolute paths
+before starting Ragent:
 
 ```sh
 export AGENTOC_LOCAL_VOICE_EXECUTABLE="/absolute/path/to/whisper-server"

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve, win32 } from 'node:path';
 import { createLocalVoiceServer } from './local-voice-server.mjs';
 import { createLocalVoiceInstaller } from './local-voice-installation.mjs';
 import { loadLocalVoiceSettings, saveLocalVoiceSettings } from '../lib/local-voice-settings.mjs';
@@ -271,10 +271,22 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
   return handleLocalVoice;
 }
 
+export function resolveLocalVoiceRuntimeDirectory(configDirectory = CONFIG_DIR, env = process.env) {
+  const configured = typeof env.AGENTOC_LOCAL_VOICE_RUNTIME_DIRECTORY === 'string'
+    ? env.AGENTOC_LOCAL_VOICE_RUNTIME_DIRECTORY.trim() : '';
+  if (!configured) return join(configDirectory, 'voice-runtime');
+  if (win32.isAbsolute(configured)) {
+    if (configured.startsWith('\\\\')) throw Object.assign(new Error('A local voice runtime directory is required'), { code: 'VOICE_INSTALL_CONFIG_INVALID' });
+    return win32.normalize(configured);
+  }
+  if (isAbsolute(configured)) return resolve(configured);
+  throw Object.assign(new Error('A local voice runtime directory must be absolute'), { code: 'VOICE_INSTALL_CONFIG_INVALID' });
+}
+
 export function createConfiguredLocalVoiceRoutes(env = process.env) {
   let transcriber = null;
   let installer = null;
-  const managedRuntimeDirectory = join(CONFIG_DIR, 'voice-runtime');
+  const managedRuntimeDirectory = resolveLocalVoiceRuntimeDirectory(CONFIG_DIR, env);
   const managedExecutable = join(managedRuntimeDirectory, 'whisper-server.exe');
   const managedModel = join(managedRuntimeDirectory, 'ggml-base-q5_1.bin');
   const managedManifest = join(managedRuntimeDirectory, 'runtime-manifest.json');
