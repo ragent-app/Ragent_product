@@ -500,7 +500,7 @@ void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left
         FillRounded(graphics, Gdiplus::RectF(x, y + Px(365), width, Px(42)), Px(9), noteFill);
         const std::wstring note = !g.errorDetail.empty() ? g.errorDetail
             : g.whisperFeatureAvailable
-            ? Text(L"Whisper is selected by default. Clear this option to omit it. Ragent will not start it until you enable computer voice recognition in Settings.", L"Whisper 默认安装。取消勾选即可不安装；只有在设置中启用电脑语音识别后，Ragent 才会启动它。")
+            ? Text(L"Whisper is selected by default. A fresh install starts voice recognition automatically; clear this option to omit it.", L"Whisper 默认安装。首次安装后会自动启动语音识别；取消勾选即可不安装。")
                 : Text(L"Protected service data remains in C:\\ProgramData\\AgentoC.", L"受保护的服务数据仍保存在 C:\\ProgramData\\AgentoC。");
         DrawText(graphics, note, x + Px(14), y + Px(376), width - Px(28), Px(12),
             g.errorDetail.empty() ? muted : Color(166, 66, 52));

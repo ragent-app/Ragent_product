@@ -1,5 +1,9 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createLocalVoiceServer } from './local-voice-server.mjs';
+import { createLocalVoiceInstaller } from './local-voice-installation.mjs';
 import { loadLocalVoiceSettings, saveLocalVoiceSettings } from '../lib/local-voice-settings.mjs';
+import { CONFIG_DIR } from '../lib/config.mjs';
 import { readBody } from '../lib/utils.mjs';
 
 const MAX_BODY = 900_000;
@@ -43,7 +47,7 @@ function decodeAudio(body) {
   return audio.toString('base64') === value.audio ? audio : null;
 }
 
-export function createLocalVoiceRoutes({ transcriber = null, settingsStore = { load: loadLocalVoiceSettings, save: saveLocalVoiceSettings } } = {}) {
+export function createLocalVoiceRoutes({ transcriber = null, installer = null, settingsStore = { load: loadLocalVoiceSettings, save: saveLocalVoiceSettings } } = {}) {
   async function isInstalled() {
     if (!transcriber) return false;
     if (typeof transcriber.isInstalled === 'function') return Boolean(await transcriber.isInstalled());
@@ -51,7 +55,8 @@ export function createLocalVoiceRoutes({ transcriber = null, settingsStore = { l
   }
 
   async function initialize() {
-    const settings = await settingsStore.load();
+    await installer?.initialize?.();
+    const settings = await settingsStore.load({ defaultEnabled: await isInstalled() });
     if (settings.enabled && transcriber?.setEnabled) {
       try { await transcriber.setEnabled(true); } catch { /* Leave the option saved; the runtime retries while enabled. */ }
     }
@@ -66,13 +71,15 @@ export function createLocalVoiceRoutes({ transcriber = null, settingsStore = { l
       }
       try {
         if (req.method === 'GET') {
-          const settings = await settingsStore.load();
           const installed = await isInstalled();
+          const settings = await settingsStore.load({ defaultEnabled: installed });
           writeJson(res, 200, {
             installed,
             enabled: settings.enabled,
             running: Boolean(transcriber?.isRunning?.()),
             ready: Boolean(transcriber?.isReady?.()),
+            installing: Boolean(installer?.isInstalling?.()),
+            installable: Boolean(installer),
           });
           return true;
         }
@@ -116,21 +123,105 @@ export function createLocalVoiceRoutes({ transcriber = null, settingsStore = { l
             enabled: saved.enabled,
             running: Boolean(transcriber?.isRunning?.()),
             ready: Boolean(transcriber?.isReady?.()),
+            installing: Boolean(installer?.isInstalling?.()),
+            installable: Boolean(installer),
           });
           return true;
         }
-        const saved = await settingsStore.load();
+        const saved = await settingsStore.load({ defaultEnabled: true });
         writeJson(res, 200, {
           installed: true,
           enabled: saved.enabled,
           running: Boolean(transcriber?.isRunning?.()),
           ready: Boolean(transcriber?.isReady?.()),
+          installing: Boolean(installer?.isInstalling?.()),
+          installable: Boolean(installer),
         });
       } catch (error) {
         writeJson(res, Number.isInteger(error?.statusCode) ? error.statusCode : 503, {
           error: error?.message || 'Local voice recognition setting is unavailable',
         });
       }
+      return true;
+    }
+    if (pathname === '/api/local-voice-install' && req.method === 'POST') {
+      res.setHeader?.('Cache-Control', 'no-store');
+      if (authSession?.role !== 'owner' ||
+          (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+        req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED', error: 'Owner access required' }); return true;
+      }
+      if (!installer || typeof transcriber?.configurePaths !== 'function') {
+        req.resume?.(); writeJson(res, 503, { code: 'VOICE_INSTALL_UNAVAILABLE', error: 'Whisper installation is unavailable on this computer' }); return true;
+      }
+      let payload;
+      try { payload = JSON.parse(await readBody(req, 4096)); }
+      catch (error) {
+        writeJson(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: 'Invalid request body' });
+        return true;
+      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).length !== 0) {
+        writeJson(res, 400, { error: 'Expected an empty object' }); return true;
+      }
+      if (!installer.isInstalling?.() && await isInstalled()) {
+        writeJson(res, 409, { code: 'VOICE_ALREADY_INSTALLED', error: 'Whisper is already installed' }); return true;
+      }
+      try {
+        const operation = await installer.start(async paths => {
+          try {
+            await transcriber.configurePaths(paths);
+            await settingsStore.save({ enabled: true });
+            await transcriber.setEnabled(true);
+          } catch {
+            try { await transcriber.setEnabled(false); } catch {}
+            try { await settingsStore.save({ enabled: false }); } catch {}
+            throw Object.assign(new Error('Whisper did not become ready after installation'), { code: 'VOICE_INSTALL_START_FAILED' });
+          }
+        });
+        writeJson(res, 202, { operationId: operation.operationId, status: operation.status });
+      } catch (error) {
+        writeJson(res, 503, { code: error?.code || 'VOICE_INSTALL_UNAVAILABLE', error: 'Whisper installation could not start' });
+      }
+      return true;
+    }
+    const installStatusMatch = /^\/api\/local-voice-install\/([a-f0-9-]{36})$/.exec(pathname);
+    if (installStatusMatch && req.method === 'GET') {
+      res.setHeader?.('Cache-Control', 'no-store');
+      if (authSession?.role !== 'owner' ||
+          (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+        req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED', error: 'Owner access required' }); return true;
+      }
+      const operation = await installer?.getStatus?.(installStatusMatch[1]);
+      if (!operation) { writeJson(res, 404, { code: 'VOICE_INSTALL_UNKNOWN', error: 'Whisper installation operation not found' }); return true; }
+      writeJson(res, 200, operation);
+      return true;
+    }
+    if (pathname === '/api/local-voice-recognition' && req.method === 'POST') {
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      if (authSession?.role !== 'owner' ||
+          (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+        req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED', error: 'Owner access required' }); return true;
+      }
+      const voiceSettings = await settingsStore.load({ defaultEnabled: await isInstalled() });
+      if (!voiceSettings.enabled || !await isInstalled()) {
+        req.resume?.(); writeJson(res, 503, { code: 'VOICE_UNAVAILABLE', error: 'Local voice recognition is unavailable' }); return true;
+      }
+      const controller = new AbortController();
+      const disconnected = () => { if (!res.writableEnded) controller.abort(); };
+      res.once('close', disconnected);
+      if (res.destroyed) controller.abort();
+      try {
+        const audio = decodeAudio(await readRequest(req, controller.signal));
+        if (!audio) throw Object.assign(new Error('Invalid voice request'), { code: 'VOICE_AUDIO_INVALID' });
+        const text = await transcriber.transcribe(audio, { signal: controller.signal });
+        if (controller.signal.aborted) return true;
+        writeJson(res, 200, { text });
+      } catch (error) {
+        if (controller.signal.aborted) return true;
+        const code = ['BODY_TOO_LARGE', 'VOICE_AUDIO_INVALID', 'VOICE_BUSY', 'VOICE_TIMEOUT', 'VOICE_CANCELLED'].includes(error?.code)
+          ? error.code : 'VOICE_UNAVAILABLE';
+        const status = code === 'BODY_TOO_LARGE' ? 413 : code === 'VOICE_AUDIO_INVALID' ? 400 : code === 'VOICE_BUSY' ? 429 : 503;
+        writeJson(res, status, { code, error: 'Local voice recognition failed' });
+      } finally { res.removeListener('close', disconnected); }
       return true;
     }
     const match = /^\/api\/sessions\/([^/]+)\/local-voice-recognition$/.exec(pathname);
@@ -144,7 +235,7 @@ export function createLocalVoiceRoutes({ transcriber = null, settingsStore = { l
     const sessionId = match[1];
     if (!await requireSessionAccess(res, authSession, sessionId)) { req.resume?.(); return true; }
     if (!await getSession(sessionId)) { req.resume?.(); writeJson(res, 404, { error: 'Session not found' }); return true; }
-    const voiceSettings = await settingsStore.load();
+    const voiceSettings = await settingsStore.load({ defaultEnabled: await isInstalled() });
     if (req.method === 'GET') {
       writeJson(res, 200, { available: Boolean(voiceSettings.enabled && transcriber && await transcriber.isAvailable()), destination: 'connected_computer', maxSeconds: 20 });
       return true;
@@ -182,10 +273,19 @@ export function createLocalVoiceRoutes({ transcriber = null, settingsStore = { l
 
 export function createConfiguredLocalVoiceRoutes(env = process.env) {
   let transcriber = null;
+  let installer = null;
+  const managedRuntimeDirectory = join(CONFIG_DIR, 'voice-runtime');
+  const managedExecutable = join(managedRuntimeDirectory, 'whisper-server.exe');
+  const managedModel = join(managedRuntimeDirectory, 'ggml-base-q5_1.bin');
+  const managedManifest = join(managedRuntimeDirectory, 'runtime-manifest.json');
+  const hasManagedRuntime = existsSync(managedManifest);
+  const executable = hasManagedRuntime ? managedExecutable : env.AGENTOC_LOCAL_VOICE_EXECUTABLE || managedExecutable;
+  const model = hasManagedRuntime ? managedModel : env.AGENTOC_LOCAL_VOICE_MODEL || managedModel;
   try {
-    if (env.AGENTOC_LOCAL_VOICE_EXECUTABLE && env.AGENTOC_LOCAL_VOICE_MODEL) {
-      transcriber = createLocalVoiceServer({ executable: env.AGENTOC_LOCAL_VOICE_EXECUTABLE, model: env.AGENTOC_LOCAL_VOICE_MODEL });
+    transcriber = createLocalVoiceServer({ executable, model });
+    if (process.platform === 'win32') {
+      installer = createLocalVoiceInstaller({ runtimeDirectory: managedRuntimeDirectory });
     }
   } catch { /* Invalid or missing administrator configuration leaves it unavailable. */ }
-  return createLocalVoiceRoutes({ transcriber });
+  return createLocalVoiceRoutes({ transcriber, installer });
 }

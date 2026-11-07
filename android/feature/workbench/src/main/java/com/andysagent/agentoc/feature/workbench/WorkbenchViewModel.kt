@@ -174,6 +174,7 @@ data class WorkbenchUiState(
     val appLanguage: AppLanguage = AppLanguage.System,
     val appVersion: String = "Unknown",
     val appBuild: String = "Unknown",
+    val voice: VoiceUiState = VoiceUiState(),
 )
 
 enum class SettingsPage {
@@ -190,6 +191,7 @@ enum class SettingsPage {
     Triggers,
     Usage,
     ComputerManagement,
+    Voice,
     Version,
 }
 
@@ -199,6 +201,13 @@ sealed interface WorkbenchEvent {
     data class OpenSettingsPage(val page: SettingsPage) : WorkbenchEvent
     data object CloseSettingsPage : WorkbenchEvent
     data object OpenAppApiSettings : WorkbenchEvent
+    data object ToggleVoiceInput : WorkbenchEvent
+    data class SelectVoiceChoice(val choice: String) : WorkbenchEvent
+    data class SetPhoneLocalVoiceEnabled(val enabled: Boolean) : WorkbenchEvent
+    data class SetComputerVoiceEnabled(val targetId: String, val enabled: Boolean) : WorkbenchEvent
+    data class InstallComputerVoice(val targetId: String) : WorkbenchEvent
+    data object RefreshVoiceDevices : WorkbenchEvent
+    data class VoiceTranscriptionReceived(val text: String) : WorkbenchEvent
     data class ReportAgentContent(val text: String? = null) : WorkbenchEvent
     data class SelectTheme(val theme: AppTheme) : WorkbenchEvent
     data class SelectLanguage(val language: AppLanguage) : WorkbenchEvent

@@ -58,6 +58,7 @@ enum class AgentoWebGlyph(@DrawableRes val resource: Int) {
     Close(R.drawable.agento_close),
     Bolt(R.drawable.agento_bolt),
     Image(R.drawable.agento_image),
+    Microphone(R.drawable.agento_microphone),
     Trash(R.drawable.agento_trash),
 }
 

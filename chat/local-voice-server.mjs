@@ -28,8 +28,9 @@ function delay(ms) {
 }
 
 /** A loopback-only whisper.cpp server that keeps its model loaded while enabled.
- * It starts only after the owner opts in, and accepts audio only through this
- * process's private 127.0.0.1 endpoint. */
+ * The persisted owner setting controls startup; a fresh Windows install with
+ * Whisper included defaults to enabled. Audio reaches only this private
+ * 127.0.0.1 endpoint. */
 export function createLocalVoiceServer({
   executable,
   model,
@@ -48,6 +49,8 @@ export function createLocalVoiceServer({
     throw failure('VOICE_CONFIG_INVALID');
   }
 
+  let executablePath = executable;
+  let modelPath = model;
   let enabled = false;
   let generation = 0;
   let current = null;
@@ -57,13 +60,13 @@ export function createLocalVoiceServer({
   const children = new Set();
 
   async function resolveInputs() {
-    const [binary, modelPath] = await Promise.all([realpath(executable), realpath(model)]);
-    const [binaryStat, modelStat] = await Promise.all([stat(binary), stat(modelPath)]);
+    const [binary, resolvedModel] = await Promise.all([realpath(executablePath), realpath(modelPath)]);
+    const [binaryStat, modelStat] = await Promise.all([stat(binary), stat(resolvedModel)]);
     if (!binaryStat.isFile() || binaryStat.size === 0 || binaryStat.size > 512 * 1024 * 1024
         || !modelStat.isFile() || modelStat.size === 0 || modelStat.size > 16 * 1024 * 1024 * 1024) {
       throw failure('VOICE_CONFIG_INVALID');
     }
-    return [binary, modelPath];
+    return [binary, resolvedModel];
   }
 
   function killChildrenOnExit() {
@@ -185,6 +188,17 @@ export function createLocalVoiceServer({
         return false;
       }
       await ensureStarted();
+      return true;
+    },
+    async configurePaths({ executable: nextExecutable, model: nextModel }) {
+      if (!isAbsolute(nextExecutable || '') || !isAbsolute(nextModel || '')) throw failure('VOICE_CONFIG_INVALID');
+      enabled = false;
+      generation += 1;
+      activeRequestController?.abort();
+      await stopChild();
+      if (starting) await starting.catch(() => {});
+      executablePath = nextExecutable;
+      modelPath = nextModel;
       return true;
     },
     async isAvailable() {

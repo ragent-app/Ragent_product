@@ -1,5 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="settings_voice">语音识别</string>
+    <string name="settings_voice_summary">选择语音识别设备</string>
+    <string name="voice_menu_device">语音处理设备 · %1$s</string>
+    <string name="voice_picker_title">语音处理设备</string>
+    <string name="voice_picker_done">完成</string>
+    <string name="voice_route_automatic">自动选择</string>
+    <string name="voice_route_automatic_hint">优先使用会话所在电脑，其次使用本机</string>
+    <string name="voice_route_phone">本机</string>
+    <string name="voice_phone_section">手机本地识别</string>
+    <string name="voice_computers_section">已配对电脑</string>
+    <string name="voice_phone_unsupported">此手机不支持设备端语音识别</string>
+    <string name="voice_phone_ready">设备端识别可用</string>
+    <string name="voice_phone_disabled">已关闭</string>
+    <string name="voice_computer_offline">电脑未连接</string>
+    <string name="voice_computer_not_installed">未安装 Whisper</string>
+    <string name="voice_computer_install_unavailable">Whisper 安装仅支持 Windows 版 Ragent</string>
+    <string name="voice_computer_disabled">Whisper 已停止</string>
+    <string name="voice_computer_starting">Whisper 正在启动</string>
+    <string name="voice_computer_ready">语音识别就绪</string>
+    <string name="voice_no_computers">配对电脑后，可在这里管理其 Whisper 服务。</string>
+    <string name="voice_install">安装</string>
+    <string name="voice_installing">正在安装…</string>
+    <string name="voice_privacy_note">音频只会发送到选定的已配对电脑，或由本机设备端识别器处理。识别文字只会写入草稿，不会自动发送。</string>
     <string name="settings_sharing_agents">分享与智能助手</string>
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">停止任务</string>

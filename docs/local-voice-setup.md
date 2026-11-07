@@ -1,24 +1,35 @@
-# Optional computer voice recognition
+# Local voice recognition
 
-Computer voice recognition uses a resident, loopback-only `whisper-server` on
-the connected computer. The Windows setup package installs the runtime and
-multilingual base model by default; clear the Whisper option to omit them. An
-upgrade keeps the existing component choice initially and lets the user change
-it. Installation alone does not start Whisper.
+Ragent supports two local recognition routes in Android: Android's on-device
+speech recognizer and a paired Windows computer running Whisper. The Android
+app selects the active session's enabled Whisper computer automatically, then
+uses phone-local recognition when that computer has no enabled Whisper
+service. Users can override the route for each chat from the chat's three-dot
+menu. Transcripts are inserted into the draft; Ragent never sends them
+automatically and does not forward voice audio to a cloud speech service.
 
-An owner must enable **Computer voice recognition** in Ragent Settings on the
-computer that will process audio. With the option off, the Whisper process is
-stopped and is not started, including after a service restart. With the option
-on, Ragent starts Whisper, keeps the model loaded, and restarts the server if
-it exits. Turning the option off stops it. The setting is local to each
-computer. If Whisper was not installed, enable it in the Windows setup program
-first; the upgrade flow keeps the current component selection by default and
-lets the user change it.
+The Windows setup package selects the Whisper runtime and multilingual base
+model by default. A fresh installation that includes Whisper starts the
+recognition service automatically. Users can clear the option to omit the
+runtime. On upgrades, the setup screen reflects whether the feature is
+installed, and a saved recognition on/off setting remains authoritative across
+upgrades and service restarts.
 
-On Windows, setup places the verified Whisper runtime and model under the
-Ragent installation folder and configures the service paths. For a development
-or manually managed installation, set both absolute paths before starting
-Ragent:
+The computer owner can stop or start an installed Whisper service from Ragent
+Settings or the paired Android app. Stopping the service keeps the runtime
+installed and preserves the disabled setting across restarts. The setting is
+stored per computer. Android also has a separate switch for phone-local
+recognition.
+
+On a fresh Windows install, setup places the verified Whisper runtime and
+model with the Ragent installation. If Whisper is installed later from
+Android, the Windows Ragent service downloads and verifies the same pinned
+assets into its protected per-instance configuration directory, activates
+them atomically, enables the service, and reports completion after it is
+ready. The phone sends only a fixed install request; it does not send commands
+or download payloads. Windows Ragent is the only platform that offers this
+remote installation action. For development or manually managed installations,
+set both absolute paths before starting Ragent:
 
 ```sh
 export AGENTOC_LOCAL_VOICE_EXECUTABLE="/absolute/path/to/whisper-server"
@@ -26,12 +37,14 @@ export AGENTOC_LOCAL_VOICE_MODEL="/absolute/path/to/ggml-base-q5_1.bin"
 # Start the Ragent server using the normal procedure for your installation.
 ```
 
-The process binds only to `127.0.0.1`; the service sends a validated WAV to
-that local endpoint and returns recognized text to the connected client. The
-browser or Android app captures audio, shows the transcript in the draft, and
-does not send the message automatically. Audio is not sent to a cloud speech
-service by this local adapter.
+The process binds only to `127.0.0.1`. Ragent sends validated WAV audio to that
+local endpoint and returns recognized text to the connected client. Browser or
+Android microphone permissions and secure-context requirements still apply.
 
-The setting is owner-only. Browser or Android microphone permissions and
-secure-context requirements still apply. Whisper runs on the connected
-computer selected for recognition, which may be remote from the phone.
+Android can independently enable or disable phone-local recognition and each
+paired computer's Whisper service. Per-chat **Automatic** mode selects an
+enabled Whisper service on the session computer, then falls back to the phone
+when that computer is offline, lacks Whisper, or has Whisper stopped. A
+per-chat device override is available from the chat's top-right menu. See
+[android-voice-routing-plan.md](android-voice-routing-plan.md) for the complete
+behavior and acceptance criteria.

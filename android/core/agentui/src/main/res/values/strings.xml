@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="agentui_start_voice_input">Start voice input</string>
+    <string name="agentui_stop_voice_input">Stop voice input</string>
     <string name="agentui_edit_message">Edit message</string>
     <string name="agentui_done">Done</string>
     <string name="agentui_return_to_composer">Return to composer</string>

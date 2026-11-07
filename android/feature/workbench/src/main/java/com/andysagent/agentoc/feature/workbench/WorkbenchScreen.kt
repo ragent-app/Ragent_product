@@ -243,6 +243,7 @@ import com.andysagent.agentoc.core.designsystem.MotionPreference
 import com.andysagent.agentoc.core.designsystem.motionPolicy
 import com.andysagent.agentoc.core.designsystem.AgentoShapes
 import com.andysagent.agentoc.core.designsystem.AgentoSettingRow
+import com.andysagent.agentoc.core.designsystem.AgentoSwitch
 import com.andysagent.agentoc.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.agentoc.core.navigation.AgentoAdaptiveScaffold
 import com.andysagent.agentoc.core.navigation.AgentoDestination
@@ -1536,6 +1537,7 @@ private fun ChatSurface(
     var sessionEntryBottomPinActive by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var deleteDialogOpen by remember { mutableStateOf(false) }
+    var voiceDevicePickerOpen by remember { mutableStateOf(false) }
     var approvalCollapsed by rememberSaveable(state.sessionId) { mutableStateOf(false) }
     var renameText by remember(state.sessionId, state.sessionTitle) { mutableStateOf(state.sessionTitle) }
     var scrollMode by remember { mutableStateOf(ChatScrollMode.Following) }
@@ -2596,6 +2598,8 @@ private fun ChatSurface(
                 onPasteImage = ::appendClipboardImages,
                 backdropLayer = chatBackdropForControls,
                 backdropOrigin = chatBackdropOrigin,
+                onVoiceClick = { onEvent(WorkbenchEvent.ToggleVoiceInput) },
+                voiceActive = state.voice.recording || state.voice.processing,
                 modifier = Modifier
                     .then(if (composerFullscreenActive) Modifier else Modifier.widthIn(max = AgentocSizes.ContentMaxWidth))
                     .onGloballyPositioned { composerBounds = it.boundsInRoot() },
@@ -3179,6 +3183,15 @@ private fun ChatSurface(
                 leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Info, contentDescription = null) },
             )
             AgentoDropdownMenuItem(
+                text = stringResource(R.string.voice_menu_device, state.voice.choiceLabel(state.chatTargetId)),
+                onClick = {
+                    onEvent(WorkbenchEvent.CloseSessionMenu)
+                    onEvent(WorkbenchEvent.RefreshVoiceDevices)
+                    voiceDevicePickerOpen = true
+                },
+                leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Microphone, contentDescription = null) },
+            )
+            AgentoDropdownMenuItem(
                 text = stringResource(R.string.workbench_session_rename),
                 onClick = {
                     renameText = state.sessionTitle
@@ -3227,6 +3240,54 @@ private fun ChatSurface(
         }
 
         }
+    }
+
+    if (voiceDevicePickerOpen) {
+        AgentoDialog(
+            title = stringResource(R.string.voice_picker_title),
+            confirmLabel = stringResource(R.string.voice_picker_done),
+            onConfirm = { voiceDevicePickerOpen = false },
+            onDismiss = { voiceDevicePickerOpen = false },
+            backdropLayer = chatModalBackdrop,
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingsChoiceRow(
+                        title = stringResource(R.string.voice_route_automatic),
+                        subtitle = stringResource(R.string.voice_route_automatic_hint),
+                        selected = state.voice.choice == "auto",
+                        onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("auto")) },
+                        modifier = Modifier.testTag("voice-route-auto"),
+                    )
+                    SettingsChoiceRow(
+                        title = stringResource(R.string.voice_route_phone),
+                        subtitle = stringResource(
+                            if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
+                            else if (state.voice.phoneEnabled) R.string.voice_phone_ready
+                            else R.string.voice_phone_disabled,
+                        ),
+                        selected = state.voice.choice == "phone",
+                        onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("phone")) },
+                        modifier = Modifier.testTag("voice-route-phone"),
+                    )
+                    state.voice.computers.forEach { computer ->
+                        SettingsChoiceRow(
+                            title = computer.label,
+                            subtitle = when {
+                                !computer.connected -> stringResource(R.string.voice_computer_offline)
+                                !computer.installed -> stringResource(R.string.voice_computer_not_installed)
+                                !computer.enabled -> stringResource(R.string.voice_computer_disabled)
+                                !computer.ready -> stringResource(R.string.voice_computer_starting)
+                                else -> stringResource(R.string.voice_computer_ready)
+                            },
+                            selected = state.voice.choice == "computer:${computer.targetId}",
+                            enabled = computer.canRouteVoice || state.voice.choice == "computer:${computer.targetId}",
+                            onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("computer:${computer.targetId}")) },
+                            modifier = Modifier.testTag("voice-route-computer-${computer.targetId}"),
+                        )
+                    }
+                }
+            },
+        )
     }
 
         // Modals & Bottom Sheets
@@ -4888,6 +4949,18 @@ private fun SettingsOverviewContent(
                     modifier = Modifier.testTag("settings-connection-help"), onClick = { onEvent(WorkbenchEvent.OpenComputerSetup) })
             }
         }
+        item(key = "voice-settings-entry") {
+            SettingsGroup(modifier = Modifier.widthIn(max = AgentocSizes.ContentMaxWidth)) {
+                AgentoSettingRow(
+                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
+                    title = stringResource(R.string.settings_voice),
+                    subtitle = stringResource(R.string.settings_voice_summary),
+                    showDivider = false,
+                    modifier = Modifier.testTag("settings-voice"),
+                    onClick = { onEvent(WorkbenchEvent.OpenSettingsPage(SettingsPage.Voice)) },
+                )
+            }
+        }
         item(key = "models-runtime") {
             SettingsGroup(title = stringResource(R.string.settings_models_runtime),
                 modifier = Modifier.widthIn(max = AgentocSizes.ContentMaxWidth)) {
@@ -5286,6 +5359,7 @@ private fun SettingsDetailSurface(
         SettingsPage.Language -> stringResource(R.string.settings_language)
         SettingsPage.Theme -> stringResource(R.string.settings_theme)
         SettingsPage.ComputerManagement -> stringResource(R.string.settings_manage_devices)
+        SettingsPage.Voice -> stringResource(R.string.settings_voice)
         SettingsPage.Version -> stringResource(R.string.settings_version)
         else -> return
     }
@@ -5314,6 +5388,93 @@ private fun SettingsDetailSurface(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 when (page) {
+                    SettingsPage.Voice -> {
+                        item(key = "voice-phone-settings") {
+                            SettingsGroup(
+                                title = stringResource(R.string.voice_phone_section),
+                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
+                            ) {
+                                AgentoSettingRow(
+                                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
+                                    title = stringResource(R.string.voice_route_phone),
+                                    subtitle = stringResource(
+                                        if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
+                                        else if (state.voice.phoneEnabled) R.string.voice_phone_ready
+                                        else R.string.voice_phone_disabled,
+                                    ),
+                                    trailing = {
+                                        AgentoSwitch(
+                                            checked = state.voice.phoneEnabled,
+                                            onCheckedChange = { onEvent(WorkbenchEvent.SetPhoneLocalVoiceEnabled(it)) },
+                                            enabled = state.voice.phoneSupported && !state.voice.processing,
+                                            modifier = Modifier.testTag("voice-phone-switch"),
+                                        )
+                                    },
+                                    showDivider = false,
+                                )
+                            }
+                        }
+                        item(key = "voice-computer-settings") {
+                            SettingsGroup(
+                                title = stringResource(R.string.voice_computers_section),
+                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
+                            ) {
+                                if (state.voice.computers.isEmpty()) {
+                                    Text(
+                                        text = stringResource(R.string.voice_no_computers),
+                                        color = colors.secondaryContent,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(16.dp),
+                                    )
+                                } else state.voice.computers.forEachIndexed { index, computer ->
+                                    val statusText = when {
+                                        computer.error != null -> computer.error
+                                        !computer.connected -> stringResource(R.string.voice_computer_offline)
+                                        !computer.installed && !computer.installable -> stringResource(R.string.voice_computer_install_unavailable)
+                                        !computer.installed -> stringResource(R.string.voice_computer_not_installed)
+                                        !computer.enabled -> stringResource(R.string.voice_computer_disabled)
+                                        !computer.ready -> stringResource(R.string.voice_computer_starting)
+                                        else -> stringResource(R.string.voice_computer_ready)
+                                    }
+                                    AgentoSettingRow(
+                                        leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Monitor) },
+                                        title = computer.label,
+                                        subtitle = statusText,
+                                        trailing = {
+                                            if (!computer.installed && computer.installable) {
+                                                AgentoButton(
+                                                    text = stringResource(if (computer.busy) R.string.voice_installing else R.string.voice_install),
+                                                    onClick = { onEvent(WorkbenchEvent.InstallComputerVoice(computer.targetId)) },
+                                                    enabled = computer.connected && !computer.busy,
+                                                    secondary = true,
+                                                    modifier = Modifier.testTag("voice-install-${computer.targetId}"),
+                                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                                                )
+                                            } else if (computer.installed) {
+                                                AgentoSwitch(
+                                                    checked = computer.enabled,
+                                                    onCheckedChange = { enabled ->
+                                                        onEvent(WorkbenchEvent.SetComputerVoiceEnabled(computer.targetId, enabled))
+                                                    },
+                                                    enabled = computer.connected && !computer.busy,
+                                                    modifier = Modifier.testTag("voice-computer-switch-${computer.targetId}"),
+                                                )
+                                            }
+                                        },
+                                        showDivider = index < state.voice.computers.lastIndex,
+                                    )
+                                }
+                            }
+                        }
+                        item(key = "voice-privacy-note") {
+                            Text(
+                                text = stringResource(R.string.voice_privacy_note),
+                                color = colors.secondaryContent,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth).padding(horizontal = 8.dp),
+                            )
+                        }
+                    }
                     SettingsPage.Account -> {
                         item(key = "google-account-management") {
                             SettingsGoogleAccountManagement(

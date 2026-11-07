@@ -711,6 +711,10 @@ namespace AgentoC.ServiceHost
                 info.EnvironmentVariables["AGENTOC_TEMPORARY_PAIRING_ENABLED"] = "1";
             info.EnvironmentVariables["AGENTOC_WINDOWS_SERVICE_ROLE"] = role;
             info.EnvironmentVariables["AGENTOC_WINDOWS_SERVICE_MODE"] = "1";
+            // The bundled Node 24 runtime otherwise ignores configured system
+            // proxies for fetch(). Whisper's pinned runtime/model downloads use
+            // only those explicit proxy settings and verify fixed SHA-256 values.
+            info.EnvironmentVariables["NODE_USE_ENV_PROXY"] = "1";
             // Do not trust an inherited ProgramData override for the fixed
             // owner layout; this value comes from the Windows known folder.
             info.EnvironmentVariables["ProgramData"] = ProgramDataPath();

@@ -1793,6 +1793,9 @@ fun AgentComposer(
     pendingSend: Boolean = false,
     backdropLayer: GraphicsLayer? = null,
     backdropOrigin: IntOffset = IntOffset.Zero,
+    onVoiceClick: (() -> Unit)? = null,
+    voiceActive: Boolean = false,
+    voiceEnabled: Boolean = true,
 ) {
     val colors = LocalAgentocColors.current
     val isCreatingGoal = goalMode && goalText.isBlank()
@@ -2321,6 +2324,37 @@ fun AgentComposer(
                     } else {
                         Spacer(Modifier.weight(1f))
                     }
+                    if (onVoiceClick != null && !fullscreenActive) {
+                        val voiceDescription = stringResource(
+                            if (voiceActive) R.string.agentui_stop_voice_input else R.string.agentui_start_voice_input,
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("composer-voice-action")
+                                .clip(CircleShape)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    enabled = enabled && voiceEnabled,
+                                    onClick = onVoiceClick,
+                                )
+                                .semantics { contentDescription = voiceDescription },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AgentoWebIcon(
+                                glyph = AgentoWebGlyph.Microphone,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = when {
+                                    !enabled || !voiceEnabled -> colors.disabledContent
+                                    voiceActive -> colors.accentPrimary
+                                    else -> colors.secondaryContent
+                                },
+                            )
+                        }
+                    }
+
                     // Morphing Right Action: Normal Send/Stop Button <-> ("取消" + "设定目标") Action Buttons
                     AnimatedContent(
                         targetState = isCreatingGoal,

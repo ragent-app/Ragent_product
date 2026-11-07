@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="agentui_start_voice_input">开始语音输入</string>
+    <string name="agentui_stop_voice_input">停止语音输入</string>
     <string name="agentui_edit_message">编辑消息</string>
     <string name="agentui_done">完成</string>
     <string name="agentui_return_to_composer">返回输入框</string>

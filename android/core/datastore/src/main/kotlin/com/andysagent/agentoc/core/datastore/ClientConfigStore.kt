@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.security.MessageDigest
 import java.util.UUID
 
 import com.andysagent.agentoc.core.model.AppLanguage
@@ -146,6 +147,7 @@ class ClientConfigStore private constructor(private val context: Context, privat
         val chatRuntimeCache = stringPreferencesKey("chat_runtime_cache_v1")
         val appTheme = stringPreferencesKey("app_theme")
         val appLanguage = stringPreferencesKey("app_language")
+        val phoneLocalVoiceEnabled = booleanPreferencesKey("phone_local_voice_enabled")
         val googleAccountDisplayName = stringPreferencesKey("google_account_display_name")
         val googleAccountEmail = stringPreferencesKey("google_account_email")
         val googleAccountPhotoUrl = stringPreferencesKey("google_account_photo_url")
@@ -212,6 +214,19 @@ class ClientConfigStore private constructor(private val context: Context, privat
     /** Configured app language preference. */
     val appLanguage: Flow<AppLanguage> = preferences.data.map { prefs ->
         AppLanguage.fromValue(prefs[Keys.appLanguage])
+    }
+
+    /** Explicit opt-in for recognition on this phone; it never enables a PC service. */
+    val phoneLocalVoiceEnabled: Flow<Boolean> = preferences.data.map { prefs ->
+        prefs[Keys.phoneLocalVoiceEnabled] ?: false
+    }
+
+    fun chatVoiceChoice(sessionId: String): Flow<String> {
+        require(sessionId.isNotBlank())
+        val key = chatVoiceChoiceKey(sessionId)
+        return preferences.data.map { prefs ->
+            prefs[key]?.takeIf { it in setOf("auto", "phone") || it.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}")) } ?: "auto"
+        }
     }
 
     /** Non-secret identity selected through Google on this phone. */
@@ -475,6 +490,21 @@ class ClientConfigStore private constructor(private val context: Context, privat
             prefs[Keys.appLanguage] = language.value
         }
     }
+
+    suspend fun setPhoneLocalVoiceEnabled(enabled: Boolean) {
+        preferences.edit { prefs -> prefs[Keys.phoneLocalVoiceEnabled] = enabled }
+    }
+
+    suspend fun setChatVoiceChoice(sessionId: String, choice: String) {
+        require(sessionId.isNotBlank())
+        require(choice == "auto" || choice == "phone" || choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}")))
+        val key = chatVoiceChoiceKey(sessionId)
+        preferences.edit { prefs -> prefs[key] = choice }
+    }
+
+    private fun chatVoiceChoiceKey(sessionId: String) = stringPreferencesKey(
+        "chat_voice_choice_${MessageDigest.getInstance("SHA-256").digest(sessionId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }}",
+    )
 
     suspend fun saveGoogleAccountProfile(profile: StoredGoogleAccountProfile) {
         preferences.edit { prefs ->
