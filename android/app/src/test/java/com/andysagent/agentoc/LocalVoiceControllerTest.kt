@@ -2,6 +2,7 @@ package com.andysagent.agentoc
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class LocalVoiceControllerTest {
     @Test
@@ -34,5 +35,18 @@ class LocalVoiceControllerTest {
             VoiceStopAction.NoOp,
             voiceStopAction(recording = false, processing = false, computerRoute = false),
         )
+    }
+
+    @Test
+    fun emptyAndWhisperSilenceMarkersDoNotBecomeDraftText() {
+        assertNull(usableComputerVoiceTranscript(null))
+        assertNull(usableComputerVoiceTranscript("  "))
+        assertNull(usableComputerVoiceTranscript("[BLANK_AUDIO]"))
+        assertNull(usableComputerVoiceTranscript("[ Silence ]"))
+    }
+
+    @Test
+    fun recognizedComputerSpeechIsTrimmedAndPreserved() {
+        assertEquals("Ragent voice test", usableComputerVoiceTranscript("  Ragent voice test  "))
     }
 }

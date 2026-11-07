@@ -244,9 +244,10 @@ internal class LocalVoiceController(
                     ),
                 )
                 check(response.isSuccessful) { responseError(response.body, "Computer voice recognition failed") }
-                val text = Json.parseToJsonElement(response.body).jsonObject["text"]
-                    ?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-                check(text.isNotBlank()) { "Computer returned an empty transcript" }
+                val text = usableComputerVoiceTranscript(
+                    Json.parseToJsonElement(response.body).jsonObject["text"]?.jsonPrimitive?.contentOrNull,
+                )
+                check(text != null) { "No speech was recognized. Try again." }
                 onText(text)
                 mutableState.update { it.copy(message = null) }
             } catch (cancelled: CancellationException) {
@@ -329,6 +330,12 @@ internal enum class VoiceStopAction {
     StopPhoneRecording,
     CancelProcessing,
     NoOp,
+}
+
+internal fun usableComputerVoiceTranscript(transcript: String?): String? {
+    val text = transcript?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val silenceMarker = Regex("(?i)^\\[\\s*(?:blank[ _]audio|silence)\\s*\\]$")
+    return text.takeUnless(silenceMarker::matches)
 }
 
 internal fun voiceStopAction(recording: Boolean, processing: Boolean, computerRoute: Boolean): VoiceStopAction = when {
