@@ -55,7 +55,7 @@ internal class LocalVoiceController(
 
     fun loadSession(sessionId: String?) {
         if (activeSessionId == sessionId) return
-        stopVoiceInput()
+        cancelVoiceInput()
         activeSessionId = sessionId
         if (sessionId == null) {
             mutableState.update { it.copy(choice = "auto") }
@@ -163,7 +163,40 @@ internal class LocalVoiceController(
     }
 
     fun stopVoiceInput() {
-        if (mutableState.value.recording && localRecognizer.isAvailable()) localRecognizer.stop(destroy = true, cancel = true)
+        val current = mutableState.value
+        when (voiceStopAction(
+            recording = current.recording,
+            processing = current.processing,
+            computerRoute = current.operationTargetId != null,
+        )) {
+            VoiceStopAction.FinishComputerRecording -> {
+                val stop = stopRequested
+                if (stop == null) {
+                    cancelVoiceInput()
+                    return
+                }
+                stop.set(true)
+                mutableState.update { state ->
+                    if (state.recording && state.operationTargetId != null) {
+                        state.copy(recording = false, processing = true)
+                    } else state
+                }
+                return
+            }
+            VoiceStopAction.StopPhoneRecording -> {
+                localRecognizer.stop(destroy = true, cancel = true)
+                mutableState.update { it.copy(recording = false, processing = false, operationTargetId = null) }
+                return
+            }
+            VoiceStopAction.CancelProcessing -> cancelVoiceInput()
+            VoiceStopAction.NoOp -> Unit
+        }
+    }
+
+    private fun cancelVoiceInput() {
+        if (mutableState.value.recording && mutableState.value.operationTargetId == null) {
+            localRecognizer.stop(destroy = true, cancel = true)
+        }
         stopRequested?.set(true)
         activeJob?.cancel()
         activeJob = null
@@ -289,4 +322,18 @@ internal class LocalVoiceController(
     private fun responseError(body: String, fallback: String): String = runCatching {
         Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     }.getOrNull() ?: fallback
+}
+
+internal enum class VoiceStopAction {
+    FinishComputerRecording,
+    StopPhoneRecording,
+    CancelProcessing,
+    NoOp,
+}
+
+internal fun voiceStopAction(recording: Boolean, processing: Boolean, computerRoute: Boolean): VoiceStopAction = when {
+    recording && computerRoute -> VoiceStopAction.FinishComputerRecording
+    recording -> VoiceStopAction.StopPhoneRecording
+    processing -> VoiceStopAction.CancelProcessing
+    else -> VoiceStopAction.NoOp
 }
