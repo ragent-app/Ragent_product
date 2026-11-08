@@ -53,6 +53,15 @@ function decodeVoiceRequest(body) {
 }
 
 export function createLocalVoiceRoutes({ transcriber = null, installer = null, settingsStore = { load: loadLocalVoiceSettings, save: saveLocalVoiceSettings } } = {}) {
+  function hasVoiceOwnerAccess(authSession, operation) {
+    if (authSession?.role !== 'owner') return false;
+    const principalKind = authSession.principalKind;
+    if (!principalKind || ['owner', 'trusted_device'].includes(principalKind)) return true;
+    return principalKind === 'target_runtime_gateway'
+      && authSession.targetRuntime === true
+      && authSession.targetRuntimeOperation === operation;
+  }
+
   async function isInstalled() {
     if (!transcriber) return false;
     if (typeof transcriber.isInstalled === 'function') return Boolean(await transcriber.isInstalled());
@@ -71,7 +80,8 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
   async function handleLocalVoice({ req, res, pathname, authSession, requireSessionAccess, getSession, writeJson }) {
     if (pathname === '/api/local-voice-settings' && ['GET', 'PATCH'].includes(req.method)) {
       res.setHeader?.('Cache-Control', 'no-store');
-      if (authSession?.role !== 'owner') {
+      const operation = req.method === 'GET' ? 'voice.settings.read' : 'voice.settings.write';
+      if (!hasVoiceOwnerAccess(authSession, operation)) {
         req.resume?.(); writeJson(res, 403, { error: 'Owner access required' }); return true;
       }
       try {
@@ -154,8 +164,7 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
     }
     if (pathname === '/api/local-voice-install' && req.method === 'POST') {
       res.setHeader?.('Cache-Control', 'no-store');
-      if (authSession?.role !== 'owner' ||
-          (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+      if (!hasVoiceOwnerAccess(authSession, 'voice.install')) {
         req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED', error: 'Owner access required' }); return true;
       }
       if (!installer || typeof transcriber?.configurePaths !== 'function') {
@@ -194,8 +203,7 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
     const installStatusMatch = /^\/api\/local-voice-install\/([a-f0-9-]{36})$/.exec(pathname);
     if (installStatusMatch && req.method === 'GET') {
       res.setHeader?.('Cache-Control', 'no-store');
-      if (authSession?.role !== 'owner' ||
-          (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+      if (!hasVoiceOwnerAccess(authSession, 'voice.install.read')) {
         req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED', error: 'Owner access required' }); return true;
       }
       const operation = await installer?.getStatus?.(installStatusMatch[1]);
@@ -205,8 +213,7 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
     }
     if (pathname === '/api/local-voice-recognition' && req.method === 'POST') {
       res.setHeader?.('Cache-Control', 'private, no-store');
-      if (authSession?.role !== 'owner' ||
-          (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+      if (!hasVoiceOwnerAccess(authSession, 'voice.recognition')) {
         req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED', error: 'Owner access required' }); return true;
       }
       const voiceSettings = await settingsStore.load({ defaultEnabled: await isInstalled() });

@@ -127,6 +127,105 @@ test('general computer transcription rejects untrusted requests', async () => {
   assert.equal(called, false);
 });
 
+test('target runtime owner grant can transcribe but a grant for another operation is rejected', async () => {
+  let calls = 0;
+  const routes = createLocalVoiceRoutes({
+    transcriber: { isInstalled: async () => true, transcribe: async () => { calls += 1; return 'recognized words'; } },
+    settingsStore: { load: async ({ defaultEnabled }) => ({ enabled: defaultEnabled }) },
+  });
+  const authSession = {
+    role: 'owner',
+    principalKind: 'target_runtime_gateway',
+    targetRuntime: true,
+    targetRuntimeOperation: 'voice.recognition',
+  };
+  let result;
+  await routes({
+    req: requestFor('POST', JSON.stringify({ audio: wavBase64(), language: 'ko' })),
+    res: responseFor(), pathname: '/api/local-voice-recognition', authSession,
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.text, 'recognized words');
+  assert.equal(calls, 1);
+
+  await routes({
+    req: requestFor('POST', JSON.stringify({ audio: wavBase64(), language: 'ko' })),
+    res: responseFor(), pathname: '/api/local-voice-recognition',
+    authSession: { ...authSession, targetRuntimeOperation: 'voice.settings.read' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 403);
+  assert.equal(calls, 1);
+});
+
+test('target runtime owner grants can read and change Whisper settings with separate operations', async () => {
+  let enabled = true;
+  let running = true;
+  const routes = createLocalVoiceRoutes({
+    transcriber: {
+      isInstalled: async () => true,
+      isRunning: () => running,
+      isReady: () => running,
+      setEnabled: async value => { running = value; },
+    },
+    settingsStore: {
+      load: async () => ({ enabled }),
+      save: async value => { enabled = value.enabled; return value; },
+    },
+  });
+  const base = { role: 'owner', principalKind: 'target_runtime_gateway', targetRuntime: true };
+  let result;
+  await routes({
+    req: requestFor('GET'), res: responseFor(), pathname: '/api/local-voice-settings',
+    authSession: { ...base, targetRuntimeOperation: 'voice.settings.read' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.enabled, true);
+
+  await routes({
+    req: requestFor('PATCH', JSON.stringify({ enabled: false })), res: responseFor(), pathname: '/api/local-voice-settings',
+    authSession: { ...base, targetRuntimeOperation: 'voice.settings.write' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.enabled, false);
+  assert.equal(running, false);
+
+  await routes({
+    req: requestFor('GET'), res: responseFor(), pathname: '/api/local-voice-settings',
+    authSession: { ...base, targetRuntimeOperation: 'voice.settings.write' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 403);
+});
+
+test('target runtime owner grant can start Whisper installation only for the install operation', async () => {
+  let starts = 0;
+  const routes = createLocalVoiceRoutes({
+    transcriber: { isInstalled: async () => false, configurePaths: async () => {}, setEnabled: async () => {} },
+    installer: { isInstalling: () => false, start: async () => { starts += 1; return { operationId: 'd1b1a6b9-54ef-4784-8cb5-ef0fe011f9e7', status: 'queued' }; } },
+  });
+  let result;
+  const base = { role: 'owner', principalKind: 'target_runtime_gateway', targetRuntime: true };
+  await routes({
+    req: requestFor('POST', '{}'), res: responseFor(), pathname: '/api/local-voice-install',
+    authSession: { ...base, targetRuntimeOperation: 'voice.install' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 202);
+  assert.equal(starts, 1);
+
+  await routes({
+    req: requestFor('POST', '{}'), res: responseFor(), pathname: '/api/local-voice-install',
+    authSession: { ...base, targetRuntimeOperation: 'voice.install.read' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 403);
+  assert.equal(starts, 1);
+});
+
 test('voice settings expose install support and in-progress installation state', async () => {
   const routes = createLocalVoiceRoutes({
     transcriber: { isInstalled: async () => false },
