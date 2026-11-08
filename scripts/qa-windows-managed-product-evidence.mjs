@@ -53,9 +53,14 @@ if(active){
 const manifestBytes=await readFile(join(root,'source-manifest.json')),manifest=JSON.parse(manifestBytes);assert.equal(manifest.schemaVersion,1);assert.equal(manifest.profile,'desktop');assert.equal(manifest.sourceRevision,commit);
 const git=async(...args)=>(await exec('git',args,{windowsHide:true,encoding:'buffer',maxBuffer:32*1024*1024,timeout:30000})).stdout;
 const specBytes=await git('show',commit+':packaging/runtime-payload.json'),spec=JSON.parse(specBytes),profile=spec.profiles.desktop;
+assert.ok(profile.prefixes.includes('shared/'),'Desktop runtime payload must include shared data used by runtime imports');
+assert.ok(profile.required.includes('shared/whisper-languages.json'),'Whisper language catalog is a required Windows runtime input');
+const npmPackage=JSON.parse(await git('show',commit+':package.json'));
+assert.ok(npmPackage.files.includes('shared/'),'Published npm package must carry shared runtime data');
 assert.ok([hash(specBytes),hash(Buffer.from(specBytes.toString().replace(/\r?\n/g,'\r\n')))].includes(manifest.allowlistSha256));
 const tree=new Map((await git('ls-tree','-r','-z',commit)).toString().split('\0').filter(Boolean).map(line=>{const i=line.indexOf('\t'),[mode,type,oid]=line.slice(0,i).split(' ');return [line.slice(i+1),{mode,type,oid}];}));
 const selected=[...tree.keys()].filter(p=>(profile.files.includes(p)||profile.prefixes.some(x=>p.startsWith(x)))&&!profile.exclude.some(x=>p===x||x.endsWith('/')&&p.startsWith(x)));
+assert.ok(selected.includes('shared/whisper-languages.json'),'Frozen source staging must include the Whisper language catalog');
 assert.equal(manifest.files.length,selected.length);assert.equal(new Set(manifest.files.map(x=>x.path)).size,selected.length);
 const sourceByTarget=new Map(selected.map(p=>[profile.rename[p]||p,p])),oids=[...new Set(selected.map(p=>tree.get(p).oid))];
 const blobs=await new Promise((resolve,reject)=>{

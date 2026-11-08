@@ -10,11 +10,11 @@
         "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs"
       ],
       "prefixes": [
-        "lib/", "chat/", "static/", "templates/", "automation/", "connectors/", "skills/",
+        "lib/", "chat/", "shared/", "static/", "templates/", "automation/", "connectors/", "skills/",
         "scripts/", "p2p/", "native/", "local-helper/", "policy/", "tunnel/", "docs/", "packaging/", "third_party_licenses/"
       ],
       "exclude": ["scripts/accounts-migrate.mjs", "scripts/accounts-rotate-key.mjs"],
-      "required": ["package.json", "package-lock.json", "chat-server.mjs", "cli.js", "static/chat/ui.js", "templates/chat.html", "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs"],
+      "required": ["package.json", "package-lock.json", "chat-server.mjs", "cli.js", "shared/whisper-languages.json", "static/chat/ui.js", "templates/chat.html", "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs"],
       "rename": {}
     },
     "accounts": {

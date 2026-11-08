@@ -54,6 +54,7 @@
     "accounts/turn-lease-policy.mjs",
     "lib/",
     "chat/",
+    "shared/",
     "p2p/",
     "scripts/",
     "!scripts/accounts-migrate.mjs",
