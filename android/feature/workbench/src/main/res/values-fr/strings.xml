@@ -169,6 +169,8 @@
     <string name="workbench_status_processing">Traitement…</string>
     <string name="workbench_status_awaiting_approval">En attente d’approbation</string>
     <string name="workbench_status_sending">Envoi…</string>
+    <string name="workbench_upload_preparing">Préparation de la pièce jointe…</string>
+    <string name="workbench_upload_progress">Envoi de la pièce jointe · %1$d%%</string>
     <string name="projects_title">Projets</string>
     <string name="projects_this_device">Cet appareil</string>
     <string name="projects_running">En cours</string>

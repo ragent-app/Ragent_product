@@ -2,6 +2,17 @@
 import { normalizeTurnPlan, resolveTurnDeviceLimits } from '../lib/turn-authorization.mjs';
 const text = (value) => typeof value === 'string' ? value.trim() : '';
 
+export const ACCOUNT_FILE_UPLOAD_POLICY_VERSION = 'account-file-upload-batch-v2';
+export const ACCOUNT_FREE_FILE_MAX_BYTES = 50 * 1024 * 1024;
+export const ACCOUNT_FREE_FILE_TOTAL_BYTES = 100 * 1024 * 1024;
+export const ACCOUNT_FILE_HARD_MAX_BYTES = 1024 * 1024 * 1024;
+
+export function resolveAccountFileUploadLimits(plan) {
+  return text(plan).toLowerCase() === 'free'
+    ? { maxFileBytes: ACCOUNT_FREE_FILE_MAX_BYTES, maxTotalBytes: ACCOUNT_FREE_FILE_TOTAL_BYTES }
+    : { maxFileBytes: ACCOUNT_FILE_HARD_MAX_BYTES, maxTotalBytes: Number.MAX_SAFE_INTEGER };
+}
+
 export function getTurnConnectionLeases(draft) {
   if (!Array.isArray(draft.turnConnectionLeases)) draft.turnConnectionLeases = [];
   return draft.turnConnectionLeases;

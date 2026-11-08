@@ -15,7 +15,7 @@ for (const key of ['AGENTOC_MEMORY_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVI
   'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR', 'AGENTOC_INSTANCE_KEY_FILE']) delete process.env[key];
 const assets = await import('../chat/file-assets.mjs');
 const { FileAssetUploadCheckpoints, UPLOAD_CHUNK_BYTES: chunkBytes, UPLOAD_CHECKPOINT_TTL_MS,
-  uploadChunkHeaders } = await import('../chat/file-asset-upload-checkpoints.mjs');
+  UPLOAD_CHECKPOINT_MAX_LIFETIME_MS, MAX_STABLE_UPLOAD_BYTES, uploadChunkHeaders } = await import('../chat/file-asset-upload-checkpoints.mjs');
 const { CHAT_FILE_ASSETS_DIR } = await import('../lib/config.mjs');
 assert.equal(resolve(CHAT_FILE_ASSETS_DIR), resolve(join(root, 'config', 'file-assets')));
 const directory = join(CHAT_FILE_ASSETS_DIR, 'upload-checkpoints');
@@ -50,7 +50,9 @@ if (process.argv[2] === 'crash-before-manifest') {
       const headers = { 'content-type': 'application/octet-stream', 'x-agentoc-upload-offset': '0',
         'x-agentoc-upload-length': String(chunkBytes), 'x-agentoc-upload-sha256': hash(bytes) };
       assert.deepEqual(uploadChunkHeaders(headers), { offset: 0, length: chunkBytes, sha256: hash(bytes) });
-      for (const bad of ['-1', '00', '1.0', '1e3', ' 1', '1000000000', ['0', '1'], undefined])
+      assert.equal(MAX_STABLE_UPLOAD_BYTES, 1024 * 1024 * 1024);
+      assert.equal(uploadChunkHeaders({ ...headers, 'x-agentoc-upload-offset': '1073741824' }).offset, 1073741824);
+      for (const bad of ['-1', '00', '1.0', '1e3', ' 1', '9007199254740992', ['0', '1'], undefined])
         assert.throws(() => uploadChunkHeaders({ ...headers, 'x-agentoc-upload-offset': bad }), { code: 'INVALID_ARGUMENT' });
       assert.throws(() => uploadChunkHeaders({ ...headers, 'content-type': 'text/plain' }), { statusCode: 415 });
     });
@@ -61,6 +63,18 @@ if (process.argv[2] === 'crash-before-manifest') {
       assert.equal(state.offset, 0); assert.equal(state.totalBytes, bytes.length);
       await assert.rejects(stat(paths(id).manifest), { code: 'ENOENT' });
       await assert.rejects(stat(paths(id).body), { code: 'ENOENT' });
+    });
+
+    await t.test('one GiB intent is accepted without reserving or buffering its payload', async () => {
+      const receipt = await assets.createFileAssetUploadIntent({ ...input, requestId: 'checkpoint-one-gib',
+        sizeBytes: MAX_STABLE_UPLOAD_BYTES, sha256: 'f'.repeat(64) });
+      assert.equal(receipt.asset.sizeBytes, MAX_STABLE_UPLOAD_BYTES);
+      const id = receipt.asset.id;
+      assert.equal((await assets.readFileAssetUploadCheckpoint(id)).offset, 0);
+      await assert.rejects(stat(paths(id).manifest), { code: 'ENOENT' });
+      await assert.rejects(stat(paths(id).body), { code: 'ENOENT' });
+      await assert.rejects(assets.createFileAssetUploadIntent({ ...input, requestId: 'checkpoint-too-large',
+        sizeBytes: MAX_STABLE_UPLOAD_BYTES + 1, sha256: 'f'.repeat(64) }), { code: 'INVALID_ARGUMENT' });
     });
 
     await t.test('duplicates recover lost replies; wrong order and different replay cannot mutate bytes', async () => {
@@ -119,6 +133,27 @@ if (process.argv[2] === 'crash-before-manifest') {
       assert.equal((await assets.finalizeFileAssetUpload(id)).status, 'ready');
     });
 
+    await t.test('valid one-day v1 checkpoints remain resumable during upgrade', async () => {
+      const id = await seed(); await chunk(id);
+      const record = await assets.getFileAsset(id), manifestPath = paths(id).manifest;
+      const legacy = JSON.parse(await readFile(manifestPath, 'utf8'));
+      delete legacy.hardExpiresAt;
+      legacy.version = 1;
+      legacy.expiresAt = Date.parse(record.createdAt) + 24 * 60 * 60 * 1000;
+      await writeFile(manifestPath, JSON.stringify(legacy));
+      const now = Date.parse(record.createdAt) + 1_000;
+      const checkpoints = new FileAssetUploadCheckpoints(directory, () => now);
+      const fence = effect => effect();
+      assert.equal((await checkpoints.state(record, fence)).offset, chunkBytes);
+      await checkpoints.append(record, { offset: chunkBytes, length: chunkBytes,
+        sha256: hash(bytes.subarray(chunkBytes, 2 * chunkBytes)) },
+      Readable.from([bytes.subarray(chunkBytes, 2 * chunkBytes)]), fence);
+      const upgraded = JSON.parse(await readFile(manifestPath, 'utf8'));
+      assert.equal(upgraded.version, 2);
+      assert.equal(upgraded.offset, 2 * chunkBytes);
+      assert.equal(upgraded.hardExpiresAt, Date.parse(record.createdAt) + UPLOAD_CHECKPOINT_MAX_LIFETIME_MS);
+    });
+
     await t.test('cancel is durable, idempotent and cannot be bypassed by full upload or finalize', async () => {
       const id = await seed(); await chunk(id);
       assert.equal((await assets.cancelFileAssetUploadCheckpoint(id)).status, 'cancelled');
@@ -136,16 +171,23 @@ if (process.argv[2] === 'crash-before-manifest') {
       assert.equal(cold.stdout.trim().split('\n').at(-1), 'FILE_ASSET_UPLOAD_CANCELLED');
     });
 
-    await t.test('expiry cannot be renewed by retry and removes only the matching partial body', async () => {
-      const id = await seed(), other = await seed(); await chunk(id); await chunk(other);
-      const record = await assets.getFileAsset(id);
-      const expired = new FileAssetUploadCheckpoints(directory,
-        () => Date.parse(record.createdAt) + UPLOAD_CHECKPOINT_TTL_MS);
-      const manifest = await readFile(paths(id).manifest);
-      await assert.rejects(expired.state(record, effect => effect()), { code: 'FILE_ASSET_UPLOAD_EXPIRED', statusCode: 410 });
+    await t.test('active chunks extend the idle lease while the hard lifetime still bounds retention', async () => {
+      const id = await seed(), other = await seed();
+      const record = await assets.getFileAsset(id), created = Date.parse(record.createdAt);
+      let now = created + UPLOAD_CHECKPOINT_TTL_MS - 1_000;
+      const checkpoints = new FileAssetUploadCheckpoints(directory, () => now);
+      const fence = effect => effect();
+      const renewed = await checkpoints.append(record, { offset: 0, length: chunkBytes, sha256: hash(bytes.subarray(0, chunkBytes)) },
+        Readable.from([bytes.subarray(0, chunkBytes)]), fence);
+      assert.equal(renewed.expiresAt, Math.min(now + UPLOAD_CHECKPOINT_TTL_MS,
+        created + UPLOAD_CHECKPOINT_MAX_LIFETIME_MS));
+      now = renewed.expiresAt - 1;
+      assert.equal((await checkpoints.state(record, fence)).offset, chunkBytes);
+      now = renewed.expiresAt;
+      await assert.rejects(checkpoints.state(record, fence), { code: 'FILE_ASSET_UPLOAD_EXPIRED', statusCode: 410 });
       await assert.rejects(stat(paths(id).body), { code: 'ENOENT' });
       await assert.rejects(stat(paths(id).manifest), { code: 'ENOENT' });
-      assert.notDeepEqual(manifest, Buffer.alloc(0));
+      await chunk(other);
       assert.equal((await stat(paths(other).body)).size, chunkBytes);
     });
 

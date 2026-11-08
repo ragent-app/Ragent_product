@@ -169,6 +169,8 @@
     <string name="workbench_status_processing">Procesando…</string>
     <string name="workbench_status_awaiting_approval">Esperando aprobación</string>
     <string name="workbench_status_sending">Enviando…</string>
+    <string name="workbench_upload_preparing">Preparando el archivo adjunto…</string>
+    <string name="workbench_upload_progress">Subiendo archivo adjunto · %1$d%%</string>
     <string name="projects_title">Proyectos</string>
     <string name="projects_this_device">Este dispositivo</string>
     <string name="projects_running">En ejecución</string>

@@ -11,6 +11,7 @@ import com.andysagent.agentoc.core.agentui.composerRuntimeIdentity
 import com.andysagent.agentoc.core.agentui.ApprovalActionUiState
 import com.andysagent.agentoc.core.agentui.PermissionRequestUiState
 import com.andysagent.agentoc.core.domain.RefreshResult
+import com.andysagent.agentoc.core.domain.AttachmentUploadProgress
 import com.andysagent.agentoc.core.domain.ApprovalResolutionCoordinator
 import com.andysagent.agentoc.core.domain.OutboundAttachment
 import com.andysagent.agentoc.core.domain.ProjectFolder
@@ -496,6 +497,7 @@ data class PendingTurnUiState(
     val goalToPersist: String? = null,
     val state: PendingTurnState = PendingTurnState.Sending,
     val error: String? = null,
+    val attachmentUploadProgress: AttachmentUploadProgress? = null,
 )
 
 enum class PendingTurnState { Sending, Accepted, Failed }
@@ -1465,7 +1467,7 @@ class ChatViewModel(
         if (selectedRepository !== fixed) return
         val sessionId = mutableState.value.sessionId
         if (sessionId != null && sessionPendingTurns[fixed to sessionId]?.requestId != pendingTurn.requestId) return
-        val sending = pendingTurn.copy(state = PendingTurnState.Sending, error = null)
+        val sending = pendingTurn.copy(state = PendingTurnState.Sending, error = null, attachmentUploadProgress = null)
         if (sessionId != null) sessionPendingTurns[fixed to sessionId] = sending
         updateState { copy(pendingTurn = sending, error = null, isLoading = true) }
         deliverPendingTurn(
@@ -1992,6 +1994,20 @@ class ChatViewModel(
             launch {
                 fixed.observeRunDurations(sessionId).collectLatest { durations ->
                     if (isCurrentSession(sessionId, generation)) updateState { copy(runDurations = durations) }
+                }
+            }
+            launch {
+                fixed.observeAttachmentUploadProgress(sessionId).collectLatest { progressByRequestId ->
+                    if (!isCurrentSession(sessionId, generation)) return@collectLatest
+                    val pending = sessionPendingTurns[fixed to sessionId] ?: mutableState.value.pendingTurn
+                    val requestId = pending?.requestId ?: return@collectLatest
+                    val progress = progressByRequestId[requestId]
+                    if (pending.attachmentUploadProgress == progress) return@collectLatest
+                    val updated = pending.copy(attachmentUploadProgress = progress)
+                    sessionPendingTurns[fixed to sessionId] = updated
+                    updateState {
+                        if (pendingTurn?.requestId == requestId) copy(pendingTurn = updated) else this
+                    }
                 }
             }
             launch {

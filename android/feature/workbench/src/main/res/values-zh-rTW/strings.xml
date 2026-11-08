@@ -174,6 +174,8 @@
     <string name="timeline_process">處理過程</string>
     <string name="workbench_status_awaiting_approval">等待核准</string>
     <string name="workbench_status_sending">傳送中…</string>
+    <string name="workbench_upload_preparing">正在準備附件…</string>
+    <string name="workbench_upload_progress">正在上傳附件 · %1$d%%</string>
     <string name="projects_title">專案</string>
     <string name="projects_this_device">這台裝置</string>
     <string name="projects_running">執行中</string>

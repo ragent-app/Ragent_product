@@ -21,6 +21,8 @@ export async function handleSessionApiScopeRoutes({ req, res, pathname, parsedUr
         cancellationRequestedIsTerminal: false },
       { id: 'asset.upload.intent', method: 'POST', path: '/api/assets/upload-intents' },
       { id: 'asset.upload.body', method: 'POST', path: '/api/assets/{assetId}/upload', stagedBeforeGuard: true },
+      { id: 'asset.upload.chunk', method: 'PATCH', path: '/api/assets/{assetId}/upload' },
+      { id: 'asset.upload.checkpoint', method: 'GET', path: '/api/assets/{assetId}/upload-checkpoint', readonly: true },
       { id: 'asset.upload.finalize', method: 'POST', path: '/api/assets/{assetId}/finalize', verifiedBeforeGuard: true },
       { id: 'asset.upload.receipt', method: 'GET', path: '/api/assets/upload-intents?sessionId={sessionId}&requestId={requestId}', readonly: true },
       { id: 'message.prepare', method: 'POST', path: '/api/sessions/{sessionId}/app-api-message-preparations', startsRun: false },

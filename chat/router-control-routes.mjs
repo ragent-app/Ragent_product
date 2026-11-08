@@ -18,6 +18,8 @@ import {
   verifyOwnerWebAuthnRegistration,
 } from '../lib/owner-webauthn.mjs';
 import { setOwnerPasswordAsync } from '../lib/auth.mjs';
+import { getOwnerAccountBinding, reserveOwnerAccountFileUpload,
+  completeOwnerAccountFileUpload, releaseOwnerAccountFileUpload } from '../lib/owner-account-auth.mjs';
 import { getModelsForTool, getToolModelCatalog, getToolModelCatalogs } from './models.mjs';
 import { getGloballyInstalledHarnessIdsForProviders } from '../lib/harness-installation-sync.mjs';
 import { getHarnessProviderProtocols } from '../lib/provider-runtime/harness-bridge.mjs';
@@ -90,7 +92,7 @@ import {
   localizeFileAsset,
 } from './file-assets.mjs';
 import { RESUMABLE_UPLOAD_CONTRACT, UPLOAD_CHUNK_REQUEST_TIMEOUT_MS,
-  uploadChunkHeaders } from './file-asset-upload-checkpoints.mjs';
+  uploadChunkHeaders, MAX_STABLE_UPLOAD_BYTES } from './file-asset-upload-checkpoints.mjs';
 import { pathExists } from './fs-utils.mjs';
 import { queryUsageLedger } from './usage-ledger.mjs';
 import { broadcastAll } from './ws-clients.mjs';
@@ -471,7 +473,7 @@ function writeUploadFailure(res, error, writeJson, conditional, fallback) {
     writeJson(res, error?.statusCode || 400, { error: error?.message || fallback, code: error?.code });
     return;
   }
-  const known = /^FILE_ASSET_[A-Z_]+$/.test(error?.code || '') ||
+  const known = /^FILE_ASSET_[A-Z_]+$/.test(error?.code || '') || /^account_file_upload_[a-z_]+$/.test(error?.code || '') ||
     ['INVALID_ARGUMENT', 'REVISION_CONFLICT', 'RESOURCE_NOT_FOUND',
       'SESSION_MUTATION_STORE_INVALID', 'SESSION_MUTATION_STORE_UNAVAILABLE'].includes(error?.code);
   const valid = known && Number.isInteger(error.statusCode) && error.statusCode >= 400 && error.statusCode <= 599;
@@ -1290,7 +1292,7 @@ export async function handleControlRoutes({
       writeJson(res, 403, { error: 'Owner upload access required', code: 'PERMISSION_DENIED' });
       return true;
     }
-    writeJson(res, 200, { version: 1, maximumBytes: 25 * 1024 * 1024, requestIdMaximumLength: 200,
+    writeJson(res, 200, { version: 1, maximumBytes: MAX_STABLE_UPLOAD_BYTES, requestIdMaximumLength: 200,
       sha256Required: true, readonlyReceiptLookup: true,
       resumableUpload: RESUMABLE_UPLOAD_CONTRACT,
       scopeConditionVersion: 1, scopeContractPath: '/api/session-scope-contract' });
@@ -1312,6 +1314,14 @@ export async function handleControlRoutes({
     try {
       const receipt = await findFileAssetUploadReceipt({ sessionId, requestId: parsedUrl?.query?.requestId,
         scopeCondition: readSessionApiScopeHeader(req, sessionId) });
+      if (receipt?.asset?.status === 'ready') {
+        const binding = await getOwnerAccountBinding();
+        if (binding?.accountId && (!authSession?.accountId || authSession.accountId === binding.accountId)) {
+          await completeOwnerAccountFileUpload({ requestId: parsedUrl?.query?.requestId,
+            quotaBatchId: receipt.quotaBatchId || parsedUrl?.query?.requestId,
+            sizeBytes: receipt.asset.sizeBytes, sha256: receipt.asset.sha256 });
+        }
+      }
       writeJson(res, receipt ? 200 : 404, receipt || { error: 'Upload request not found', code: 'FILE_ASSET_NOT_FOUND' });
     } catch (error) {
       writeUploadFailure(res, error, writeJson, conditionalUpload, 'Upload receipt is unavailable');
@@ -1345,15 +1355,46 @@ export async function handleControlRoutes({
         writeJson(res, 403, { error: 'Owner stable upload access required', code: 'PERMISSION_DENIED' });
         return true;
       }
-      const intent = await createFileAssetUploadIntent({
-        sessionId,
-        originalName: typeof payload?.originalName === 'string' ? payload.originalName : '',
-        mimeType: typeof payload?.mimeType === 'string' ? payload.mimeType : '',
-        sizeBytes: payload?.sizeBytes,
-        createdBy: authSession?.role === 'visitor' ? 'visitor' : 'owner',
-        scopeCondition: readSessionApiScopeHeader(req, sessionId),
-        ...(Object.hasOwn(payload, 'requestId') ? { requestId: payload.requestId, sha256: payload.sha256 } : {}),
-      });
+      const accountBinding = await getOwnerAccountBinding();
+      let quotaReservation = null;
+      if (accountBinding?.accountId) {
+        if (authSession?.accountId && authSession.accountId !== accountBinding.accountId) {
+          writeJson(res, 403, { error: 'The signed-in account does not match this computer.', code: 'PERMISSION_DENIED' });
+          return true;
+        }
+        if (typeof payload?.requestId !== 'string' || typeof payload?.sha256 !== 'string') {
+          writeJson(res, 400, { error: 'This account requires resumable attachment uploads.', code: 'FILE_ASSET_STABLE_UPLOAD_REQUIRED' });
+          return true;
+        }
+        if (typeof payload?.quotaBatchId !== 'string' || !payload.quotaBatchId.trim()) {
+          writeJson(res, 400, { error: 'This account requires a message attachment batch identity.', code: 'FILE_ASSET_QUOTA_BATCH_REQUIRED' });
+          return true;
+        }
+        quotaReservation = await reserveOwnerAccountFileUpload({ requestId: payload.requestId,
+          quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 });
+      }
+      let intent;
+      try {
+        intent = await createFileAssetUploadIntent({
+          sessionId,
+          originalName: typeof payload?.originalName === 'string' ? payload.originalName : '',
+          mimeType: typeof payload?.mimeType === 'string' ? payload.mimeType : '',
+          sizeBytes: payload?.sizeBytes,
+          createdBy: authSession?.role === 'visitor' ? 'visitor' : 'owner',
+          scopeCondition: readSessionApiScopeHeader(req, sessionId),
+          ...(Object.hasOwn(payload, 'requestId') ? { requestId: payload.requestId, quotaBatchId: payload.quotaBatchId, sha256: payload.sha256 } : {}),
+        });
+      } catch (error) {
+        if (quotaReservation && !quotaReservation.duplicate) {
+          await releaseOwnerAccountFileUpload({ requestId: payload.requestId,
+            quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 }).catch(() => {});
+        }
+        throw error;
+      }
+      if (intent?.asset?.status === 'ready' && accountBinding?.accountId) {
+        await completeOwnerAccountFileUpload({ requestId: payload.requestId,
+          quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 });
+      }
       writeJson(res, 200, intent);
     } catch (error) {
       writeUploadFailure(res, error, writeJson, conditionalUpload, 'Failed to create upload intent');
@@ -1466,6 +1507,14 @@ export async function handleControlRoutes({
         etag: typeof payload?.etag === 'string' ? payload.etag : '',
         scopeCondition: readSessionApiScopeHeader(req, asset.sessionId),
       });
+      if (next?.status === 'ready' && asset.uploadRequest?.key) {
+        const binding = await getOwnerAccountBinding();
+        if (binding?.accountId && (!authSession?.accountId || authSession.accountId === binding.accountId)) {
+          await completeOwnerAccountFileUpload({ requestId: asset.uploadRequest.key,
+            quotaBatchId: asset.uploadRequest.quotaBatchId || asset.uploadRequest.key,
+            sizeBytes: asset.sizeBytes, sha256: asset.sha256 });
+        }
+      }
       writeJson(res, 200, { asset: next });
     } catch (error) {
       writeUploadFailure(res, error, writeJson, conditionalUpload, 'Failed to finalize asset upload');

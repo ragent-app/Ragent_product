@@ -33,10 +33,11 @@ process.env.AGENTOC_ASSET_STORAGE_REGION = 'fixture';
 process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '0';
 delete process.env.AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL;
 const assets = await import('../chat/file-assets.mjs');
+const { MAX_STABLE_UPLOAD_BYTES } = await import('../chat/file-asset-upload-checkpoints.mjs');
 const { CHAT_FILE_ASSETS_DIR } = await import('../lib/config.mjs');
 assert.equal(resolve(CHAT_FILE_ASSETS_DIR), resolve(join(root, 'config', 'file-assets')),
   'Tests must use their isolated instance, including on Windows');
-const input = { sessionId: 'session-a', requestId: 'capture-one:file-one', originalName: '销售.csv',
+const input = { sessionId: 'session-a', requestId: 'capture-one:file-one', quotaBatchId: 'message-a', originalName: '销售.csv',
   mimeType: 'text/csv', sizeBytes: bytes.length, sha256 };
 
 if (process.argv[2] === 'restart') {
@@ -60,6 +61,7 @@ if (process.argv[2] === 'restart') {
     assert.equal(first.upload.method, 'POST');
     const pending = await assets.findFileAssetUploadReceipt(input);
     assert.equal(pending.asset.status, 'pending_upload');
+  assert.equal(pending.quotaBatchId, input.quotaBatchId, 'The message batch survives durable upload recovery');
     assert.equal(pending.upload, undefined);
     assert.equal(pending.asset.directUrl, undefined);
     assert.equal(pending.asset.uploadRequest, undefined);
@@ -69,7 +71,7 @@ if (process.argv[2] === 'restart') {
         { code: 'FILE_ASSET_IDEMPOTENCY_CONFLICT', statusCode: 409 });
     }
     for (const change of [{ requestId: '' }, { requestId: null }, { requestId: 42 }, { requestId: 'a'.repeat(201) },
-      { originalName: '' }, { sha256: 'no-digest' }, { sizeBytes: '7' }, { sizeBytes: 0 }, { sizeBytes: 26 * 1024 * 1024 }]) {
+      { originalName: '' }, { sha256: 'no-digest' }, { sizeBytes: '7' }, { sizeBytes: 0 }, { sizeBytes: MAX_STABLE_UPLOAD_BYTES + 1 }]) {
       await assert.rejects(assets.createFileAssetUploadIntent({ ...input, ...change }), { code: 'INVALID_ARGUMENT' });
     }
     const otherSession = await assets.createFileAssetUploadIntent({ ...input, sessionId: 'session-b' });
@@ -195,7 +197,7 @@ if (process.argv[2] === 'restart') {
     const contract = await route('GET', null, {}, { role: 'owner' }, true, '/api/asset-upload-contract');
     assert.equal(contract.status, 200);
     assert.equal(contract.body.version, 1);
-    assert.equal(contract.body.maximumBytes, 25 * 1024 * 1024);
+    assert.equal(contract.body.maximumBytes, MAX_STABLE_UPLOAD_BYTES);
     assert.equal(contract.body.sha256Required, true);
     assert.equal((await route('GET', null, {}, { role: 'visitor' }, true, '/api/asset-upload-contract')).status, 403);
     assert.equal((await route('GET', null, input, { role: 'visitor' })).status, 403);

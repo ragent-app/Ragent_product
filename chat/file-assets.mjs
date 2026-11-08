@@ -31,7 +31,7 @@ import {
 } from './fs-utils.mjs';
 import { parseUploadScope, storedUploadScope, withUploadScope } from './file-asset-scope.mjs';
 import { assertOutsideSessionMetaTransaction } from './session-meta-store.mjs';
-import { FileAssetUploadCheckpoints, RESUMABLE_UPLOAD_CONTRACT } from './file-asset-upload-checkpoints.mjs';
+import { FileAssetUploadCheckpoints, MAX_STABLE_UPLOAD_BYTES, RESUMABLE_UPLOAD_CONTRACT } from './file-asset-upload-checkpoints.mjs';
 
 const FILE_ASSET_ID_PATTERN = /^fasset_[a-f0-9]{24}$/;
 const runFileAssetMutation = createSerialTaskQueue();
@@ -367,7 +367,10 @@ function normalizeFileAssetRecord(record) {
     localizedPath: normalizeString(record.localizedPath),
     localizedAt: normalizeString(record.localizedAt),
     uploadCompletedAt: normalizeString(record.uploadCompletedAt),
-    uploadRequest: record.uploadRequest || null,
+    uploadRequest: record.uploadRequest ? {
+      ...record.uploadRequest,
+      quotaBatchId: normalizeString(record.uploadRequest.quotaBatchId) || normalizeString(record.uploadRequest.key),
+    } : null,
   };
 }
 
@@ -484,6 +487,7 @@ export async function createFileAssetUploadIntent({
   forceLocal = false,
   forceRemote = false,
   requestId,
+  quotaBatchId,
   sha256,
   principalScope = 'owner',
   scopeCondition = null,
@@ -499,7 +503,7 @@ export async function createFileAssetUploadIntent({
   const scope = parseUploadScope(scopeCondition, normalizedSessionId);
   if (scope && requestId === undefined)
     throw createError('Scoped uploads require a stable request identity', 'INVALID_ARGUMENT', 400);
-  const uploadRequest = parseUploadRequest({ requestId, principalScope, sessionId: normalizedSessionId,
+  const uploadRequest = parseUploadRequest({ requestId, quotaBatchId, principalScope, sessionId: normalizedSessionId,
     originalName, mimeType, sizeBytes, sha256, scopeCondition: scope });
   return runFileAssetMutation(async () => {
     const assetId = uploadRequest ? uploadRequest.assetId : generateFileAssetId();
@@ -617,14 +621,19 @@ function parseUploadIdentity({ requestId, principalScope, sessionId }) {
 function parseUploadRequest(input) {
   if (input.requestId === undefined) return null;
   const identity = parseUploadIdentity(input);
-  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > 25 * 1024 * 1024
+  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > MAX_STABLE_UPLOAD_BYTES
     || typeof input.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(input.sha256)
     || typeof input.originalName !== 'string' || !input.originalName.trim() || input.originalName.length > 512
     || typeof input.mimeType !== 'string' || input.mimeType.length > 256) {
-    throw createError('Stable uploads require a filename, MIME type, SHA-256 and size from 1 byte to 25 MiB', 'INVALID_ARGUMENT');
+    throw createError('Stable uploads require a filename, MIME type, SHA-256 and size from 1 byte to 1 GiB', 'INVALID_ARGUMENT');
   }
   const scope = input.scopeCondition;
-  return { ...identity, ...(scope ? { scopeVersion: 1, scopeCondition: scope } : {}),
+  const quotaBatchId = typeof input.quotaBatchId === 'string' && input.quotaBatchId.trim()
+    ? input.quotaBatchId.trim() : identity.key;
+  if (quotaBatchId.length > 200 || /[\r\n]/.test(quotaBatchId)) {
+    throw createError('Stable upload quota batch identity is invalid', 'INVALID_ARGUMENT');
+  }
+  return { ...identity, quotaBatchId, ...(scope ? { scopeVersion: 1, scopeCondition: scope } : {}),
     fingerprint: uploadFingerprint({ originalName: sanitizeDisplayName(input.originalName),
       mimeType: normalizeMimeType(input.mimeType), sizeBytes: input.sizeBytes, sha256: input.sha256.toLowerCase(),
       uploadRequest: scope ? { scopeVersion: 1, scopeCondition: scope } : null, sessionId: identity.sessionId }) };
@@ -654,7 +663,7 @@ async function readUploadRequestAsset(identity) {
     || !Number.isSafeInteger(raw.sizeBytes)
     || !['pending_upload', 'ready'].includes(record.status)
     || !/^[a-f0-9]{64}$/.test(record.sha256)
-    || !Number.isSafeInteger(record.sizeBytes) || record.sizeBytes <= 0 || record.sizeBytes > 25 * 1024 * 1024
+    || !Number.isSafeInteger(record.sizeBytes) || record.sizeBytes <= 0 || record.sizeBytes > MAX_STABLE_UPLOAD_BYTES
     || record.uploadRequest?.fingerprint !== uploadFingerprint(record)) {
     throw createError('Upload receipt identity is inconsistent', 'FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
   }
@@ -666,7 +675,8 @@ export async function findFileAssetUploadReceipt({ sessionId, requestId, princip
   assertOutsideSessionMetaTransaction();
   const record = await readUploadRequestAsset(parseUploadIdentity({ sessionId, requestId, principalScope }));
   return record ? withUploadScope(record, scopeCondition, async () =>
-    ({ uploadContractVersion: 1, asset: await buildClientFileAsset(record) }), authorize) : null;
+    ({ uploadContractVersion: 1, quotaBatchId: record.uploadRequest?.quotaBatchId || record.uploadRequest?.key,
+      asset: await buildClientFileAsset(record) }), authorize) : null;
 }
 
 export async function ingestFileAssetUpload(assetId, readableStream, { scopeCondition = null, authorize, signal } = {}) {

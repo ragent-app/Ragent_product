@@ -12,6 +12,19 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.io.InputStream
+
+/** Reopenable, fixed-size request body used for uploads without a heap-sized byte array. */
+data class ApiRequestBodySource(
+    val sizeBytes: Long,
+    val sha256: String,
+    val openStream: () -> InputStream,
+) {
+    init {
+        require(sizeBytes > 0L)
+        require(sha256.matches(Regex("^[a-f0-9]{64}$")))
+    }
+}
 
 data class ApiRequest(
     val method: String,
@@ -20,13 +33,15 @@ data class ApiRequest(
     val requestId: String? = null,
     val idempotencyKey: String? = null,
     val headers: Map<String, String> = emptyMap(),
-    /** Optional binary body for file uploads. Exactly one of body/bodyBytes may be set. */
+    /** Optional binary body for small payloads. Large uploads should use [bodySource]. */
     val bodyBytes: ByteArray? = null,
     val contentType: String? = null,
     /** Optional local body-write observation. Unsupported carriers leave it silent; never serialized. */
     val onBodyBytesWritten: ((Long) -> Unit)? = null,
     /** Public device-key challenges do not authenticate or invalidate the current bearer. */
     val isolateCredentialFailure: Boolean = false,
+    /** Reopenable streaming body for direct HTTP uploads; never serialized into carrier metadata. */
+    val bodySource: ApiRequestBodySource? = null,
 )
 
 data class ApiResponse(

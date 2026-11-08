@@ -531,11 +531,19 @@ export async function handleOwnerAuthRoutes({
     '/v1/owner-auth/account/session/logout', '/v1/owner-auth/account/turn/connections',
     '/v1/owner-auth/account/turn/connections/release'].includes(path)
     || /^\/v1\/owner-auth\/account\/devices\/[^/]+\/(rename|revoke)$/.test(path);
-  if (!trimString(googleWebClientId) && !isNativeApi && !isDiscoveryApi && !isBindingAuthorityApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi) return false;
+  const isAccountFileUploadQuotaApi = /^\/v1\/owner-auth\/instances\/uploads\/(reserve|complete|release)$/.test(path);
+  if (!trimString(googleWebClientId) && !isNativeApi && !isDiscoveryApi && !isBindingAuthorityApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi && !isAccountFileUploadQuotaApi) return false;
 
   try {
     if (isBindingAuthorityApi && req.method === 'POST') {
       const result = await broker.readBindingAuthority(await readJsonBody(req));
+      jsonResponse(res, 200, result);
+      return true;
+    }
+    if (isAccountFileUploadQuotaApi && req.method === 'POST') {
+      const method = path.endsWith('/reserve') ? broker.reserveAccountFileUpload
+        : path.endsWith('/complete') ? broker.completeAccountFileUpload : broker.releaseAccountFileUpload;
+      const result = await method(await readJsonBody(req));
       jsonResponse(res, 200, result);
       return true;
     }

@@ -12,6 +12,7 @@ import {
   buildNativeOwnerAuthMessage,
   buildNativeOwnerAuthRollbackMessage,
   buildBindingAuthorityProofMessage,
+  buildAccountFileUploadQuotaMessage,
   buildTargetRuntimeAuthorizationMessage,
   buildOwnerAuthPollMessage,
   createInstancePublicKeyFingerprint,
@@ -35,7 +36,8 @@ import {
   publicTurnAuthorization,
 } from '../lib/turn-authorization.mjs';
 import { getTurnConnectionLeases, resolveAccountEntitlement, effectiveDeviceKind,
-  isActiveTurnConnectionLease, activeTurnConnectionState } from './turn-lease-policy.mjs';
+  isActiveTurnConnectionLease, activeTurnConnectionState, ACCOUNT_FILE_UPLOAD_POLICY_VERSION, ACCOUNT_FILE_HARD_MAX_BYTES,
+  resolveAccountFileUploadLimits } from './turn-lease-policy.mjs';
 import { prepareTurnHandoff, commitTurnHandoff, expireTurnHandoffs } from './turn-handoff-policy.mjs';
 import { issueTurnBrokerCapability } from '../lib/turn-broker-capability.mjs';
 import { assertAccountNotDeleting } from './account-deletion-policy.mjs';
@@ -64,6 +66,7 @@ export const ACCOUNT_JOIN_GRANT_TTL_MS = 60 * 1000;
 export const ACCOUNT_RENDEZVOUS_TTL_MS = 2 * 60 * 1000;
 export const ACCOUNT_RENDEZVOUS_RESULT_TTL_MS = 5 * 60 * 1000;
 export const ACCOUNT_RENDEZVOUS_ACTIVITY_PERSIST_INTERVAL_MS = 5 * 60 * 1000;
+export const ACCOUNT_FILE_UPLOAD_RESERVATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const ACCOUNT_CREDENTIAL_REFRESH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const TARGET_RUNTIME_AUTH_SKEW_MS = 2 * 60 * 1000;
 const TARGET_RUNTIME_AUTH_MAX_LIFETIME_MS = 5 * 60 * 1000;
@@ -187,6 +190,41 @@ function isProtocolField(value, { min = 1, max = 256 } = {}) {
     && /^[\x21-\x7e]+$/.test(value);
 }
 
+function normalizeAccountFileUploadQuotaInput(input, operation, clock) {
+  const instanceInput = input?.instance && typeof input.instance === 'object' ? input.instance : {};
+  const instanceId = trimString(instanceInput.instanceId);
+  const publicKey = trimString(instanceInput.publicKey);
+  const keyFingerprint = trimString(instanceInput.keyFingerprint);
+  const accountId = trimString(input?.accountId);
+  const requestId = trimString(input?.requestId);
+  const quotaBatchId = trimString(input?.quotaBatchId);
+  const sizeBytes = Number(input?.sizeBytes);
+  const sha256 = trimString(input?.sha256).toLowerCase();
+  const issuedAt = trimString(input?.issuedAt);
+  const issuedMs = Date.parse(issuedAt);
+  if (!isProtocolField(instanceId, { min: 8, max: 160 }) || !publicKey
+    || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !isProtocolField(accountId, { min: 8, max: 160 })
+    || !isProtocolField(requestId, { min: 1, max: 200 })
+    || !isProtocolField(quotaBatchId, { min: 1, max: 200 }) || !Number.isSafeInteger(sizeBytes)
+    || sizeBytes <= 0 || sizeBytes > ACCOUNT_FILE_HARD_MAX_BYTES || !/^[a-f0-9]{64}$/.test(sha256)
+    || !issuedMs || !isProtocolField(issuedAt, { min: 20, max: 64 })
+    || trimString(input?.audience) !== 'agentoc-account-file-upload') {
+    throw createError('account_file_upload_request_invalid', 'Invalid account file upload quota request.', 400);
+  }
+  if (Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
+    throw createError('owner_auth_proof_expired', 'Account file upload quota proof is expired.', 401);
+  }
+  if (createInstancePublicKeyFingerprint(publicKey) !== keyFingerprint) {
+    throw createError('owner_auth_instance_invalid', 'Instance key fingerprint does not match.', 401);
+  }
+  const message = buildAccountFileUploadQuotaMessage({ instanceId, accountId, operation, requestId,
+    quotaBatchId, sizeBytes, sha256, issuedAt });
+  if (!verifyInstanceProofSignature({ publicKey, message, signature: input?.signature })) {
+    throw createError('owner_auth_proof_invalid', 'Invalid account file upload quota signature.', 401);
+  }
+  return { instance: { instanceId, publicKey, keyFingerprint }, accountId, requestId, quotaBatchId, sizeBytes, sha256 };
+}
+
 function hasCredentialScope(credential, scope) {
   return trimString(credential?.scope).split(/\s+/).includes(scope);
 }
@@ -291,6 +329,25 @@ function getNativeAuthRequests(draft) {
 function getAccountJoinIntents(draft) {
   if (!Array.isArray(draft.accountJoinIntents)) draft.accountJoinIntents = [];
   return draft.accountJoinIntents;
+}
+
+function getAccountFileUploads(draft) {
+  if (!Array.isArray(draft.accountFileUploads)) draft.accountFileUploads = [];
+  return draft.accountFileUploads;
+}
+
+function accountFileUploadUsage(draft, accountId, quotaBatchId, nowMs) {
+  let usedBytes = 0;
+  let reservedBytes = 0;
+  for (const item of getAccountFileUploads(draft)) {
+    if (item.accountId !== accountId || item.quotaBatchId !== quotaBatchId) continue;
+    if (item.status === 'committed') usedBytes += Number(item.sizeBytes) || 0;
+    else if (item.status === 'reserved' && Date.parse(item.reservedUntil || '') > nowMs) reservedBytes += Number(item.sizeBytes) || 0;
+  }
+  if (!Number.isSafeInteger(usedBytes) || !Number.isSafeInteger(reservedBytes)) {
+    throw createError('account_file_usage_unavailable', 'Account file usage is invalid.', 503);
+  }
+  return { usedBytes, reservedBytes };
 }
 
 function publicRendezvousIntent(intent) {
@@ -3229,6 +3286,113 @@ export function createOwnerAuthBroker({
     });
   }
 
+  async function reserveAccountFileUpload(input) {
+    const normalized = normalizeAccountFileUploadQuotaInput(input, 'reserve', clock);
+    const result = await store.mutate(async (draft) => {
+      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertAccountNotDeleting(draft, normalized.accountId);
+      assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
+      const now = clock();
+      const entitlement = resolveEntitlement(draft, normalized.accountId, now);
+      const limits = resolveAccountFileUploadLimits(entitlement.plan);
+      if (normalized.sizeBytes > limits.maxFileBytes) {
+        throw createError('account_file_upload_file_limit', 'This account plan limits each file to 50 MiB.', 413);
+      }
+      const rows = getAccountFileUploads(draft);
+      let existing = rows.find((item) => item.accountId === normalized.accountId && item.requestId === normalized.requestId);
+      if (existing && (existing.instanceId !== normalized.instance.instanceId
+        || existing.quotaBatchId !== normalized.quotaBatchId
+        || existing.sizeBytes !== normalized.sizeBytes || existing.sha256 !== normalized.sha256)) {
+        throw createError('account_file_upload_identity_conflict', 'Upload identity was already used for different file data.', 409);
+      }
+      if (existing?.status === 'committed') {
+        return { tracked: true, duplicate: true, limits,
+          ...accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now) };
+      }
+      if (existing?.status === 'reserved' && Date.parse(existing.reservedUntil || '') > now) {
+        return { tracked: true, duplicate: true, limits,
+          ...accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now) };
+      }
+      const usage = accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now);
+      if (usage.usedBytes + usage.reservedBytes + normalized.sizeBytes > limits.maxTotalBytes) {
+        throw createError('account_file_upload_total_limit', 'This message exceeds the 100 MiB attachment limit.', 429);
+      }
+      const timestamp = new Date(now).toISOString();
+      if (existing) {
+        Object.assign(existing, { quotaBatchId: normalized.quotaBatchId, status: 'reserved',
+          reservedUntil: new Date(now + ACCOUNT_FILE_UPLOAD_RESERVATION_TTL_MS).toISOString(), updatedAt: timestamp });
+      } else {
+        existing = { accountId: normalized.accountId, requestId: normalized.requestId,
+          instanceId: normalized.instance.instanceId, quotaBatchId: normalized.quotaBatchId,
+          sizeBytes: normalized.sizeBytes, sha256: normalized.sha256,
+          status: 'reserved', reservedUntil: new Date(now + ACCOUNT_FILE_UPLOAD_RESERVATION_TTL_MS).toISOString(),
+          createdAt: timestamp, updatedAt: timestamp };
+        rows.push(existing);
+      }
+      return { tracked: true, duplicate: false, limits,
+        ...accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now) };
+    });
+    audit({ event: 'account_file_upload.reserved', accountId: normalized.accountId,
+      instanceId: normalized.instance.instanceId, sizeBytes: normalized.sizeBytes, duplicate: result.duplicate });
+    return { contractVersion: 2, policyVersion: ACCOUNT_FILE_UPLOAD_POLICY_VERSION, ...result };
+  }
+
+  async function completeAccountFileUpload(input) {
+    const normalized = normalizeAccountFileUploadQuotaInput(input, 'complete', clock);
+    const result = await store.mutate(async (draft) => {
+      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertAccountNotDeleting(draft, normalized.accountId);
+      assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
+      const now = clock();
+      const entitlement = resolveEntitlement(draft, normalized.accountId, now);
+      const limits = resolveAccountFileUploadLimits(entitlement.plan);
+      const row = getAccountFileUploads(draft).find((item) => item.accountId === normalized.accountId
+        && item.requestId === normalized.requestId);
+      if (!row) return { tracked: false, limits,
+        ...accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now) };
+      if (row.instanceId !== normalized.instance.instanceId || row.quotaBatchId !== normalized.quotaBatchId
+        || row.sizeBytes !== normalized.sizeBytes || row.sha256 !== normalized.sha256) {
+        throw createError('account_file_upload_identity_conflict', 'Upload identity was already used for different file data.', 409);
+      }
+      if (row.status !== 'committed') {
+        const usage = accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now);
+        const activeReservation = Date.parse(row.reservedUntil || '') > now;
+        const usedAfter = usage.usedBytes + Math.max(0, usage.reservedBytes - (activeReservation ? normalized.sizeBytes : 0))
+          + normalized.sizeBytes;
+        if (normalized.sizeBytes > limits.maxFileBytes || usedAfter > limits.maxTotalBytes) {
+          throw createError('account_file_upload_total_limit', 'This message exceeds the 100 MiB attachment limit.', 429);
+        }
+        row.status = 'committed';
+        row.reservedUntil = '';
+        row.updatedAt = new Date(now).toISOString();
+      }
+      return { tracked: true, limits,
+        ...accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now) };
+    });
+    audit({ event: 'account_file_upload.completed', accountId: normalized.accountId,
+      instanceId: normalized.instance.instanceId, sizeBytes: normalized.sizeBytes, tracked: result.tracked });
+    return { contractVersion: 2, policyVersion: ACCOUNT_FILE_UPLOAD_POLICY_VERSION, ...result };
+  }
+
+  async function releaseAccountFileUpload(input) {
+    const normalized = normalizeAccountFileUploadQuotaInput(input, 'release', clock);
+    const result = await store.mutate(async (draft) => {
+      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      const now = clock();
+      const row = getAccountFileUploads(draft).find((item) => item.accountId === normalized.accountId
+        && item.requestId === normalized.requestId);
+      const released = Boolean(row && row.instanceId === normalized.instance.instanceId && row.status === 'reserved'
+        && row.quotaBatchId === normalized.quotaBatchId
+        && row.sizeBytes === normalized.sizeBytes && row.sha256 === normalized.sha256);
+      if (released) {
+        row.reservedUntil = new Date(now).toISOString();
+        row.updatedAt = new Date(now).toISOString();
+      }
+      return { released };
+    });
+    return { contractVersion: 2, policyVersion: ACCOUNT_FILE_UPLOAD_POLICY_VERSION, ...result };
+  }
+
   async function listOwnTurnConnections({ credential = '', afterConnectionId = '', limit = 100 } = {}) {
     if ((afterConnectionId && (!isTurnLeaseId(afterConnectionId) || afterConnectionId !== trimString(afterConnectionId)))
       || !Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 100) {
@@ -3956,6 +4120,9 @@ export function createOwnerAuthBroker({
     publishInstanceIdentity,
     listAccountDirectoryDevices,
     getAccountUsage,
+    reserveAccountFileUpload,
+    completeAccountFileUpload,
+    releaseAccountFileUpload,
     listOwnTurnConnections,
     releaseOwnTurnConnections,
     renameAccountDirectoryDevice,

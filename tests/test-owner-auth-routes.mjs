@@ -23,6 +23,7 @@ const {
   signInstanceProof,
   signOwnerAuthDeviceProof,
   signOwnerAuthPollProof,
+  signAccountFileUploadQuotaProof,
 } = await import(pathToFileURL(join(repoRoot, 'lib', 'instance-identity.mjs')).href);
 const { createTurnConnectionId } = await import(pathToFileURL(join(testedRoot, 'lib', 'turn-authorization.mjs')).href);
 const { createDevicePublicKeyFingerprint, normalizeDevicePublicKey } = await import(pathToFileURL(join(testedRoot, 'lib', 'device-auth-protocol.mjs')).href);
@@ -401,6 +402,30 @@ try {
   });
   check('TURN connection release route 释放租约', releasedConnection.status === 200
     && releasedConnection.json?.released === true);
+
+  function fileQuotaProof(operation, requestId, quotaBatchId, sizeBytes, sha256) {
+    const issuedAt = new Date().toISOString();
+    const fields = { accountId: 'acct_owner_1', operation, requestId, quotaBatchId, sizeBytes, sha256,
+      issuedAt, audience: 'agentoc-account-file-upload' };
+    const signature = signAccountFileUploadQuotaProof(identity, fields);
+    return { ...fields, instance: publicInstanceIdentity(identity), signature: signature.signature };
+  }
+  const quotaFirst = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',
+    fileQuotaProof('reserve', 'file-quota-a', 'message-quota-a', 50 * 1024 * 1024, 'a'.repeat(64)));
+  const quotaSecond = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',
+    fileQuotaProof('reserve', 'file-quota-b', 'message-quota-a', 50 * 1024 * 1024, 'b'.repeat(64)));
+  const quotaOver = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',
+    fileQuotaProof('reserve', 'file-quota-c', 'message-quota-a', 1, 'c'.repeat(64)));
+  const quotaNextMessage = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',
+    fileQuotaProof('reserve', 'file-quota-d', 'message-quota-next', 50 * 1024 * 1024, 'd'.repeat(64)));
+  const quotaNextMessageSecond = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',
+    fileQuotaProof('reserve', 'file-quota-e', 'message-quota-next', 50 * 1024 * 1024, 'e'.repeat(64)));
+  check('免费档文件额度路由按签名消息批次跨设备累计，并独立重置到后续消息', quotaFirst.status === 200
+    && quotaFirst.json?.reservedBytes === 50 * 1024 * 1024
+    && quotaSecond.status === 200 && quotaSecond.json?.reservedBytes === 100 * 1024 * 1024
+    && quotaOver.status === 429 && quotaOver.json?.code === 'account_file_upload_total_limit'
+    && quotaNextMessage.status === 200 && quotaNextMessage.json?.reservedBytes === 50 * 1024 * 1024
+    && quotaNextMessageSecond.status === 200 && quotaNextMessageSecond.json?.reservedBytes === 100 * 1024 * 1024);
 
   console.log(`test-owner-auth-routes: ${passed} assertions passed`);
 } finally {

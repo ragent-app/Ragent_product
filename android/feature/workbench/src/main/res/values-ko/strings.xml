@@ -169,6 +169,8 @@
     <string name="workbench_status_processing">처리 중…</string>
     <string name="workbench_status_awaiting_approval">승인 대기 중</string>
     <string name="workbench_status_sending">전송 중…</string>
+    <string name="workbench_upload_preparing">첨부 파일 준비 중…</string>
+    <string name="workbench_upload_progress">첨부 파일 업로드 중 · %1$d%%</string>
     <string name="projects_title">프로젝트</string>
     <string name="projects_this_device">이 기기</string>
     <string name="projects_running">실행 중</string>
