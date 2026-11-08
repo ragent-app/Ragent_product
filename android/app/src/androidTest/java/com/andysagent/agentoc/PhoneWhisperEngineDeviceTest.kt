@@ -11,21 +11,95 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Hardware smoke test for local Whisper inference; skips unless a user-installed model is present. */
+/** Hardware smoke tests for local Whisper inference; external-microphone acceptance is opt-in. */
 @RunWith(AndroidJUnit4::class)
 class PhoneWhisperEngineDeviceTest {
+    @Test
+    fun nativeWhisperCatalogMatchesAllBundledLanguageChoices() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val catalog = context.assets.open("whisper-languages.json").bufferedReader().use { reader ->
+            kotlinx.serialization.json.Json.parseToJsonElement(reader.readText()).jsonArray.map { entry ->
+                entry.jsonObject.getValue("code").jsonPrimitive.content
+            }
+        }
+        val nativeLanguages = NativeWhisper.supportedLanguageCodes().toList()
+        assertEquals("The packaged catalog must match the pinned native Whisper runtime", catalog, nativeLanguages)
+        assertTrue("The speech picker must include languages outside Ragent's seven UI locales", catalog.size >= 100)
+        assertTrue(catalog.containsAll(listOf("de", "ru", "ar", "hi", "haw")))
+        Log.i("RagentVoiceQA", "Pinned Whisper speech languages: ${catalog.size}")
+    }
+
     @Test
     fun createsAppScopedDirectoryForImportedVoiceQaSamples() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = checkNotNull(context.getExternalFilesDir(null)) { "App-scoped external storage is unavailable" }
         check(directory.mkdirs() || directory.isDirectory) { "Could not create app-scoped voice QA directory" }
         Log.i("RagentVoiceQA", "App-scoped sample directory: ${directory.absolutePath}")
+    }
+
+    @Test
+    fun liveHonorMicrophoneRecordingReachesPhoneWhisperDraftCallback() = runBlocking {
+        val expectedRegex = InstrumentationRegistry.getArguments()
+            .getString("voiceMicExpectedRegex")
+            ?.takeIf(String::isNotBlank)
+        assumeTrue(
+            "Pass -e voiceMicExpectedRegex '<expected transcript regex>' while speaking or playing that phrase",
+            expectedRegex != null,
+        )
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val app = context.applicationContext as AgentoCApplication
+        val sampleDirectory = checkNotNull(context.getExternalFilesDir(null))
+        val modelSeed = File(sampleDirectory, "ggml-tiny-q5_1.bin")
+        assumeTrue("Seed the verified phone model before this live microphone acceptance test", modelSeed.isFile)
+        val engine = PhoneWhisperEngine(context)
+        val modelFile = File(File(context.filesDir, "voice-models"), "ggml-tiny-q5_1.bin")
+        check(modelFile.parentFile?.mkdirs() == true || modelFile.parentFile?.isDirectory == true)
+        modelSeed.copyTo(modelFile, overwrite = true)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val controller = LocalVoiceController(app, context, scope)
+        val transcript = CompletableFuture<String>()
+        try {
+            app.runtime.configStore.setPhoneLocalVoiceEnabled(true)
+            app.runtime.configStore.setVoiceRecognitionLanguage("ko")
+            controller.loadSession(null)
+            withTimeout(15_000) { controller.state.first { it.phoneEnabled && it.phoneWhisperInstalled } }
+            controller.startVoiceInput(sessionTargetId = null, onText = transcript::complete)
+            withTimeout(15_000) { controller.state.first { it.recording } }
+            Log.i("RagentVoiceQA", "LIVE_MIC_RECORDING_STARTED")
+            // Leave enough capture time for the separately started speaker playback to begin.
+            delay(20_000)
+            controller.stopVoiceInput()
+            val recognized = withTimeout(5 * 60_000) { withContext(Dispatchers.IO) { transcript.get(5, TimeUnit.MINUTES) } }
+            Log.i("RagentVoiceQA", "LIVE_MIC_TRANSCRIPT: $recognized")
+            assertTrue(
+                "The Honor microphone did not capture the supplied speech sample: $recognized",
+                Regex(checkNotNull(expectedRegex)).containsMatchIn(recognized),
+            )
+        } finally {
+            controller.cancelVoiceInput()
+            scope.cancel()
+            engine.remove()
+            app.runtime.configStore.setPhoneLocalVoiceEnabled(false)
+            app.runtime.configStore.setVoiceRecognitionLanguage("auto")
+        }
     }
 
     @Test
@@ -41,31 +115,37 @@ class PhoneWhisperEngineDeviceTest {
             ImportedSample("voice-qa-ja-JP.wav", "ja-JP", Regex("[\\u3040-\\u30ff]")),
             ImportedSample("voice-qa-ko-KR.wav", "ko-KR", Regex("[\\uac00-\\ud7af]")),
             ImportedSample("voice-qa-fr-FR.wav", "fr-FR", Regex("(?i)bonjour|reconnaissance|vocale")),
-            ImportedSample("voice-qa-es-ES.wav", "es-ES", Regex("(?i)hola|reconocimiento|voz")),
+            ImportedSample("voice-qa-es-ES.wav", "es-AR", Regex("(?i)hace|grados|sol")),
         ).mapNotNull { sample ->
             sampleDirectory?.let { directory -> File(directory, sample.fileName).takeIf(File::isFile)?.let { sample to it } }
         }
-        var copiedTestModel = false
-        try {
-            assumeTrue("This phone does not have the Whisper native runtime ABI", engine.isSupported)
-            if (!engine.isInstalled && modelSeed?.isFile == true) {
-                val internalModel = File(File(context.filesDir, "voice-models"), "ggml-tiny-q5_1.bin")
-                check(internalModel.parentFile?.mkdirs() == true || internalModel.parentFile?.isDirectory == true)
-                modelSeed.copyTo(internalModel, overwrite = true)
-                copiedTestModel = true
-            }
-            assumeTrue("Provide the model seed and language WAVs in this test app's external files directory", engine.isInstalled && samples.isNotEmpty())
-            for ((sample, file) in samples) {
-                val transcript = engine.transcribe(normalizeWav(file.readBytes())).trim()
-                Log.i("RagentVoiceQA", "${sample.languageTag}: $transcript")
-                assertTrue("Whisper returned no ${sample.languageTag} transcript", transcript.isNotBlank())
-                assertTrue("Whisper did not recognize ${sample.languageTag}: $transcript", sample.expected.containsMatchIn(transcript))
-            }
-        } finally {
-            samples.forEach { (_, file) -> file.delete() }
-            modelSeed?.delete()
-            if (copiedTestModel) engine.remove()
+        assumeTrue("This phone does not have the Whisper native runtime ABI", engine.isSupported)
+        if (!engine.isInstalled && modelSeed?.isFile == true) {
+            val internalModel = File(File(context.filesDir, "voice-models"), "ggml-tiny-q5_1.bin")
+            check(internalModel.parentFile?.mkdirs() == true || internalModel.parentFile?.isDirectory == true)
+            modelSeed.copyTo(internalModel, overwrite = true)
         }
+        assumeTrue("Provide the model seed and language WAVs in this test app's external files directory", engine.isInstalled && samples.isNotEmpty())
+        for ((sample, file) in samples) {
+            val transcript = engine.transcribe(normalizeWav(file.readBytes())).trim()
+            Log.i("RagentVoiceQA", "${sample.languageTag}: $transcript")
+            assertTrue("Whisper returned no ${sample.languageTag} transcript", transcript.isNotBlank())
+            assertTrue("Whisper did not recognize ${sample.languageTag}: $transcript", sample.expected.containsMatchIn(transcript))
+        }
+    }
+
+    @Test
+    fun transcribesKoreanSampleWhenRecognitionLanguageIsExplicitlySelected() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val engine = PhoneWhisperEngine(context)
+        val directory = context.getExternalFilesDir(null)
+        val sample = directory?.let { File(it, "voice-qa-ko-KR.wav") }
+        assumeTrue("Install the optional multilingual model before this hardware test", engine.isInstalled)
+        assumeTrue("Provide the Korean voice sample in the test app's external files directory", sample?.isFile == true)
+        val transcript = engine.transcribe(normalizeWav(checkNotNull(sample).readBytes()), "ko").trim()
+        Log.i("RagentVoiceQA", "ko (explicit): $transcript")
+        assertTrue("Whisper returned no Korean transcript", transcript.isNotBlank())
+        assertTrue("Whisper did not recognize Korean speech: $transcript", Regex("[\\uac00-\\ud7af]").containsMatchIn(transcript))
     }
 
     @Test

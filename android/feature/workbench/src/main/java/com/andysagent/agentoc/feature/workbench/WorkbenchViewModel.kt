@@ -204,6 +204,7 @@ sealed interface WorkbenchEvent {
     data object ToggleVoiceInput : WorkbenchEvent
     data object CancelVoiceInput : WorkbenchEvent
     data class SelectVoiceChoice(val choice: String) : WorkbenchEvent
+    data class SelectVoiceLanguage(val languageTag: String) : WorkbenchEvent
     data class SetPhoneLocalVoiceEnabled(val enabled: Boolean) : WorkbenchEvent
     data object DownloadPhoneVoiceModel : WorkbenchEvent
     data object RemovePhoneVoiceModel : WorkbenchEvent

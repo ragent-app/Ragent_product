@@ -3,6 +3,7 @@ package com.andysagent.agentoc
 import android.content.Context
 import android.app.ActivityManager
 import android.os.Build
+import com.andysagent.agentoc.feature.workbench.whisperLanguageCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -30,6 +31,9 @@ internal class PhoneWhisperEngine(context: Context) {
 
     val downloadSizeMb: Int get() = spec.downloadSizeMb
     val workingMemoryMb: Int get() = spec.workingMemoryMb
+
+    val supportedLanguageCodes: List<String>
+        get() = if (isSupported) NativeWhisper.supportedLanguageCodes().toList() else emptyList()
 
     val isSupported: Boolean
         get() = Build.SUPPORTED_ABIS.any { it in SUPPORTED_ABIS }
@@ -79,7 +83,7 @@ internal class PhoneWhisperEngine(context: Context) {
         }
     }
 
-    suspend fun transcribe(wav: ByteArray): String = withContext(Dispatchers.IO) {
+    suspend fun transcribe(wav: ByteArray, languageTag: String = "auto"): String = withContext(Dispatchers.IO) {
         check(isInstalled) { "Download the multilingual offline model in Voice settings first" }
         val audio = File(appContext.cacheDir, "ragent-voice-${System.nanoTime()}.wav")
         audio.writeBytes(wav)
@@ -88,6 +92,7 @@ internal class PhoneWhisperEngine(context: Context) {
                 modelFile.absolutePath,
                 audio.absolutePath,
                 Runtime.getRuntime().availableProcessors().coerceIn(2, 6),
+                whisperLanguageCode(languageTag),
             ).trim()
         } finally {
             audio.delete()

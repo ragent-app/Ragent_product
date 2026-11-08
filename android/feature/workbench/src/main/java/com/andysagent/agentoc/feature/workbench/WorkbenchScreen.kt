@@ -5397,6 +5397,60 @@ private fun SettingsDetailSurface(
             ) {
                 when (page) {
                     SettingsPage.Voice -> {
+                        item(key = "voice-language-settings") {
+                            var speechLanguageQuery by rememberSaveable { mutableStateOf("") }
+                            val voiceUiLocale = LocalConfiguration.current.locales[0] ?: java.util.Locale.getDefault()
+                            SettingsGroup(
+                                title = stringResource(R.string.voice_language_section),
+                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
+                            ) {
+                                androidx.compose.material3.OutlinedTextField(
+                                    value = speechLanguageQuery,
+                                    onValueChange = { speechLanguageQuery = it },
+                                    label = { Text(stringResource(R.string.voice_language_search)) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .testTag("voice-language-search"),
+                                )
+                                val languages = state.voice.speechLanguages.filter { tag ->
+                                    if (speechLanguageQuery.isBlank()) true
+                                    else {
+                                        val locale = java.util.Locale.forLanguageTag(tag)
+                                        tag.contains(speechLanguageQuery.trim(), ignoreCase = true) ||
+                                            locale.getDisplayName(voiceUiLocale).contains(speechLanguageQuery.trim(), ignoreCase = true) ||
+                                            locale.getDisplayName(locale).contains(speechLanguageQuery.trim(), ignoreCase = true)
+                                    }
+                                }
+                                Column(Modifier.selectableGroup().padding(vertical = 6.dp)) {
+                                    if (languages.isEmpty()) {
+                                        Text(
+                                            stringResource(R.string.voice_language_no_results),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                                        )
+                                    } else {
+                                        languages.forEach { tag ->
+                                            val title = if (tag == "auto") stringResource(R.string.voice_language_auto) else {
+                                                val languageLocale = java.util.Locale.forLanguageTag(tag)
+                                                val translatedName = languageLocale.getDisplayLanguage(voiceUiLocale).ifBlank { tag }
+                                                val nativeName = languageLocale.getDisplayLanguage(languageLocale)
+                                                if (nativeName.isNotBlank() && !nativeName.equals(translatedName, ignoreCase = true)) {
+                                                    "$translatedName · $nativeName"
+                                                } else translatedName
+                                            }
+                                            SettingsChoiceRow(
+                                                title = title,
+                                                subtitle = if (tag == "auto") stringResource(R.string.voice_language_auto_hint) else null,
+                                                selected = state.voice.speechLanguage == tag,
+                                                onClick = { onEvent(WorkbenchEvent.SelectVoiceLanguage(tag)) },
+                                                modifier = Modifier.testTag("voice-language-$tag"),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         item(key = "voice-phone-settings") {
                             SettingsGroup(
                                 title = stringResource(R.string.voice_phone_section),

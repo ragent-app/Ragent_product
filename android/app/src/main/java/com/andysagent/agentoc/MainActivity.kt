@@ -1463,6 +1463,7 @@ class MainActivity : ComponentActivity() {
                             }
                             WorkbenchEvent.CancelVoiceInput -> voiceController.cancelVoiceInput()
                             is WorkbenchEvent.SelectVoiceChoice -> voiceController.selectChoice(event.choice)
+                            is WorkbenchEvent.SelectVoiceLanguage -> voiceController.selectSpeechLanguage(event.languageTag)
                             is WorkbenchEvent.SetPhoneLocalVoiceEnabled -> voiceController.setPhoneEnabled(event.enabled)
                             WorkbenchEvent.DownloadPhoneVoiceModel -> voiceController.downloadPhoneWhisperModel()
                             WorkbenchEvent.RemovePhoneVoiceModel -> voiceController.removePhoneWhisperModel()

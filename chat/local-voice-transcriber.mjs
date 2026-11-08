@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, win32 } from 'node:path';
+import { normalizeLocalVoiceLanguage } from './local-voice-languages.mjs';
+
+export { normalizeLocalVoiceLanguage };
 
 const SAMPLE_RATE = 16_000;
 const MAX_SECONDS = 20;
@@ -50,8 +53,9 @@ export function createLocalVoiceTranscriber({ executable, model, timeoutMs = 90_
     async isAvailable() {
       try { await resolveInputs(); return true; } catch { return false; }
     },
-    async transcribe(audio, { signal } = {}) {
+    async transcribe(audio, { signal, language = 'auto' } = {}) {
     validateLocalVoiceWav(audio);
+    const languageCode = normalizeLocalVoiceLanguage(language);
     // Keep the validated bytes stable while asynchronous path checks run.
     const input = Buffer.from(audio);
     if (signal?.aborted) throw failure('VOICE_CANCELLED');
@@ -75,7 +79,7 @@ export function createLocalVoiceTranscriber({ executable, model, timeoutMs = 90_
           // With stdin input, whisper.cpp otherwise treats "-" as the output
           // target too and disables its stdout segment callback. No output
           // format is enabled, so this basename is never opened as a file.
-          child = spawnImpl(binary, ['--model', modelPath, '--file', '-', '--output-file', 'agentoc-unused', '--language', 'auto', '--no-timestamps', '--no-prints', '--threads', '4'],
+          child = spawnImpl(binary, ['--model', modelPath, '--file', '-', '--output-file', 'agentoc-unused', '--language', languageCode, '--no-timestamps', '--no-prints', '--threads', '4'],
             { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: localVoiceProcessEnvironment() });
           signal?.addEventListener('abort', cancel, { once: true });
           timer = setTimeout(() => stop('VOICE_TIMEOUT'), timeoutMs);

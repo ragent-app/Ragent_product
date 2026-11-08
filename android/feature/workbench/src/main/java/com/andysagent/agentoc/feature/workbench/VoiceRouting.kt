@@ -2,6 +2,17 @@ package com.andysagent.agentoc.feature.workbench
 
 import androidx.compose.runtime.Immutable
 
+/** Preview fallback; the app replaces this with the complete pinned Whisper language catalog. */
+val RAGENT_VOICE_LANGUAGES: List<String> = listOf("auto", "en", "zh", "ja", "ko", "fr", "es")
+
+fun isSupportedRagentVoiceLanguage(languageTag: String): Boolean =
+    languageTag == "auto" || languageTag.matches(Regex("[a-z]{2,3}"))
+
+fun whisperLanguageCode(languageTag: String): String = when (languageTag) {
+    "zh-CN", "zh-TW" -> "zh"
+    else -> languageTag.lowercase()
+}
+
 @Immutable
 data class VoiceComputerState(
     val targetId: String,
@@ -14,6 +25,8 @@ data class VoiceComputerState(
     val ready: Boolean = false,
     val busy: Boolean = false,
     val error: String? = null,
+    /** Language codes advertised by this computer's Whisper endpoint; older versions expose auto only. */
+    val supportedLanguages: Set<String> = setOf("auto"),
 ) {
     val canRouteVoice: Boolean get() = connected && installed && enabled
     val canProcessVoice: Boolean get() = canRouteVoice && running && ready && !busy
@@ -31,6 +44,9 @@ data class VoiceUiState(
     val phoneWhisperModelSizeMb: Int = 0,
     val phoneWhisperWorkingMemoryMb: Int = 0,
     val phoneNativeLanguageSupported: Boolean? = null,
+    /** Recognition language, independent of the app's display locale. */
+    val speechLanguage: String = "auto",
+    val speechLanguages: List<String> = RAGENT_VOICE_LANGUAGES,
     val computers: List<VoiceComputerState> = emptyList(),
     val choice: String = "auto",
     val recording: Boolean = false,

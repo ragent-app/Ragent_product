@@ -49,7 +49,7 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
                             override fun onSupportResult(recognitionSupport: RecognitionSupport) {
                                 val installed = recognitionSupport.installedOnDeviceLanguages
                                 if (continuation.isActive) continuation.resume(
-                                    installed.takeIf { it.isNotEmpty() }?.any { supported -> matchesLanguage(supported, locale.toLanguageTag()) },
+                                    installed.any { supported -> matchesLanguage(supported, locale.toLanguageTag()) },
                                 )
                                 runCatching { localRecognizer.destroy() }
                             }
@@ -70,9 +70,9 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
         }
     }
 
-    fun start(onResult: (String) -> Unit, onError: (String) -> Unit, onLevel: (Float) -> Unit = {}) {
+    fun start(languageTag: String? = null, onResult: (String) -> Unit, onError: (Int) -> Unit, onLevel: (Float) -> Unit = {}) {
         if (!isAvailable()) {
-            onError("On-device speech recognition is unavailable on this phone")
+            onError(SpeechRecognizer.ERROR_CLIENT)
             return
         }
         stop(destroy = true, cancel = true)
@@ -92,18 +92,18 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.trim().orEmpty()
-                if (text.isBlank()) onError("No speech was recognized") else onResult(text)
+                if (text.isBlank()) onError(SpeechRecognizer.ERROR_NO_MATCH) else onResult(text)
                 stop(destroy = true)
             }
 
             override fun onError(error: Int) {
-                onError(errorMessage(error))
+                onError(error)
                 stop(destroy = true)
             }
         })
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag?.takeIf { it != "auto" } ?: Locale.getDefault().toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -112,7 +112,7 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
             localRecognizer.startListening(intent)
         } catch (error: RuntimeException) {
             stop(destroy = true, cancel = true)
-            onError(error.message ?: "Could not start on-device speech recognition")
+            onError(SpeechRecognizer.ERROR_CLIENT)
         }
     }
 
@@ -121,17 +121,6 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
         if (cancel || destroy) recognizer = null
         if (cancel) runCatching { localRecognizer.cancel() } else runCatching { localRecognizer.stopListening() }
         if (destroy) runCatching { localRecognizer.destroy() }
-    }
-
-    private fun errorMessage(error: Int): String = when (error) {
-        SpeechRecognizer.ERROR_AUDIO -> "Phone microphone could not be read"
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required"
-        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "On-device recognition provider reported a network error"
-        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech was recognized"
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Phone speech recognizer is busy"
-        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "The phone's built-in recognizer does not support the system language. Install Ragent's multilingual offline model to recognize other languages."
-        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "The phone's built-in language pack is missing. Download that language pack in phone settings or install Ragent's multilingual offline model."
-        else -> "On-device speech recognition failed ($error)"
     }
 
     private fun matchesLanguage(supportedTag: String, requestedTag: String): Boolean {

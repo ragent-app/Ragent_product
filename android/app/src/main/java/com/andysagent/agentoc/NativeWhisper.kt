@@ -10,5 +10,8 @@ internal object NativeWhisper {
     }
 
     @Keep
-    external fun transcribeFile(modelPath: String, audioPath: String, threads: Int): String
+    external fun transcribeFile(modelPath: String, audioPath: String, threads: Int, language: String): String
+
+    @Keep
+    external fun supportedLanguageCodes(): Array<String>
 }

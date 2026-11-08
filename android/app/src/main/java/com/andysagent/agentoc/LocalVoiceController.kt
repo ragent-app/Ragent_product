@@ -1,6 +1,7 @@
 package com.andysagent.agentoc
 
 import android.content.Context
+import android.speech.SpeechRecognizer
 import android.util.Base64
 import com.andysagent.agentoc.core.model.RemoteTarget
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
@@ -8,8 +9,11 @@ import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.feature.workbench.VoiceComputerState
 import com.andysagent.agentoc.feature.workbench.VoiceDestination
 import com.andysagent.agentoc.feature.workbench.VoiceUiState
+import com.andysagent.agentoc.feature.workbench.RAGENT_VOICE_LANGUAGES
 import com.andysagent.agentoc.feature.workbench.isMissingComputerVoiceEndpoint
+import com.andysagent.agentoc.feature.workbench.isSupportedRagentVoiceLanguage
 import com.andysagent.agentoc.feature.workbench.resolveVoiceDestination
+import com.andysagent.agentoc.feature.workbench.whisperLanguageCode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -25,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.Locale
@@ -37,6 +42,7 @@ internal class LocalVoiceController(
 ) {
     private val localRecognizer = PhoneOnDeviceSpeechRecognizer(context)
     private val phoneWhisper = PhoneWhisperEngine(context)
+    private val speechLanguageCodes = readVoiceLanguageCodes(context)
     private val mutableState = MutableStateFlow(
         VoiceUiState(
             phoneAvailable = localRecognizer.isAvailable() || phoneWhisper.isInstalled,
@@ -45,6 +51,7 @@ internal class LocalVoiceController(
             phoneWhisperInstalled = phoneWhisper.isInstalled,
             phoneWhisperModelSizeMb = phoneWhisper.downloadSizeMb,
             phoneWhisperWorkingMemoryMb = phoneWhisper.workingMemoryMb,
+            speechLanguages = speechLanguageCodes,
         ),
     )
     val state: StateFlow<VoiceUiState> = mutableState.asStateFlow()
@@ -59,12 +66,16 @@ internal class LocalVoiceController(
             }
         }
         scope.launch {
-            val installedLanguage = runCatching { localRecognizer.hasInstalledLanguage(Locale.getDefault()) }.getOrNull()
-            mutableState.update { current ->
-                current.copy(
-                    phoneNativeLanguageSupported = installedLanguage,
-                    phoneAvailable = phoneWhisper.isInstalled || (localRecognizer.isAvailable() && installedLanguage != false),
-                )
+            app.runtime.configStore.voiceRecognitionLanguage.collect { languageTag ->
+                mutableState.update { it.copy(speechLanguage = languageTag, phoneNativeLanguageSupported = null) }
+                val locale = if (languageTag == "auto") Locale.getDefault() else Locale.forLanguageTag(languageTag)
+                val installedLanguage = runCatching { localRecognizer.hasInstalledLanguage(locale) }.getOrNull()
+                mutableState.update { current ->
+                    current.copy(
+                        phoneNativeLanguageSupported = installedLanguage,
+                        phoneAvailable = phoneWhisper.isInstalled || (localRecognizer.isAvailable() && installedLanguage != false),
+                    )
+                }
             }
         }
     }
@@ -118,6 +129,15 @@ internal class LocalVoiceController(
         scope.launch {
             runCatching { app.runtime.configStore.setPhoneLocalVoiceEnabled(enabled) }
                 .onFailure { error -> mutableState.update { it.copy(message = error.message ?: "Could not save phone voice setting") } }
+        }
+    }
+
+    fun selectSpeechLanguage(languageTag: String) {
+        if (!isSupportedRagentVoiceLanguage(languageTag) || languageTag !in speechLanguageCodes) return
+        mutableState.update { it.copy(speechLanguage = languageTag, phoneNativeLanguageSupported = null, message = null) }
+        scope.launch {
+            runCatching { app.runtime.configStore.setVoiceRecognitionLanguage(languageTag) }
+                .onFailure { error -> mutableState.update { it.copy(message = error.message ?: "Could not save speech language") } }
         }
     }
 
@@ -282,7 +302,7 @@ internal class LocalVoiceController(
             return
         }
         if (phoneWhisper.isInstalled) {
-            startPhoneWhisperRecognition(onText)
+            startPhoneWhisperRecognition(onText, mutableState.value.speechLanguage)
             return
         }
         if (mutableState.value.phoneNativeLanguageSupported == false) {
@@ -297,18 +317,19 @@ internal class LocalVoiceController(
         }
         mutableState.update { it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = null) }
         localRecognizer.start(
+            languageTag = mutableState.value.speechLanguage,
             onResult = { text ->
                 mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f) }
                 onText(text)
             },
-            onError = { error ->
-                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, message = error) }
+            onError = { errorCode ->
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, message = phoneRecognitionError(errorCode)) }
             },
             onLevel = { level -> mutableState.update { it.copy(waveformLevel = level) } },
         )
     }
 
-    private fun startPhoneWhisperRecognition(onText: (String) -> Unit) {
+    private fun startPhoneWhisperRecognition(onText: (String) -> Unit, languageTag: String) {
         val stop = AtomicBoolean(false)
         stopRequested = stop
         mutableState.update {
@@ -318,7 +339,7 @@ internal class LocalVoiceController(
             try {
                 val audio = recordVoiceWav(stop) { level -> mutableState.update { it.copy(waveformLevel = level) } }
                 mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
-                val text = usableComputerVoiceTranscript(phoneWhisper.transcribe(audio))
+                val text = usableComputerVoiceTranscript(phoneWhisper.transcribe(audio, languageTag))
                 check(text != null) { "No speech was recognized. Try again." }
                 onText(text)
                 mutableState.update { it.copy(message = null) }
@@ -335,6 +356,15 @@ internal class LocalVoiceController(
     }
 
     private fun startComputerRecognition(targetId: String, onText: (String) -> Unit) {
+        val languageTag = mutableState.value.speechLanguage
+        val languageCode = whisperLanguageCode(languageTag)
+        val computer = mutableState.value.computers.firstOrNull { it.targetId == targetId }
+        if (languageCode !in (computer?.supportedLanguages ?: setOf("auto"))) {
+            mutableState.update {
+                it.copy(message = app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_computer_update_required))
+            }
+            return
+        }
         val stop = AtomicBoolean(false)
         stopRequested = stop
         mutableState.update {
@@ -349,7 +379,7 @@ internal class LocalVoiceController(
                     ApiRequest(
                         method = "POST",
                         path = "/api/local-voice-recognition",
-                        body = "{\"audio\":\"${Base64.encodeToString(audio, Base64.NO_WRAP)}\"}",
+                        body = "{\"audio\":\"${Base64.encodeToString(audio, Base64.NO_WRAP)}\",\"language\":\"$languageCode\"}",
                     ),
                 )
                 check(response.isSuccessful) { responseError(response.body, "Computer voice recognition failed") }
@@ -426,6 +456,11 @@ internal class LocalVoiceController(
             running = value["running"]?.jsonPrimitive?.booleanOrNull == true,
             ready = value["ready"]?.jsonPrimitive?.booleanOrNull == true,
             busy = value["installing"]?.jsonPrimitive?.booleanOrNull == true,
+            supportedLanguages = value["supportedLanguages"]?.jsonArray
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                ?.toSet()
+                ?.takeIf { it.isNotEmpty() }
+                ?: setOf("auto"),
         )
     }
 
@@ -442,7 +477,25 @@ internal class LocalVoiceController(
     private fun responseError(body: String, fallback: String): String = runCatching {
         Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     }.getOrNull() ?: fallback
+
+    private fun phoneRecognitionError(errorCode: Int): String = when (errorCode) {
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_language_unsupported)
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_language_pack_missing)
+        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_no_speech)
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_microphone_permission)
+        else -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_recognition_failed, errorCode)
+    }
 }
+
+private fun readVoiceLanguageCodes(context: Context): List<String> = runCatching {
+    val codes = context.assets.open("whisper-languages.json").bufferedReader().use { reader ->
+        Json.parseToJsonElement(reader.readText()).jsonArray.mapNotNull { entry ->
+            entry.jsonObject["code"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf { isSupportedRagentVoiceLanguage(it) }
+        }
+    }
+    listOf("auto") + codes.distinct()
+}.getOrElse { listOf("auto") + RAGENT_VOICE_LANGUAGES.drop(1) }
 
 internal enum class VoiceStopAction {
     FinishComputerRecording,

@@ -61,3 +61,13 @@ when that computer is offline, lacks Whisper, or has Whisper stopped. A
 per-chat device override is available from the chat's top-right menu. See
 [android-voice-routing-plan.md](android-voice-routing-plan.md) for the complete
 behavior and acceptance criteria.
+
+Recognition language is selected independently from the app display language.
+Ragent's bundled, pinned Whisper catalog contains 100 language codes. Whisper
+can detect speech automatically or use an explicitly selected language on the
+phone and on a compatible paired Windows computer. The Android system
+recognizer is a separate provider: it can use the selected language only when
+that phone's on-device recognition provider supports and has the language
+pack installed. If it does not, install Ragent's multilingual Whisper model
+for a consistent offline path. Catalog support does not promise equal model
+accuracy for every language.

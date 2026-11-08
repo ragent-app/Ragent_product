@@ -79,4 +79,20 @@ class VoiceRoutingTest {
         val result = resolveVoiceDestination("phone", "pc-a", false, true, listOf(readyComputer))
         assertIs<VoiceDestination.Unavailable>(result)
     }
+
+    @Test
+    fun speechLanguageValidationAllowsWhisperLanguagesBeyondRagentUiLocales() {
+        assertEquals(listOf("auto", "en", "zh", "ja", "ko", "fr", "es"), RAGENT_VOICE_LANGUAGES)
+        assertTrue(RAGENT_VOICE_LANGUAGES.all(::isSupportedRagentVoiceLanguage))
+        assertTrue(isSupportedRagentVoiceLanguage("de"))
+        assertTrue(isSupportedRagentVoiceLanguage("ru"))
+        assertTrue(isSupportedRagentVoiceLanguage("haw"))
+        assertFalse(isSupportedRagentVoiceLanguage("auto-detect"))
+        assertEquals("auto", whisperLanguageCode("auto"))
+        assertEquals("zh", whisperLanguageCode("zh-CN"))
+        assertEquals("zh", whisperLanguageCode("zh-TW"))
+        assertEquals("ko", whisperLanguageCode("ko"))
+        assertEquals("es", whisperLanguageCode("es"))
+        assertEquals("haw", whisperLanguageCode("haw"))
+    }
 }

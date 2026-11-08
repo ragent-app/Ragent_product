@@ -5,6 +5,7 @@ import { createLocalVoiceInstaller } from './local-voice-installation.mjs';
 import { loadLocalVoiceSettings, saveLocalVoiceSettings } from '../lib/local-voice-settings.mjs';
 import { CONFIG_DIR } from '../lib/config.mjs';
 import { readBody } from '../lib/utils.mjs';
+import { localVoiceLanguageCodes, whisperLanguageCodes } from './local-voice-languages.mjs';
 
 const MAX_BODY = 900_000;
 const MAX_BASE64 = Math.ceil((44 + 16_000 * 2 * 20) / 3) * 4;
@@ -36,15 +37,19 @@ function readRequest(req, signal) {
   });
 }
 
-function decodeAudio(body) {
+function decodeVoiceRequest(body) {
   let value;
   try { value = JSON.parse(body); } catch { return null; }
   if (!value || typeof value !== 'object' || Array.isArray(value)
-      || Object.keys(value).length !== 1 || typeof value.audio !== 'string'
+      || Object.keys(value).some(key => !['audio', 'language'].includes(key)) || typeof value.audio !== 'string'
       || value.audio.length > MAX_BASE64 || value.audio.length % 4 !== 0
       || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.audio)) return null;
+  const language = value.language ?? 'auto';
+  if (typeof language !== 'string' || !localVoiceLanguageCodes.has(language)) {
+    throw Object.assign(new Error('Invalid voice language'), { code: 'VOICE_LANGUAGE_INVALID' });
+  }
   const audio = Buffer.from(value.audio, 'base64');
-  return audio.toString('base64') === value.audio ? audio : null;
+  return audio.toString('base64') === value.audio ? { audio, language } : null;
 }
 
 export function createLocalVoiceRoutes({ transcriber = null, installer = null, settingsStore = { load: loadLocalVoiceSettings, save: saveLocalVoiceSettings } } = {}) {
@@ -74,12 +79,15 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
           const installed = await isInstalled();
           const settings = await settingsStore.load({ defaultEnabled: installed });
           writeJson(res, 200, {
+            apiVersion: 1,
             installed,
             enabled: settings.enabled,
             running: Boolean(transcriber?.isRunning?.()),
             ready: Boolean(transcriber?.isReady?.()),
             installing: Boolean(installer?.isInstalling?.()),
             installable: Boolean(installer),
+            languageMode: 'auto-or-explicit',
+            supportedLanguages: ['auto', ...whisperLanguageCodes],
           });
           return true;
         }
@@ -210,16 +218,16 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
       res.once('close', disconnected);
       if (res.destroyed) controller.abort();
       try {
-        const audio = decodeAudio(await readRequest(req, controller.signal));
-        if (!audio) throw Object.assign(new Error('Invalid voice request'), { code: 'VOICE_AUDIO_INVALID' });
-        const text = await transcriber.transcribe(audio, { signal: controller.signal });
+        const voiceRequest = decodeVoiceRequest(await readRequest(req, controller.signal));
+        if (!voiceRequest) throw Object.assign(new Error('Invalid voice request'), { code: 'VOICE_AUDIO_INVALID' });
+        const text = await transcriber.transcribe(voiceRequest.audio, { signal: controller.signal, language: voiceRequest.language });
         if (controller.signal.aborted) return true;
         writeJson(res, 200, { text });
       } catch (error) {
         if (controller.signal.aborted) return true;
-        const code = ['BODY_TOO_LARGE', 'VOICE_AUDIO_INVALID', 'VOICE_BUSY', 'VOICE_TIMEOUT', 'VOICE_CANCELLED'].includes(error?.code)
+        const code = ['BODY_TOO_LARGE', 'VOICE_AUDIO_INVALID', 'VOICE_LANGUAGE_INVALID', 'VOICE_BUSY', 'VOICE_TIMEOUT', 'VOICE_CANCELLED'].includes(error?.code)
           ? error.code : 'VOICE_UNAVAILABLE';
-        const status = code === 'BODY_TOO_LARGE' ? 413 : code === 'VOICE_AUDIO_INVALID' ? 400 : code === 'VOICE_BUSY' ? 429 : 503;
+        const status = code === 'BODY_TOO_LARGE' ? 413 : ['VOICE_AUDIO_INVALID', 'VOICE_LANGUAGE_INVALID'].includes(code) ? 400 : code === 'VOICE_BUSY' ? 429 : 503;
         writeJson(res, status, { code, error: 'Local voice recognition failed' });
       } finally { res.removeListener('close', disconnected); }
       return true;
@@ -248,9 +256,9 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
     res.once('close', disconnected);
     if (res.destroyed) controller.abort();
     try {
-      const audio = decodeAudio(await readRequest(req, controller.signal));
-      if (!audio) throw Object.assign(new Error('Invalid voice request'), { code: 'VOICE_AUDIO_INVALID' });
-      const text = await transcriber.transcribe(audio, { signal: controller.signal });
+      const voiceRequest = decodeVoiceRequest(await readRequest(req, controller.signal));
+      if (!voiceRequest) throw Object.assign(new Error('Invalid voice request'), { code: 'VOICE_AUDIO_INVALID' });
+      const text = await transcriber.transcribe(voiceRequest.audio, { signal: controller.signal, language: voiceRequest.language });
       if (controller.signal.aborted) return true;
       if (!await requireSessionAccess(res, authSession, sessionId)) return true;
       if (!await getSession(sessionId)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
@@ -258,9 +266,9 @@ export function createLocalVoiceRoutes({ transcriber = null, installer = null, s
       writeJson(res, 200, { text });
     } catch (error) {
       if (controller.signal.aborted) return true;
-      const code = ['BODY_TOO_LARGE', 'VOICE_AUDIO_INVALID', 'VOICE_BUSY', 'VOICE_TIMEOUT', 'VOICE_CANCELLED'].includes(error?.code)
+      const code = ['BODY_TOO_LARGE', 'VOICE_AUDIO_INVALID', 'VOICE_LANGUAGE_INVALID', 'VOICE_BUSY', 'VOICE_TIMEOUT', 'VOICE_CANCELLED'].includes(error?.code)
         ? error.code : 'VOICE_UNAVAILABLE';
-      const status = code === 'BODY_TOO_LARGE' ? 413 : code === 'VOICE_AUDIO_INVALID' ? 400 : code === 'VOICE_BUSY' ? 429 : 503;
+      const status = code === 'BODY_TOO_LARGE' ? 413 : ['VOICE_AUDIO_INVALID', 'VOICE_LANGUAGE_INVALID'].includes(code) ? 400 : code === 'VOICE_BUSY' ? 429 : 503;
       writeJson(res, status, { code, error: 'Local voice recognition failed' });
     } finally { res.removeListener('close', disconnected); }
     return true;

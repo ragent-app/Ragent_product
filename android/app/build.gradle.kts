@@ -104,6 +104,7 @@ android {
     compileSdk = 37
     experimentalProperties["android.experimental.enableScreenshotTest"] = true
     ndkVersion = "27.3.13750724"
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("../shared"))
 
     defaultConfig {
         applicationId = "com.agentoncloud.android"

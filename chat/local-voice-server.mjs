@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, win32 } from 'node:path';
 
-import { localVoiceProcessEnvironment, validateLocalVoiceWav } from './local-voice-transcriber.mjs';
+import { localVoiceProcessEnvironment, normalizeLocalVoiceLanguage, validateLocalVoiceWav } from './local-voice-transcriber.mjs';
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const failure = code => Object.assign(new Error('Local voice transcription is unavailable'), { code });
@@ -211,8 +211,9 @@ export function createLocalVoiceServer({
       if (!enabled || !current?.ready || current.closed) return false;
       try { await resolveInputs(); return true; } catch { return false; }
     },
-    async transcribe(audio, { signal } = {}) {
+    async transcribe(audio, { signal, language = 'auto' } = {}) {
       validateLocalVoiceWav(audio);
+      const languageCode = normalizeLocalVoiceLanguage(language);
       if (!enabled) throw failure('VOICE_DISABLED');
       if (signal?.aborted) throw failure('VOICE_CANCELLED');
       if (activeRequest) throw failure('VOICE_BUSY');
@@ -229,7 +230,7 @@ export function createLocalVoiceServer({
         if (!slot?.ready || !enabled || controller.signal.aborted) throw failure(controller.signal.aborted ? 'VOICE_CANCELLED' : 'VOICE_UNAVAILABLE');
         const form = new FormData();
         form.append('file', new Blob([input], { type: 'audio/wav' }), 'ragent-voice.wav');
-        form.append('language', 'auto');
+        form.append('language', languageCode);
         form.append('response_format', 'json');
         form.append('temperature', '0.0');
         const response = await fetchImpl(`${slot.baseUrl}/inference`, {

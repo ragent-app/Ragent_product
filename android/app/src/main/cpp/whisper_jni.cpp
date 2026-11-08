@@ -91,22 +91,31 @@ Java_com_andysagent_agentoc_NativeWhisper_transcribeFile(
     jobject /* thiz */,
     jstring modelPathValue,
     jstring audioPathValue,
-    jint threads) {
-    if (modelPathValue == nullptr || audioPathValue == nullptr) {
-        throwJava(env, "Whisper model or audio path is missing");
+    jint threads,
+    jstring languageValue) {
+    if (modelPathValue == nullptr || audioPathValue == nullptr || languageValue == nullptr) {
+        throwJava(env, "Whisper model, audio path, or language is missing");
         return nullptr;
     }
     const char *modelPathChars = env->GetStringUTFChars(modelPathValue, nullptr);
     const char *audioPathChars = env->GetStringUTFChars(audioPathValue, nullptr);
-    if (modelPathChars == nullptr || audioPathChars == nullptr) {
+    const char *languageChars = env->GetStringUTFChars(languageValue, nullptr);
+    if (modelPathChars == nullptr || audioPathChars == nullptr || languageChars == nullptr) {
         if (modelPathChars != nullptr) env->ReleaseStringUTFChars(modelPathValue, modelPathChars);
         if (audioPathChars != nullptr) env->ReleaseStringUTFChars(audioPathValue, audioPathChars);
+        if (languageChars != nullptr) env->ReleaseStringUTFChars(languageValue, languageChars);
         return nullptr;
     }
     const std::string modelPath(modelPathChars);
     const std::string audioPath(audioPathChars);
+    const std::string language(languageChars);
     env->ReleaseStringUTFChars(modelPathValue, modelPathChars);
     env->ReleaseStringUTFChars(audioPathValue, audioPathChars);
+    env->ReleaseStringUTFChars(languageValue, languageChars);
+    if (language != "auto" && whisper_lang_id(language.c_str()) < 0) {
+        throwJava(env, "Whisper does not support the selected language code");
+        return nullptr;
+    }
 
     std::vector<float> samples;
     if (!readPcmWav(audioPath, samples)) {
@@ -126,7 +135,7 @@ Java_com_andysagent_agentoc_NativeWhisper_transcribeFile(
     params.n_threads = std::clamp(static_cast<int>(threads), 1, 6);
     const int requestedAudioContext = static_cast<int>(std::ceil(samples.size() / 320.0));
     params.audio_ctx = std::clamp(requestedAudioContext, 256, whisper_n_audio_ctx(context));
-    params.language = "auto";
+    params.language = language.c_str();
     params.translate = false;
     params.no_context = true;
     params.print_realtime = false;
@@ -149,4 +158,22 @@ Java_com_andysagent_agentoc_NativeWhisper_transcribeFile(
         return nullptr;
     }
     return env->NewStringUTF(transcript.c_str());
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_andysagent_agentoc_NativeWhisper_supportedLanguageCodes(JNIEnv *env, jobject /* thiz */) {
+    const int languageCount = whisper_lang_max_id() + 1;
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (stringClass == nullptr) return nullptr;
+    jobjectArray result = env->NewObjectArray(languageCount, stringClass, nullptr);
+    if (result == nullptr) return nullptr;
+    for (int id = 0; id < languageCount; ++id) {
+        const char *code = whisper_lang_str(id);
+        if (code == nullptr) continue;
+        jstring value = env->NewStringUTF(code);
+        if (value == nullptr) return nullptr;
+        env->SetObjectArrayElement(result, id, value);
+        env->DeleteLocalRef(value);
+    }
+    return result;
 }

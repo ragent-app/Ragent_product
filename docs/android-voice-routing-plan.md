@@ -62,6 +62,14 @@ Android 语音设置提供手机本机识别开关，并逐台显示已配对电
 | 电脑和手机都没有可用路线 | 提示如何恢复；不上传、不改草稿 |
 | 用户手动选了不可用设备 | 报告该设备不可用；不自动切换 |
 
+## 识别语言与平台能力
+
+语音识别语言是独立于 Android/Ragent 界面语言的设置。语言选择器提供 Auto 和随当前 pinned `whisper.cpp` 运行时打包的 100 个语言代码，可搜索本地名称和原生名称。手机 Whisper 的 Auto 让 Whisper 检测语种；显式选择时把 Whisper 语言代码传给 JNI。Windows Ragent 同样把该代码传给本机 Whisper，并在设置 API 中报告支持的代码。
+
+Android 系统内置识别器不等同于 Whisper，也不保证支持 Whisper 的全部语种。它使用手机当前系统语种（Auto）或用户显式选择的语种；该语种必须由手机上的 on-device recognition provider 支持并安装语言包。无法使用时应显示不支持或缺少语言包的具体提示；安装 Ragent 多语言 Whisper 模型后才有一致的离线多语言路径。Whisper 目录包含某个语种，只表示模型接受该代码，不代表所有语种的识别质量相同。
+
+Windows 语音路由接收 Android 录好的 WAV 并直接交给 Whisper；Windows 扬声器的静音状态不会影响这条识别路径。手机本地路线也使用手机麦克风，不依赖电脑的扬声器或麦克风。
+
 ## Whisper 安装与服务生命周期
 
 ### 从 Android 远程安装
@@ -93,11 +101,13 @@ Android 语音设置提供手机本机识别开关，并逐台显示已配对电
 
 Ragent 接口保持窄范围：
 
-- `GET /api/local-voice-settings`：返回 Whisper 安装、启用、运行、就绪、安装中和是否可安装状态。
+- `GET /api/local-voice-settings`：返回 Whisper 安装、启用、运行、就绪、安装中和是否可安装状态，以及 API 版本和支持的语种代码。
 - `PATCH /api/local-voice-settings`：仅接受 `{ "enabled": true|false }`，启停已安装服务。
 - `POST /api/local-voice-install`：仅接受 `{}`，发起固定的 Windows Whisper 安装并返回操作 ID。
 - `GET /api/local-voice-install/:operationId`：查询安装进度和结果。
-- `POST /api/local-voice-recognition`：接收大小受限且通过格式检查的 WAV；仅在 Whisper 已启用时识别并返回文字。
+- `POST /api/local-voice-recognition`：接收大小受限且通过格式检查的 WAV 和可选语种代码；仅在 Whisper 已启用时识别并返回文字。
+
+旧版配对电脑没有 `supportedLanguages` 时，Android 只允许 Auto 语种并提示用户更新电脑后再使用显式语种。
 
 以上接口复用现有 Ragent 配对认证和电脑授权；Whisper 服务端口不开放到局域网或公网。
 
@@ -119,8 +129,10 @@ Ragent 接口保持窄范围：
 
 ## 当前实现与验证进度
 
-主线已包含 Android 本机识别开关、逐台电脑的 Whisper 状态与启停、手机发起 Windows 远程安装、聊天级路由和三点菜单、Windows 安装器默认安装/加装选项、载荷校验与失败回滚。Node 安装/路由/服务测试 15 项通过；Android app 与 Workbench 单元测试及 debug 构建通过。电脑路线停止录音后继续上传转写的协程取消问题已修复；app 单测覆盖录音停止和转写处理。Whisper 返回 `[BLANK_AUDIO]` 或 `[ Silence ]` 时，Android 不把静音占位符加入草稿，而是提示用户重试。
+主线已包含 Android 本机识别开关、逐台电脑的 Whisper 状态与启停、手机发起 Windows 远程安装、聊天级路由和三点菜单、Windows 安装器默认安装/加装选项、载荷校验与失败回滚。电脑路线停止录音后继续上传转写的协程取消问题已修复；app 单测覆盖录音停止和转写处理。Whisper 返回 `[BLANK_AUDIO]` 或 `[ Silence ]` 时，Android 不把静音占位符加入草稿，而是提示用户重试。
 
 Windows Ragent 0.0.42 已在测试机升级；正式命名的 Windows x64 setup EXE 已构建、校验并通过静默安装验收。测试机三项服务正常，Whisper 进程数为 1，Android 显示电脑语音服务就绪。Whisper 本地接口的合成 WAV 测试返回非空文字。
 
-Honor 真机的 Android app 已用同签名覆盖更新到 0.0.9；`firstInstallTime` 未变，账号和应用数据保留。电脑连接及 Whisper 就绪状态正常，QA 会话已恢复。电脑麦克风采集和 Whisper 响应已在 Honor 走通，但扬声器合成语音没有被 Honor 清晰识别（返回过静音标记及短词），因此真实口述到草稿的端到端验收仍待完成。静音标记过滤已有 app 单测；测试过程中不得点击发送。
+多语种扩展验收（2026-11-08）：共享目录与 pinned Whisper 原生目录一致，包含 100 个语言代码；Android 搜索选择器可选择全部代码，旧版电脑只广告 Auto 时会阻止不兼容的显式语言请求。Android 本地错误提示和新选择器文案覆盖英语、简中、繁中、日语、韩语、法语、西语。Honor MTN-AN80 / Android 16 上，native/JSON 目录一致性测试和 7 种界面语言资源测试通过；手机 Whisper 自动检测的预录样本测试通过英语、简中、繁中、日语、韩语、法语和西语；显式 `ko` 韩语预录样本测试通过。识别目录覆盖不表示每种语言有相同精度：样本结果有措辞误差，尤其短西语样本，仍应避免宣传“所有语言准确率一致”。
+
+真实电脑扬声器到 Honor 麦克风的声学回环测试尚未通过。Windows 默认 Realtek 输出当时为静音、主音量 51%；仅在样本播放期间临时解除，结束后恢复原静音。Honor 回传 `(라이브)` 而非韩语样本关键词，所以这项测试结果不作为麦克风验收。它只说明这台测试电脑的输出静音会使“电脑播样本、手机收音”的测试无效；产品正常识别路径将手机录音直接交给本机或配对电脑上的 Whisper，不依赖 Windows 扬声器输出。手机真实口述到草稿仍需有效的现场口述验收。Node 本地语音测试 19 项通过；Android Workbench/app 单测和 debug APK/AndroidTest 构建通过。

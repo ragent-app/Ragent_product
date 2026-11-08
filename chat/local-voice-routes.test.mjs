@@ -68,16 +68,16 @@ test('saved disabled preference overrides the fresh-install default', async () =
   assert.equal(started, false);
 });
 
-test('paired owner can transcribe through the computer without binding to a session', async () => {
-  let received;
+test('paired owner can transcribe a Whisper language outside Ragent UI locales', async () => {
+  let received, receivedLanguage;
   const routes = createLocalVoiceRoutes({
     transcriber: {
       isInstalled: async () => true,
-      transcribe: async audio => { received = audio; return 'recognized words'; },
+      transcribe: async (audio, options) => { received = audio; receivedLanguage = options.language; return 'recognized words'; },
     },
     settingsStore: { load: async ({ defaultEnabled }) => ({ enabled: defaultEnabled }) },
   });
-  const req = requestFor('POST', JSON.stringify({ audio: wavBase64() }));
+  const req = requestFor('POST', JSON.stringify({ audio: wavBase64(), language: 'haw' }));
   const res = responseFor();
   let result;
   const handled = await routes({
@@ -89,6 +89,25 @@ test('paired owner can transcribe through the computer without binding to a sess
   assert.equal(result.status, 200);
   assert.equal(result.body.text, 'recognized words');
   assert.equal(received.length, 44 + 32_000);
+  assert.equal(receivedLanguage, 'haw');
+});
+
+test('computer voice request rejects codes outside the pinned Whisper catalog', async () => {
+  let called = false;
+  const routes = createLocalVoiceRoutes({
+    transcriber: { isInstalled: async () => true, transcribe: async () => { called = true; return 'bad'; } },
+    settingsStore: { load: async ({ defaultEnabled }) => ({ enabled: defaultEnabled }) },
+  });
+  let result;
+  await routes({
+    req: requestFor('POST', JSON.stringify({ audio: wavBase64(), language: 'zzz' })),
+    res: responseFor(), pathname: '/api/local-voice-recognition',
+    authSession: { role: 'owner', principalKind: 'trusted_device' },
+    writeJson: (_res, status, body) => { result = { status, body }; },
+  });
+  assert.equal(result.status, 400);
+  assert.equal(result.body.code, 'VOICE_LANGUAGE_INVALID');
+  assert.equal(called, false);
 });
 
 test('general computer transcription rejects untrusted requests', async () => {
