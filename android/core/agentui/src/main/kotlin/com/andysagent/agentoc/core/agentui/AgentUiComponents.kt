@@ -1825,6 +1825,8 @@ fun AgentComposer(
     // editor keeps its document, selection and input session in both forms.
     val isExpanded = expanded || fullscreenActive
     val hasComposerContent = value.isNotBlank() || hasAttachments
+    val showSendAction = hasComposerContent || working || pendingSend
+    val showRightAction = isCreatingGoal || showSendAction
     val committedRuntime = if (runtimePickerOpen && runtimeSelectionDisplay != null) runtimeSelectionDisplay
         else composerRuntimeIdentity(runtimeCatalog, runtimeTool, runtimeProvider, runtimeModel, runtimeSelectionDisplay)
     val supportsFast = committedRuntime.supportsFast
@@ -1933,7 +1935,16 @@ fun AgentComposer(
         label = "composer_collapsed_left_inset",
     )
     val startPadding = androidx.compose.ui.unit.lerp(animatedCollapsedLeftInset, AgentoSpacing.ScreenHorizontal, morph)
-    val endPadding = androidx.compose.ui.unit.lerp(58.dp, AgentoSpacing.ScreenHorizontal, morph)
+    val compactEndPadding by animateDpAsState(
+        targetValue = when {
+            onVoiceClick != null && showRightAction -> 106.dp
+            onVoiceClick != null || showRightAction -> 58.dp
+            else -> AgentoSpacing.ScreenHorizontal
+        },
+        animationSpec = composerMorphSpec(composerMotion),
+        label = "composer_compact_end_inset",
+    )
+    val endPadding = androidx.compose.ui.unit.lerp(compactEndPadding, AgentoSpacing.ScreenHorizontal, morph)
     val topPadding = 12.dp * morph
     val bottomPadding = AgentoSpacing.Compact * morph
     val editorTextStyle = androidx.compose.ui.text.lerp(compactTextStyle, AgentocTextStyles.userBody, morph)
@@ -2497,23 +2508,37 @@ fun AgentComposer(
                             }
                         } else {
                             // Pinned Send / Stop Button (Right)
-                            AgentoSendButton(
-                                onClick = if (working && !hasComposerContent) {
-                                    onStop
-                                } else {
-                                    {
-                                        onExpandedChange(false)
-                                        onSend()
-                                        if (fullscreen) onFullscreenChange(false)
-                                    }
-                                },
-                                working = working,
-                                pendingSend = pendingSend,
-                                enabled = enabled && actionEnabled,
-                                hasText = hasComposerContent,
-                                modifier = Modifier.size(48.dp).testTag("composer-send-action"),
-                                buttonSize = androidx.compose.ui.unit.lerp(30.dp, 34.dp, morph),
-                            )
+                            AnimatedVisibility(
+                                visible = showSendAction,
+                                enter = fadeIn(animationSpec = composerMorphSpec(composerMotion)) +
+                                    expandHorizontally(
+                                        animationSpec = composerMorphSpec(composerMotion),
+                                        expandFrom = Alignment.End,
+                                    ),
+                                exit = fadeOut(animationSpec = composerMorphSpec(composerMotion)) +
+                                    shrinkHorizontally(
+                                        animationSpec = composerMorphSpec(composerMotion),
+                                        shrinkTowards = Alignment.End,
+                                    ),
+                            ) {
+                                AgentoSendButton(
+                                    onClick = if (working && !hasComposerContent) {
+                                        onStop
+                                    } else {
+                                        {
+                                            onExpandedChange(false)
+                                            onSend()
+                                            if (fullscreen) onFullscreenChange(false)
+                                        }
+                                    },
+                                    working = working,
+                                    pendingSend = pendingSend,
+                                    enabled = enabled && actionEnabled,
+                                    hasText = hasComposerContent,
+                                    modifier = Modifier.size(48.dp).testTag("composer-send-action"),
+                                    buttonSize = androidx.compose.ui.unit.lerp(30.dp, 34.dp, morph),
+                                )
+                            }
                         }
                     }
                 }

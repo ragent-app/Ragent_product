@@ -25,7 +25,12 @@ class ComposerActionRailUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val events = mutableListOf<String>()
 
-    private fun show(goal: Boolean = false, expanded: Boolean = true, largeText: Boolean = true) {
+    private fun show(
+        goal: Boolean = false,
+        expanded: Boolean = true,
+        largeText: Boolean = true,
+        withVoice: Boolean = false,
+    ) {
         val context = compose.activity.createConfigurationContext(
             Configuration(compose.activity.resources.configuration).apply { setLocale(Locale.FRENCH) },
         )
@@ -44,6 +49,7 @@ class ComposerActionRailUiTest {
                             onOpenEffortPicker = { events += "effort" },
                             goalMode = goal, goalText = "Un objectif très détaillé",
                             onGoalClick = { events += "goal" },
+                            onVoiceClick = if (withVoice) ({ events += "voice" }) else null,
                         )
                     }
                 }
@@ -74,13 +80,11 @@ class ComposerActionRailUiTest {
     @Test fun frenchLargeTextRetainsCircularSendAndSeparateTargets() { show(); checkRail() }
     @Test fun goalModeDoesNotStealTheSendOrModelTarget() { show(goal = true); checkRail(goal = true) }
     @Test fun ordinaryTextRetainsTheSameActionGeometry() { show(largeText = false); checkRail() }
-    @Test fun collapsedHintKeepsTheWholeSpaceBetweenEdgeActions() {
-        show(expanded = false)
-        val add = compose.onNodeWithTag("composer-attachment-action").getUnclippedBoundsInRoot()
-        val send = compose.onNodeWithTag("composer-send-action").getUnclippedBoundsInRoot()
+    @Test fun collapsedHintStaysClearOfTrailingMicrophoneWhenSendIsHidden() {
+        show(expanded = false, withVoice = true)
+        val voice = compose.onNodeWithTag("composer-voice-action").assertIsDisplayed().getUnclippedBoundsInRoot()
         val hint = compose.onNodeWithTag("composer-collapsed-hint", useUnmergedTree = true).getUnclippedBoundsInRoot()
-        assertTrue("Collapsed hint lost half its width", hint.right - hint.left >= send.left - add.right - 10.dp)
-        compose.onNodeWithTag("composer-send-disc", useUnmergedTree = true)
-            .assertWidthIsEqualTo(30.dp).assertHeightIsEqualTo(30.dp)
+        compose.onNodeWithTag("composer-send-action").assertDoesNotExist()
+        assertTrue("Collapsed hint overlaps the microphone", hint.right <= voice.left)
     }
 }
