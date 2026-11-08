@@ -25,6 +25,7 @@
     <string name="voice_phone_model_downloading_button">下载中…</string>
     <string name="voice_phone_model_remove">移除</string>
     <string name="voice_computer_offline">电脑未连接</string>
+    <string name="voice_computer_update_required">请更新这台电脑上的 Ragent，以启用语音识别。</string>
     <string name="voice_computer_not_installed">未安装 Whisper</string>
     <string name="voice_computer_install_unavailable">Whisper 安装仅支持 Windows 版 Ragent</string>
     <string name="voice_computer_disabled">Whisper 已停止</string>

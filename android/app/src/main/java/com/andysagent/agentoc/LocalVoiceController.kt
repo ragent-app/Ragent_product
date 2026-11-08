@@ -8,6 +8,7 @@ import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.feature.workbench.VoiceComputerState
 import com.andysagent.agentoc.feature.workbench.VoiceDestination
 import com.andysagent.agentoc.feature.workbench.VoiceUiState
+import com.andysagent.agentoc.feature.workbench.isMissingComputerVoiceEndpoint
 import com.andysagent.agentoc.feature.workbench.resolveVoiceDestination
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -392,14 +393,24 @@ internal class LocalVoiceController(
 
     private suspend fun readComputerStatus(target: RemoteTarget): VoiceComputerState = runCatching {
         val response = app.runtime.executeOnTarget(target.instanceId, ApiRequest("GET", "/api/local-voice-settings"))
-        check(response.isSuccessful) { responseError(response.body, "Ragent voice service is unavailable; update Ragent if needed") }
+        check(response.isSuccessful) {
+            if (isMissingComputerVoiceEndpoint(response.statusCode, null)) {
+                app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_computer_update_required)
+            } else {
+                responseError(response.body, "Ragent voice service is unavailable")
+            }
+        }
         readStatusBody(response.body, target.instanceId, target.label)
     }.getOrElse { error ->
         VoiceComputerState(
             targetId = target.instanceId,
             label = target.label.ifBlank { target.instanceId },
             connected = app.runtime.targetConnectionStates.value[target.instanceId] == RuntimeConnectionState.Connected,
-            error = error.message ?: "Computer voice status is unavailable",
+            error = if (isMissingComputerVoiceEndpoint(null, error.message)) {
+                app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_computer_update_required)
+            } else {
+                error.message ?: "Computer voice status is unavailable"
+            },
         )
     }
 

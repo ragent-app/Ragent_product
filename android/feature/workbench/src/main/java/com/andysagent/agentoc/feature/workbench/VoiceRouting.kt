@@ -87,3 +87,7 @@ fun encodeVoiceChoice(targetId: String?): String = when {
     targetId == "phone" -> "phone"
     else -> "computer:$targetId"
 }
+
+/** Older paired Ragent builds may not expose the local voice API yet. */
+fun isMissingComputerVoiceEndpoint(statusCode: Int?, errorMessage: String?): Boolean =
+    statusCode == 404 || errorMessage?.contains("(404)", ignoreCase = true) == true

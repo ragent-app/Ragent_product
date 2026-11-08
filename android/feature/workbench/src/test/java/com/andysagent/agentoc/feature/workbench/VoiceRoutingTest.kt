@@ -2,9 +2,19 @@ package com.andysagent.agentoc.feature.workbench
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class VoiceRoutingTest {
+
+    @Test
+    fun missingComputerVoiceEndpointDetectsHttpAndTransport404() {
+        assertTrue(isMissingComputerVoiceEndpoint(404, null))
+        assertTrue(isMissingComputerVoiceEndpoint(null, "Agentoc request failed (404)"))
+        assertFalse(isMissingComputerVoiceEndpoint(500, "Agentoc request failed (500)"))
+    }
+
     private val readyComputer = VoiceComputerState(
         targetId = "pc-a",
         label = "Office PC",

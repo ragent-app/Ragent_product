@@ -25,6 +25,7 @@
     <string name="voice_phone_model_downloading_button">Downloading…</string>
     <string name="voice_phone_model_remove">Remove</string>
     <string name="voice_computer_offline">Computer disconnected</string>
+    <string name="voice_computer_update_required">Update Ragent on this computer to enable voice recognition.</string>
     <string name="voice_computer_not_installed">Whisper not installed</string>
     <string name="voice_computer_install_unavailable">Whisper installation is available on Windows Ragent</string>
     <string name="voice_computer_disabled">Whisper is stopped</string>
