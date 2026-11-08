@@ -21,6 +21,54 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PhoneWhisperEngineDeviceTest {
     @Test
+    fun createsAppScopedDirectoryForImportedVoiceQaSamples() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = checkNotNull(context.getExternalFilesDir(null)) { "App-scoped external storage is unavailable" }
+        check(directory.mkdirs() || directory.isDirectory) { "Could not create app-scoped voice QA directory" }
+        Log.i("RagentVoiceQA", "App-scoped sample directory: ${directory.absolutePath}")
+    }
+
+    @Test
+    fun transcribesImportedRagentLanguageSamplesOnHonorWithAutomaticLanguageDetection() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val engine = PhoneWhisperEngine(context)
+        val sampleDirectory = context.getExternalFilesDir(null)
+        val modelSeed = sampleDirectory?.let { File(it, "ggml-tiny-q5_1.bin") }
+        val samples = listOf(
+            ImportedSample("voice-qa-en-US.wav", "en-US", Regex("(?i)speech|recognition")),
+            ImportedSample("voice-qa-zh-CN.wav", "zh-CN", Regex("[\\u4e00-\\u9fff]")),
+            ImportedSample("voice-qa-zh-TW.wav", "zh-TW", Regex("[\\u4e00-\\u9fff]")),
+            ImportedSample("voice-qa-ja-JP.wav", "ja-JP", Regex("[\\u3040-\\u30ff]")),
+            ImportedSample("voice-qa-ko-KR.wav", "ko-KR", Regex("[\\uac00-\\ud7af]")),
+            ImportedSample("voice-qa-fr-FR.wav", "fr-FR", Regex("(?i)bonjour|reconnaissance|vocale")),
+            ImportedSample("voice-qa-es-ES.wav", "es-ES", Regex("(?i)hola|reconocimiento|voz")),
+        ).mapNotNull { sample ->
+            sampleDirectory?.let { directory -> File(directory, sample.fileName).takeIf(File::isFile)?.let { sample to it } }
+        }
+        var copiedTestModel = false
+        try {
+            assumeTrue("This phone does not have the Whisper native runtime ABI", engine.isSupported)
+            if (!engine.isInstalled && modelSeed?.isFile == true) {
+                val internalModel = File(File(context.filesDir, "voice-models"), "ggml-tiny-q5_1.bin")
+                check(internalModel.parentFile?.mkdirs() == true || internalModel.parentFile?.isDirectory == true)
+                modelSeed.copyTo(internalModel, overwrite = true)
+                copiedTestModel = true
+            }
+            assumeTrue("Provide the model seed and language WAVs in this test app's external files directory", engine.isInstalled && samples.isNotEmpty())
+            for ((sample, file) in samples) {
+                val transcript = engine.transcribe(normalizeWav(file.readBytes())).trim()
+                Log.i("RagentVoiceQA", "${sample.languageTag}: $transcript")
+                assertTrue("Whisper returned no ${sample.languageTag} transcript", transcript.isNotBlank())
+                assertTrue("Whisper did not recognize ${sample.languageTag}: $transcript", sample.expected.containsMatchIn(transcript))
+            }
+        } finally {
+            samples.forEach { (_, file) -> file.delete() }
+            modelSeed?.delete()
+            if (copiedTestModel) engine.remove()
+        }
+    }
+
+    @Test
     fun transcribesEveryRagentLanguageAvailableInThePhoneTtsWithAutomaticLanguageDetection() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val engine = PhoneWhisperEngine(context)
@@ -73,6 +121,8 @@ class PhoneWhisperEngineDeviceTest {
     }
 
     private val completions = java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<Boolean>>()
+
+    private data class ImportedSample(val fileName: String, val languageTag: String, val expected: Regex)
 
     private data class LanguageSample(val locale: Locale, val phrase: String, val expected: Regex)
 
