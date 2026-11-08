@@ -98,6 +98,28 @@ class StartupAccountSessionGateTest {
     }
 
     @Test
+    fun `valid desktop account handoff can start before local account metadata loads`() {
+        val accountHandoff = "agentoc://pair?v=4&i=inst_protocol_test_0001" +
+            "&q=rpinv_protocol_test_0001&t=rpi_test_token" +
+            "&x=2099-01-01T00%3A00%3A00Z&p=key&f=${"a".repeat(64)}&accountType=google"
+        val computerPairing = "agentoc://pair?v=3&i=inst_protocol_test_0001" +
+            "&e=https%3A%2F%2Fcomputer.example&t=rpi_test_token&x=2099-01-01T00%3A00%3A00Z"
+
+        assertTrue(isValidAccountHandoffPairingUri(accountHandoff))
+        assertFalse(isValidAccountHandoffPairingUri(computerPairing))
+        assertFalse(isValidAccountHandoffPairingUri("agentoc://pair?v=4&invalid=true"))
+        assertFalse(shouldWaitForAccountSessionMetadataBeforePairing(accountHandoff, accountSessionMetadataLoaded = false))
+        assertTrue(shouldWaitForAccountSessionMetadataBeforePairing(computerPairing, accountSessionMetadataLoaded = false))
+        assertFalse(shouldWaitForAccountSessionMetadataBeforePairing(computerPairing, accountSessionMetadataLoaded = true))
+        assertTrue(
+            shouldWaitForAccountSessionMetadataBeforePairing(
+                "agentoc://pair?v=4&invalid=true",
+                accountSessionMetadataLoaded = false,
+            ),
+        )
+    }
+
+    @Test
     fun `only account authorization failures request Google sign in`() {
         assertTrue(
             isAccountReauthorizationFailure(

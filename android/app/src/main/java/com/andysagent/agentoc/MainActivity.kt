@@ -80,6 +80,7 @@ import com.andysagent.agentoc.core.auth.AccountSessionChallenge
 import com.andysagent.agentoc.core.auth.AccountSessionException
 import com.andysagent.agentoc.core.auth.TemporaryClaimConflictException
 import com.andysagent.agentoc.core.domain.AccountsRepositoryException
+import com.andysagent.agentoc.core.protocol.parsePairingUri
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.designsystem.AgentoDialog
 import com.andysagent.agentoc.core.designsystem.AgentoDialogActionLayout
@@ -213,6 +214,14 @@ internal fun shouldReuseStoredAccountSession(
     hasStoredAccountSession: Boolean,
 ): Boolean = hasVerifiedAccountSession || (accountSessionMetadataLoaded && hasStoredAccountSession)
 
+internal fun isValidAccountHandoffPairingUri(value: String): Boolean =
+    runCatching { parsePairingUri(value).version == 4 }.getOrDefault(false)
+
+internal fun shouldWaitForAccountSessionMetadataBeforePairing(
+    pairingUri: String,
+    accountSessionMetadataLoaded: Boolean,
+): Boolean = !accountSessionMetadataLoaded && !isValidAccountHandoffPairingUri(pairingUri)
+
 internal fun isAccountReauthorizationFailure(error: Throwable): Boolean = when (error) {
     is AccountSessionException -> error.statusCode in setOf(401, 403)
     is AccountsRepositoryException -> error.statusCode in setOf(401, 403)
@@ -323,6 +332,8 @@ class MainActivity : ComponentActivity() {
     private fun consumeIncomingIntent(intent: Intent?) {
         intent ?: return
         if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme in setOf("agentoc", "riollant", "ragent") && intent.data?.host == "pair") {
+            val accountHandoff = isValidAccountHandoffPairingUri(intent.data.toString())
+            Log.i("PairingIntake", "Received pair URI; accountHandoff=$accountHandoff")
             pendingPairingUri = intent.data.toString()
         }
         try {
@@ -1075,10 +1086,27 @@ class MainActivity : ComponentActivity() {
                 // The pairing operation still verifies its credential before it
                 // can authorize this computer; metadata only selects the UI path.
                 LaunchedEffect(pendingPairingUri, accountSessionMetadataLoaded) {
-                    if (heroDemo || !accountSessionMetadataLoaded) return@LaunchedEffect
+                    if (heroDemo) {
+                        Log.i("PairingIntake", "Ignored pair URI in design preview")
+                        return@LaunchedEffect
+                    }
                     pendingPairingUri?.let { uri ->
+                        // A v4 desktop account handoff establishes the phone's
+                        // first Accounts session itself. Start it immediately;
+                        // waiting on unrelated local startup stores can consume
+                        // the QR's short validity window before the claim begins.
+                        val waitForAccountSessionMetadata = shouldWaitForAccountSessionMetadataBeforePairing(
+                            pairingUri = uri,
+                            accountSessionMetadataLoaded = accountSessionMetadataLoaded,
+                        )
+                        Log.i("PairingIntake", "Pair URI effect; metadataLoaded=$accountSessionMetadataLoaded waitingForMetadata=$waitForAccountSessionMetadata")
+                        if (waitForAccountSessionMetadata) {
+                            Log.i("PairingIntake", "Deferred legacy pair URI until local account metadata loads")
+                            return@let
+                        }
                         pairingOnboarding.onEvent(PairingOnboardingEvent.Open)
                         pairingOnboarding.onEvent(PairingOnboardingEvent.PairingUriReceived(uri))
+                        Log.i("PairingIntake", "Pair URI dispatched; step=${pairingOnboarding.state.value.step}")
                         if (shouldReuseStoredAccountSession(
                                 accounts.state.value.hasVerifiedAccountSession,
                                 accountSessionMetadataLoaded,
