@@ -4,10 +4,17 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionSupport
+import android.speech.RecognitionSupportCallback
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.core.content.ContextCompat
 import java.util.Locale
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** Uses only Android's on-device recognizer API. It never falls back to the network recognizer. */
 internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
@@ -16,6 +23,52 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
 
     fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
         SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext)
+
+    /** Returns whether the current phone provider has the requested locale installed, or null when unknown. */
+    suspend fun hasInstalledLanguage(locale: Locale): Boolean? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || !isAvailable()) return null
+        return suspendCancellableCoroutine { continuation ->
+            val request = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale.toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            }
+            val query = Runnable {
+                val localRecognizer = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext) }
+                    .getOrNull()
+                if (localRecognizer == null) {
+                    if (continuation.isActive) continuation.resume(null)
+                    return@Runnable
+                }
+                continuation.invokeOnCancellation { runCatching { localRecognizer.cancel() }; runCatching { localRecognizer.destroy() } }
+                try {
+                    localRecognizer.checkRecognitionSupport(
+                        request,
+                        ContextCompat.getMainExecutor(appContext),
+                        object : RecognitionSupportCallback {
+                            override fun onSupportResult(recognitionSupport: RecognitionSupport) {
+                                val installed = recognitionSupport.installedOnDeviceLanguages
+                                if (continuation.isActive) continuation.resume(
+                                    installed.takeIf { it.isNotEmpty() }?.any { supported -> matchesLanguage(supported, locale.toLanguageTag()) },
+                                )
+                                runCatching { localRecognizer.destroy() }
+                            }
+
+                            override fun onError(error: Int) {
+                                if (continuation.isActive) continuation.resume(null)
+                                runCatching { localRecognizer.destroy() }
+                            }
+                        },
+                    )
+                } catch (_: RuntimeException) {
+                    if (continuation.isActive) continuation.resume(null)
+                    runCatching { localRecognizer.destroy() }
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) query.run()
+            else Handler(Looper.getMainLooper()).post(query)
+        }
+    }
 
     fun start(onResult: (String) -> Unit, onError: (String) -> Unit, onLevel: (Float) -> Unit = {}) {
         if (!isAvailable()) {
@@ -76,6 +129,14 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "On-device recognition provider reported a network error"
         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech was recognized"
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Phone speech recognizer is busy"
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "The phone's built-in recognizer does not support the system language. Install Ragent's multilingual offline model to recognize other languages."
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "The phone's built-in language pack is missing. Download that language pack in phone settings or install Ragent's multilingual offline model."
         else -> "On-device speech recognition failed ($error)"
+    }
+
+    private fun matchesLanguage(supportedTag: String, requestedTag: String): Boolean {
+        val supported = Locale.forLanguageTag(supportedTag)
+        val requested = Locale.forLanguageTag(requestedTag)
+        return supported.language.equals(requested.language, ignoreCase = true)
     }
 }

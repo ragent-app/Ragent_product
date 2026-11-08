@@ -13,6 +13,17 @@
     <string name="voice_phone_unsupported">On-device speech recognition is unavailable on this phone</string>
     <string name="voice_phone_ready">On-device recognition is available</string>
     <string name="voice_phone_disabled">Off</string>
+    <string name="voice_phone_native_language_unsupported">The phone recognizer does not have an offline pack for the system language. Add the multilingual model below, especially when you speak a different language.</string>
+    <string name="voice_phone_model_required">Install the multilingual model below to use recognition on this phone.</string>
+    <string name="voice_phone_model_section">Multilingual phone model</string>
+    <string name="voice_phone_model_title">Whisper offline model</string>
+    <string name="voice_phone_model_available">Downloads about %1$d MB. Auto-detects about 99 languages and uses about %2$d MB temporary memory. Model size is selected for this phone.</string>
+    <string name="voice_phone_model_installed">Installed (%1$d MB) · automatic language detection · about 99 languages</string>
+    <string name="voice_phone_model_downloading">Downloading and verifying… %1$d%%</string>
+    <string name="voice_phone_model_unsupported">The offline model is unavailable for this processor. The phone’s system recognizer may still work.</string>
+    <string name="voice_phone_model_download">Download</string>
+    <string name="voice_phone_model_downloading_button">Downloading…</string>
+    <string name="voice_phone_model_remove">Remove</string>
     <string name="voice_computer_offline">Computer disconnected</string>
     <string name="voice_computer_not_installed">Whisper not installed</string>
     <string name="voice_computer_install_unavailable">Whisper installation is available on Windows Ragent</string>
@@ -22,7 +33,7 @@
     <string name="voice_no_computers">Pair a computer to manage its Whisper service here.</string>
     <string name="voice_install">Install</string>
     <string name="voice_installing">Installing…</string>
-    <string name="voice_privacy_note">Audio is sent only to the selected paired computer or processed by this phone’s on-device recognizer. Transcripts are added to the draft and are never sent automatically.</string>
+    <string name="voice_privacy_note">The selected device processes audio locally. Whisper can automatically detect about 99 languages; the phone’s built-in recognizer supports languages set by its provider. Transcripts are added to the draft and are never sent automatically.</string>
     <string name="settings_sharing_agents">Sharing and agents</string>
     <string name="run_dock_stop">Stop</string>
     <string name="run_dock_stop_description">Stop run</string>

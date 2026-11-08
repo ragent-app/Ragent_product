@@ -3268,6 +3268,8 @@ private fun ChatSurface(
                         title = stringResource(R.string.voice_route_phone),
                         subtitle = stringResource(
                             if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
+                            else if (!state.voice.phoneWhisperInstalled && state.voice.phoneNativeLanguageSupported == false) R.string.voice_phone_native_language_unsupported
+                            else if (!state.voice.phoneAvailable) R.string.voice_phone_model_required
                             else if (state.voice.phoneEnabled) R.string.voice_phone_ready
                             else R.string.voice_phone_disabled,
                         ),
@@ -5405,6 +5407,8 @@ private fun SettingsDetailSurface(
                                     title = stringResource(R.string.voice_route_phone),
                                     subtitle = stringResource(
                                         if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
+                                        else if (!state.voice.phoneWhisperInstalled && state.voice.phoneNativeLanguageSupported == false) R.string.voice_phone_native_language_unsupported
+                                        else if (!state.voice.phoneAvailable) R.string.voice_phone_model_required
                                         else if (state.voice.phoneEnabled) R.string.voice_phone_ready
                                         else R.string.voice_phone_disabled,
                                     ),
@@ -5415,6 +5419,55 @@ private fun SettingsDetailSurface(
                                             enabled = state.voice.phoneSupported && !state.voice.processing,
                                             modifier = Modifier.testTag("voice-phone-switch"),
                                         )
+                                    },
+                                    showDivider = false,
+                                )
+                            }
+                        }
+                        item(key = "voice-phone-multilingual-model") {
+                            SettingsGroup(
+                                title = stringResource(R.string.voice_phone_model_section),
+                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
+                            ) {
+                                val modelSubtitle = when {
+                                    state.voice.phoneWhisperDownloading -> stringResource(
+                                        R.string.voice_phone_model_downloading,
+                                        state.voice.phoneWhisperProgress,
+                                    )
+                                    state.voice.phoneWhisperInstalled -> stringResource(
+                                        R.string.voice_phone_model_installed,
+                                        state.voice.phoneWhisperModelSizeMb,
+                                    )
+                                    !state.voice.phoneWhisperSupported -> stringResource(R.string.voice_phone_model_unsupported)
+                                    else -> stringResource(
+                                        R.string.voice_phone_model_available,
+                                        state.voice.phoneWhisperModelSizeMb,
+                                        state.voice.phoneWhisperWorkingMemoryMb,
+                                    )
+                                }
+                                AgentoSettingRow(
+                                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
+                                    title = stringResource(R.string.voice_phone_model_title),
+                                    subtitle = modelSubtitle,
+                                    trailing = {
+                                        if (state.voice.phoneWhisperSupported) {
+                                            AgentoButton(
+                                                text = stringResource(
+                                                    when {
+                                                        state.voice.phoneWhisperDownloading -> R.string.voice_phone_model_downloading_button
+                                                        state.voice.phoneWhisperInstalled -> R.string.voice_phone_model_remove
+                                                        else -> R.string.voice_phone_model_download
+                                                    },
+                                                ),
+                                                onClick = {
+                                                    onEvent(if (state.voice.phoneWhisperInstalled) WorkbenchEvent.RemovePhoneVoiceModel else WorkbenchEvent.DownloadPhoneVoiceModel)
+                                                },
+                                                enabled = !state.voice.phoneWhisperDownloading && !state.voice.processing && !state.voice.recording,
+                                                secondary = true,
+                                                modifier = Modifier.testTag("voice-phone-whisper-model"),
+                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                                            )
+                                        }
                                     },
                                     showDivider = false,
                                 )

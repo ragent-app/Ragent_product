@@ -43,6 +43,22 @@ class VoiceRoutingTest {
     }
 
     @Test
+    fun automaticFallsBackToTheSessionComputerWhenPhoneLanguageIsUnavailable() {
+        assertEquals(
+            VoiceDestination.Computer("pc-a"),
+            resolveVoiceDestination("auto", "pc-a", true, false, listOf(readyComputer)),
+        )
+    }
+
+    @Test
+    fun installedPhoneWhisperCanRouteEvenWhenTheSystemRecognizerCannotHandleItsLocale() {
+        assertEquals(
+            VoiceDestination.Phone,
+            resolveVoiceDestination("phone", "pc-a", true, true, emptyList()),
+        )
+    }
+
+    @Test
     fun manualComputerFailureDoesNotSilentlySwitchToThePhone() {
         val result = resolveVoiceDestination("computer:pc-a", "pc-a", true, true, emptyList())
         assertIs<VoiceDestination.Unavailable>(result)

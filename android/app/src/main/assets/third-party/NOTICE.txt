@@ -1,0 +1,15 @@
+Ragent Android multilingual offline speech recognition
+
+The optional phone-local recognizer links the CPU build of whisper.cpp and ggml
+from the official ggml-org/whisper.cpp project at commit
+ d1be6fde11ac6e0407606b4e42fe72d34add8037 (v1.9.5).
+The runtime is distributed under the MIT license; see whisper.cpp-MIT.txt.
+
+The optional tiny-q5_1 and base-q5_1 model files are downloaded on request from
+https://huggingface.co/ggerganov/whisper.cpp at pinned revisions. The model
+repository is marked MIT licensed; the OpenAI Whisper model notice is provided
+in OpenAI-Whisper-MIT.txt.
+
+Ragent stores the model in its private app files, verifies the pinned SHA-256
+before activating it, and performs inference on the phone. Audio is not sent to
+a service by this phone-local path.

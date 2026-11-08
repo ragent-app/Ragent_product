@@ -26,6 +26,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class LocalVoiceController(
@@ -34,10 +35,15 @@ internal class LocalVoiceController(
     private val scope: CoroutineScope,
 ) {
     private val localRecognizer = PhoneOnDeviceSpeechRecognizer(context)
+    private val phoneWhisper = PhoneWhisperEngine(context)
     private val mutableState = MutableStateFlow(
         VoiceUiState(
-            phoneAvailable = localRecognizer.isAvailable(),
-            phoneSupported = localRecognizer.isAvailable(),
+            phoneAvailable = localRecognizer.isAvailable() || phoneWhisper.isInstalled,
+            phoneSupported = localRecognizer.isAvailable() || phoneWhisper.isSupported,
+            phoneWhisperSupported = phoneWhisper.isSupported,
+            phoneWhisperInstalled = phoneWhisper.isInstalled,
+            phoneWhisperModelSizeMb = phoneWhisper.downloadSizeMb,
+            phoneWhisperWorkingMemoryMb = phoneWhisper.workingMemoryMb,
         ),
     )
     val state: StateFlow<VoiceUiState> = mutableState.asStateFlow()
@@ -49,6 +55,15 @@ internal class LocalVoiceController(
         scope.launch {
             app.runtime.configStore.phoneLocalVoiceEnabled.collect { enabled ->
                 mutableState.update { it.copy(phoneEnabled = enabled) }
+            }
+        }
+        scope.launch {
+            val installedLanguage = runCatching { localRecognizer.hasInstalledLanguage(Locale.getDefault()) }.getOrNull()
+            mutableState.update { current ->
+                current.copy(
+                    phoneNativeLanguageSupported = installedLanguage,
+                    phoneAvailable = phoneWhisper.isInstalled || (localRecognizer.isAvailable() && installedLanguage != false),
+                )
             }
         }
     }
@@ -95,13 +110,59 @@ internal class LocalVoiceController(
     }
 
     fun setPhoneEnabled(enabled: Boolean) {
-        if (enabled && !localRecognizer.isAvailable()) {
+        if (enabled && !mutableState.value.phoneSupported) {
             mutableState.update { it.copy(message = "On-device speech recognition is unavailable on this phone") }
             return
         }
         scope.launch {
             runCatching { app.runtime.configStore.setPhoneLocalVoiceEnabled(enabled) }
                 .onFailure { error -> mutableState.update { it.copy(message = error.message ?: "Could not save phone voice setting") } }
+        }
+    }
+
+    fun downloadPhoneWhisperModel() {
+        if (!phoneWhisper.isSupported || mutableState.value.phoneWhisperDownloading || mutableState.value.recording || mutableState.value.processing) return
+        mutableState.update { it.copy(phoneWhisperDownloading = true, phoneWhisperProgress = 0, message = null) }
+        scope.launch {
+            runCatching {
+                phoneWhisper.download { progress ->
+                    mutableState.update { it.copy(phoneWhisperProgress = progress) }
+                }
+            }.onSuccess {
+                mutableState.update {
+                    it.copy(
+                        phoneWhisperInstalled = true,
+                        phoneWhisperDownloading = false,
+                        phoneWhisperProgress = 100,
+                        phoneWhisperModelSizeMb = phoneWhisper.downloadSizeMb,
+                        phoneWhisperWorkingMemoryMb = phoneWhisper.workingMemoryMb,
+                        phoneAvailable = true,
+                        phoneSupported = true,
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        phoneWhisperDownloading = false,
+                        phoneWhisperProgress = 0,
+                        message = error.message ?: "The multilingual voice model could not be downloaded",
+                    )
+                }
+            }
+        }
+    }
+
+    fun removePhoneWhisperModel() {
+        if (mutableState.value.recording || mutableState.value.processing) return
+        phoneWhisper.remove()
+        mutableState.update { current ->
+            val nativeAvailable = localRecognizer.isAvailable() && current.phoneNativeLanguageSupported != false
+            current.copy(
+                phoneWhisperInstalled = false,
+                phoneAvailable = nativeAvailable,
+                phoneSupported = localRecognizer.isAvailable() || phoneWhisper.isSupported,
+                phoneNativeLanguageSupported = current.phoneNativeLanguageSupported,
+            )
         }
     }
 
@@ -184,8 +245,14 @@ internal class LocalVoiceController(
                 return
             }
             VoiceStopAction.StopPhoneRecording -> {
-                localRecognizer.stop(destroy = false, cancel = false)
-                mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
+                val stop = stopRequested
+                if (stop != null && current.operationTargetId == null) {
+                    stop.set(true)
+                    mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
+                } else {
+                    localRecognizer.stop(destroy = false, cancel = false)
+                    mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
+                }
                 return
             }
             VoiceStopAction.CancelProcessing -> cancelVoiceInput()
@@ -209,8 +276,22 @@ internal class LocalVoiceController(
     fun setMessage(message: String) = mutableState.update { it.copy(message = message) }
 
     private fun startPhoneRecognition(onText: (String) -> Unit) {
-        if (!mutableState.value.phoneEnabled || !localRecognizer.isAvailable()) {
+        if (!mutableState.value.phoneEnabled || !mutableState.value.phoneAvailable) {
             mutableState.update { it.copy(message = "Enable phone-local recognition in Settings first") }
+            return
+        }
+        if (phoneWhisper.isInstalled) {
+            startPhoneWhisperRecognition(onText)
+            return
+        }
+        if (mutableState.value.phoneNativeLanguageSupported == false) {
+            mutableState.update {
+                it.copy(message = "The phone's built-in recognizer does not support the system language. Install Ragent's multilingual offline model in Voice settings.")
+            }
+            return
+        }
+        if (!localRecognizer.isAvailable()) {
+            mutableState.update { it.copy(message = "Download Ragent's multilingual offline model in Voice settings to recognize speech on this phone") }
             return
         }
         mutableState.update { it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = null) }
@@ -224,6 +305,32 @@ internal class LocalVoiceController(
             },
             onLevel = { level -> mutableState.update { it.copy(waveformLevel = level) } },
         )
+    }
+
+    private fun startPhoneWhisperRecognition(onText: (String) -> Unit) {
+        val stop = AtomicBoolean(false)
+        stopRequested = stop
+        mutableState.update {
+            it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = null)
+        }
+        activeJob = scope.launch {
+            try {
+                val audio = recordVoiceWav(stop) { level -> mutableState.update { it.copy(waveformLevel = level) } }
+                mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
+                val text = usableComputerVoiceTranscript(phoneWhisper.transcribe(audio))
+                check(text != null) { "No speech was recognized. Try again." }
+                onText(text)
+                mutableState.update { it.copy(message = null) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                mutableState.update { it.copy(message = error.message ?: "Phone-local voice recognition failed") }
+            } finally {
+                activeJob = null
+                stopRequested = null
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, operationTargetId = null) }
+            }
+        }
     }
 
     private fun startComputerRecognition(targetId: String, onText: (String) -> Unit) {

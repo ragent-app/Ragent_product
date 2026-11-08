@@ -1,6 +1,7 @@
 node_modules/
 .gradle/
 **/build/
+**/.cxx/
 android/local.properties
 android/.kotlin/
 android/design/

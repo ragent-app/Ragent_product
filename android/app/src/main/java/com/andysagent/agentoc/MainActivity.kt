@@ -1464,6 +1464,8 @@ class MainActivity : ComponentActivity() {
                             WorkbenchEvent.CancelVoiceInput -> voiceController.cancelVoiceInput()
                             is WorkbenchEvent.SelectVoiceChoice -> voiceController.selectChoice(event.choice)
                             is WorkbenchEvent.SetPhoneLocalVoiceEnabled -> voiceController.setPhoneEnabled(event.enabled)
+                            WorkbenchEvent.DownloadPhoneVoiceModel -> voiceController.downloadPhoneWhisperModel()
+                            WorkbenchEvent.RemovePhoneVoiceModel -> voiceController.removePhoneWhisperModel()
                             is WorkbenchEvent.SetComputerVoiceEnabled -> voiceController.setComputerEnabled(event.targetId, event.enabled)
                             is WorkbenchEvent.InstallComputerVoice -> voiceController.installComputer(event.targetId)
                             is WorkbenchEvent.VoiceTranscriptionReceived -> appendVoiceTranscript(event.text)

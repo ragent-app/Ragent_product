@@ -13,6 +13,17 @@
     <string name="voice_phone_unsupported">此手机不支持设备端语音识别</string>
     <string name="voice_phone_ready">设备端识别可用</string>
     <string name="voice_phone_disabled">已关闭</string>
+    <string name="voice_phone_native_language_unsupported">手机系统识别器没有当前系统语言的离线语音包。若要识别其他语言，或避免依赖厂商语音包，请安装下方多语言模型。</string>
+    <string name="voice_phone_model_required">请先安装下方的多语言模型，才能在本机识别语音。</string>
+    <string name="voice_phone_model_section">手机多语言模型</string>
+    <string name="voice_phone_model_title">Whisper 离线模型</string>
+    <string name="voice_phone_model_available">下载约 %1$d MB，可自动识别约 99 种语言，临时内存约 %2$d MB；模型会按手机性能自动选择。</string>
+    <string name="voice_phone_model_installed">已安装（%1$d MB）· 自动判断语种 · 约 99 种语言</string>
+    <string name="voice_phone_model_downloading">正在下载并校验… %1$d%%</string>
+    <string name="voice_phone_model_unsupported">此处理器无法运行本地多语言模型；手机系统识别器仍可能可用。</string>
+    <string name="voice_phone_model_download">下载</string>
+    <string name="voice_phone_model_downloading_button">下载中…</string>
+    <string name="voice_phone_model_remove">移除</string>
     <string name="voice_computer_offline">电脑未连接</string>
     <string name="voice_computer_not_installed">未安装 Whisper</string>
     <string name="voice_computer_install_unavailable">Whisper 安装仅支持 Windows 版 Ragent</string>
@@ -22,7 +33,7 @@
     <string name="voice_no_computers">配对电脑后，可在这里管理其 Whisper 服务。</string>
     <string name="voice_install">安装</string>
     <string name="voice_installing">正在安装…</string>
-    <string name="voice_privacy_note">音频只会发送到选定的已配对电脑，或由本机设备端识别器处理。识别文字只会写入草稿，不会自动发送。</string>
+    <string name="voice_privacy_note">音频只在选定设备上本地处理。Whisper 可自动识别约 99 种语言；手机系统识别器的语种由其提供方决定。识别文字只会写入草稿，不会自动发送。</string>
     <string name="settings_sharing_agents">分享与智能助手</string>
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">停止任务</string>

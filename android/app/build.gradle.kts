@@ -103,6 +103,7 @@ android {
     namespace = "com.andysagent.agentoc"
     compileSdk = 37
     experimentalProperties["android.experimental.enableScreenshotTest"] = true
+    ndkVersion = "27.3.13750724"
 
     defaultConfig {
         applicationId = "com.agentoncloud.android"
@@ -111,6 +112,23 @@ android {
         versionCode = playVersionCode ?: 99999
         versionName = playVersionName ?: "0.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DWHISPER_BUILD_IS_DEV=OFF",
+                    "-DWHISPER_BUILD_TESTS=OFF",
+                    "-DWHISPER_BUILD_EXAMPLES=OFF",
+                    "-DWHISPER_BUILD_SERVER=OFF",
+                    "-DWHISPER_ALL_WARNINGS=OFF",
+                    "-DGGML_NATIVE=OFF",
+                    "-DGGML_OPENMP=OFF",
+                    "-DGGML_LTO=OFF",
+                )
+            }
+        }
     }
 
     signingConfigs {
@@ -182,6 +200,12 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         jniLibs {
             useLegacyPackaging = true
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 }
