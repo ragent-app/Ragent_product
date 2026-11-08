@@ -23,11 +23,17 @@ class ComposerVoiceActionUiTest {
     private var draft by mutableStateOf("")
     private var hasAttachments by mutableStateOf(false)
     private var expanded by mutableStateOf(false)
+    private var voiceRecording by mutableStateOf(false)
+    private var voiceProcessing by mutableStateOf(false)
+    private val events = mutableListOf<String>()
 
     private fun showComposer() {
         draft = ""
         hasAttachments = false
         expanded = false
+        voiceRecording = false
+        voiceProcessing = false
+        events.clear()
         compose.setContent {
             AgentocTheme {
                 Box(Modifier.width(360.dp)) {
@@ -42,7 +48,11 @@ class ComposerVoiceActionUiTest {
                         hasAttachments = hasAttachments,
                         expanded = expanded,
                         onExpandedChange = { expanded = it },
-                        onVoiceClick = {},
+                        onVoiceClick = { events += "stop" },
+                        voiceRecording = voiceRecording,
+                        voiceProcessing = voiceProcessing,
+                        voiceLevel = 0.45f,
+                        onVoiceCancelClick = { events += "cancel" },
                     )
                 }
             }
@@ -130,5 +140,40 @@ class ComposerVoiceActionUiTest {
             exitingFrames.any { it < fullInset - 1.dp && it > emptyInset + 1.dp })
         assertTrue("Microphone did not return to the empty trailing slot", kotlin.math.abs(clearedInset.value - emptyInset.value) < 4.dp.value)
         compose.mainClock.autoAdvance = true
+    }
+
+    @Test fun recordingRailOnlyShowsWaveformCancelAndStop() {
+        showComposer()
+        compose.runOnIdle { voiceRecording = true }
+        compose.waitForIdle()
+
+        val rail = compose.onNodeWithTag("composer-action-rail").getUnclippedBoundsInRoot()
+        val cancel = compose.onNodeWithTag("composer-voice-cancel").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val waveform = compose.onNodeWithTag("composer-voice-waveform").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val stop = compose.onNodeWithTag("composer-voice-stop").assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue("Voice controls escaped the rail", cancel.left >= rail.left && stop.right <= rail.right)
+        assertTrue("Waveform overlaps Cancel", cancel.right <= waveform.left)
+        assertTrue("Waveform overlaps Stop", waveform.right <= stop.left)
+        compose.onNodeWithTag("composer-attachment-action").assertDoesNotExist()
+        compose.onNodeWithTag("composer-effort-action").assertDoesNotExist()
+        compose.onNodeWithTag("composer-send-action").assertDoesNotExist()
+        compose.onNodeWithTag("composer-collapsed-hint").assertDoesNotExist()
+
+        compose.onNodeWithTag("composer-voice-cancel").performTouchInput { click() }
+        compose.onNodeWithTag("composer-voice-stop").performTouchInput { click() }
+        compose.runOnIdle { assertTrue(events == listOf("cancel", "stop")) }
+    }
+
+    @Test fun transcriptionKeepsOnlyCancelAndAnActivityIndicator() {
+        showComposer()
+        compose.runOnIdle { voiceProcessing = true }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("composer-voice-cancel").assertIsDisplayed()
+        compose.onNodeWithTag("composer-voice-processing").assertIsDisplayed()
+        compose.onNodeWithTag("composer-voice-stop").assertDoesNotExist()
+        compose.onNodeWithTag("composer-voice-waveform").assertDoesNotExist()
+        compose.onNodeWithTag("composer-voice-action").assertDoesNotExist()
+        compose.onNodeWithTag("composer-send-action").assertDoesNotExist()
     }
 }

@@ -184,8 +184,8 @@ internal class LocalVoiceController(
                 return
             }
             VoiceStopAction.StopPhoneRecording -> {
-                localRecognizer.stop(destroy = true, cancel = true)
-                mutableState.update { it.copy(recording = false, processing = false, operationTargetId = null) }
+                localRecognizer.stop(destroy = false, cancel = false)
+                mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
                 return
             }
             VoiceStopAction.CancelProcessing -> cancelVoiceInput()
@@ -193,15 +193,15 @@ internal class LocalVoiceController(
         }
     }
 
-    private fun cancelVoiceInput() {
-        if (mutableState.value.recording && mutableState.value.operationTargetId == null) {
+    fun cancelVoiceInput() {
+        if ((mutableState.value.recording || mutableState.value.processing) && mutableState.value.operationTargetId == null) {
             localRecognizer.stop(destroy = true, cancel = true)
         }
         stopRequested?.set(true)
         activeJob?.cancel()
         activeJob = null
         stopRequested = null
-        mutableState.update { it.copy(recording = false, processing = false, operationTargetId = null) }
+        mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, operationTargetId = null) }
     }
 
     fun clearMessage() = mutableState.update { it.copy(message = null) }
@@ -213,15 +213,16 @@ internal class LocalVoiceController(
             mutableState.update { it.copy(message = "Enable phone-local recognition in Settings first") }
             return
         }
-        mutableState.update { it.copy(recording = true, processing = false, message = null, operationTargetId = null) }
+        mutableState.update { it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = null) }
         localRecognizer.start(
             onResult = { text ->
-                mutableState.update { it.copy(recording = false, processing = false) }
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f) }
                 onText(text)
             },
             onError = { error ->
-                mutableState.update { it.copy(recording = false, processing = false, message = error) }
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, message = error) }
             },
+            onLevel = { level -> mutableState.update { it.copy(waveformLevel = level) } },
         )
     }
 
@@ -229,12 +230,12 @@ internal class LocalVoiceController(
         val stop = AtomicBoolean(false)
         stopRequested = stop
         mutableState.update {
-            it.copy(recording = true, processing = false, message = null, operationTargetId = targetId)
+            it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = targetId)
         }
         activeJob = scope.launch {
             try {
-                val audio = recordVoiceWav(stop)
-                mutableState.update { it.copy(recording = false, processing = true) }
+                val audio = recordVoiceWav(stop) { level -> mutableState.update { it.copy(waveformLevel = level) } }
+                mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
                 val response = app.runtime.executeOnTarget(
                     targetId,
                     ApiRequest(
@@ -257,7 +258,7 @@ internal class LocalVoiceController(
             } finally {
                 activeJob = null
                 stopRequested = null
-                mutableState.update { it.copy(recording = false, processing = false, operationTargetId = null) }
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, operationTargetId = null) }
             }
         }
     }

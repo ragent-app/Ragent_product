@@ -1795,11 +1795,19 @@ fun AgentComposer(
     backdropOrigin: IntOffset = IntOffset.Zero,
     onVoiceClick: (() -> Unit)? = null,
     voiceActive: Boolean = false,
+    voiceRecording: Boolean = false,
+    voiceProcessing: Boolean = false,
+    voiceLevel: Float = 0f,
+    onVoiceCancelClick: (() -> Unit)? = null,
     voiceEnabled: Boolean = true,
 ) {
     val colors = LocalAgentocColors.current
     val isCreatingGoal = goalMode && goalText.isBlank()
-    val placeholderText = if (isCreatingGoal) "设定你的目标..." else composerPlaceholder(enabled)
+    val composerVoiceProcessing = voiceProcessing
+    val composerVoiceRecording = voiceRecording || (voiceActive && !composerVoiceProcessing)
+    val composerVoiceActive = onVoiceClick != null && (composerVoiceRecording || composerVoiceProcessing)
+    val placeholderText = if (composerVoiceActive && value.isEmpty()) ""
+        else if (isCreatingGoal) "设定你的目标..." else composerPlaceholder(enabled)
     val composerContentDescription = stringResource(R.string.agentui_message_composer)
     val approvalPendingDescription = stringResource(R.string.agentui_resolve_approval)
     val fullscreenEditDescription = stringResource(R.string.agentui_fullscreen_edit)
@@ -1825,8 +1833,8 @@ fun AgentComposer(
     // editor keeps its document, selection and input session in both forms.
     val isExpanded = expanded || fullscreenActive
     val hasComposerContent = value.isNotBlank() || hasAttachments
-    val showSendAction = hasComposerContent || working || pendingSend
-    val showRightAction = isCreatingGoal || showSendAction
+    val showSendAction = !composerVoiceActive && (hasComposerContent || working || pendingSend)
+    val showRightAction = !composerVoiceActive && (isCreatingGoal || showSendAction)
     val committedRuntime = if (runtimePickerOpen && runtimeSelectionDisplay != null) runtimeSelectionDisplay
         else composerRuntimeIdentity(runtimeCatalog, runtimeTool, runtimeProvider, runtimeModel, runtimeSelectionDisplay)
     val supportsFast = committedRuntime.supportsFast
@@ -2171,7 +2179,17 @@ fun AgentComposer(
                     modifier = Modifier.fillMaxSize().testTag("composer-action-rail"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (!fullscreenActive) {
+                    if (composerVoiceActive && !fullscreenActive) {
+                        VoiceCaptureActionRail(
+                            recording = composerVoiceRecording,
+                            processing = composerVoiceProcessing,
+                            level = voiceLevel,
+                            enabled = enabled && voiceEnabled,
+                            onCancel = onVoiceCancelClick ?: onVoiceClick ?: {},
+                            onStop = onVoiceClick ?: {},
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else if (!fullscreenActive) {
                     // Pinned '+' Button (Left) - Borderless WebUI Mobile Style
                     val attachmentPressSource = remember { MutableInteractionSource() }
                     Box(
@@ -2335,7 +2353,7 @@ fun AgentComposer(
                     } else {
                         Spacer(Modifier.weight(1f))
                     }
-                    if (onVoiceClick != null && !fullscreenActive) {
+                    if (!composerVoiceActive && onVoiceClick != null && !fullscreenActive) {
                         val voiceDescription = stringResource(
                             if (voiceActive) R.string.agentui_stop_voice_input else R.string.agentui_start_voice_input,
                         )
@@ -2368,7 +2386,7 @@ fun AgentComposer(
 
                     // Morphing Right Action: Normal Send/Stop Button <-> ("取消" + "设定目标") Action Buttons
                     AnimatedContent(
-                        targetState = isCreatingGoal,
+                        targetState = isCreatingGoal && !composerVoiceActive,
                         transitionSpec = {
                             (fadeIn(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)) +
                                 scaleIn(initialScale = 0.88f, animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)))
@@ -2545,6 +2563,140 @@ fun AgentComposer(
                 }
                     },
                 )
+        }
+    }
+}
+
+@Composable
+private fun VoiceCaptureActionRail(
+    recording: Boolean,
+    processing: Boolean,
+    level: Float,
+    enabled: Boolean,
+    onCancel: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalAgentocColors.current
+    val cancelDescription = stringResource(R.string.agentui_cancel_voice_input)
+    val stopDescription = stringResource(R.string.agentui_stop_voice_input)
+    val waveformDescription = stringResource(
+        if (processing) R.string.agentui_voice_processing else R.string.agentui_voice_waveform,
+    )
+
+    Row(
+        modifier = modifier.fillMaxWidth().height(48.dp).testTag("composer-voice-recording-rail"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(48.dp).testTag("composer-voice-cancel")
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = enabled,
+                    onClick = onCancel,
+                )
+                .semantics {
+                    role = Role.Button
+                    contentDescription = cancelDescription
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            AgentoWebIcon(
+                glyph = AgentoWebGlyph.Close,
+                contentDescription = null,
+                modifier = Modifier.size(17.dp),
+                tint = colors.secondaryContent,
+            )
+        }
+
+        Box(
+            modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (processing) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp).testTag("composer-voice-processing")
+                        .semantics { contentDescription = waveformDescription },
+                    color = colors.accentPrimary,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                VoiceWaveform(
+                    level = level,
+                    modifier = Modifier.fillMaxWidth().height(32.dp)
+                        .testTag("composer-voice-waveform")
+                        .semantics { contentDescription = waveformDescription },
+                )
+            }
+        }
+
+        if (recording) {
+            Box(
+                modifier = Modifier.size(48.dp).testTag("composer-voice-stop")
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        enabled = enabled,
+                        onClick = onStop,
+                    )
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = stopDescription
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier.size(34.dp).clip(CircleShape).background(colors.actionPrimary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AgentoWebIcon(
+                        glyph = AgentoWebGlyph.Stop,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = colors.actionPrimaryContent,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceWaveform(level: Float, modifier: Modifier = Modifier) {
+    val colors = LocalAgentocColors.current
+    val smoothedLevel by animateFloatAsState(
+        targetValue = level.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 90, easing = FastOutSlowInEasing),
+        label = "voice_waveform_level",
+    )
+    val profile = listOf(
+        .20f, .34f, .50f, .73f, .42f, .26f, .61f, .88f, .55f, .32f,
+        .70f, .44f, .24f, .58f, .82f, .49f, .30f, .66f, .91f, .52f,
+        .35f, .72f, .46f, .27f, .57f,
+    )
+    val activeScale = 0.10f + smoothedLevel * 0.90f
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        profile.forEachIndexed { index, peak ->
+            val targetHeight = 2.5.dp + (24.dp * peak * activeScale)
+            val height by animateDpAsState(
+                targetValue = targetHeight,
+                animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
+                label = "voice_waveform_bar_$index",
+            )
+            Box(
+                modifier = Modifier.padding(horizontal = 1.5.dp)
+                    .width(2.5.dp).height(height)
+                    .clip(CircleShape)
+                    .background(colors.accentPrimary),
+            )
         }
     }
 }

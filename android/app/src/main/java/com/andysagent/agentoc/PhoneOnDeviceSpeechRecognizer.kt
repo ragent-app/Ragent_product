@@ -17,7 +17,7 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
     fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
         SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext)
 
-    fun start(onResult: (String) -> Unit, onError: (String) -> Unit) {
+    fun start(onResult: (String) -> Unit, onError: (String) -> Unit, onLevel: (Float) -> Unit = {}) {
         if (!isAvailable()) {
             onError("On-device speech recognition is unavailable on this phone")
             return
@@ -28,7 +28,9 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
         localRecognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) = Unit
             override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onRmsChanged(rmsdB: Float) {
+                onLevel(((rmsdB + 2f) / 14f).coerceIn(0f, 1f))
+            }
             override fun onBufferReceived(buffer: ByteArray?) = Unit
             override fun onEndOfSpeech() = Unit
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -63,7 +65,7 @@ internal class PhoneOnDeviceSpeechRecognizer(context: Context) {
 
     fun stop(destroy: Boolean = false, cancel: Boolean = false) {
         val localRecognizer = recognizer ?: return
-        recognizer = null
+        if (cancel || destroy) recognizer = null
         if (cancel) runCatching { localRecognizer.cancel() } else runCatching { localRecognizer.stopListening() }
         if (destroy) runCatching { localRecognizer.destroy() }
     }

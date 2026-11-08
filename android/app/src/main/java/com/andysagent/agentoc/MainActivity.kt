@@ -1461,6 +1461,7 @@ class MainActivity : ComponentActivity() {
                                     voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             }
+                            WorkbenchEvent.CancelVoiceInput -> voiceController.cancelVoiceInput()
                             is WorkbenchEvent.SelectVoiceChoice -> voiceController.selectChoice(event.choice)
                             is WorkbenchEvent.SetPhoneLocalVoiceEnabled -> voiceController.setPhoneEnabled(event.enabled)
                             is WorkbenchEvent.SetComputerVoiceEnabled -> voiceController.setComputerEnabled(event.targetId, event.enabled)

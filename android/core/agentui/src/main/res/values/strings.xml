@@ -2,6 +2,9 @@
 <resources>
     <string name="agentui_start_voice_input">Start voice input</string>
     <string name="agentui_stop_voice_input">Stop voice input</string>
+    <string name="agentui_cancel_voice_input">Cancel voice input</string>
+    <string name="agentui_voice_waveform">Voice waveform</string>
+    <string name="agentui_voice_processing">Transcribing speech</string>
     <string name="agentui_edit_message">Edit message</string>
     <string name="agentui_done">Done</string>
     <string name="agentui_return_to_composer">Return to composer</string>

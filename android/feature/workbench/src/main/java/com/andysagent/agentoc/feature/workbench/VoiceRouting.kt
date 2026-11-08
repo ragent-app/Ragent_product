@@ -28,6 +28,7 @@ data class VoiceUiState(
     val choice: String = "auto",
     val recording: Boolean = false,
     val processing: Boolean = false,
+    val waveformLevel: Float = 0f,
     val operationTargetId: String? = null,
     val message: String? = null,
 ) {

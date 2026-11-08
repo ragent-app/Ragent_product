@@ -2246,6 +2246,8 @@ private fun ChatSurface(
             !showActiveRunAction && state.stopRequest == StopRequestState.None &&
             !historyTransitioning &&
             state.error == null &&
+            !state.voice.recording &&
+            !state.voice.processing &&
             state.composerText.isBlank() &&
             attachments.isEmpty()
 
@@ -2600,6 +2602,10 @@ private fun ChatSurface(
                 backdropOrigin = chatBackdropOrigin,
                 onVoiceClick = { onEvent(WorkbenchEvent.ToggleVoiceInput) },
                 voiceActive = state.voice.recording || state.voice.processing,
+                voiceRecording = state.voice.recording,
+                voiceProcessing = state.voice.processing,
+                voiceLevel = state.voice.waveformLevel,
+                onVoiceCancelClick = { onEvent(WorkbenchEvent.CancelVoiceInput) },
                 modifier = Modifier
                     .then(if (composerFullscreenActive) Modifier else Modifier.widthIn(max = AgentocSizes.ContentMaxWidth))
                     .onGloballyPositioned { composerBounds = it.boundsInRoot() },

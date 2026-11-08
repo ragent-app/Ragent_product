@@ -2,6 +2,9 @@
 <resources>
     <string name="agentui_start_voice_input">开始语音输入</string>
     <string name="agentui_stop_voice_input">停止语音输入</string>
+    <string name="agentui_cancel_voice_input">取消录音</string>
+    <string name="agentui_voice_waveform">语音波形</string>
+    <string name="agentui_voice_processing">正在转写语音</string>
     <string name="agentui_edit_message">编辑消息</string>
     <string name="agentui_done">完成</string>
     <string name="agentui_return_to_composer">返回输入框</string>

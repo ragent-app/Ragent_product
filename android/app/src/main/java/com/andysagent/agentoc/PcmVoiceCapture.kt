@@ -8,7 +8,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal suspend fun recordVoiceWav(stopRequested: AtomicBoolean, maxSeconds: Int = 20): ByteArray =
+internal suspend fun recordVoiceWav(
+    stopRequested: AtomicBoolean,
+    maxSeconds: Int = 20,
+    onLevel: (Float) -> Unit = {},
+): ByteArray =
     withContext(Dispatchers.IO) {
         require(maxSeconds in 1..20)
         val sampleRate = 16_000
@@ -39,7 +43,10 @@ internal suspend fun recordVoiceWav(stopRequested: AtomicBoolean, maxSeconds: In
             while (!stopRequested.get() && System.nanoTime() < deadline) {
                 val read = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                 if (read < 0) error("Phone microphone read failed ($read)")
-                if (read > 0) pcm.write(buffer, 0, read)
+                if (read > 0) {
+                    pcm.write(buffer, 0, read)
+                    onLevel(pcmLevel(buffer, read))
+                }
             }
         } finally {
             runCatching { recorder.stop() }
@@ -49,6 +56,20 @@ internal suspend fun recordVoiceWav(stopRequested: AtomicBoolean, maxSeconds: In
         check(data.size >= sampleRate / 2) { "Recording was too short" }
         encodePcm16Wav(data, sampleRate)
     }
+
+private fun pcmLevel(buffer: ByteArray, length: Int): Float {
+    val samples = length / 2
+    if (samples == 0) return 0f
+    var squared = 0.0
+    var offset = 0
+    repeat(samples) {
+        val sample = ((buffer[offset + 1].toInt() shl 8) or (buffer[offset].toInt() and 0xff)).toShort().toInt()
+        squared += sample.toDouble() * sample
+        offset += 2
+    }
+    val rms = kotlin.math.sqrt(squared / samples) / Short.MAX_VALUE
+    return ((rms * 4.5).coerceIn(0.0, 1.0)).toFloat()
+}
 
 internal fun encodePcm16Wav(pcm: ByteArray, sampleRate: Int): ByteArray {
     require(sampleRate > 0 && pcm.size % 2 == 0)
