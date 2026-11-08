@@ -1,10 +1,28 @@
 package com.andysagent.agentoc
 
+import android.speech.SpeechRecognizer
+import com.andysagent.agentoc.feature.workbench.R
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class LocalVoiceControllerTest {
+    @Test
+    fun unsupportedSystemRecognizerCheckSuggestsTheOfflineMultilingualModel() {
+        assertEquals(
+            R.string.voice_error_support_check_failed,
+            phoneRecognitionErrorStringResource(SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT),
+        )
+    }
+
+    @Test
+    fun missingMicrophonePermissionGetsAnActionableMessage() {
+        assertEquals(
+            R.string.voice_error_microphone_permission,
+            phoneRecognitionErrorStringResource(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS),
+        )
+    }
+
     @Test
     fun stoppingComputerCaptureFinalizesRecordingInsteadOfCancellingRecognition() {
         assertEquals(

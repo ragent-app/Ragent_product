@@ -30,6 +30,7 @@
     <string name="voice_error_language_pack_missing">Le pack vocal hors ligne de cette langue n’est pas installé. Ajoutez-le dans les paramètres Android ou utilisez le modèle multilingue Ragent.</string>
     <string name="voice_error_no_speech">Aucune parole reconnue. Réessayez.</string>
     <string name="voice_error_microphone_permission">Autorisez l’accès au microphone pour utiliser la reconnaissance vocale.</string>
+    <string name="voice_error_support_check_failed">Le service vocal Android n’a pas pu confirmer la prise en charge de cette langue. Installez le modèle multilingue hors ligne de Ragent ou choisissez un ordinateur connecté.</string>
     <string name="voice_error_recognition_failed">Échec de la reconnaissance vocale du téléphone (%1$d).</string>
     <string name="voice_phone_model_required">Installez le modèle multilingue ci-dessous pour reconnaître la voix sur ce téléphone.</string>
     <string name="voice_phone_model_section">Modèle multilingue du téléphone</string>

@@ -30,6 +30,7 @@
     <string name="voice_error_language_pack_missing">No está instalado el paquete de voz sin conexión para este idioma. Instálalo en los ajustes de Android o usa el modelo multilingüe de Ragent.</string>
     <string name="voice_error_no_speech">No se reconoció ninguna voz. Inténtalo de nuevo.</string>
     <string name="voice_error_microphone_permission">Permite el acceso al micrófono para usar el reconocimiento de voz.</string>
+    <string name="voice_error_support_check_failed">El servicio de voz de Android no pudo confirmar la compatibilidad con este idioma. Instala el modelo multilingüe sin conexión de Ragent o elige un ordenador conectado.</string>
     <string name="voice_error_recognition_failed">Falló el reconocimiento de voz del teléfono (%1$d).</string>
     <string name="voice_phone_model_required">Instala el modelo multilingüe de abajo para reconocer voz en este teléfono.</string>
     <string name="voice_phone_model_section">Modelo multilingüe del teléfono</string>

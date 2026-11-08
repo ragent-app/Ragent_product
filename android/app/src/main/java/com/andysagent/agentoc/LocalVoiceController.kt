@@ -478,13 +478,23 @@ internal class LocalVoiceController(
         Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     }.getOrNull() ?: fallback
 
-    private fun phoneRecognitionError(errorCode: Int): String = when (errorCode) {
-        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_language_unsupported)
-        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_language_pack_missing)
-        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_no_speech)
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_microphone_permission)
-        else -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_error_recognition_failed, errorCode)
+    private fun phoneRecognitionError(errorCode: Int): String {
+        val resource = phoneRecognitionErrorStringResource(errorCode)
+        return if (resource == com.andysagent.agentoc.feature.workbench.R.string.voice_error_recognition_failed) {
+            app.getString(resource, errorCode)
+        } else {
+            app.getString(resource)
+        }
     }
+}
+
+internal fun phoneRecognitionErrorStringResource(errorCode: Int): Int = when (errorCode) {
+    SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> com.andysagent.agentoc.feature.workbench.R.string.voice_error_language_unsupported
+    SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> com.andysagent.agentoc.feature.workbench.R.string.voice_error_language_pack_missing
+    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> com.andysagent.agentoc.feature.workbench.R.string.voice_error_no_speech
+    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> com.andysagent.agentoc.feature.workbench.R.string.voice_error_microphone_permission
+    SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT -> com.andysagent.agentoc.feature.workbench.R.string.voice_error_support_check_failed
+    else -> com.andysagent.agentoc.feature.workbench.R.string.voice_error_recognition_failed
 }
 
 private fun readVoiceLanguageCodes(context: Context): List<String> = runCatching {

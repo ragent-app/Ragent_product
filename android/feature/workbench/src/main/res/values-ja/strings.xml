@@ -30,6 +30,7 @@
     <string name="voice_error_language_pack_missing">この言語のオフライン音声パックがありません。Android の設定で追加するか、Ragent の多言語モデルを使用してください。</string>
     <string name="voice_error_no_speech">音声を認識できませんでした。もう一度お試しください。</string>
     <string name="voice_error_microphone_permission">音声認識にはマイクの使用を許可してください。</string>
+    <string name="voice_error_support_check_failed">Android の音声サービスでこの言語の対応を確認できません。Ragent のオフライン多言語モデルをインストールするか、接続済みのコンピューターを選択してください。</string>
     <string name="voice_error_recognition_failed">端末の音声認識に失敗しました（%1$d）。</string>
     <string name="voice_phone_model_required">この端末で認識するには、下の多言語モデルをインストールしてください。</string>
     <string name="voice_phone_model_section">端末用多言語モデル</string>

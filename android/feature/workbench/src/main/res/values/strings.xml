@@ -30,6 +30,7 @@
     <string name="voice_error_language_pack_missing">This language pack is not installed on the phone. Install it in Android settings or use Ragent\'s multilingual model.</string>
     <string name="voice_error_no_speech">No speech was recognized. Try again.</string>
     <string name="voice_error_microphone_permission">Allow microphone access to use speech recognition.</string>
+    <string name="voice_error_support_check_failed">Android’s speech service couldn’t confirm support for this language. Install Ragent’s offline multilingual model or choose a connected computer.</string>
     <string name="voice_error_recognition_failed">Phone speech recognition failed (%1$d).</string>
     <string name="voice_phone_model_required">Install the multilingual model below to use recognition on this phone.</string>
     <string name="voice_phone_model_section">Multilingual phone model</string>

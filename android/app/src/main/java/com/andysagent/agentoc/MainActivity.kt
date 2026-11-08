@@ -899,7 +899,7 @@ class MainActivity : ComponentActivity() {
                     if (granted) {
                         voiceController.startVoiceInput(tabletChatBinding.targetId.value, appendVoiceTranscript)
                     } else {
-                        voiceController.setMessage("Allow microphone access to dictate a draft")
+                        voiceController.setMessage(getString(WorkbenchR.string.voice_error_microphone_permission))
                     }
                 }
                 LaunchedEffect(chatState.sessionId) { voiceController.loadSession(chatState.sessionId) }

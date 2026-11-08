@@ -30,6 +30,7 @@
     <string name="voice_error_language_pack_missing">이 언어의 오프라인 음성 팩이 없습니다. Android 설정에서 설치하거나 Ragent 다국어 모델을 사용하세요.</string>
     <string name="voice_error_no_speech">음성을 인식하지 못했습니다. 다시 시도하세요.</string>
     <string name="voice_error_microphone_permission">음성 인식을 사용하려면 마이크 사용을 허용하세요.</string>
+    <string name="voice_error_support_check_failed">Android 음성 서비스가 이 언어의 지원 여부를 확인하지 못했습니다. Ragent 오프라인 다국어 모델을 설치하거나 연결된 컴퓨터를 선택하세요.</string>
     <string name="voice_error_recognition_failed">휴대폰 음성 인식에 실패했습니다(%1$d).</string>
     <string name="voice_phone_model_required">휴대폰에서 인식하려면 아래 다국어 모델을 설치하세요.</string>
     <string name="voice_phone_model_section">휴대폰 다국어 모델</string>

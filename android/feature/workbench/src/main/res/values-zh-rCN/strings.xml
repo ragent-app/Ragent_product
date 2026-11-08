@@ -30,6 +30,7 @@
     <string name="voice_error_language_pack_missing">手机尚未安装此语言的离线语音包。请在 Android 设置中安装，或使用 Ragent 多语言模型。</string>
     <string name="voice_error_no_speech">没有识别到语音，请重试。</string>
     <string name="voice_error_microphone_permission">请允许使用麦克风，才能进行语音识别。</string>
+    <string name="voice_error_support_check_failed">手机系统识别器无法确认是否支持此语言。请安装 Ragent 离线多语言模型，或选择已连接的电脑。</string>
     <string name="voice_error_recognition_failed">手机语音识别失败（%1$d）。</string>
     <string name="voice_phone_model_required">请先安装下方的多语言模型，才能在本机识别语音。</string>
     <string name="voice_phone_model_section">手机多语言模型</string>
