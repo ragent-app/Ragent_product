@@ -2,6 +2,10 @@ package com.andysagent.agentoc
 
 import android.os.Bundle
 import android.util.Log
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
+import com.andysagent.agentoc.core.model.RemoteTarget
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -10,7 +14,9 @@ import java.io.File
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -20,7 +26,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertTrue
@@ -56,13 +64,51 @@ class PhoneWhisperEngineDeviceTest {
     }
 
     @Test
+    fun reportsHonorPairedComputerVoiceReadinessWithoutExposingTargetIdentity(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val app = context.applicationContext as AgentoCApplication
+        val linkedComputers = withTimeout(15_000) { app.runtime.configStore.directory.first().computers }
+        val targets = linkedComputers.map { computer ->
+            RemoteTarget(
+                instanceId = computer.instanceId,
+                label = computer.label.ifBlank { "Computer" },
+                endpoint = computer.endpoint,
+                platform = computer.platform,
+            )
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val controller = LocalVoiceController(app, context, scope)
+        try {
+            controller.refreshComputers(targets)
+            val computers = withTimeout(30_000) {
+                controller.state.first { it.computers.size == targets.size }.computers
+            }
+            val report = listOf(
+                "paired=${targets.size}",
+                "connected=${computers.count { it.connected }}",
+                "installed=${computers.count { it.installed }}",
+                "enabled=${computers.count { it.enabled }}",
+                "ready=${computers.count { it.ready }}",
+                "koreanSupported=${computers.count { "ko" in it.supportedLanguages }}",
+                "errors=${computers.count { it.error != null }}",
+            ).joinToString("\n", postfix = "\n")
+            File(checkNotNull(context.getExternalFilesDir(null)), "voice-computer-status-qa.txt").writeText(report)
+            Log.i("RagentVoiceQA", "HONOR_PAIRED_COMPUTER_VOICE_STATUS: ${report.replace('\n', ';')}")
+            Unit
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun liveHonorMicrophoneRecordingReachesPhoneWhisperDraftCallback() = runBlocking {
         val expectedRegex = InstrumentationRegistry.getArguments()
             .getString("voiceMicExpectedRegex")
             ?.takeIf(String::isNotBlank)
+        val playbackMode = InstrumentationRegistry.getArguments().getString("voiceMicPlayback") ?: "external"
         assumeTrue(
-            "Pass -e voiceMicExpectedRegex '<expected transcript regex>' while speaking or playing that phrase",
-            expectedRegex != null,
+            "Pass -e voiceMicExpectedRegex <pattern> and optionally -e voiceMicPlayback phone-speaker",
+            expectedRegex != null && playbackMode in setOf("external", "phone-speaker"),
         )
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val app = context.applicationContext as AgentoCApplication
@@ -76,6 +122,12 @@ class PhoneWhisperEngineDeviceTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val controller = LocalVoiceController(app, context, scope)
         val transcript = CompletableFuture<String>()
+        val peakInputLevel = AtomicReference(0f)
+        val levelCollector = scope.launch {
+            controller.state.collect { voiceState ->
+                peakInputLevel.updateAndGet { maxOf(it, voiceState.waveformLevel) }
+            }
+        }
         try {
             app.runtime.configStore.setPhoneLocalVoiceEnabled(true)
             app.runtime.configStore.setVoiceRecognitionLanguage("ko")
@@ -84,16 +136,27 @@ class PhoneWhisperEngineDeviceTest {
             controller.startVoiceInput(sessionTargetId = null, onText = transcript::complete)
             withTimeout(15_000) { controller.state.first { it.recording } }
             Log.i("RagentVoiceQA", "LIVE_MIC_RECORDING_STARTED")
-            // Leave enough capture time for the separately started speaker playback to begin.
-            delay(20_000)
+            if (playbackMode == "phone-speaker") {
+                val sample = File(sampleDirectory, "voice-qa-ko-KR.wav")
+                assumeTrue("Seed the Korean sample before phone-speaker microphone acceptance", sample.isFile)
+                delay(500)
+                withContext(Dispatchers.IO) { playWavThroughPhoneSpeaker(context, sample) }
+                delay(1_000)
+            } else {
+                // Leave enough capture time for the separately started speaker playback to begin.
+                delay(20_000)
+            }
             controller.stopVoiceInput()
             val recognized = withTimeout(5 * 60_000) { withContext(Dispatchers.IO) { transcript.get(5, TimeUnit.MINUTES) } }
+            levelCollector.cancel()
+            Log.i("RagentVoiceQA", "LIVE_MIC_PEAK_WAVEFORM_LEVEL: ${peakInputLevel.get()}")
             Log.i("RagentVoiceQA", "LIVE_MIC_TRANSCRIPT: $recognized")
             assertTrue(
-                "The Honor microphone did not capture the supplied speech sample: $recognized",
+                "The Honor microphone did not capture the supplied speech sample: $recognized (peak waveform level ${peakInputLevel.get()})",
                 Regex(checkNotNull(expectedRegex)).containsMatchIn(recognized),
             )
         } finally {
+            levelCollector.cancel()
             controller.cancelVoiceInput()
             scope.cancel()
             engine.remove()
@@ -261,5 +324,33 @@ class PhoneWhisperEngineDeviceTest {
             pcm[frame * 2 + 1] = (sample shr 8).toByte()
         }
         return encodePcm16Wav(pcm, 16_000)
+    }
+
+    private fun playWavThroughPhoneSpeaker(context: android.content.Context, sample: File) {
+        val audioManager = context.getSystemService(AudioManager::class.java)
+        val previousMusicVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val testMusicVolume = (audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) / 2).coerceAtLeast(1)
+        val player = MediaPlayer()
+        val completed = CountDownLatch(1)
+        try {
+            if (previousMusicVolume == 0) audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, testMusicVolume, 0)
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            player.setDataSource(sample.absolutePath)
+            player.prepare()
+            player.setOnCompletionListener { completed.countDown() }
+            player.start()
+            check(completed.await(30, TimeUnit.SECONDS)) { "Honor speaker playback did not finish" }
+        } finally {
+            runCatching { if (player.isPlaying) player.stop() }
+            player.release()
+            if (previousMusicVolume == 0) {
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, previousMusicVolume, 0)
+            }
+        }
     }
 }
