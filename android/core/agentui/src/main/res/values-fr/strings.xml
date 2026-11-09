@@ -28,6 +28,7 @@
     <string name="agentui_message_composer">Zone de message</string>
     <string name="agentui_fullscreen_edit">Modifier en plein écran</string>
     <string name="agentui_resolve_approval">Traitez d’abord la décision ci-dessus</string>
+    <string name="agentui_loading_conversation">Chargement de la conversation…</string>
     <string name="agentui_composer_prompt">Sur quoi souhaitez-vous travailler ?</string>
     <string name="agentui_new_conversation">Nouvelle discussion</string>
     <string name="agentui_back">Retour</string>

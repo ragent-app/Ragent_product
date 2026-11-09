@@ -28,6 +28,7 @@
     <string name="agentui_message_composer">メッセージ入力欄</string>
     <string name="agentui_fullscreen_edit">全画面で編集</string>
     <string name="agentui_resolve_approval">上の承認リクエストを先に処理してください</string>
+    <string name="agentui_loading_conversation">会話を読み込み中…</string>
     <string name="agentui_composer_prompt">何に取り組みますか？</string>
     <string name="agentui_new_conversation">新しいチャット</string>
     <string name="agentui_back">戻る</string>

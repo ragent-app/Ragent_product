@@ -2550,6 +2550,10 @@ private fun ChatSurface(
                 onAddAttachment = { onSetComposerActionSheetOpen(true) },
                 enabled = (!state.isLoading || state.runStatus == AgentRunStatus.Working) &&
                     !state.historyLoading && state.approval == null && !state.approvalResolving,
+                disabledPlaceholder = stringResource(
+                    if (state.approval != null || state.approvalResolving) AgentUiR.string.agentui_resolve_approval
+                    else AgentUiR.string.agentui_loading_conversation,
+                ),
                 actionEnabled = state.connection == AgentConnectionStatus.Connected && state.stopRequest == StopRequestState.None &&
                     !state.runtimeResolving && state.runtimeModel != null && state.runtimeModelsError == null,
                 attachmentsEnabled = true,

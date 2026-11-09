@@ -18,6 +18,7 @@ import com.andysagent.agentoc.core.model.Project
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.model.Session
 import com.andysagent.agentoc.core.model.SessionStatus
+import com.andysagent.agentoc.core.network.ApiException
 import com.andysagent.agentoc.core.protocol.SessionEventDto
 import com.andysagent.agentoc.core.protocol.WebAuthnProofDto
 import com.andysagent.agentoc.core.protocol.WebAuthnProofResponseDto
@@ -135,6 +136,34 @@ class AttentionCenterViewModelTest {
         assertEquals("approve", repository.lastDecision)
         assertNull(viewModel.state.value.resolvingItemId)
         assertTrue(viewModel.state.value.items.isEmpty())
+    }
+
+    @Test
+    fun `terminal run rejection retires a stale cross-session approval without an error banner`() = runTest(dispatcher.scheduler) {
+        val stale = Approval(
+            id = "stale-approval",
+            sessionId = "s1",
+            title = "Delete an expired QA file",
+            status = "pending",
+            runId = "run-finished",
+            kind = "approval_request",
+        )
+        val repository = FakeRepository(
+            sessions = listOf(Session(id = "s1", title = "Finished run")),
+            approvals = listOf(stale),
+        ).apply {
+            resolveError = ApiException(409, "RUN_TERMINAL", "Run is no longer active", retryable = false)
+        }
+        val viewModel = AttentionCenterViewModel(repository)
+        advanceUntilIdle()
+
+        viewModel.onEvent(AttentionEvent.ResolveApproval(AttentionReducer.approvalItemId("s1", stale.id), approve = true))
+        advanceUntilIdle()
+
+        assertEquals("resolved", repository.approvalState.value.single().status)
+        assertTrue(viewModel.state.value.items.isEmpty())
+        assertNull(viewModel.state.value.error)
+        assertNull(viewModel.state.value.resolvingItemId)
     }
 
     @Test
@@ -540,6 +569,7 @@ class AttentionCenterViewModelTest {
         var lastCustomAnswer: String? = null
         var lastCustomAnswers: List<String> = emptyList()
         var resolveError: Throwable? = null
+        var retiredApproval: Pair<String, String>? = null
         val privilegedCalls = mutableListOf<Pair<String, List<String>>>()
         var challengeCalls = 0
         var lastProof: WebAuthnProofDto? = null
@@ -570,6 +600,13 @@ class AttentionCenterViewModelTest {
 
         override suspend fun findPendingApproval(sessionId: String, approvalId: String): Approval? =
             approvalState.value.firstOrNull { it.sessionId == sessionId && it.id == approvalId }
+
+        override suspend fun retireStaleApproval(sessionId: String, approvalId: String) {
+            retiredApproval = sessionId to approvalId
+            approvalState.value = approvalState.value.map {
+                if (it.sessionId == sessionId && it.id == approvalId && it.status == "pending") it.copy(status = "resolved") else it
+            }
+        }
 
         override suspend fun createSession(name: String, tool: String): Session = Session("s-new", name)
         override suspend fun createProject(name: String, rootPath: String): Project = Project("p-new", name, rootPath)

@@ -16,6 +16,7 @@ import com.andysagent.agentoc.core.domain.OutboundAttachment
 import com.andysagent.agentoc.core.domain.ProjectFolder
 import com.andysagent.agentoc.core.domain.SessionRepository
 import com.andysagent.agentoc.core.domain.SessionRepositoryException
+import com.andysagent.agentoc.core.domain.isTerminalApprovalFailure
 import com.andysagent.agentoc.core.domain.SwitchingSessionRepository
 import com.andysagent.agentoc.core.domain.newRequestId
 import com.andysagent.agentoc.core.protocol.WebAuthnProofDto
@@ -2811,7 +2812,28 @@ class ChatViewModel(
                     repository.decideConfirmation(sessionId, approvalId, decision)
                 }
                 refreshSession(sessionId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
+                if (error.isTerminalApprovalFailure()) {
+                    try {
+                        repository.retireStaleApproval(sessionId, approvalId)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        // The terminal server result still makes this local approval unusable.
+                    }
+                    updateState {
+                        copy(
+                            approval = approval?.takeUnless { it.id == approvalId },
+                            activeDecision = activeDecision?.takeUnless { it.id == approvalId },
+                            resolvingApprovalId = null,
+                            error = null,
+                        )
+                    }
+                    try { repository.refreshEvents(sessionId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {}
+                    return@launch
+                }
                 mutableState.update { state ->
                     state.copy(activeDecision = state.activeDecision?.let {
                         if (it.id == approvalId) it.copy(submissionError = error.message ?: "Approval could not be resolved") else it

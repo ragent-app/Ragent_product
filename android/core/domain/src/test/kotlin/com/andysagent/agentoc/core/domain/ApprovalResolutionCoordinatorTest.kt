@@ -9,6 +9,7 @@ import com.andysagent.agentoc.core.model.Message
 import com.andysagent.agentoc.core.model.Project
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.model.Session
+import com.andysagent.agentoc.core.network.ApiException
 import com.andysagent.agentoc.core.protocol.SessionEventDto
 import com.andysagent.agentoc.core.protocol.WebAuthnProofDto
 import com.andysagent.agentoc.core.timeline.TimelineItem
@@ -34,6 +35,8 @@ class ApprovalResolutionCoordinatorTest {
         val confirmations = mutableListOf<Triple<String, String, String>>()
         val refreshes = mutableListOf<String>()
         var findError: Throwable? = null
+        var runtimeApprovalError: Throwable? = null
+        var retiredApproval: Pair<String, String>? = null
 
         override val connectionState: StateFlow<RuntimeConnectionState> =
             MutableStateFlow(RuntimeConnectionState.Connected).asStateFlow()
@@ -51,6 +54,11 @@ class ApprovalResolutionCoordinatorTest {
         override suspend fun findPendingApproval(sessionId: String, approvalId: String): Approval? {
             findError?.let { throw it }
             return approvals.firstOrNull { it.sessionId == sessionId && it.id == approvalId }
+        }
+
+        override suspend fun retireStaleApproval(sessionId: String, approvalId: String) {
+            retiredApproval = sessionId to approvalId
+            approvals.replaceAll { if (it.sessionId == sessionId && it.id == approvalId) it.copy(status = "resolved") else it }
         }
 
         override suspend fun createSession(name: String, tool: String): Session = Session("s", name)
@@ -106,6 +114,7 @@ class ApprovalResolutionCoordinatorTest {
             customAnswer: String?,
             requestId: String,
         ) {
+            runtimeApprovalError?.let { throw it }
             lastChoices = choices
             lastCustomAnswer = customAnswer
             runtimeApprovals += Triple(runId, approvalId, decision)
@@ -140,6 +149,32 @@ class ApprovalResolutionCoordinatorTest {
         assertEquals(ApprovalResolutionCoordinator.Outcome.Submitted, outcome)
         assertEquals(Triple("run-1", "a1", "approve"), repository.runtimeApprovals.single())
         assertEquals(listOf("s1"), repository.refreshes)
+    }
+
+    @Test
+    fun `terminal run rejection retires the cached approval instead of offering retry`() = runTest {
+        val repository = FakeRepository()
+        repository.approvals += Approval(
+            id = "stale-approval",
+            sessionId = "s1",
+            title = "Delete an expired QA file",
+            status = "pending",
+            runId = "run-finished",
+            kind = "approval_request",
+        )
+        repository.runtimeApprovalError = ApiException(
+            statusCode = 409,
+            code = "RUN_TERMINAL",
+            message = "Run is no longer active",
+            retryable = false,
+        )
+
+        val outcome = ApprovalResolutionCoordinator(repository).resolvePlainApproval("s1", "stale-approval", approve = true)
+
+        assertEquals(ApprovalResolutionCoordinator.Outcome.Stale, outcome)
+        assertEquals("s1" to "stale-approval", repository.retiredApproval)
+        assertEquals("resolved", repository.approvals.single().status)
+        assertTrue(repository.runtimeApprovals.isEmpty())
     }
 
     @Test

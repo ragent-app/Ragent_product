@@ -33,6 +33,7 @@
     <string name="agentui_message_composer">Message composer</string>
     <string name="agentui_fullscreen_edit">Fullscreen edit</string>
     <string name="agentui_resolve_approval">Resolve the decision above</string>
+    <string name="agentui_loading_conversation">Loading conversation…</string>
     <string name="agentui_composer_prompt">What should we work on?</string>
     <string name="agentui_new_conversation">New chat</string>
     <string name="agentui_back">Back</string>

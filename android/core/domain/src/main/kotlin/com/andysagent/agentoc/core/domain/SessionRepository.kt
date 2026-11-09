@@ -117,6 +117,8 @@ interface SessionRepository {
     /** Cross-session pending approvals for the active computer's attention surface. */
     fun observeAllPendingApprovals(): Flow<List<Approval>> = kotlinx.coroutines.flow.flowOf(emptyList())
     suspend fun findPendingApproval(sessionId: String, approvalId: String): Approval?
+    /** Retires a cached approval after the server confirms its run is terminal. */
+    suspend fun retireStaleApproval(sessionId: String, approvalId: String) {}
     suspend fun createSession(name: String = "New session", tool: String = "codex"): Session
     /** Caller journals/retries this request; the legacy pending queue does not own it. */
     suspend fun createSessionIdempotent(

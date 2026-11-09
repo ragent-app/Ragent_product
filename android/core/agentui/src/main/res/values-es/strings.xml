@@ -28,6 +28,7 @@
     <string name="agentui_message_composer">Campo de mensaje</string>
     <string name="agentui_fullscreen_edit">Editar a pantalla completa</string>
     <string name="agentui_resolve_approval">Resuelve primero la decisión anterior</string>
+    <string name="agentui_loading_conversation">Cargando la conversación…</string>
     <string name="agentui_composer_prompt">¿En qué trabajamos?</string>
     <string name="agentui_new_conversation">Nuevo chat</string>
     <string name="agentui_back">Atrás</string>

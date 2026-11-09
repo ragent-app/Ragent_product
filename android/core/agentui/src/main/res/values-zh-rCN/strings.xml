@@ -33,6 +33,7 @@
     <string name="agentui_message_composer">消息输入框</string>
     <string name="agentui_fullscreen_edit">全屏编辑</string>
     <string name="agentui_resolve_approval">请先处理上方审批</string>
+    <string name="agentui_loading_conversation">正在加载对话…</string>
     <string name="agentui_composer_prompt">想做点什么？</string>
     <string name="agentui_new_conversation">新会话</string>
     <string name="agentui_back">返回</string>

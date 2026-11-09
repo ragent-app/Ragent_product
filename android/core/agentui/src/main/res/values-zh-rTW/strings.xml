@@ -28,6 +28,7 @@
     <string name="agentui_message_composer">訊息輸入框</string>
     <string name="agentui_fullscreen_edit">全螢幕編輯</string>
     <string name="agentui_resolve_approval">請先處理上方核准要求</string>
+    <string name="agentui_loading_conversation">正在載入對話…</string>
     <string name="agentui_composer_prompt">想做些什麼？</string>
     <string name="agentui_new_conversation">新對話</string>
     <string name="agentui_back">返回</string>

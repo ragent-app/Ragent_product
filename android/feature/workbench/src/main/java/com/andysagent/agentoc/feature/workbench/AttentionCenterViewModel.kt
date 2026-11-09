@@ -8,6 +8,7 @@ import com.andysagent.agentoc.core.domain.SessionRepository
 import com.andysagent.agentoc.core.domain.SwitchingSessionRepository
 import com.andysagent.agentoc.core.domain.RefreshResult
 import com.andysagent.agentoc.core.domain.SessionRepositoryException
+import com.andysagent.agentoc.core.domain.isTerminalApprovalFailure
 import com.andysagent.agentoc.core.domain.newRequestId
 import com.andysagent.agentoc.core.network.ApiException
 import com.andysagent.agentoc.core.protocol.WebAuthnProofDto
@@ -234,7 +235,10 @@ class AttentionCenterViewModel(
                     is SessionRepositoryException -> error.retryable
                     else -> true
                 }
-                if (attempted && retryable) awaitActionBatch(fixed, switching, item.sessionId, approval.id, event.itemId)
+                if (error.isTerminalApprovalFailure()) {
+                    fixed.retireStaleApproval(item.sessionId, approval.id)
+                    consumeResolution(event.itemId, ApprovalResolutionCoordinator.Outcome.Stale)
+                } else if (attempted && retryable) awaitActionBatch(fixed, switching, item.sessionId, approval.id, event.itemId)
                 else mutableState.update { it.copy(resolvingItemId = null, error = error.message ?: "审批提交失败") }
             }
         }
@@ -302,7 +306,10 @@ class AttentionCenterViewModel(
                     is SessionRepositoryException -> error.retryable
                     else -> true
                 }
-                if (attempted && retryable) awaitPrivilegedCategory(fixed, switching, item.sessionId, original.id, event)
+                if (error.isTerminalApprovalFailure()) {
+                    fixed.retireStaleApproval(item.sessionId, original.id)
+                    consumeResolution(event.itemId, ApprovalResolutionCoordinator.Outcome.Stale)
+                } else if (attempted && retryable) awaitPrivilegedCategory(fixed, switching, item.sessionId, original.id, event)
                 else mutableState.update { it.copy(resolvingItemId = null, error = error.message ?: "Approval could not be resolved") }
             }
         }

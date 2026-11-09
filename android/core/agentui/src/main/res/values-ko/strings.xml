@@ -28,6 +28,7 @@
     <string name="agentui_message_composer">메시지 입력창</string>
     <string name="agentui_fullscreen_edit">전체 화면 편집</string>
     <string name="agentui_resolve_approval">위의 승인 요청을 먼저 처리하세요</string>
+    <string name="agentui_loading_conversation">대화를 불러오는 중…</string>
     <string name="agentui_composer_prompt">무엇을 함께 할까요?</string>
     <string name="agentui_new_conversation">새 대화</string>
     <string name="agentui_back">뒤로</string>

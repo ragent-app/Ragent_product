@@ -1285,6 +1285,26 @@ class RoomSessionRepositoryEventTest {
     }
 
     @Test
+    fun staleApprovalRetirementRemovesOnlyTheRequestedApprovalFromThePendingQueue() = runBlocking {
+        database.dao().upsertSessions(listOf(
+            SessionEntity("session-1", "Task one", null, "completed", 0, 0),
+            SessionEntity("session-2", "Task two", null, "working", 0, 0),
+        ))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "expired-id", sessionId = "session-1", title = "Expired", status = "pending", runId = "run-1", updatedAt = 1),
+            ApprovalEntity(id = "current-id", sessionId = "session-2", title = "Current", status = "pending", runId = "run-2", updatedAt = 2),
+        ))
+        val repository = RoomSessionRepository(database, FakeTransport("{}"))
+
+        repository.retireStaleApproval("session-1", "expired-id")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "expired-id")?.status)
+        assertEquals("pending", database.dao().getApproval("session-2", "current-id")?.status)
+        assertEquals(listOf("current-id"), repository.observeAllPendingApprovals().first().map { it.id })
+        repository.close()
+    }
+
+    @Test
     fun endpointlessLiveSyncReconcilesFinalEventsAfterDetailBecomesTerminal() = runBlocking {
         database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "working", 0, 0)))
         val transport = LiveSyncTransport()

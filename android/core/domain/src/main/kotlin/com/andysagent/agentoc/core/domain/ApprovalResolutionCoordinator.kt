@@ -3,6 +3,8 @@ package com.andysagent.agentoc.core.domain
 import com.andysagent.agentoc.core.model.Approval
 import com.andysagent.agentoc.core.model.ApprovalOption
 import com.andysagent.agentoc.core.model.ApprovalQuestion
+import com.andysagent.agentoc.core.network.ApiException
+import kotlinx.coroutines.CancellationException
 
 /**
  * Shared plain-approval resolution used by surfaces outside the session
@@ -73,7 +75,10 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
                     }
                     runCatching { repository.refreshSessionDetail(sessionId) }
                     Outcome.Submitted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (error: Throwable) {
+                    if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
                     Outcome.Failed(error.message ?: "审批提交失败")
                 }
             }
@@ -155,7 +160,12 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
             repository.resolveRuntimeApprovalWithMultiChoices(runId, approvalId, selections, answers, requestId)
             runCatching { repository.refreshSessionDetail(sessionId) }
             Outcome.Submitted
-        } catch (error: Throwable) { Outcome.Failed(error.message ?: "提交回答失败") }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
+            Outcome.Failed(error.message ?: "提交回答失败")
+        }
     }
 
     private suspend fun resolveQuestionChoices(
@@ -228,7 +238,10 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
                     }
                     runCatching { repository.refreshSessionDetail(sessionId) }
                     Outcome.Submitted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (error: Throwable) {
+                    if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
                     Outcome.Failed(error.message ?: "回答提交失败")
                 }
             }
@@ -241,6 +254,16 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
             ?: PendingRead.Missing
     } catch (error: Throwable) {
         PendingRead.Error(error.message ?: "审批状态读取失败")
+    }
+
+    private suspend fun retireStaleApproval(sessionId: String, approvalId: String, cause: Throwable): Outcome = try {
+        repository.retireStaleApproval(sessionId, approvalId)
+        runCatching { repository.refreshSessionDetail(sessionId) }
+        Outcome.Stale
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        Outcome.Failed(error.message ?: cause.message ?: "过期审批无法清理")
     }
 
     private fun Approval.requiresStructuredResolution(): Boolean = batchId != null ||
@@ -266,3 +289,23 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         const val MAX_CUSTOM_ANSWER = 8_000
     }
 }
+
+/** Server-confirmed terminal approval failures should remove stale UI, not offer retry. */
+fun Throwable.isTerminalApprovalFailure(): Boolean {
+    val code = when (this) {
+        is ApiException -> code
+        is SessionRepositoryException -> code
+        else -> null
+    }
+    return code in TERMINAL_APPROVAL_FAILURE_CODES
+}
+
+private val TERMINAL_APPROVAL_FAILURE_CODES = setOf(
+    "RUN_TERMINAL",
+    "RUN_NOT_FOUND",
+    "APPROVAL_NOT_FOUND",
+    "APPROVED_ACTION_RUN_TERMINAL",
+    "APPROVED_ACTION_RUN_NOT_FOUND",
+    "BROKER_RUN_NOT_ACTIVE",
+    "BROKER_RUN_NOT_FOUND",
+)

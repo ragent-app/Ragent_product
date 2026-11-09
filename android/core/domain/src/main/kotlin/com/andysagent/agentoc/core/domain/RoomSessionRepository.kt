@@ -588,6 +588,12 @@ class RoomSessionRepository(
         it.toDomainApproval()
     }
 
+    override suspend fun retireStaleApproval(sessionId: String, approvalId: String) {
+        val approval = dao.getApproval(sessionId, approvalId) ?: return
+        if (approval.status != "pending") return
+        dao.upsertApprovals(listOf(approval.copy(status = "resolved", updatedAt = System.currentTimeMillis())))
+    }
+
     override suspend fun refreshComputers() {
         val response = execute(ApiRequest("GET", "/api/device-pairing/devices"))
         val payload = codec.decode(serializer<ListTrustedDevicesResponse>(), response.body)

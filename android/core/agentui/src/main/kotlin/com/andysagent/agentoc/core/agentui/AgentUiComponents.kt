@@ -1753,6 +1753,7 @@ fun AgentComposer(
     working: Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    disabledPlaceholder: String? = null,
     actionEnabled: Boolean = true,
     attachmentsEnabled: Boolean = false,
     onAddAttachment: () -> Unit,
@@ -1807,7 +1808,7 @@ fun AgentComposer(
     val composerVoiceRecording = voiceRecording || (voiceActive && !composerVoiceProcessing)
     val composerVoiceActive = onVoiceClick != null && (composerVoiceRecording || composerVoiceProcessing)
     val placeholderText = if (composerVoiceActive && value.isEmpty()) ""
-        else if (isCreatingGoal) "设定你的目标..." else composerPlaceholder(enabled)
+        else if (isCreatingGoal) "设定你的目标..." else composerPlaceholder(enabled, disabledPlaceholder)
     val composerContentDescription = stringResource(R.string.agentui_message_composer)
     val approvalPendingDescription = stringResource(R.string.agentui_resolve_approval)
     val fullscreenEditDescription = stringResource(R.string.agentui_fullscreen_edit)
@@ -2702,9 +2703,11 @@ private fun VoiceWaveform(level: Float, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun composerPlaceholder(enabled: Boolean): String = stringResource(
-    if (enabled) R.string.agentui_composer_prompt else R.string.agentui_resolve_approval,
-)
+private fun composerPlaceholder(enabled: Boolean, disabledPlaceholder: String?): String = when {
+    enabled -> stringResource(R.string.agentui_composer_prompt)
+    !disabledPlaceholder.isNullOrBlank() -> disabledPlaceholder
+    else -> stringResource(R.string.agentui_resolve_approval)
+}
 
 /**
  * AgentToolRow — the shared quiet flat operation row.
