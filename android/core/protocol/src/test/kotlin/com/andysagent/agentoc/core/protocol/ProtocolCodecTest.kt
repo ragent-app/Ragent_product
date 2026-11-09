@@ -486,7 +486,10 @@ class ProtocolCodecTest {
         val request = SendMessageRequestDto(
             text = "Inspect this file",
             requestId = "req-attachment",
+            tool = "codex",
+            providerProfile = "codex-official",
             agentId = "report_cleaner",
+            harnessCapabilityIds = listOf("agentoc:skill:calendar"),
             attachments = listOf(
                 AttachmentItemDto(
                     assetId = "fasset_123",
@@ -502,6 +505,9 @@ class ProtocolCodecTest {
         val decoded = codec.decode(serializer<SendMessageRequestDto>(), encoded)
 
         assertEquals("report_cleaner", decoded.agentId)
+        assertEquals("codex", decoded.tool)
+        assertEquals("codex-official", decoded.providerProfile)
+        assertEquals(listOf("agentoc:skill:calendar"), decoded.harnessCapabilityIds)
         assertEquals("fasset_123", decoded.attachments.single().assetId)
         assertEquals("input.csv", decoded.attachments.single().originalName)
         assertEquals("text/csv", decoded.attachments.single().mimeType)

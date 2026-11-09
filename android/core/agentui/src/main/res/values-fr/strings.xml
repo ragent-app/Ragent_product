@@ -73,4 +73,17 @@
     <string name="agentui_connection_reconnecting">Reconnexion…</string>
     <string name="agentui_connection_sign_in_required">Connexion requise</string>
     <string name="agentui_connection_error">Erreur de connexion</string>
+    <string name="agentui_slash_palette_hint">Commandes, compétences, MCP et plugins</string>
+    <string name="agentui_slash_palette_loading">Chargement des capacités du harness…</string>
+    <string name="agentui_slash_palette_empty">Aucune capacité correspondante</string>
+    <string name="agentui_slash_palette_partial_error">Certaines capacités n’ont pas pu être chargées</string>
+    <string name="agentui_slash_kind_command">Commandes</string>
+    <string name="agentui_slash_kind_skill">Compétences</string>
+    <string name="agentui_slash_kind_mcp">Serveurs MCP</string>
+    <string name="agentui_slash_kind_plugin">Plugins</string>
+    <string name="agentui_slash_source_codex">Codex</string>
+    <string name="agentui_slash_source_claude">Claude Code</string>
+    <string name="agentui_slash_source_agentoc">AgentoC</string>
+    <string name="agentui_slash_source_plugin">Plugin</string>
+    <string name="agentui_slash_remove_selected">Retirer %1$s</string>
 </resources>

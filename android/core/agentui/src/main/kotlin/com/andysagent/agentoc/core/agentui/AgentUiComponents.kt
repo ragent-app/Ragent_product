@@ -150,6 +150,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -848,7 +849,7 @@ private fun AgentoBoltIcon(
 /** Translate the window-local popup back into the chat's capture coordinates. */
 @Composable
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-private fun ComposerPickerPopup(
+internal fun ComposerPickerPopup(
     onDismiss: () -> Unit,
     anchorTop: Int?,
     onPositioned: (Int) -> Unit,
@@ -1801,6 +1802,12 @@ fun AgentComposer(
     voiceLevel: Float = 0f,
     onVoiceCancelClick: (() -> Unit)? = null,
     voiceEnabled: Boolean = true,
+    slashSuggestions: List<ComposerSlashSuggestion> = emptyList(),
+    slashSuggestionsLoading: Boolean = false,
+    slashSuggestionsError: String? = null,
+    onSelectSlashSuggestion: (ComposerSlashSuggestion) -> Unit = {},
+    selectedCapabilities: List<ComposerSelectedCapability> = emptyList(),
+    onRemoveSelectedCapability: (String) -> Unit = {},
 ) {
     val colors = LocalAgentocColors.current
     val isCreatingGoal = goalMode && goalText.isBlank()
@@ -1825,6 +1832,7 @@ fun AgentComposer(
     val fullscreenActive = fullscreen || fullscreenProgress > 0f
     val composerMotion = LocalMotionPolicy.current
     var pendingEditorFocus by remember { mutableStateOf(false) }
+    var dismissedSlashQuery by remember { mutableStateOf<String?>(null) }
     val isOverVisibleLines = remember(value, textLineCount) {
         textLineCount > COMPOSER_VISIBLE_LINE_COUNT
             || value.count { it == '\n' } >= COMPOSER_VISIBLE_LINE_COUNT
@@ -1866,6 +1874,15 @@ fun AgentComposer(
         if (hasComposerContent) {
             onExpandedChange(true)
         }
+    }
+
+    LaunchedEffect(selectedCapabilities) {
+        if (selectedCapabilities.isNotEmpty()) onExpandedChange(true)
+    }
+
+    val slashQuery = composerSlashQuery(value)
+    LaunchedEffect(slashQuery) {
+        if (slashQuery != null) dismissedSlashQuery = null
     }
 
     LaunchedEffect(isExpanded) {
@@ -1964,10 +1981,11 @@ fun AgentComposer(
     // Otherwise shortening a draft morphs back to a stale tall composer and
     // only then starts another shrink. Content measurement includes the
     // editor's font-scaled rich-decoration insets, not just text glyph height.
+    val selectedCapabilitiesHeight = if (selectedCapabilities.isNotEmpty()) 38.dp else 0.dp
     val inlineEditorHeight = (with(composerDensity) { textContentHeightPx.toDp() } +
         topPadding + bottomPadding).coerceIn(
         AgentocSizes.ComposerTextMinHeight, AgentocSizes.ComposerMaxHeight,
-    )
+    ) + selectedCapabilitiesHeight
     val inlineHeight = (if (expanded) expandedRailHeight else compactRailHeight) + if (expanded) {
         inlineEditorHeight + if (isOverVisibleLines) 48.dp else 0.dp
     } else 0.dp
@@ -2081,6 +2099,47 @@ fun AgentComposer(
                     },
                     editor = {
                     val textFieldScrollState = rememberScrollState()
+                    Column(Modifier.fillMaxWidth()) {
+                    if (selectedCapabilities.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(38.dp)
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            selectedCapabilities.forEach { capability ->
+                                val kindLabel = slashCapabilityKindLabel(capability.kind)
+                                val capabilityTag = capability.id.hashCode().toUInt().toString(16)
+                                val removeSelectedDescription = stringResource(R.string.agentui_slash_remove_selected, capability.title)
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(colors.surfaceLow.copy(alpha = if (isDark) 0.72f else 0.82f))
+                                        .testTag("composer-selected-capability-$capabilityTag")
+                                        .padding(start = 9.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    Text(
+                                        text = "$kindLabel · ${capability.title}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.primaryContent,
+                                        maxLines = 1,
+                                    )
+                                    Box(
+                                        modifier = Modifier.size(24.dp).clip(CircleShape)
+                                            .clickable { onRemoveSelectedCapability(capability.id) }
+                                            .testTag("composer-selected-capability-remove-$capabilityTag")
+                                            .semantics { contentDescription = removeSelectedDescription },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text("×", style = MaterialTheme.typography.labelMedium, color = colors.secondaryContent)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2159,6 +2218,7 @@ fun AgentComposer(
                                 if (enabled) onClick { expandEditorAndFocus(); true }
                             })
                         }
+                    }
                     }
                     },
                     rail = {
@@ -2566,6 +2626,183 @@ fun AgentComposer(
                 )
         }
     }
+    if (slashQuery != null && dismissedSlashQuery != slashQuery) {
+        ComposerSlashPalettePopover(
+            query = slashQuery,
+            suggestions = slashSuggestions,
+            loading = slashSuggestionsLoading,
+            error = slashSuggestionsError,
+            anchorTop = backdropOrigin.y - composerBackdropOffset.value.y,
+            onDismiss = { dismissedSlashQuery = slashQuery },
+            onSelect = onSelectSlashSuggestion,
+        )
+    }
+}
+
+@Composable
+private fun ComposerSlashPalettePopover(
+    query: String,
+    suggestions: List<ComposerSlashSuggestion>,
+    loading: Boolean,
+    error: String?,
+    anchorTop: Int,
+    onDismiss: () -> Unit,
+    onSelect: (ComposerSlashSuggestion) -> Unit,
+) {
+    val colors = LocalAgentocColors.current
+    val normalizedQuery = query.trim().removePrefix("/").lowercase()
+    val matching = suggestions.asSequence()
+        .filter { normalizedQuery.isEmpty() || it.title.lowercase().contains(normalizedQuery) || it.description.lowercase().contains(normalizedQuery) }
+        .sortedWith(compareBy<ComposerSlashSuggestion>({ slashCapabilityKindOrder(it.kind) }, { it.title.lowercase() }))
+        .take(80)
+        .toList()
+    ComposerPickerPopup(onDismiss = onDismiss, anchorTop = anchorTop, onPositioned = {}) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 560.dp)
+                .padding(horizontal = 10.dp)
+                .testTag("composer-slash-palette"),
+            shape = RoundedCornerShape(20.dp),
+            color = colors.canvas,
+            contentColor = colors.primaryContent,
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+        ) {
+            Column(Modifier.heightIn(max = 320.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "/$query",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.primaryContent,
+                        ),
+                    )
+                    Text(
+                        text = stringResource(R.string.agentui_slash_palette_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryContent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.subtleOutline.copy(alpha = 0.28f)))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    if (loading && matching.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.agentui_slash_palette_loading),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 16.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryContent,
+                        )
+                    } else if (matching.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.agentui_slash_palette_empty),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 16.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryContent,
+                        )
+                    } else {
+                        matching.groupBy { it.kind }.forEach { (kind, entries) ->
+                            Text(
+                                text = slashCapabilityKindLabel(kind),
+                                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 9.dp, bottom = 4.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.secondaryContent,
+                            )
+                            entries.forEach { suggestion ->
+                                val canSelect = suggestion.enabled &&
+                                    (suggestion.invocationText.isNotBlank() || suggestion.selectionMode == "attach")
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(13.dp))
+                                        .then(if (canSelect) Modifier.clickable { onSelect(suggestion) } else Modifier)
+                                        .semantics { if (!canSelect) disabled() }
+                                        .testTag("composer-capability-${suggestion.id.hashCode().toUInt().toString(16)}")
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = suggestion.title,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                            color = if (canSelect) colors.primaryContent else colors.secondaryContent,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val detail = if (!suggestion.enabled) {
+                                            suggestion.disabledReason?.takeIf { it.isNotBlank() } ?: suggestion.description
+                                        } else suggestion.description
+                                        if (detail.isNotBlank()) {
+                                            Text(
+                                                text = detail,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colors.secondaryContent,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = slashCapabilitySourceLabel(suggestion.source),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.secondaryContent,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (!error.isNullOrBlank()) {
+                        Text(
+                            text = stringResource(R.string.agentui_slash_palette_partial_error),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryContent,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun slashCapabilityKindOrder(kind: String): Int = when (kind.lowercase()) {
+    "command" -> 0
+    "skill" -> 1
+    "mcp" -> 2
+    "plugin" -> 3
+    else -> 4
+}
+
+@Composable
+private fun slashCapabilityKindLabel(kind: String): String = when (kind.lowercase()) {
+    "command" -> stringResource(R.string.agentui_slash_kind_command)
+    "skill" -> stringResource(R.string.agentui_slash_kind_skill)
+    "mcp" -> stringResource(R.string.agentui_slash_kind_mcp)
+    "plugin" -> stringResource(R.string.agentui_slash_kind_plugin)
+    else -> kind
+}
+
+@Composable
+private fun slashCapabilitySourceLabel(source: String): String = when (source.lowercase()) {
+    "codex" -> stringResource(R.string.agentui_slash_source_codex)
+    "claude", "claude-project", "claude-plugin" -> stringResource(R.string.agentui_slash_source_claude)
+    "agentoc" -> stringResource(R.string.agentui_slash_source_agentoc)
+    "plugin" -> stringResource(R.string.agentui_slash_source_plugin)
+    else -> source
 }
 
 @Composable

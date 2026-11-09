@@ -903,6 +903,8 @@ data class RequestMetadataDto(
 data class SendMessageRequestDto(
     val text: String,
     val requestId: String,
+    val tool: String? = null,
+    val providerProfile: String? = null,
     val model: String? = null,
     val effort: String? = null,
     val serviceTier: String? = null,
@@ -913,6 +915,7 @@ data class SendMessageRequestDto(
     val permissionMode: String? = null,
     val planAction: String? = null,
     val planId: String? = null,
+    val harnessCapabilityIds: List<String> = emptyList(),
     val attachments: List<AttachmentItemDto> = emptyList(),
 )
 

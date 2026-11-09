@@ -143,7 +143,8 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         requestId: String,
         agentId: String?,
         attachments: List<OutboundAttachment>,
-    ) = current().sendMessage(sessionId, text, selection, requestId, agentId, attachments)
+        harnessCapabilityIds: List<String>,
+    ) = current().sendMessage(sessionId, text, selection, requestId, agentId, attachments, harnessCapabilityIds)
     override suspend fun updateQueuedFollowUp(
         sessionId: String,
         action: QueuedFollowUpAction,
@@ -160,6 +161,11 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         serviceTier: String,
     ) = current().updateRuntimeSelection(sessionId, tool, providerProfile, model, effort, serviceTier)
     override suspend fun loadRuntimeCatalog(): RuntimeCatalog = current().loadRuntimeCatalog()
+    override suspend fun loadHarnessCapabilities(
+        sessionId: String,
+        tool: String?,
+        providerProfile: String?,
+    ): HarnessCapabilityCatalog = current().loadHarnessCapabilities(sessionId, tool, providerProfile)
     override suspend fun loadSessionRuntimeSelection(sessionId: String): RuntimeSelection? = current().loadSessionRuntimeSelection(sessionId)
     override suspend fun loadGlobalRuntimeSelection(): RuntimeSelection? = current().loadGlobalRuntimeSelection()
     override suspend fun saveGlobalRuntimeSelection(selection: RuntimeSelection) = current().saveGlobalRuntimeSelection(selection)

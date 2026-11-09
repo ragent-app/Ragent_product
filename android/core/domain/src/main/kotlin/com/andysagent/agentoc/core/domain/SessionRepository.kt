@@ -24,6 +24,24 @@ data class SessionAccessContext(val sessionId: String, val projectId: String?)
 data class SessionMetadataSnapshot(val sessionId: String, val title: String, val projectId: String?,
     val state: String, val updatedAt: String?)
 
+/** Safe, display-only entry returned by a computer's current harness catalog. */
+data class HarnessCapabilityItem(
+    val id: String,
+    val kind: String,
+    val source: String,
+    val title: String,
+    val description: String = "",
+    val invocationText: String = "",
+    val enabled: Boolean = true,
+    val disabledReason: String? = null,
+)
+
+data class HarnessCapabilityCatalog(
+    val tool: String,
+    val items: List<HarnessCapabilityItem> = emptyList(),
+    val errors: Map<String, String> = emptyMap(),
+)
+
 data class SessionInvalidation(
     val type: String,
     val sessionId: String? = null,
@@ -286,6 +304,7 @@ interface SessionRepository {
         requestId: String = newRequestId(),
         agentId: String? = null,
         attachments: List<OutboundAttachment> = emptyList(),
+        harnessCapabilityIds: List<String> = emptyList(),
     ) = sendMessage(sessionId, text, requestId)
     suspend fun updateQueuedFollowUp(
         sessionId: String,
@@ -298,6 +317,12 @@ interface SessionRepository {
         error("Queued follow-up steering is not supported by this repository")
     }
     suspend fun loadRuntimeCatalog(): RuntimeCatalog = RuntimeCatalog()
+    suspend fun loadHarnessCapabilities(
+        sessionId: String,
+        tool: String? = null,
+        providerProfile: String? = null,
+    ): HarnessCapabilityCatalog =
+        HarnessCapabilityCatalog(tool = "unknown")
     suspend fun loadRuntimeProviders(tool: String): List<RuntimeProviderOption> = emptyList()
     suspend fun loadRuntimeModels(tool: String, providerProfile: String): List<RuntimeModelOption> = emptyList()
     suspend fun loadSessionRuntimeSelection(sessionId: String): RuntimeSelection? = null

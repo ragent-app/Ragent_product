@@ -1763,6 +1763,7 @@ class RoomSessionRepository(
         requestId: String,
         agentId: String?,
         attachments: List<OutboundAttachment>,
+        harnessCapabilityIds: List<String>,
     ) {
         val path = "/api/sessions/${encode(sessionId)}/messages"
         if (attachments.isEmpty()) {
@@ -1772,6 +1773,7 @@ class RoomSessionRepository(
                 selection = selection,
                 agentId = agentId,
                 attachments = emptyList(),
+                harnessCapabilityIds = harnessCapabilityIds,
             )
             executePending(sessionId, requestId, "send_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
@@ -1788,7 +1790,7 @@ class RoomSessionRepository(
             requestId = requestId,
             kind = "send_message_with_attachments",
             path = path,
-            payload = encodeAttachmentSendCommand(sessionId, text, requestId, selection, agentId, attachments),
+            payload = encodeAttachmentSendCommand(sessionId, text, requestId, selection, agentId, attachments, harnessCapabilityIds),
             state = "pending",
             createdAt = System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis(),
@@ -1805,6 +1807,7 @@ class RoomSessionRepository(
                 selection = selection,
                 agentId = agentId,
                 attachments = materialized.second,
+                harnessCapabilityIds = harnessCapabilityIds,
             )
             dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
             execute(ApiRequest("POST", path, body, requestId, requestId))
@@ -1867,11 +1870,14 @@ class RoomSessionRepository(
         selection: RuntimeSelection,
         agentId: String?,
         attachments: List<AttachmentItemDto>,
+        harnessCapabilityIds: List<String> = emptyList(),
     ): String = codec.encode(
         serializer<SendMessageRequestDto>(),
         SendMessageRequestDto(
             text = text,
             requestId = requestId,
+            tool = selection.tool,
+            providerProfile = selection.providerProfile,
             model = selection.model,
             effort = selection.effort,
             serviceTier = selection.serviceTier,
@@ -1880,6 +1886,7 @@ class RoomSessionRepository(
             permissionMode = selection.permissionMode,
             planAction = selection.planAction,
             planId = selection.planId,
+            harnessCapabilityIds = harnessCapabilityIds,
             attachments = attachments,
         ),
     )
@@ -1927,6 +1934,7 @@ class RoomSessionRepository(
         selection: RuntimeSelection,
         agentId: String?,
         attachments: List<OutboundAttachment>,
+        harnessCapabilityIds: List<String>,
     ): String = buildJsonObject {
         put("sessionId", JsonPrimitive(sessionId))
         put("text", JsonPrimitive(text))
@@ -1941,6 +1949,9 @@ class RoomSessionRepository(
         selection.planAction?.let { put("planAction", JsonPrimitive(it)) }
         selection.planId?.let { put("planId", JsonPrimitive(it)) }
         agentId?.let { put("agentId", JsonPrimitive(it)) }
+        put("harnessCapabilityIds", buildJsonArray {
+            harnessCapabilityIds.forEach { add(JsonPrimitive(it)) }
+        })
         put("attachments", buildJsonArray {
             attachments.forEach { attachment ->
                 add(buildJsonObject {
@@ -2202,6 +2213,43 @@ class RoomSessionRepository(
     override suspend fun loadRuntimeProviders(tool: String): List<RuntimeProviderOption> {
         val response = execute(ApiRequest("GET", "/api/native-providers?tool=${encode(tool)}"))
         return parseRuntimeProviders(codec.decode(serializer<JsonObject>(), response.body))
+    }
+
+    override suspend fun loadHarnessCapabilities(
+        sessionId: String,
+        tool: String?,
+        providerProfile: String?,
+    ): HarnessCapabilityCatalog {
+        val query = buildList {
+            tool?.takeIf { it.isNotBlank() }?.let { add("tool=${encode(it)}") }
+            providerProfile?.takeIf { it.isNotBlank() }?.let { add("providerProfile=${encode(it)}") }
+        }.joinToString("&").takeIf { it.isNotBlank() }?.let { "?$it" }.orEmpty()
+        val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/harness-capabilities$query"))
+        val root = codec.decode(serializer<JsonObject>(), response.body)
+        val items = (root["items"] as? JsonArray).orEmpty().mapNotNull { element ->
+            val item = element as? JsonObject ?: return@mapNotNull null
+            val id = item.string("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = item.string("title")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            HarnessCapabilityItem(
+                id = id,
+                kind = item.string("kind") ?: "command",
+                source = item.string("source") ?: "harness",
+                title = title,
+                description = item.string("description") ?: "",
+                invocationText = item.string("invocationText") ?: "",
+                enabled = item["enabled"]?.jsonPrimitive?.booleanOrNull != false,
+                disabledReason = item.string("disabledReason"),
+            )
+        }
+        val errors = (root["errors"] as? JsonObject).orEmpty().mapNotNull { (key, value) ->
+            val message = (value as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            message?.let { key to it }
+        }.toMap()
+        return HarnessCapabilityCatalog(
+            tool = root.string("tool") ?: "unknown",
+            items = items,
+            errors = errors,
+        )
     }
 
     override suspend fun loadRuntimeModels(tool: String, providerProfile: String): List<RuntimeModelOption> {
@@ -2608,6 +2656,8 @@ class RoomSessionRepository(
                         ),
                         agentId = payload.string("agentId"),
                         attachments = materialized.second,
+                        harnessCapabilityIds = payload["harnessCapabilityIds"]?.jsonArray
+                            ?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
                     )
                     execute(ApiRequest("POST", operation.path, body, operation.requestId, operation.idempotencyKey ?: operation.requestId))
                 } else if (operation.kind == "resend_edited_message_with_attachments") {

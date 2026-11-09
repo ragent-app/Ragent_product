@@ -73,4 +73,17 @@
     <string name="agentui_connection_reconnecting">正在恢復連線</string>
     <string name="agentui_connection_sign_in_required">需要重新登入</string>
     <string name="agentui_connection_error">連線錯誤</string>
+    <string name="agentui_slash_palette_hint">命令、技能、MCP 與外掛</string>
+    <string name="agentui_slash_palette_loading">正在載入執行環境能力…</string>
+    <string name="agentui_slash_palette_empty">沒有符合的能力</string>
+    <string name="agentui_slash_palette_partial_error">部分能力載入失敗</string>
+    <string name="agentui_slash_kind_command">命令</string>
+    <string name="agentui_slash_kind_skill">技能</string>
+    <string name="agentui_slash_kind_mcp">MCP 伺服器</string>
+    <string name="agentui_slash_kind_plugin">外掛</string>
+    <string name="agentui_slash_source_codex">Codex</string>
+    <string name="agentui_slash_source_claude">Claude Code</string>
+    <string name="agentui_slash_source_agentoc">AgentoC</string>
+    <string name="agentui_slash_source_plugin">外掛</string>
+    <string name="agentui_slash_remove_selected">移除 %1$s</string>
 </resources>

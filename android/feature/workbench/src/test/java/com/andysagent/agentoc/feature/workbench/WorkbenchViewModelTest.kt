@@ -19,6 +19,8 @@ import com.andysagent.agentoc.core.timeline.TimelineItem
 import com.andysagent.agentoc.core.model.Session
 import com.andysagent.agentoc.core.domain.RefreshResult
 import com.andysagent.agentoc.core.domain.OutboundAttachment
+import com.andysagent.agentoc.core.domain.HarnessCapabilityCatalog
+import com.andysagent.agentoc.core.domain.HarnessCapabilityItem
 import com.andysagent.agentoc.core.domain.ProjectFolder
 import com.andysagent.agentoc.core.domain.ProjectFolderBrowser
 import com.andysagent.agentoc.core.domain.RuntimeSelection
@@ -479,6 +481,41 @@ class WorkbenchViewModelTest {
             assertEquals(listOf(""), repository.createdNames)
             assertEquals("", viewModel.state.value.composerText)
             assertFalse(viewModel.state.value.isLoading)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `selected harness capability id is carried into the outbound message`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val capability = HarnessCapabilityItem(
+                id = "agentoc:mcp:agentoc",
+                kind = "mcp",
+                source = "agentoc",
+                title = "agentoc",
+            )
+            val repository = FakeSessionRepository(
+                sessions = listOf(Session("session-1", "Capabilities")),
+                connection = RuntimeConnectionState.Connected,
+                capabilities = HarnessCapabilityCatalog(tool = "codex", items = listOf(capability)),
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+            viewModel.onEvent(ChatEvent.SelectSession("session-1"))
+            advanceUntilIdle()
+            viewModel.onEvent(ChatEvent.ComposerChanged("/agentoc"))
+            advanceUntilIdle()
+            assertEquals(listOf(capability), viewModel.state.value.harnessCapabilities)
+
+            viewModel.onEvent(ChatEvent.AddHarnessCapability(capability))
+            viewModel.onEvent(ChatEvent.ComposerChanged("Use the connected AgentoC tools."))
+            viewModel.onEvent(ChatEvent.SendMessage)
+            advanceUntilIdle()
+
+            assertEquals(listOf("agentoc:mcp:agentoc"), repository.structuredSends.single().harnessCapabilityIds)
+            assertTrue(viewModel.state.value.selectedHarnessCapabilities.isEmpty())
         } finally {
             Dispatchers.resetMain()
         }
@@ -1641,6 +1678,7 @@ private class FakeSessionRepository(
     private val sessionRefreshFailures: Map<String, Throwable> = emptyMap(),
     var failMessageSend: Boolean = false,
     private val runtimeCatalog: RuntimeCatalog = RuntimeCatalog(),
+    private val capabilities: HarnessCapabilityCatalog = HarnessCapabilityCatalog(tool = "unknown"),
     private val sessionRuntime: Map<String, RuntimeSelection> = emptyMap(),
     var globalRuntime: RuntimeSelection? = null,
     private val targetId: String? = null,
@@ -1750,6 +1788,7 @@ private class FakeSessionRepository(
         sessionRefreshCalls += 1
     }
     override suspend fun loadRuntimeCatalog(): RuntimeCatalog = runtimeCatalog
+    override suspend fun loadHarnessCapabilities(sessionId: String, tool: String?, providerProfile: String?): HarnessCapabilityCatalog = capabilities
     override suspend fun loadSessionRuntimeSelection(sessionId: String): RuntimeSelection? = sessionRuntime[sessionId]
     override suspend fun loadGlobalRuntimeSelection(): RuntimeSelection? { globalGate?.await(); return globalRuntime }
     override suspend fun saveGlobalRuntimeSelection(selection: RuntimeSelection) { globalRuntime = selection }
@@ -1779,11 +1818,12 @@ private class FakeSessionRepository(
         requestId: String,
         agentId: String?,
         attachments: List<OutboundAttachment>,
+        harnessCapabilityIds: List<String>,
     ) {
         attemptedSessionIds += sessionId
         attemptedRequestIds += requestId
         runtimeUpdatedBeforeSend = runtimeEffortUpdates.isNotEmpty()
-        structuredSends += StructuredSend(text, agentId, attachments, selection)
+        structuredSends += StructuredSend(text, agentId, attachments, selection, harnessCapabilityIds)
         sendMessage(sessionId, text, requestId)
     }
     override suspend fun cancelSession(sessionId: String) {
@@ -1830,6 +1870,7 @@ private data class StructuredSend(
     val agentId: String?,
     val attachments: List<OutboundAttachment>,
     val selection: RuntimeSelection,
+    val harnessCapabilityIds: List<String>,
 )
 
 private data class ApprovedActionsCall(

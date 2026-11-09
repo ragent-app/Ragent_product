@@ -10,11 +10,13 @@ import com.andysagent.agentoc.core.agentui.ComposerRuntimeIdentity
 import com.andysagent.agentoc.core.agentui.composerRuntimeIdentity
 import com.andysagent.agentoc.core.agentui.ApprovalActionUiState
 import com.andysagent.agentoc.core.agentui.PermissionRequestUiState
+import com.andysagent.agentoc.core.agentui.composerSlashQuery
 import com.andysagent.agentoc.core.domain.RefreshResult
 import com.andysagent.agentoc.core.domain.AttachmentUploadProgress
 import com.andysagent.agentoc.core.domain.ApprovalResolutionCoordinator
 import com.andysagent.agentoc.core.domain.OutboundAttachment
 import com.andysagent.agentoc.core.domain.ProjectFolder
+import com.andysagent.agentoc.core.domain.HarnessCapabilityItem
 import com.andysagent.agentoc.core.domain.SessionRepository
 import com.andysagent.agentoc.core.domain.SessionRepositoryException
 import com.andysagent.agentoc.core.domain.isTerminalApprovalFailure
@@ -90,6 +92,10 @@ data class WorkbenchUiState(
     val pendingTurn: PendingTurnUiState? = null,
     val acceptedTurns: List<PendingTurnUiState> = emptyList(),
     val composerText: String = "",
+    val harnessCapabilities: List<HarnessCapabilityItem> = emptyList(),
+    val selectedHarnessCapabilities: List<HarnessCapabilityItem> = emptyList(),
+    val harnessCapabilitiesLoading: Boolean = false,
+    val harnessCapabilitiesError: String? = null,
     val messageCount: Int = 0,
     val unseenCount: Int = 0,
     val sessionId: String? = null,
@@ -226,6 +232,8 @@ sealed interface WorkbenchEvent {
     data object CloseChat : WorkbenchEvent
     data class SessionSearchChanged(val value: String) : WorkbenchEvent
     data class ComposerChanged(val text: String) : WorkbenchEvent
+    data class AddHarnessCapability(val capability: HarnessCapabilityItem) : WorkbenchEvent
+    data class RemoveHarnessCapability(val id: String) : WorkbenchEvent
     data object SendMessage : WorkbenchEvent
     data object RetryPendingTurn : WorkbenchEvent
     data class SelectAgent(val agentId: String?) : WorkbenchEvent
@@ -450,6 +458,10 @@ data class ChatUiState(
     val pendingTurn: PendingTurnUiState? = null,
     val acceptedTurns: List<PendingTurnUiState> = emptyList(),
     val composerText: String = "",
+    val harnessCapabilities: List<HarnessCapabilityItem> = emptyList(),
+    val selectedHarnessCapabilities: List<HarnessCapabilityItem> = emptyList(),
+    val harnessCapabilitiesLoading: Boolean = false,
+    val harnessCapabilitiesError: String? = null,
     val messageCount: Int = 0,
     val unseenCount: Int = 0,
     val sessionId: String? = null,
@@ -509,6 +521,7 @@ data class PendingTurnUiState(
     val selection: RuntimeSelection,
     val agentId: String?,
     val goalToPersist: String? = null,
+    val harnessCapabilityIds: List<String> = emptyList(),
     val state: PendingTurnState = PendingTurnState.Sending,
     val error: String? = null,
     val attachmentUploadProgress: AttachmentUploadProgress? = null,
@@ -522,6 +535,8 @@ private data class PendingStopRequest(val state: StopRequestState)
 
 sealed interface ChatEvent {
     data class ComposerChanged(val text: String) : ChatEvent
+    data class AddHarnessCapability(val capability: HarnessCapabilityItem) : ChatEvent
+    data class RemoveHarnessCapability(val id: String) : ChatEvent
     data object SendMessage : ChatEvent
     data object RetryPendingTurn : ChatEvent
     data class SelectAgent(val agentId: String?) : ChatEvent
@@ -726,9 +741,59 @@ class ChatViewModel(
     private var runtimeModelSelectionGeneration = 0L
     private var runtimePickerSnapshot: RuntimeSelection? = null
     private var runtimeCatalogRepository: SessionRepository? = null
+    private data class CapabilityCatalogKey(
+        val repository: SessionRepository,
+        val sessionId: String,
+        val tool: String,
+        val providerProfile: String?,
+    )
+    private var capabilityCatalogKey: CapabilityCatalogKey? = null
+    private var capabilityCatalogJob: Job? = null
 
     private fun activeRepository(): SessionRepository? =
         if (repository is SwitchingSessionRepository) repository.delegate.value else repository
+
+    private fun loadHarnessCapabilitiesIfNeeded() {
+        val current = mutableState.value
+        val sessionId = current.sessionId?.takeIf { it.isNotBlank() } ?: return
+        val fixed = activeRepository() ?: return
+        val key = CapabilityCatalogKey(fixed, sessionId, current.runtimeTool, current.runtimeProvider)
+        if (capabilityCatalogKey == key) return
+        capabilityCatalogKey = key
+        capabilityCatalogJob?.cancel()
+        updateState {
+            copy(harnessCapabilities = emptyList(), harnessCapabilitiesLoading = true, harnessCapabilitiesError = null)
+        }
+        capabilityCatalogJob = viewModelScope.launch {
+            val catalog = try {
+                fixed.loadHarnessCapabilities(sessionId, key.tool, key.providerProfile)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (capabilityCatalogKey != key || activeRepository() !== fixed ||
+                    mutableState.value.sessionId != sessionId || mutableState.value.runtimeTool != key.tool
+                    || mutableState.value.runtimeProvider != key.providerProfile) return@launch
+                updateState {
+                    copy(
+                        harnessCapabilities = emptyList(),
+                        harnessCapabilitiesLoading = false,
+                        harnessCapabilitiesError = error.message ?: "Harness capabilities could not be loaded.",
+                    )
+                }
+                return@launch
+            }
+            if (capabilityCatalogKey != key || activeRepository() !== fixed ||
+                mutableState.value.sessionId != sessionId || mutableState.value.runtimeTool != key.tool
+                || mutableState.value.runtimeProvider != key.providerProfile) return@launch
+            updateState {
+                copy(
+                    harnessCapabilities = catalog.items,
+                    harnessCapabilitiesLoading = false,
+                    harnessCapabilitiesError = catalog.errors.values.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+                )
+            }
+        }
+    }
 
     // Carry the delegate with its snapshot. Reading a mutable delegate after an
     // emission can otherwise assign an old computer's Session list to a new one.
@@ -897,6 +962,16 @@ class ChatViewModel(
                     mutableState.value.sessionId?.let { sessionDrafts[fixed to it] = event.text }
                 }
                 updateState { copy(composerText = event.text) }
+                if (composerSlashQuery(event.text) != null) loadHarnessCapabilitiesIfNeeded()
+            }
+            is ChatEvent.AddHarnessCapability -> updateState {
+                val capability = harnessCapabilities.firstOrNull { it.id == event.capability.id && it.enabled }
+                    ?: return@updateState this
+                if (selectedHarnessCapabilities.any { it.id == capability.id }) this
+                else copy(selectedHarnessCapabilities = (selectedHarnessCapabilities + capability).takeLast(8))
+            }
+            is ChatEvent.RemoveHarnessCapability -> updateState {
+                copy(selectedHarnessCapabilities = selectedHarnessCapabilities.filterNot { it.id == event.id })
             }
             ChatEvent.SendMessage -> sendMessage()
             ChatEvent.RetryPendingTurn -> retryPendingTurn()
@@ -959,11 +1034,17 @@ class ChatViewModel(
             ChatEvent.RefreshRuntimeCatalog -> refreshRuntimeCatalog()
             is ChatEvent.SelectRuntime -> {
                 runtimeModelLoadJob?.cancel()
+                capabilityCatalogJob?.cancel()
+                capabilityCatalogKey = null
                 updateState {
                     copy(
                         runtimeTool = event.tool,
                         runtimeProvider = null,
                         runtimeModel = null,
+                        selectedHarnessCapabilities = emptyList(),
+                        harnessCapabilities = emptyList(),
+                        harnessCapabilitiesLoading = false,
+                        harnessCapabilitiesError = null,
                         runtimeModelsLoading = false,
                         runtimeModelsError = null,
                         serviceTier = "standard",
@@ -1444,6 +1525,7 @@ class ChatViewModel(
             requestId = newRequestId(),
             text = textToSend,
             attachments = current.attachments,
+            harnessCapabilityIds = current.selectedHarnessCapabilities.map { it.id },
             selection = selection,
             agentId = current.selectedAgentId,
             goalToPersist = effectiveGoalText.takeIf { isPendingGoal && it.isNotBlank() },
@@ -1458,6 +1540,7 @@ class ChatViewModel(
             copy(
                 composerText = "",
                 attachments = emptyList(),
+                selectedHarnessCapabilities = emptyList(),
                 editingTurnId = null,
                 editingTurnText = null,
                 isLoading = true,
@@ -1567,6 +1650,7 @@ class ChatViewModel(
                     requestId = pendingTurn.requestId,
                     agentId = pendingTurn.agentId,
                     attachments = outboundAttachments,
+                    harnessCapabilityIds = pendingTurn.harnessCapabilityIds,
                 )
                 // Once the POST succeeds, this one-shot guard has completed
                 // its job. Keeping it through an active run hides Stop and
@@ -1928,6 +2012,8 @@ class ChatViewModel(
         selectedRepository = fixed
         newSessionRequested = false
         sendAfterPendingTurn = false
+        capabilityCatalogJob?.cancel()
+        capabilityCatalogKey = null
         if (computerChanged) {
             sendAfterPendingTurn = false
             runtimeModelLoadJob?.cancel()
@@ -1947,6 +2033,10 @@ class ChatViewModel(
                 selectedAgentId = selectedSession?.templateId,
                 runStatus = selectedSession?.status?.toAgentStatus() ?: AgentRunStatus.Idle,
                 composerText = restoredDraft,
+                harnessCapabilities = emptyList(),
+                selectedHarnessCapabilities = emptyList(),
+                harnessCapabilitiesLoading = false,
+                harnessCapabilitiesError = null,
                 pendingTurn = restoredPendingTurn,
                 acceptedTurns = sessionAcceptedTurns[fixed to sessionId].orEmpty().filterNot { accepted -> selectedSession?.queuedMessages.orEmpty().any { it.requestId == accepted.requestId } },
                 isLoading = restoredPendingTurn?.state == PendingTurnState.Sending,
@@ -2351,6 +2441,8 @@ class ChatViewModel(
     private fun selectRuntimeProvider(provider: String?) {
         val fixed = activeRepository() ?: return
         runtimeModelLoadJob?.cancel()
+        capabilityCatalogJob?.cancel()
+        capabilityCatalogKey = null
         val selectionGeneration = ++runtimeModelSelectionGeneration
         val toolId = mutableState.value.runtimeTool
         val normalizedProvider = provider?.trim()?.takeIf { it.isNotEmpty() }
@@ -2359,6 +2451,10 @@ class ChatViewModel(
         updateState {
             copy(
                 runtimeProvider = normalizedProvider,
+                selectedHarnessCapabilities = emptyList(),
+                harnessCapabilities = emptyList(),
+                harnessCapabilitiesLoading = false,
+                harnessCapabilitiesError = null,
                 // Provider selection clears the previous model. The model
                 // remains unset until the user explicitly chooses one.
                 runtimeModel = null,

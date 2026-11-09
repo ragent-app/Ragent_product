@@ -1163,6 +1163,10 @@ class MainActivity : ComponentActivity() {
                     pendingTurn = chatState.pendingTurn,
                     acceptedTurns = chatState.acceptedTurns,
                     composerText = chatState.composerText,
+                    harnessCapabilities = chatState.harnessCapabilities,
+                    selectedHarnessCapabilities = chatState.selectedHarnessCapabilities,
+                    harnessCapabilitiesLoading = chatState.harnessCapabilitiesLoading,
+                    harnessCapabilitiesError = chatState.harnessCapabilitiesError,
                     messageCount = chatState.messageCount,
                     unseenCount = chatState.unseenCount,
                     sessionId = chatState.sessionId,
@@ -1632,6 +1636,8 @@ class MainActivity : ComponentActivity() {
                             }
                             WorkbenchEvent.CloseProjectSessions -> shell.onEvent(AppShellEvent.CloseProjectSessions)
                             is WorkbenchEvent.ComposerChanged -> chat.onEvent(ChatEvent.ComposerChanged(event.text))
+                            is WorkbenchEvent.AddHarnessCapability -> chat.onEvent(ChatEvent.AddHarnessCapability(event.capability))
+                            is WorkbenchEvent.RemoveHarnessCapability -> chat.onEvent(ChatEvent.RemoveHarnessCapability(event.id))
                             WorkbenchEvent.SendMessage -> chat.onEvent(ChatEvent.SendMessage)
                             WorkbenchEvent.RetryPendingTurn -> chat.onEvent(ChatEvent.RetryPendingTurn)
                             is WorkbenchEvent.SelectAgent -> chat.onEvent(ChatEvent.SelectAgent(event.agentId))

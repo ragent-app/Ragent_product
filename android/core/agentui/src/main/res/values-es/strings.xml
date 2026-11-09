@@ -73,4 +73,17 @@
     <string name="agentui_connection_reconnecting">Reconectando…</string>
     <string name="agentui_connection_sign_in_required">Debes iniciar sesión de nuevo</string>
     <string name="agentui_connection_error">Error de conexión</string>
+    <string name="agentui_slash_palette_hint">Comandos, habilidades, MCP y complementos</string>
+    <string name="agentui_slash_palette_loading">Cargando capacidades del entorno…</string>
+    <string name="agentui_slash_palette_empty">No hay capacidades coincidentes</string>
+    <string name="agentui_slash_palette_partial_error">No se pudieron cargar algunas capacidades</string>
+    <string name="agentui_slash_kind_command">Comandos</string>
+    <string name="agentui_slash_kind_skill">Habilidades</string>
+    <string name="agentui_slash_kind_mcp">Servidores MCP</string>
+    <string name="agentui_slash_kind_plugin">Complementos</string>
+    <string name="agentui_slash_source_codex">Codex</string>
+    <string name="agentui_slash_source_claude">Claude Code</string>
+    <string name="agentui_slash_source_agentoc">AgentoC</string>
+    <string name="agentui_slash_source_plugin">Complemento</string>
+    <string name="agentui_slash_remove_selected">Quitar %1$s</string>
 </resources>

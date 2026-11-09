@@ -73,4 +73,17 @@
     <string name="agentui_connection_reconnecting">다시 연결 중</string>
     <string name="agentui_connection_sign_in_required">다시 로그인해야 함</string>
     <string name="agentui_connection_error">연결 오류</string>
+    <string name="agentui_slash_palette_hint">명령, 스킬, MCP 및 플러그인</string>
+    <string name="agentui_slash_palette_loading">하네스 기능을 불러오는 중…</string>
+    <string name="agentui_slash_palette_empty">일치하는 기능이 없습니다</string>
+    <string name="agentui_slash_palette_partial_error">일부 기능을 불러오지 못했습니다</string>
+    <string name="agentui_slash_kind_command">명령</string>
+    <string name="agentui_slash_kind_skill">스킬</string>
+    <string name="agentui_slash_kind_mcp">MCP 서버</string>
+    <string name="agentui_slash_kind_plugin">플러그인</string>
+    <string name="agentui_slash_source_codex">Codex</string>
+    <string name="agentui_slash_source_claude">Claude Code</string>
+    <string name="agentui_slash_source_agentoc">AgentoC</string>
+    <string name="agentui_slash_source_plugin">플러그인</string>
+    <string name="agentui_slash_remove_selected">%1$s 제거</string>
 </resources>

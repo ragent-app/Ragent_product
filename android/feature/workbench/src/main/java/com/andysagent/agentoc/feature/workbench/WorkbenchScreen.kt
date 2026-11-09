@@ -164,6 +164,10 @@ import com.andysagent.agentoc.core.auth.BrokerEnrollmentMaterial
 import com.andysagent.agentoc.core.auth.BrokerPendingEnrollment
 import com.andysagent.agentoc.core.auth.BrokerApprovalProtocol
 import com.andysagent.agentoc.core.agentui.AgentComposer
+import com.andysagent.agentoc.core.agentui.ComposerSelectedCapability
+import com.andysagent.agentoc.core.agentui.ComposerSlashSuggestion
+import com.andysagent.agentoc.core.agentui.clearComposerSlashToken
+import com.andysagent.agentoc.core.agentui.replaceComposerSlashToken
 import com.andysagent.agentoc.core.agentui.LocalPreparedMarkdownDocuments
 import com.andysagent.agentoc.core.agentui.MarkdownBlock
 import com.andysagent.agentoc.core.agentui.prepareMarkdownDocuments
@@ -2559,6 +2563,46 @@ private fun ChatSurface(
                     !state.runtimeResolving && state.runtimeModel != null && state.runtimeModelsError == null,
                 attachmentsEnabled = true,
                 runtimeTool = state.runtimeTool,
+                slashSuggestions = state.harnessCapabilities.map { item ->
+                    ComposerSlashSuggestion(
+                        id = item.id,
+                        kind = item.kind,
+                        source = item.source,
+                        title = item.title,
+                        description = item.description,
+                        invocationText = item.invocationText,
+                        enabled = item.enabled,
+                        disabledReason = item.disabledReason,
+                        selectionMode = if (item.kind == "mcp" || item.kind == "plugin" || item.source == "agentoc") "attach" else "insert",
+                    )
+                },
+                slashSuggestionsLoading = state.harnessCapabilitiesLoading,
+                slashSuggestionsError = state.harnessCapabilitiesError,
+                onSelectSlashSuggestion = { suggestion ->
+                    if (suggestion.selectionMode == "attach") {
+                        state.harnessCapabilities.firstOrNull { it.id == suggestion.id && it.enabled }?.let { capability ->
+                            onEvent(WorkbenchEvent.AddHarnessCapability(capability))
+                            clearComposerSlashToken(state.composerText)?.let { selectedText ->
+                                onEvent(WorkbenchEvent.ComposerChanged(selectedText))
+                            }
+                        }
+                    } else {
+                        replaceComposerSlashToken(state.composerText, suggestion.invocationText)?.let { selectedText ->
+                            onEvent(WorkbenchEvent.ComposerChanged(selectedText))
+                        }
+                    }
+                },
+                selectedCapabilities = state.selectedHarnessCapabilities.map { capability ->
+                    ComposerSelectedCapability(
+                        id = capability.id,
+                        kind = capability.kind,
+                        source = capability.source,
+                        title = capability.title,
+                    )
+                },
+                onRemoveSelectedCapability = { capabilityId ->
+                    onEvent(WorkbenchEvent.RemoveHarnessCapability(capabilityId))
+                },
                 runtimeProvider = state.runtimeProvider,
                 runtimeModel = state.runtimeModel,
                 runtimeCatalog = state.runtimeCatalog,

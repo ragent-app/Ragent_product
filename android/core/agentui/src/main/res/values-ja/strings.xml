@@ -73,4 +73,17 @@
     <string name="agentui_connection_reconnecting">再接続中</string>
     <string name="agentui_connection_sign_in_required">再ログインが必要です</string>
     <string name="agentui_connection_error">接続エラー</string>
+    <string name="agentui_slash_palette_hint">コマンド、スキル、MCP、プラグイン</string>
+    <string name="agentui_slash_palette_loading">ハーネス機能を読み込み中…</string>
+    <string name="agentui_slash_palette_empty">一致する機能がありません</string>
+    <string name="agentui_slash_palette_partial_error">一部の機能を読み込めませんでした</string>
+    <string name="agentui_slash_kind_command">コマンド</string>
+    <string name="agentui_slash_kind_skill">スキル</string>
+    <string name="agentui_slash_kind_mcp">MCP サーバー</string>
+    <string name="agentui_slash_kind_plugin">プラグイン</string>
+    <string name="agentui_slash_source_codex">Codex</string>
+    <string name="agentui_slash_source_claude">Claude Code</string>
+    <string name="agentui_slash_source_agentoc">AgentoC</string>
+    <string name="agentui_slash_source_plugin">プラグイン</string>
+    <string name="agentui_slash_remove_selected">%1$s を削除</string>
 </resources>

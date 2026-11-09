@@ -16,6 +16,8 @@ import { createTemporaryControlApprovalActor } from '../lib/temporary-control-po
 import { join, resolve } from 'path';
 
 import { MANAGED_WORK_ROOT_DIR } from '../lib/config.mjs';
+import { listHarnessCapabilities, resolveHarnessCapabilityInstructions } from './harness-capability-catalog.mjs';
+import { WORKBENCH_EXECUTION_POLICY, workbenchToolAllowed } from '../lib/workbench-execution-policy.mjs';
 import { readBody } from '../lib/utils.mjs';
 import { measureApiRequestPhase, setApiRequestCorrelation } from './api-request-log.mjs';
 import { appendEvent, MAX_EVENT_RANGE_SPAN, readEventBody } from './history.mjs';
@@ -399,6 +401,53 @@ export async function handleSessionMainRoutes({
 }) {
   if (await handleSessionApiMutationRoutes({ req, res, parsedUrl, pathname, authSession,
     requireSessionAccess, writeJson, invalidate: notifyCommittedSessionApiMutation })) return true;
+  const capabilitiesRoute = req.method === 'GET'
+    ? pathname.match(/^\/api\/sessions\/([^/]+)\/harness-capabilities$/)
+    : null;
+  if (capabilitiesRoute) {
+    let sessionId;
+    try { sessionId = decodeURIComponent(capabilitiesRoute[1]); }
+    catch { writeJson(res, 400, { error: 'Invalid session id' }); return true; }
+    if (!sessionId.trim() || sessionId.length > 256) {
+      writeJson(res, 400, { error: 'Invalid session id' });
+      return true;
+    }
+    if (!await requireSessionAccess(res, authSession, sessionId, { metadataOnly: true })) return true;
+    try {
+      const session = await getSession(sessionId);
+      if (!session) {
+        writeJson(res, 404, { error: 'Session not found' });
+        return true;
+      }
+      const requestUrl = new URL(req.url || pathname, `http://${req.headers?.host || 'localhost'}`);
+      const requestedTool = requestUrl.searchParams.get('tool')?.trim() || session.tool;
+      const requestedProviderProfile = requestUrl.searchParams.get('providerProfile')?.trim()
+        || session.providerProfile || session.providerProfileId || '';
+      if (!requestedTool || !/^[a-z0-9][a-z0-9-]{0,63}$/i.test(requestedTool)) {
+        writeJson(res, 400, { error: 'Invalid harness id' });
+        return true;
+      }
+      if (WORKBENCH_EXECUTION_POLICY && !workbenchToolAllowed(requestedTool)) {
+        writeJson(res, 403, { error: 'Harness is locked by the workbench operator', code: 'WORKBENCH_EXECUTION_POLICY_DENIED' });
+        return true;
+      }
+      const project = session.projectId ? await getProject(session.projectId) : null;
+      const catalog = await listHarnessCapabilities({
+        session: { ...session, tool: requestedTool },
+        cwd: project?.rootPath || process.cwd(),
+        providerProfileId: requestedProviderProfile,
+      });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { sessionId, ...catalog });
+    } catch (error) {
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, error?.statusCode || 500, {
+        error: 'Harness capability catalog could not be loaded',
+        code: error?.code || 'HARNESS_CAPABILITY_CATALOG_UNAVAILABLE',
+      });
+    }
+    return true;
+  }
   if (await handleSessionApiScopeRoutes({ req, res, parsedUrl, pathname, authSession, writeJson })) return true;
   if (await handleRunApiRoutes({ req, res, parsedUrl, pathname, authSession, requireSessionAccess, writeJson })) return true;
   if (await handleMessageCommitRoutes({ req, res, parsedUrl, pathname, authSession, requireSessionAccess, writeJson })) return true;
@@ -1194,11 +1243,52 @@ export async function handleSessionMainRoutes({
         const requestId = typeof payload?.requestId === 'string' ? payload.requestId.trim() : '';
         setApiRequestCorrelation({ requestId, sessionId });
         const requestedAttachments = Array.isArray(payload?.attachments) ? payload.attachments.filter(Boolean) : [];
+        const harnessCapabilityIds = payload?.harnessCapabilityIds ?? [];
+        if (!Array.isArray(harnessCapabilityIds) || harnessCapabilityIds.length > 8
+          || harnessCapabilityIds.some((id) => typeof id !== 'string' || id.length > 500)) {
+          const error = new Error('Invalid harness capability selection.');
+          error.code = 'HARNESS_CAPABILITY_INVALID';
+          error.statusCode = 400;
+          throw error;
+        }
+        if (authSession?.role === 'visitor' && harnessCapabilityIds.length > 0) {
+          const error = new Error('Harness capabilities are not available to visitor sessions.');
+          error.code = 'HARNESS_CAPABILITY_FORBIDDEN';
+          error.statusCode = 403;
+          throw error;
+        }
+        const requestedTool = authSession?.role === 'visitor'
+          ? rawManagedSession.tool
+          : (typeof payload?.tool === 'string' && payload.tool.trim() ? payload.tool.trim() : rawManagedSession.tool);
+        const requestedProviderProfile = authSession?.role === 'visitor'
+          ? (rawManagedSession.providerProfile || rawManagedSession.providerProfileId || '')
+          : (typeof payload?.providerProfile === 'string' && payload.providerProfile.trim()
+            ? payload.providerProfile.trim()
+            : (rawManagedSession.providerProfile || rawManagedSession.providerProfileId || ''));
+        if (harnessCapabilityIds.length > 0 && (!requestedTool || !/^[a-z0-9][a-z0-9-]{0,63}$/i.test(requestedTool))) {
+          const error = new Error('The selected harness is not available for this session.');
+          error.code = 'HARNESS_CAPABILITY_STALE';
+          error.statusCode = 409;
+          throw error;
+        }
+        let harnessInstructions = '';
+        if (harnessCapabilityIds.length > 0) {
+          const project = rawManagedSession.projectId ? await getProject(rawManagedSession.projectId) : null;
+          harnessInstructions = await resolveHarnessCapabilityInstructions({
+            ids: harnessCapabilityIds,
+            session: { ...rawManagedSession, tool: requestedTool },
+            cwd: project?.rootPath || process.cwd(),
+            providerProfileId: requestedProviderProfile,
+          });
+        }
         const preSavedAttachments = await measureApiRequestPhase(
           'route.resolve_attachments',
           () => resolveRequestedSessionAttachments(authSession, requestedAttachments, { sessionId }),
         );
         const messageOptions = {
+          ...(authSession?.role === 'visitor' ? {} : { tool: requestedTool }),
+          ...(authSession?.role === 'visitor' || !requestedProviderProfile ? {} : { providerProfile: requestedProviderProfile }),
+          ...(harnessInstructions ? { harnessInstructions } : {}),
           thinking: authSession?.role === 'visitor' ? false : !!payload.thinking,
           model: authSession?.role === 'visitor' ? undefined : payload.model || undefined,
           effort: authSession?.role === 'visitor' ? undefined : payload.effort || undefined,
@@ -1244,7 +1334,9 @@ export async function handleSessionMainRoutes({
           session: createClientSessionDetail(outcome.session),
         });
       } catch (error) {
-        const statusCode = error?.code === SESSION_NOT_USER_ADDRESSABLE
+        const statusCode = Number.isInteger(error?.statusCode)
+          ? error.statusCode
+          : error?.code === SESSION_NOT_USER_ADDRESSABLE
           ? 403
           : error?.code === 'RESTART_DRAINING'
           ? 503

@@ -1992,6 +1992,12 @@ async function stageRunAttachmentInputs({ sessionId, runId, turnId, attachments 
 function sanitizeQueuedFollowUpOptions(options = {}) {
   const next = {};
   if (typeof options.tool === 'string' && options.tool.trim()) next.tool = options.tool.trim();
+  if (typeof options.providerProfile === 'string' && options.providerProfile.trim()) {
+    next.providerProfile = options.providerProfile.trim().slice(0, 256);
+  }
+  if (typeof options.harnessInstructions === 'string' && options.harnessInstructions.trim()) {
+    next.harnessInstructions = options.harnessInstructions.trim().slice(0, 48_000);
+  }
   if (typeof options.model === 'string' && options.model.trim()) next.model = options.model.trim();
   if (typeof options.effort === 'string' && options.effort.trim()) next.effort = options.effort.trim();
   if (typeof options.serviceTier === 'string' && options.serviceTier.trim()) {
@@ -8129,7 +8135,10 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
   const managerTurnContext = promptMode === 'default'
     ? await buildManagerTurnContextText(session, text)
     : '';
-  const perMessageInstruction = await resolveAgentMessagePrompt(session);
+  const perMessageInstruction = [
+    await resolveAgentMessagePrompt(session),
+    typeof options.harnessInstructions === 'string' ? options.harnessInstructions.trim() : '',
+  ].filter(Boolean).join('\n\n---\n\n');
   let systemContext = '';
   let sourceRuntimePrompt = '';
   let templateInstructions = '';
@@ -12721,6 +12730,7 @@ async function createPreparingHttpRun(prepared) {
 const PREPARATION_OPTION_KEYS = Object.freeze([
   'tool', 'model', 'effort', 'serviceTier', 'thinking', 'providerProfile', 'uiLanguage',
   'interactionMode', 'permissionMode',
+  'harnessInstructions',
   'planAction', 'planId', 'sourceContext', 'templateId', 'agentId', 'browserMcpEnabled',
   'authenticatedPrincipalKind', 'authenticatedOwnerDevice', 'temporaryControlAuthority', 'internalOperation', 'collaborationCapability',
   'compactionTargetSessionId', 'compactionSourceSeq', 'compactionToolIndex', 'compactionReason',

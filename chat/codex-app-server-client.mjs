@@ -305,6 +305,141 @@ export async function listCodexAppServerModels({
   });
 }
 
+const CODEX_CAPABILITY_METHODS = Object.freeze({
+  skills: { method: 'skills/list', params: (cwd) => ({ cwds: [cwd], forceReload: false }) },
+  plugins: { method: 'plugin/list', params: (cwd) => ({ cwds: [cwd] }) },
+  mcp: { method: 'mcpServerStatus/list', params: () => ({ detail: 'toolsAndAuthOnly' }) },
+});
+
+async function requestCodexCapabilityCatalogFromBroker(socketPath, method, params, {
+  timeoutMs = 10_000,
+  connectImpl = connect,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let buffer = '';
+    const initializeId = 0;
+    const requestId = 101;
+    const socket = connectImpl(socketPath);
+    const finish = (error, value = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket.destroy(); } catch {}
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const writeMessage = (message) => {
+      if (!message || socket.destroyed || !socket.writable) {
+        finish(new Error('Codex app-server broker connection is not writable'));
+        return false;
+      }
+      try {
+        socket.write(`${JSON.stringify(message)}\n`);
+        return true;
+      } catch (error) {
+        finish(error);
+        return false;
+      }
+    };
+    const timer = setTimeout(() => finish(new Error(`Timed out waiting for Codex ${method}`)), Math.max(1_000, timeoutMs));
+    timer.unref?.();
+    socket.on('error', (error) => finish(error));
+    socket.on('end', () => {
+      if (!settled) finish(new Error(`Codex app-server broker closed before ${method} completed`));
+    });
+    socket.on('data', (chunk) => {
+      if (settled) return;
+      buffer += chunk.toString('utf8');
+      let newline;
+      while (!settled && (newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        if (Buffer.byteLength(line, 'utf8') > MAX_APP_SERVER_JSON_LINE_BYTES) {
+          finish(new Error(`Codex app-server response line exceeded ${MAX_APP_SERVER_JSON_LINE_BYTES} bytes`));
+          return;
+        }
+        let message;
+        try { message = JSON.parse(line); } catch { continue; }
+        if (message?.id === initializeId) {
+          if (message.error) {
+            finish(new Error(readErrorMessage(message.error)));
+            return;
+          }
+          writeMessage(buildCodexAppServerInitializedNotification());
+          writeMessage({ method, id: requestId, params });
+          continue;
+        }
+        if (message?.id !== requestId) continue;
+        if (message.error) {
+          finish(new Error(readErrorMessage(message.error)));
+          return;
+        }
+        finish(null, message.result && typeof message.result === 'object' ? message.result : {});
+      }
+      if (!settled && Buffer.byteLength(buffer, 'utf8') > MAX_APP_SERVER_JSON_LINE_BYTES) {
+        finish(new Error(`Codex app-server response line exceeded ${MAX_APP_SERVER_JSON_LINE_BYTES} bytes`));
+      }
+    });
+    socket.once('connect', () => writeMessage(buildCodexAppServerInitializeMessage()));
+  });
+}
+
+/** Read the current Codex home’s native skills, plugins and MCP status. */
+export async function listCodexAppServerCapabilities({
+  toolId = 'codex',
+  codexHomeDir,
+  cwd = process.cwd(),
+  timeoutMs = 12_000,
+  upstreamFile = '',
+  upstreamArgs = null,
+  environment = null,
+  ensureBrokerImpl = ensureCodexAppServerBroker,
+  connectImpl = connect,
+} = {}) {
+  const home = trimString(codexHomeDir);
+  if (!home) throw new Error('Codex home is required for capability discovery');
+  const workingDirectory = trimString(cwd) || process.cwd();
+  const startedAt = Date.now();
+  let command = trimString(upstreamFile);
+  let env = environment && typeof environment === 'object'
+    ? { ...environment, CODEX_HOME: home }
+    : null;
+  if (!command) {
+    const invocation = await resolveCodexToolInvocation(toolId, { codexHomeDir: home });
+    command = invocation.command;
+    env = invocation.env;
+  }
+  const args = Array.isArray(upstreamArgs) ? upstreamArgs : ['app-server', '--stdio'];
+  const spawnSpec = buildPlatformSpawnSpec(command, args, { cwd: workingDirectory, env: env || { ...process.env, CODEX_HOME: home } });
+  const socketPath = codexAppServerBrokerSocketPath(home);
+  await ensureBrokerImpl({
+    socketPath,
+    lockPath: codexAppServerBrokerLockPath(home),
+    upstreamFile: spawnSpec.file,
+    upstreamArgs: spawnSpec.args,
+    upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
+    cwd: workingDirectory,
+    env: spawnSpec.env,
+    waitMs: Math.max(1_000, timeoutMs),
+  });
+  const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
+  const entries = Object.entries(CODEX_CAPABILITY_METHODS);
+  const results = await Promise.all(entries.map(async ([key, spec]) => {
+    try {
+      const data = await requestCodexCapabilityCatalogFromBroker(socketPath, spec.method, spec.params(workingDirectory), {
+        timeoutMs: remainingMs,
+        connectImpl,
+      });
+      return [key, { ok: true, data }];
+    } catch (error) {
+      return [key, { ok: false, error: readErrorMessage(error) }];
+    }
+  }));
+  return Object.fromEntries(results);
+}
+
 function normalizeForkResult(message) {
   const threadId = readCodexAppServerThreadId(message);
   if (!threadId) return null;
