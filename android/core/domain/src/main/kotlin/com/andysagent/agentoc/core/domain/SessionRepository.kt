@@ -75,6 +75,21 @@ data class OutboundAttachment(
     val assetId: String? = null,
 )
 
+/** Transient per-message attachment transfer progress, measured in bytes written by the transport. */
+data class AttachmentUploadProgress(
+    val sessionId: String,
+    val phase: FileUploadPhase,
+    val transferredBytes: Long,
+    val totalBytes: Long,
+) {
+    init {
+        require(sessionId.isNotBlank())
+        require(totalBytes > 0)
+        require(transferredBytes in 0..totalBytes)
+    }
+    val fraction: Float get() = transferredBytes.toFloat() / totalBytes.toFloat()
+}
+
 /** A directory exposed by the connected computer's folder browser. */
 data class ProjectFolder(
     val path: String,
@@ -107,6 +122,9 @@ interface SessionRepository {
     fun observeSession(sessionId: String): Flow<Session?>
     fun observeMessages(sessionId: String): Flow<List<Message>>
     fun observeTimeline(sessionId: String): Flow<List<TimelineItem>>
+    /** Current transient upload progress keyed by the message request id. */
+    fun observeAttachmentUploadProgress(sessionId: String): Flow<Map<String, AttachmentUploadProgress>> =
+        kotlinx.coroutines.flow.flowOf(emptyMap())
     /** Canonical action projection shared with the Web live activity strip. */
     fun observeRunActivity(sessionId: String): Flow<JsonObject?> = kotlinx.coroutines.flow.flowOf(null)
     fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> = kotlinx.coroutines.flow.flowOf(emptyMap())

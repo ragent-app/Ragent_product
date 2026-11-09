@@ -75,6 +75,8 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         current().saveRunDuration(sessionId, runId, durationMs)
     override fun observeMessages(sessionId: String): Flow<List<Message>> = delegateFlow { it.observeMessages(sessionId) }
     override fun observeTimeline(sessionId: String): Flow<List<TimelineItem>> = delegateFlow { it.observeTimeline(sessionId) }
+    override fun observeAttachmentUploadProgress(sessionId: String): Flow<Map<String, AttachmentUploadProgress>> =
+        delegateFlow { it.observeAttachmentUploadProgress(sessionId) }
     override fun observeTimelinePaging(sessionId: String): Flow<TimelinePagingState> = delegateFlow { it.observeTimelinePaging(sessionId) }
     override fun observePendingApprovals(sessionId: String): Flow<List<Approval>> = delegateFlow { it.observePendingApprovals(sessionId) }
 

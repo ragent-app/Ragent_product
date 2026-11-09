@@ -37,6 +37,7 @@ import com.andysagent.agentoc.core.datastore.ClientConfigStore
 import com.andysagent.agentoc.core.datastore.LinkedComputer
 import com.andysagent.agentoc.core.domain.RoomSessionRepository
 import com.andysagent.agentoc.core.domain.FileUploadInput
+import java.io.ByteArrayOutputStream
 import com.andysagent.agentoc.core.domain.SessionMutationKind
 import com.andysagent.agentoc.core.domain.SessionMutationContext
 import com.andysagent.agentoc.core.domain.SessionMutationCommand
@@ -1709,6 +1710,8 @@ class AppApiRuntimeGraphTest {
         val uploadFinalizes = AtomicInteger(); val uploadLookups = AtomicInteger()
         var uploadAsset: JSONObject? = null
         var uploadBody: ByteArray? = null
+        var uploadCheckpointOffset = 0L
+        val uploadBuffer = ByteArrayOutputStream()
         var loseUploadFinalizeResponse = false
         var lastMessage: JSONObject? = null
         val resultReads = AtomicInteger()
@@ -1741,6 +1744,8 @@ class AppApiRuntimeGraphTest {
                 Triple("message.commit.receipt", "GET", ScopedMessageClient.COMMIT_PATH),
                 Triple("asset.upload.intent", "POST", "/api/assets/upload-intents"),
                 Triple("asset.upload.body", "POST", "/api/assets/{assetId}/upload"),
+                Triple("asset.upload.chunk", "PATCH", "/api/assets/{assetId}/upload"),
+                Triple("asset.upload.checkpoint", "GET", "/api/assets/{assetId}/upload-checkpoint"),
                 Triple("asset.upload.finalize", "POST", "/api/assets/{assetId}/finalize"),
                 Triple("asset.upload.receipt", "GET", "/api/assets/upload-intents?sessionId={sessionId}&requestId={requestId}"))) {
                 effects.put(JSONObject().put("id", id).put("method", method).put("path", path).apply {
@@ -1887,7 +1892,7 @@ class AppApiRuntimeGraphTest {
                 }).toString())
             }
             if (request.path == "/api/asset-upload-contract") return ApiResponse(200,
-                """{"version":1,"maximumBytes":26214400,"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
+                """{"version":1,"maximumBytes":1073741824,"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
             if (request.path.startsWith("/api/assets/upload-intents?") && request.method == "GET") {
                 pc.uploadLookups.incrementAndGet()
                 val uri = android.net.Uri.parse(request.path)
@@ -1908,12 +1913,32 @@ class AppApiRuntimeGraphTest {
                 check(asset.getString("requestId") == body.getString("requestId"))
                 val upload = JSONObject().put("method", "POST").put("url", "/api/assets/${asset.getString("id")}/upload")
                     .put("headers", JSONObject().put("Content-Type", body.getString("mimeType")))
-                return ApiResponse(200, JSONObject().put("uploadContractVersion", 1).put("asset", asset).put("upload", upload).toString())
+                val resumable = JSONObject().put("version", 1).put("chunkBytes", 262144)
+                    .put("checksum", "sha256").put("fixedChunks", true)
+                return ApiResponse(200, JSONObject().put("uploadContractVersion", 1).put("asset", asset)
+                    .put("resumableUpload", resumable).put("upload", upload).toString())
+            }
+            if (request.path.startsWith("/api/assets/") && request.path.endsWith("/upload-checkpoint")) {
+                requireScope(request, pc.uploadAsset!!.getString("sessionId"))
+                val checkpoint = JSONObject().put("uploadCheckpointVersion", 1).put("assetId", pc.uploadAsset!!.getString("id"))
+                    .put("offset", pc.uploadCheckpointOffset).put("totalBytes", pc.uploadAsset!!.getLong("sizeBytes"))
+                    .put("sha256", pc.uploadAsset!!.getString("sha256")).put("chunkBytes", 262144)
+                    .put("status", if (pc.uploadCheckpointOffset == pc.uploadAsset!!.getLong("sizeBytes")) "uploaded" else "uploading")
+                return ApiResponse(200, checkpoint.toString())
             }
             if (request.path.startsWith("/api/assets/") && request.path.endsWith("/upload")) {
                 requireScope(request, pc.uploadAsset!!.getString("sessionId"))
-                pc.uploadBodies.incrementAndGet(); pc.uploadBody = request.bodyBytes!!.copyOf()
-                return ApiResponse(200, "", mapOf("ETag" to "fixture-etag"))
+                check(request.method == "PATCH" && request.contentType == "application/octet-stream")
+                check(request.headers.getValue("X-Agentoc-Upload-Offset").toLong() == pc.uploadCheckpointOffset)
+                val chunk = request.bodyBytes!!
+                check(request.headers.getValue("X-Agentoc-Upload-Length").toInt() == chunk.size)
+                pc.uploadBodies.incrementAndGet(); pc.uploadBuffer.write(chunk)
+                pc.uploadCheckpointOffset += chunk.size.toLong()
+                pc.uploadBody = pc.uploadBuffer.toByteArray()
+                val sha = java.security.MessageDigest.getInstance("SHA-256").digest(chunk).joinToString("") { "%02x".format(it) }
+                check(sha == request.headers.getValue("X-Agentoc-Upload-Sha256"))
+                return ApiResponse(200, JSONObject().put("uploadCheckpointVersion", 1)
+                    .put("assetId", pc.uploadAsset!!.getString("id")).put("offset", pc.uploadCheckpointOffset).toString())
             }
             if (request.path.startsWith("/api/assets/") && request.path.endsWith("/finalize")) {
                 requireScope(request, pc.uploadAsset!!.getString("sessionId"))

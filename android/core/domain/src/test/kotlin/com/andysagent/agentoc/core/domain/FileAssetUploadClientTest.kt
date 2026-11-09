@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.security.MessageDigest
 import kotlin.test.*
@@ -27,6 +29,11 @@ class FileAssetUploadClientTest {
         var scoped = false
         var scopeMarker = true
         var unknown404 = false
+        var resumable = false
+        var failChunksBeforePersist = 0
+        var checkpointOffset = 0L
+        var uploadInput = input
+        val chunkBody = ByteArrayOutputStream()
         var corruptAsset: (JsonObject) -> JsonObject = { it }
         var destination = "/api/assets/$assetId/upload"
         var method = "POST"
@@ -35,18 +42,43 @@ class FileAssetUploadClientTest {
         var postedBytes: ByteArray? = null
         var measuredBody = false
         var lost = false
+        var retainPatchRequests = true
+        var discardChunkBytes = false
+        var patchCount = 0
+        var largestPatchBytes = 0
+        val patchOffsets = mutableListOf<Long>()
         fun asset() = corruptAsset(buildJsonObject {
-            put("id", assetId); put("sessionId", "s"); put("originalName", input.originalName)
-            put("mimeType", input.mimeType); put("sizeBytes", input.sizeBytes); put("sha256", input.sha256)
+            put("id", assetId); put("sessionId", "s"); put("originalName", uploadInput.originalName)
+            put("mimeType", uploadInput.mimeType); put("sizeBytes", uploadInput.sizeBytes); put("sha256", uploadInput.sha256)
             put("status", if (ready) "ready" else "pending_upload")
             if (scoped && scopeMarker) put("scopeContractVersion", 1)
         })
         override suspend fun execute(request: ApiRequest): ApiResponse {
-            requests += request
+            if (request.method != "PATCH" || retainPatchRequests) requests += request
             val response = when {
                 request.path == "/api/session-scope-contract" -> ApiResponse(200, if (scoped) scopeContractFixture() else """{"version":0}""")
                 request.path == "/api/asset-upload-contract" -> if (unsupported) ApiResponse(200, """{"version":0}""")
-                    else ApiResponse(200, """{"version":1,"maximumBytes":26214400,"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
+                    else ApiResponse(200, """{"version":1,"maximumBytes":${FileAssetUploadClient.MAXIMUM_BYTES},"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
+                request.path.endsWith("/upload-checkpoint") -> ApiResponse(200, checkpoint().toString())
+                request.method == "PATCH" -> {
+                    if (failChunksBeforePersist > 0) {
+                        failChunksBeforePersist--
+                        throw ApiException(503, "TEMPORARY_UNAVAILABLE", "Temporary upload failure")
+                    }
+                    val offset = request.headers.getValue("X-Agentoc-Upload-Offset").toLong()
+                    patchOffsets += offset
+                    patchCount++
+                    assertEquals(checkpointOffset, offset)
+                    assertEquals("application/octet-stream", request.contentType)
+                    val chunk = request.bodyBytes!!
+                    largestPatchBytes = maxOf(largestPatchBytes, chunk.size)
+                    assertEquals(chunk.size.toString(), request.headers.getValue("X-Agentoc-Upload-Length"))
+                    assertEquals(MessageDigest.getInstance("SHA-256").digest(chunk).joinToString("") { "%02x".format(it) },
+                        request.headers.getValue("X-Agentoc-Upload-Sha256"))
+                    if (!discardChunkBytes) chunkBody.write(chunk)
+                    checkpointOffset += chunk.size.toLong()
+                    ApiResponse(200, checkpoint().toString())
+                }
                 request.method == "GET" -> {
                     beforeLookup()
                     if (!pending) return ApiResponse(404, if (unknown404) "{}" else """{"code":"FILE_ASSET_NOT_FOUND"}""")
@@ -54,9 +86,16 @@ class FileAssetUploadClientTest {
                 }
                 request.path == "/api/assets/upload-intents" -> {
                     pending = true
-                    assertEquals(input.requestId, Json.parseToJsonElement(request.body!!).jsonObject["requestId"]!!.jsonPrimitive.content)
+                    val intentBody = Json.parseToJsonElement(request.body!!).jsonObject
+                    assertEquals(uploadInput.requestId, intentBody["requestId"]!!.jsonPrimitive.content)
+                    assertEquals(uploadInput.quotaBatchId ?: uploadInput.requestId,
+                        intentBody["quotaBatchId"]!!.jsonPrimitive.content)
                     ApiResponse(200, buildJsonObject {
                         put("uploadContractVersion", 1); put("asset", asset())
+                        if (resumable) put("resumableUpload", buildJsonObject {
+                            put("version", 1); put("chunkBytes", FileAssetUploadClient.UPLOAD_CHUNK_BYTES)
+                            put("checksum", "sha256"); put("fixedChunks", true)
+                        })
                         put("upload", buildJsonObject {
                             put("url", destination); put("method", method)
                             put("headers", buildJsonObject { uploadHeaders.forEach { (key, value) -> put(key, value) } })
@@ -79,6 +118,12 @@ class FileAssetUploadClientTest {
             if (!lost && request.path == lose) { lost = true; throw IOException("Acknowledgement lost") }
             return response
         }
+        private fun checkpoint() = buildJsonObject {
+            put("uploadCheckpointVersion", 1); put("assetId", assetId); put("offset", checkpointOffset)
+            put("totalBytes", uploadInput.sizeBytes); put("sha256", uploadInput.sha256)
+            put("chunkBytes", FileAssetUploadClient.UPLOAD_CHUNK_BYTES)
+            put("status", if (checkpointOffset == uploadInput.sizeBytes) "uploaded" else "uploading")
+        }
         override fun connectInvalidationSocket() = Unit
         override suspend fun close() = Unit
     }
@@ -97,6 +142,78 @@ class FileAssetUploadClientTest {
         assertNull(observed[2].writtenBytes)
         assertEquals(listOf(0L, bytes.size.toLong()), observed.mapNotNull { it.writtenBytes })
         assertTrue(observed.all { it.totalBytes == input.sizeBytes })
+    }
+
+    @Test fun reopenableSourceUsesBoundedResumableChunksAndRecoversLostChunkReply() = runTest {
+        val content = ByteArray(FileAssetUploadClient.UPLOAD_CHUNK_BYTES * 2 + 19) { (it % 251).toByte() }
+        val file = input.copy(requestId = "capture:large", sizeBytes = content.size.toLong(),
+            sha256 = MessageDigest.getInstance("SHA-256").digest(content).joinToString("") { "%02x".format(it) })
+        val fixture = Fixture().apply { resumable = true; uploadInput = file; lose = "/api/assets/$assetId/upload" }
+        val client = FileAssetUploadClient("pc", fixture)
+        val source = com.andysagent.agentoc.core.network.ApiRequestBodySource(file.sizeBytes, file.sha256) {
+            ByteArrayInputStream(content)
+        }
+        assertTrue(client.upload("s", file, source).ready)
+        assertEquals(file.sizeBytes, fixture.checkpointOffset)
+        assertTrue(fixture.requests.filter { it.method == "PATCH" }.all { it.bodyBytes!!.size <= FileAssetUploadClient.UPLOAD_CHUNK_BYTES })
+        val resumedPatches = fixture.requests.filter { it.method == "PATCH" }
+        assertEquals(listOf(0L, FileAssetUploadClient.UPLOAD_CHUNK_BYTES.toLong(), FileAssetUploadClient.UPLOAD_CHUNK_BYTES.toLong() * 2),
+            resumedPatches.map { it.headers.getValue("X-Agentoc-Upload-Offset").toLong() })
+        assertContentEquals(content, fixture.chunkBody.toByteArray())
+        assertTrue(fixture.requests.any { it.path.endsWith("/upload-checkpoint") })
+    }
+
+    @Test fun retryAfterTransientChunkFailureUsesServerCheckpointAndResendsSameChunk() = runTest {
+        val fixture = Fixture().apply { resumable = true; failChunksBeforePersist = 1 }
+        val source = com.andysagent.agentoc.core.network.ApiRequestBodySource(input.sizeBytes, input.sha256) {
+            ByteArrayInputStream(bytes)
+        }
+        assertTrue(FileAssetUploadClient("pc", fixture).upload("s", input, source).ready)
+        assertEquals(bytes.size.toLong(), fixture.checkpointOffset)
+        assertEquals(listOf(0L, 0L), fixture.requests.filter { it.method == "PATCH" }
+            .map { it.headers.getValue("X-Agentoc-Upload-Offset").toLong() })
+        assertContentEquals(bytes, fixture.chunkBody.toByteArray())
+    }
+
+    @Test fun oneGiBBoundaryIsAcceptedWithoutAllocatingTheAttachment() = runTest {
+        val fixture = Fixture()
+        val maximum = input.copy(requestId = "capture:one-gib", sizeBytes = FileAssetUploadClient.MAXIMUM_BYTES,
+            sha256 = "a".repeat(64))
+        assertNull(FileAssetUploadClient("pc", fixture).findReceipt("s", maximum))
+        assertTrue(fixture.requests.all { it.method == "GET" })
+        fixture.requests.clear()
+        assertFailsWith<IllegalArgumentException> {
+            FileAssetUploadClient("pc", fixture).findReceipt("s", maximum.copy(sizeBytes = maximum.sizeBytes + 1))
+        }
+        assertTrue(fixture.requests.isEmpty())
+    }
+
+    @Test fun oneGiBStreamingTransferOnlyRetainsOneBoundedChunkAtATime() = runTest {
+        val totalBytes = FileAssetUploadClient.MAXIMUM_BYTES
+        val block = ByteArray(64 * 1024)
+        val digest = MessageDigest.getInstance("SHA-256")
+        var hashed = 0L
+        while (hashed < totalBytes) {
+            val count = minOf(block.size.toLong(), totalBytes - hashed).toInt()
+            digest.update(block, 0, count)
+            hashed += count
+        }
+        val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+        val file = input.copy(requestId = "capture:streaming-one-gib", sizeBytes = totalBytes, sha256 = sha256)
+        val fixture = Fixture().apply {
+            resumable = true; uploadInput = file; retainPatchRequests = false; discardChunkBytes = true
+        }
+        val source = com.andysagent.agentoc.core.network.ApiRequestBodySource(totalBytes, sha256) {
+            ZeroInputStream(totalBytes)
+        }
+
+        assertTrue(FileAssetUploadClient("pc", fixture).upload("s", file, source).ready)
+        assertEquals(totalBytes, fixture.checkpointOffset)
+        assertEquals(totalBytes / FileAssetUploadClient.UPLOAD_CHUNK_BYTES, fixture.patchCount.toLong())
+        assertEquals(0L, fixture.patchOffsets.first())
+        assertEquals(totalBytes - FileAssetUploadClient.UPLOAD_CHUNK_BYTES, fixture.patchOffsets.last())
+        assertTrue(fixture.largestPatchBytes <= FileAssetUploadClient.UPLOAD_CHUNK_BYTES)
+        assertTrue(fixture.chunkBody.size() == 0)
     }
 
     @Test fun carrierWithoutMeasurementStaysUnknownAndLostFinalizeDoesNotConfirmUntilLookup() = runTest {
@@ -281,5 +398,22 @@ class FileAssetUploadClientTest {
         assertNull(put.idempotencyKey)
         assertNull(put.requestId)
         assertEquals("/api/assets/$assetId/finalize", fixture.requests.last().path)
+    }
+}
+
+private class ZeroInputStream(private var remaining: Long) : java.io.InputStream() {
+    override fun read(): Int {
+        if (remaining <= 0) return -1
+        remaining--
+        return 0
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (length == 0) return 0
+        if (remaining <= 0) return -1
+        val count = minOf(length.toLong(), remaining).toInt()
+        java.util.Arrays.fill(buffer, offset, offset + count, 0.toByte())
+        remaining -= count
+        return count
     }
 }

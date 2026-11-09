@@ -14,6 +14,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.ResponseBody
+import okhttp3.MediaType.Companion.toMediaType
+import okio.Buffer
+import java.io.ByteArrayInputStream
+import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -21,6 +26,37 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class OkHttpAgentoCTransportTest {
+    @Test fun directUploadStreamsAndVerifiesAReopenableBody() = runBlocking {
+        val server = MockWebServer().apply {
+            enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody("{\"ok\":true}"))
+            start()
+        }
+        val content = ByteArray(2 * 1024 * 1024 + 73) { (it % 251).toByte() }
+        val digest = MessageDigest.getInstance("SHA-256").digest(content).joinToString("") { "%02x".format(it) }
+        var opens = 0
+        val transport = OkHttpAgentoCTransport({ server.url("/").toString().trimEnd('/') }, { null })
+        try {
+            val response = transport.execute(ApiRequest("PUT", server.url("/upload").toString(),
+                contentType = "application/octet-stream",
+                bodySource = ApiRequestBodySource(content.size.toLong(), digest) { opens++; ByteArrayInputStream(content) }))
+            assertEquals("{\"ok\":true}", response.body)
+            assertEquals(1, opens)
+            val request = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)!!
+            assertEquals("PUT", request.method)
+            assertTrue(request.body.readByteArray().contentEquals(content))
+        } finally { transport.close(); server.shutdown() }
+    }
+
+    @Test fun directHttpResponseRejectsDeclaredBodiesBeyondTheBound() {
+        val body = object : ResponseBody() {
+            private val content = Buffer().writeUtf8("{}")
+            override fun contentType() = "application/json".toMediaType()
+            override fun contentLength() = OkHttpAgentoCTransport.MAX_HTTP_RESPONSE_BYTES + 1
+            override fun source() = content
+        }
+        assertFailsWith<java.io.IOException> { readBoundedHttpResponse(200, emptyMap(), body) }
+    }
+
     @Test fun approvalTimeoutDoesNotTearDownAnOpenCarrierOrReplayTheDecision() = runBlocking {
         for (turn in listOf(true)) {
             var calls = 0

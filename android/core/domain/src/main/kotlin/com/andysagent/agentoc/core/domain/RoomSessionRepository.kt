@@ -11,7 +11,7 @@ import com.andysagent.agentoc.core.sync.terminalRunState
 
 import android.content.ContentResolver
 import android.net.Uri
-import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 import com.andysagent.agentoc.core.database.AgentoCDao
 import com.andysagent.agentoc.core.database.AgentoCDatabase
 import com.andysagent.agentoc.core.database.ApprovalEntity
@@ -48,6 +48,7 @@ import com.andysagent.agentoc.core.model.QueuedMessage
 import com.andysagent.agentoc.core.network.AgentoCTransport
 import com.andysagent.agentoc.core.network.ApiException
 import com.andysagent.agentoc.core.network.ApiRequest
+import com.andysagent.agentoc.core.network.ApiRequestBodySource
 import com.andysagent.agentoc.core.protocol.AgentocProtocol
 import com.andysagent.agentoc.core.protocol.ApprovalAuthorizationDto
 import com.andysagent.agentoc.core.protocol.ApprovalResolutionRequestDto
@@ -196,7 +197,7 @@ class RoomSessionRepository(
     override val runtimeTargetId: String? get() = targetId
     private companion object {
         const val LIVE_TIMELINE_UI_INTERVAL_MS = 16L
-        const val MAX_ATTACHMENT_BYTES = 256L * 1024L * 1024L
+        const val MAX_ATTACHMENT_BYTES = 1024L * 1024L * 1024L
         const val DEFAULT_ATTACHMENT_BUFFER_BYTES = 64 * 1024
     }
 
@@ -236,6 +237,11 @@ class RoomSessionRepository(
     // the next sync without rewinding the durable event cursor.
     private val pendingVisibleOperationRefresh = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val visibleTimelineState = MutableStateFlow<Map<String, List<TimelineItem>>>(emptyMap())
+    private val attachmentUploadProgressState = MutableStateFlow<Map<String, AttachmentUploadProgress>>(emptyMap())
+    override fun observeAttachmentUploadProgress(sessionId: String): Flow<Map<String, AttachmentUploadProgress>> =
+        attachmentUploadProgressState.map { progress ->
+            if (sessionId.isBlank()) emptyMap() else progress.filterValues { it.sessionId == sessionId }
+        }.distinctUntilChanged()
     private val timelinePagingState = MutableStateFlow<Map<String, TimelinePagingState>>(emptyMap())
     private val visibleTimelineEvents = java.util.concurrent.ConcurrentHashMap<String, List<SessionEventDto>>()
     private val targetSummaryLedger = RoomTargetSummaryLedger(database, dao, codec)
@@ -1994,27 +2000,66 @@ class RoomSessionRepository(
         var operation = initial.copy(state = "sending", updatedAt = System.currentTimeMillis())
         var payload = AgentocProtocol.json.parseToJsonElement(operation.payload).jsonObject
         val specs = payload["attachments"]?.jsonArray.orEmpty()
-        val refs = mutableListOf<AttachmentItemDto>()
-        specs.forEachIndexed { index, element ->
-            val spec = element.jsonObject
-            val existing = attachmentRefFromPendingSpec(spec)
-            val ref = existing ?: uploadAttachment(
-                operationScope(payload),
-                OutboundAttachment(
-                    contentUri = spec.string("contentUri").orEmpty(),
-                    originalName = spec.string("originalName").orEmpty(),
-                    mimeType = spec.string("mimeType").orEmpty(),
-                    sizeBytes = spec["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
-                    renderAsFile = spec["renderAsFile"]?.jsonPrimitive?.booleanOrNull == true,
-                    assetId = spec.string("assetId"),
-                ),
-            )
-            refs += ref
-            payload = payloadWithAttachmentRef(payload, index, ref)
-            operation = operation.copy(payload = payload.toString(), updatedAt = System.currentTimeMillis(), lastError = null)
-            dao.upsertOperation(operation)
+        val messageRequestId = payload.string("requestId") ?: operation.requestId
+        val sessionId = operationScope(payload)
+        val totalBytes = specs.sumOf { element ->
+            element.jsonObject["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
         }
-        return operation to refs
+        val refs = mutableListOf<AttachmentItemDto>()
+        var completedBytes = 0L
+        var lastProgressAt = 0L
+        var lastProgress: AttachmentUploadProgress? = null
+        fun publishProgress(phase: FileUploadPhase, transferredBytes: Long, force: Boolean = false) {
+            if (totalBytes <= 0L || sessionId.isBlank()) return
+            val progress = AttachmentUploadProgress(
+                sessionId = sessionId,
+                phase = phase,
+                transferredBytes = transferredBytes.coerceIn(0L, totalBytes),
+                totalBytes = totalBytes,
+            )
+            val now = System.currentTimeMillis()
+            if (!force && lastProgress?.phase == phase && now - lastProgressAt < 200L
+                && progress.transferredBytes - (lastProgress?.transferredBytes ?: 0L) < 1024L * 1024L) return
+            lastProgressAt = now
+            lastProgress = progress
+            attachmentUploadProgressState.update { it + (operation.requestId to progress) }
+        }
+        if (totalBytes > 0L) publishProgress(FileUploadPhase.PREPARING, 0L, force = true)
+        try {
+            specs.forEachIndexed { index, element ->
+                val spec = element.jsonObject
+                val attachmentSize = spec["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
+                val existing = attachmentRefFromPendingSpec(spec)
+                val ref = existing ?: uploadAttachment(
+                    sessionId,
+                    stableAttachmentUploadRequestId(messageRequestId, index),
+                    quotaBatchId = messageRequestId,
+                    attachment = OutboundAttachment(
+                        contentUri = spec.string("contentUri").orEmpty(),
+                        originalName = spec.string("originalName").orEmpty(),
+                        mimeType = spec.string("mimeType").orEmpty(),
+                        sizeBytes = attachmentSize,
+                        renderAsFile = spec["renderAsFile"]?.jsonPrimitive?.booleanOrNull == true,
+                        assetId = spec.string("assetId"),
+                    ),
+                    onProgress = { uploadProgress ->
+                        val currentBytes = if (uploadProgress.phase == FileUploadPhase.CONFIRMED) attachmentSize
+                            else uploadProgress.writtenBytes ?: 0L
+                        publishProgress(uploadProgress.phase, completedBytes + currentBytes)
+                    },
+                )
+                refs += ref
+                completedBytes = (completedBytes + attachmentSize).coerceAtMost(totalBytes)
+                if (existing != null) publishProgress(FileUploadPhase.TRANSFERRING, completedBytes)
+                payload = payloadWithAttachmentRef(payload, index, ref)
+                operation = operation.copy(payload = payload.toString(), updatedAt = System.currentTimeMillis(), lastError = null)
+                dao.upsertOperation(operation)
+            }
+            if (totalBytes > 0L) publishProgress(FileUploadPhase.CONFIRMED, totalBytes, force = true)
+            return operation to refs
+        } finally {
+            attachmentUploadProgressState.update { it - operation.requestId }
+        }
     }
 
     private fun operationScope(payload: JsonObject): String = payload.string("sessionId").orEmpty()
@@ -2050,13 +2095,21 @@ class RoomSessionRepository(
         })
     }
 
-    private suspend fun uploadAttachment(sessionId: String, attachment: OutboundAttachment): AttachmentItemDto {
+    private suspend fun uploadAttachment(
+        sessionId: String,
+        uploadRequestId: String,
+        quotaBatchId: String,
+        attachment: OutboundAttachment,
+        onProgress: (FileUploadProgress) -> Unit = {},
+    ): AttachmentItemDto {
         val resolver = contentResolver
             ?: error("Attachment upload is unavailable until the Android file resolver is configured")
+        val fixedTargetId = targetId?.takeIf { it.isNotBlank() }
+            ?: error("Attachment upload requires a fixed connected computer")
         val uri = Uri.parse(attachment.contentUri)
-        val bytes = withContext(Dispatchers.IO) {
+        val descriptor = withContext(Dispatchers.IO) {
             resolver.openInputStream(uri)?.use { input ->
-                val output = ByteArrayOutputStream()
+                val digest = MessageDigest.getInstance("SHA-256")
                 val buffer = ByteArray(DEFAULT_ATTACHMENT_BUFFER_BYTES)
                 var total = 0L
                 while (true) {
@@ -2064,63 +2117,42 @@ class RoomSessionRepository(
                     if (read < 0) break
                     total += read
                     require(total <= MAX_ATTACHMENT_BYTES) {
-                        "Attachment is larger than ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB"
+                        "Attachment is larger than 1 GiB"
                     }
-                    output.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
                 }
-                output.toByteArray()
+                total to digest.digest().joinToString("") { "%02x".format(it) }
             } ?: error("Attachment file could not be opened")
         }
-        val sizeBytes = attachment.sizeBytes.takeIf { it > 0 } ?: bytes.size.toLong()
+        val sizeBytes = attachment.sizeBytes.takeIf { it > 0 } ?: descriptor.first
+        require(sizeBytes == descriptor.first) { "Attachment changed after it was selected" }
+        require(sizeBytes in 1..MAX_ATTACHMENT_BYTES) { "Attachment must be between 1 byte and 1 GiB" }
         val mimeType = attachment.mimeType.ifBlank { "application/octet-stream" }
-        val intentBody = buildJsonObject {
-            put("sessionId", JsonPrimitive(sessionId))
-            put("originalName", JsonPrimitive(attachment.originalName))
-            put("mimeType", JsonPrimitive(mimeType))
-            put("sizeBytes", JsonPrimitive(sizeBytes))
-        }.toString()
-        val intent = execute(ApiRequest("POST", "/api/assets/upload-intents", intentBody))
-        val root = AgentocProtocol.json.parseToJsonElement(intent.body).jsonObject
-        val asset = root["asset"]?.jsonObject ?: error("Upload intent did not include an asset")
-        val assetId = asset.string("id")?.takeIf { it.isNotBlank() }
-            ?: error("Upload intent did not include an asset id")
-        val upload = root["upload"]?.jsonObject ?: error("Upload intent did not include an upload target")
-        val uploadUrl = upload.string("url")?.takeIf { it.isNotBlank() }
-            ?: error("Upload intent did not include an upload URL")
-        val uploadHeaders = upload["headers"]?.jsonObject.orEmpty().mapNotNull { (key, value) ->
-            value.jsonPrimitive.contentOrNull?.let { key to it }
-        }.toMap()
-        val uploadResponse = execute(
-            ApiRequest(
-                method = upload.string("method") ?: "PUT",
-                path = uploadUrl,
-                headers = uploadHeaders,
-                bodyBytes = bytes,
-                contentType = uploadHeaders.entries.firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }?.value
-                    ?: mimeType,
-            ),
+        val source = ApiRequestBodySource(sizeBytes, descriptor.second) {
+            resolver.openInputStream(uri) ?: error("Attachment file could not be reopened")
+        }
+        onProgress(FileUploadProgress(FileUploadPhase.PREPARING, sizeBytes, 0L))
+        val uploaded = FileAssetUploadClient(fixedTargetId, transport).upload(
+            sessionId,
+            FileUploadInput(uploadRequestId, attachment.originalName, mimeType, sizeBytes, descriptor.second,
+                quotaBatchId = quotaBatchId),
+            source,
+            onProgress = onProgress,
         )
-        val finalizeBody = buildJsonObject {
-            put("sizeBytes", JsonPrimitive(sizeBytes))
-            put(
-                "etag",
-                JsonPrimitive(
-                    uploadResponse.headers.entries
-                        .firstOrNull { (key, _) -> key.equals("ETag", ignoreCase = true) }
-                        ?.value
-                        .orEmpty(),
-                ),
-            )
-        }.toString()
-        val finalized = execute(ApiRequest("POST", "/api/assets/$assetId/finalize", finalizeBody))
-        val finalizedAsset = AgentocProtocol.json.parseToJsonElement(finalized.body).jsonObject["asset"]?.jsonObject ?: asset
         return AttachmentItemDto(
-            assetId = assetId,
-            originalName = finalizedAsset.string("originalName") ?: attachment.originalName,
-            mimeType = finalizedAsset.string("mimeType") ?: mimeType,
-            sizeBytes = finalizedAsset["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: sizeBytes,
+            assetId = uploaded.assetId,
+            originalName = uploaded.originalName,
+            mimeType = uploaded.mimeType,
+            sizeBytes = uploaded.sizeBytes,
             renderAs = "file".takeIf { attachment.renderAsFile },
         )
+    }
+
+    private fun stableAttachmentUploadRequestId(messageRequestId: String, index: Int): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$messageRequestId\u0000$index".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return "message-attachment:$digest"
     }
 
     private fun parseRuntimeModels(modelsJson: JsonObject?): List<RuntimeModelOption> =

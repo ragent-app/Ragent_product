@@ -29,11 +29,15 @@ import kotlinx.serialization.serializer
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.BufferedSink
+import okio.Buffer
 import okio.ByteString
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
@@ -64,6 +68,7 @@ private fun carrierHeaders(request: ApiRequest): MutableMap<String, String> = re
     if (keys.none { it.equals("Content-Type", ignoreCase = true) }) {
         val type = request.contentType ?: when {
             request.bodyBytes != null -> "application/octet-stream"
+            request.bodySource != null -> "application/octet-stream"
             request.body != null -> "application/json"
             else -> null
         }
@@ -149,6 +154,9 @@ class OkHttpAgentoCTransport(
         // session would upload to the wrong origin. Relative API paths remain
         // governed by the server bootstrap -> TURN-first -> P2P upgrade lock.
         val serverRelativeRequest = !request.path.startsWith("http://") && !request.path.startsWith("https://")
+        if (request.bodySource != null && serverRelativeRequest) {
+            throw ApiException(0, "STREAMING_BODY_REQUIRES_HTTP", "Streaming uploads require a direct HTTP destination", retryable = false)
+        }
         if (serverRelativeRequest) {
             p2pSession.get()?.takeIf { it.isOpen }?.let { return@withContext executeViaP2P(request, it) }
             turnSession.acquire()?.let { carrier ->
@@ -172,9 +180,13 @@ class OkHttpAgentoCTransport(
             request.requestId?.let { builder.header("X-AgentoC-Request-Id", it) }
             request.idempotencyKey?.let { builder.header("Idempotency-Key", it) }
         }
-        val rawBody = request.bodyBytes?.toRequestBody(
-            (request.contentType ?: "application/octet-stream").toMediaType(),
-        ) ?: request.body?.toRequestBody(request.contentType?.toMediaType() ?: JSON_MEDIA_TYPE)
+        require(listOfNotNull(request.bodyBytes, request.body, request.bodySource).size <= 1) {
+            "An API request may have only one body source"
+        }
+        val rawBody = request.bodySource?.let { StreamingRequestBody(it, request.contentType) }
+            ?: request.bodyBytes?.toRequestBody(
+                (request.contentType ?: "application/octet-stream").toMediaType(),
+            ) ?: request.body?.toRequestBody(request.contentType?.toMediaType() ?: JSON_MEDIA_TYPE)
         val body = if (rawBody != null && request.onBodyBytesWritten != null)
             ProgressRequestBody(rawBody, request.onBodyBytesWritten) else rawBody
         when (request.method.uppercase()) {
@@ -203,7 +215,13 @@ class OkHttpAgentoCTransport(
 
     /** Keep cancellation attached until the whole response body has been read. */
     private suspend fun executeHttpCancellable(request: Request): ApiResponse = suspendCancellableCoroutine { continuation ->
-        val call = client.newCall(request)
+        val isUploadChunk = request.method == "PATCH"
+            && request.url.encodedPath.matches(Regex("/api/assets/[^/]+/upload"))
+        val requestClient = if (isUploadChunk) client.newBuilder()
+            .readTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .build() else client
+        val call = requestClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, error: IOException) {
@@ -213,8 +231,7 @@ class OkHttpAgentoCTransport(
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                 try {
                     val result = response.use {
-                        val bytes = it.body?.bytes() ?: ByteArray(0)
-                        ApiResponse(it.code, bytes.toString(Charsets.UTF_8), it.headers.toMap(), bytes)
+                        readBoundedHttpResponse(it.code, it.headers.toMap(), it.body)
                     }
                     continuation.resume(result)
                 } catch (error: Exception) {
@@ -257,12 +274,7 @@ class OkHttpAgentoCTransport(
         if (remoteError != null) {
             throw ApiException(0, "P2P_REMOTE_ERROR", remoteError, retryable = false)
         }
-        val response = ApiResponse(
-            statusCode = result.status,
-            body = P2PProtocol.decodeBodyToString(result.bodyBase64),
-            headers = result.headers,
-            bodyBytes = runCatching { P2PProtocol.decodeBody(result.bodyBase64) }.getOrDefault(ByteArray(0)),
-        )
+        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers)
         if (!response.isSuccessful) {
             val error = response.toApiException(codec)
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
@@ -305,12 +317,7 @@ class OkHttpAgentoCTransport(
         if (remoteError != null) {
             throw ApiException(0, "TURN_REMOTE_ERROR", remoteError, retryable = false)
         }
-        val response = ApiResponse(
-            statusCode = result.status,
-            body = P2PProtocol.decodeBodyToString(result.bodyBase64),
-            headers = result.headers,
-            bodyBytes = runCatching { P2PProtocol.decodeBody(result.bodyBase64) }.getOrDefault(ByteArray(0)),
-        )
+        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers)
         if (!response.isSuccessful) {
             val error = response.toApiException(codec)
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
@@ -445,7 +452,7 @@ class OkHttpAgentoCTransport(
         if (response.code == 401) return true
         if (response.code != 403) return false
         val error = runCatching {
-            codec.decode(serializer<ErrorResponseDto>(), response.peekBody(Long.MAX_VALUE).string())
+            codec.decode(serializer<ErrorResponseDto>(), response.peekBody(MAX_ERROR_BODY_BYTES).string())
         }.getOrNull()
         return error?.code == "DEVICE_REVOKED"
     }
@@ -494,6 +501,10 @@ class OkHttpAgentoCTransport(
     }
 
     companion object {
+        internal const val MAX_HTTP_RESPONSE_BYTES = 64L * 1024L * 1024L
+        internal const val MAX_CARRIER_RESPONSE_BYTES = 24 * 1024 * 1024
+        private const val UPLOAD_CHUNK_HTTP_TIMEOUT_MS = 165_000L
+        private const val MAX_ERROR_BODY_BYTES = 64L * 1024L
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = "".toRequestBody(JSON_MEDIA_TYPE)
 
@@ -503,5 +514,70 @@ class OkHttpAgentoCTransport(
             .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(30, TimeUnit.SECONDS)
             .build()
+    }
+}
+
+internal fun readBoundedHttpResponse(statusCode: Int, headers: Map<String, String>, body: okhttp3.ResponseBody?): ApiResponse {
+    val length = body?.contentLength() ?: 0L
+    if (length > OkHttpAgentoCTransport.MAX_HTTP_RESPONSE_BYTES)
+        throw IOException("HTTP response exceeded the client size limit")
+    val buffer = Buffer()
+    val source = body?.source()
+    var total = 0L
+    if (source != null) {
+        while (true) {
+            val read = source.read(buffer, 16 * 1024L)
+            if (read < 0) break
+            total += read
+            if (total > OkHttpAgentoCTransport.MAX_HTTP_RESPONSE_BYTES)
+                throw IOException("HTTP response exceeded the client size limit")
+        }
+    }
+    val bytes = buffer.readByteArray()
+    return if (isTextResponse(body?.contentType()?.toString()))
+        ApiResponse(statusCode, bytes.toString(Charsets.UTF_8), headers)
+    else ApiResponse(statusCode, "", headers, bytes)
+}
+
+private fun isTextResponse(contentType: String?): Boolean {
+    val type = contentType?.substringBefore(';')?.trim()?.lowercase() ?: return true
+    return type.startsWith("text/") || type == "application/json" || type.endsWith("+json")
+        || type == "application/xml" || type.endsWith("+xml") || type == "application/x-www-form-urlencoded"
+}
+
+private fun decodeCarrierResponse(status: Int, bodyBase64: String, headers: Map<String, String>): ApiResponse {
+    val maximumBase64Characters = ((OkHttpAgentoCTransport.MAX_CARRIER_RESPONSE_BYTES.toLong() * 4L + 2L) / 3L)
+    if (bodyBase64.length.toLong() > maximumBase64Characters) throw IOException("Carrier response exceeded the client size limit")
+    val bytes = P2PProtocol.decodeBody(bodyBase64)
+    if (bytes.size > OkHttpAgentoCTransport.MAX_CARRIER_RESPONSE_BYTES) throw IOException("Carrier response exceeded the client size limit")
+    return if (isTextResponse(headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value))
+        ApiResponse(status, bytes.toString(Charsets.UTF_8), headers)
+    else ApiResponse(status, "", headers, bytes)
+}
+
+private class StreamingRequestBody(
+    private val source: ApiRequestBodySource,
+    private val mediaType: String?,
+) : RequestBody() {
+    override fun contentType() = mediaType?.toMediaType()
+    override fun contentLength(): Long = source.sizeBytes
+    override fun writeTo(sink: BufferedSink) {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        source.openStream().buffered(buffer.size).use { input ->
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+                total += read
+                if (total > source.sizeBytes) throw IOException("Streaming request exceeded its declared size")
+                digest.update(buffer, 0, read)
+                sink.write(buffer, 0, read)
+            }
+        }
+        val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
+        if (total != source.sizeBytes || actualHash != source.sha256)
+            throw IOException("Streaming request differs from its verified file descriptor")
     }
 }

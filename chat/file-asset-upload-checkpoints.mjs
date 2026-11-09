@@ -5,8 +5,11 @@ import { join } from 'node:path';
 import { writeJsonAtomic } from './fs-utils.mjs';
 
 export const UPLOAD_CHUNK_BYTES = 256 * 1024;
-export const UPLOAD_CHUNK_REQUEST_TIMEOUT_MS = 30_000;
-export const UPLOAD_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
+export const MAX_STABLE_UPLOAD_BYTES = 1024 * 1024 * 1024;
+export const UPLOAD_CHUNK_REQUEST_TIMEOUT_MS = 150_000;
+export const UPLOAD_CHECKPOINT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const UPLOAD_CHECKPOINT_MAX_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+const LEGACY_UPLOAD_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
 export const RESUMABLE_UPLOAD_CONTRACT = Object.freeze({ version: 1,
   chunkBytes: UPLOAD_CHUNK_BYTES, checkpointTtlMs: UPLOAD_CHECKPOINT_TTL_MS,
   checksum: 'sha256', fixedChunks: true });
@@ -39,11 +42,12 @@ export class FileAssetUploadCheckpoints {
     const created = Date.parse(record.createdAt);
     if (!Number.isFinite(created) || !/^[a-f0-9]{64}$/.test(record.uploadRequest.fingerprint || '')
       || !Number.isSafeInteger(record.sizeBytes) || record.sizeBytes < 1
-      || record.sizeBytes > 25 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(record.sha256 || ''))
+      || record.sizeBytes > MAX_STABLE_UPLOAD_BYTES || !/^[a-f0-9]{64}$/.test(record.sha256 || ''))
       fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
-    return { version: 1, assetId: record.id, fingerprint: record.uploadRequest.fingerprint,
+    const hardExpiresAt = created + UPLOAD_CHECKPOINT_MAX_LIFETIME_MS;
+    return { version: 2, assetId: record.id, fingerprint: record.uploadRequest.fingerprint,
       totalBytes: record.sizeBytes, sha256: record.sha256, offset: 0, cancelled: false,
-      expiresAt: created + UPLOAD_CHECKPOINT_TTL_MS };
+      hardExpiresAt, expiresAt: Math.min(created + UPLOAD_CHECKPOINT_TTL_MS, hardExpiresAt) };
   }
 
   async load(record) {
@@ -51,9 +55,19 @@ export class FileAssetUploadCheckpoints {
     try {
       const info = await lstat(manifest);
       if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
-      const value = JSON.parse(await readFile(manifest, 'utf8'));
-      if (Object.keys(expected).some(key => !['offset', 'cancelled'].includes(key) && value[key] !== expected[key])
+      let value = JSON.parse(await readFile(manifest, 'utf8'));
+      if (value.version === 1 && value.assetId === expected.assetId
+        && value.fingerprint === expected.fingerprint && value.totalBytes === expected.totalBytes
+        && value.sha256 === expected.sha256
+        && value.expiresAt === Date.parse(record.createdAt) + LEGACY_UPLOAD_CHECKPOINT_TTL_MS) {
+        // Preserve valid v1 checkpoints from the one-day lease before writing
+        // the sliding-lease v2 format on the next accepted chunk.
+        value = { ...value, version: 2, hardExpiresAt: expected.hardExpiresAt };
+      }
+      if (Object.keys(expected).some(key => !['offset', 'cancelled', 'expiresAt'].includes(key) && value[key] !== expected[key])
         || typeof value.cancelled !== 'boolean' || !Number.isSafeInteger(value.offset)
+        || !Number.isSafeInteger(value.expiresAt) || value.expiresAt < Date.parse(record.createdAt)
+        || value.expiresAt > expected.hardExpiresAt
         || value.offset < 0 || value.offset > record.sizeBytes
         || (value.offset !== record.sizeBytes && value.offset % UPLOAD_CHUNK_BYTES !== 0))
         fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
@@ -156,7 +170,8 @@ export class FileAssetUploadCheckpoints {
         written += result.bytesWritten;
       }
       await handle.sync();
-      const next = { ...value, offset: offset + length };
+      const next = { ...value, offset: offset + length,
+        expiresAt: Math.min(this.clock() + UPLOAD_CHECKPOINT_TTL_MS, value.hardExpiresAt) };
       return await fence(async () => {
         signal?.throwIfAborted();
         if (this.clock() >= next.expiresAt) fail('FILE_ASSET_UPLOAD_EXPIRED', 410);
@@ -185,8 +200,10 @@ export class FileAssetUploadCheckpoints {
 export function uploadChunkHeaders(headers) {
   const number = name => {
     const value = headers[name];
-    if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,8})$/.test(value)) fail('INVALID_ARGUMENT', 400);
-    return Number(value);
+    if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,15})$/.test(value)) fail('INVALID_ARGUMENT', 400);
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) fail('INVALID_ARGUMENT', 400);
+    return parsed;
   };
   if (headers['content-type'] !== 'application/octet-stream') fail('INVALID_ARGUMENT', 415);
   return { offset: number('x-agentoc-upload-offset'), length: number('x-agentoc-upload-length'),

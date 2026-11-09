@@ -23,6 +23,8 @@ internal fun scopeContractFixture(): String = buildJsonObject {
         Triple("message.commit.receipt", "GET", ScopedMessageClient.COMMIT_PATH),
         Triple("asset.upload.intent", "POST", "/api/assets/upload-intents"),
         Triple("asset.upload.body", "POST", "/api/assets/{assetId}/upload"),
+        Triple("asset.upload.chunk", "PATCH", "/api/assets/{assetId}/upload"),
+        Triple("asset.upload.checkpoint", "GET", "/api/assets/{assetId}/upload-checkpoint"),
         Triple("asset.upload.finalize", "POST", "/api/assets/{assetId}/finalize"),
         Triple("asset.upload.receipt", "GET", "/api/assets/upload-intents?sessionId={sessionId}&requestId={requestId}"),
     )

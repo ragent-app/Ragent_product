@@ -103,6 +103,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
@@ -1404,7 +1405,7 @@ private fun queryAttachmentMetadata(
     )
 }
 
-private const val MAX_PASTED_IMAGE_BYTES = 256L * 1024L * 1024L
+private const val MAX_PASTED_IMAGE_BYTES = 50L * 1024L * 1024L
 
 private fun imageFileExtension(mimeType: String): String = when (mimeType.lowercase()) {
     "image/jpeg", "image/jpg" -> "jpg"
@@ -3768,6 +3769,38 @@ private fun PendingTurnItemView(
                 )
             },
         )
+        if (state.state == PendingTurnState.Sending && state.attachments.isNotEmpty()) {
+            val progress = state.attachmentUploadProgress
+            val hasTransferProgress = progress != null && progress.phase in setOf(
+                com.andysagent.agentoc.core.domain.FileUploadPhase.TRANSFERRING,
+                com.andysagent.agentoc.core.domain.FileUploadPhase.VERIFYING,
+                com.andysagent.agentoc.core.domain.FileUploadPhase.CONFIRMED,
+            )
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = if (hasTransferProgress) {
+                        stringResource(
+                            R.string.workbench_upload_progress,
+                            ((progress!!.fraction * 100f).toInt()).coerceIn(0, 100),
+                        )
+                    } else stringResource(R.string.workbench_upload_preparing),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalAgentocColors.current.secondaryContent,
+                )
+                if (hasTransferProgress) {
+                    LinearProgressIndicator(
+                        progress = { progress!!.fraction },
+                        modifier = Modifier.width(144.dp).height(3.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.width(144.dp).height(3.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
         if (state.state == PendingTurnState.Failed) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

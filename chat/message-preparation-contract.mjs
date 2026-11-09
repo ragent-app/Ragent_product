@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { parseSessionApiScope } from './session-api-scope-contract.mjs';
 import { sessionApiError, sessionApiIdentifier } from './session-api-mutation-contract.mjs';
+import { MAX_STABLE_UPLOAD_BYTES } from './file-asset-upload-checkpoints.mjs';
 
 export const MESSAGE_PREPARATION_LIMIT = 64;
 export const MESSAGE_PREPARATION_TEXT_BYTES = 64 * 1024;
@@ -56,7 +57,7 @@ export function parseMessagePreparation(value) {
     keys(input, ['assetId', 'sha256', 'sizeBytes', 'renderAs']);
     if (typeof input.assetId !== 'string' || !/^fasset_[a-f0-9]{24}$/.test(input.assetId) || ids.has(input.assetId) ||
         typeof input.sha256 !== 'string' || !HASH.test(input.sha256) || !Number.isSafeInteger(input.sizeBytes) ||
-        input.sizeBytes < 1 || input.sizeBytes > 25 * 1024 * 1024)
+        input.sizeBytes < 1 || input.sizeBytes > MAX_STABLE_UPLOAD_BYTES)
       throw sessionApiError('INVALID_ARGUMENT', 400, 'Invalid prepared attachment');
     if (Object.hasOwn(input, 'renderAs') && input.renderAs !== 'file')
       throw sessionApiError('INVALID_ARGUMENT', 400, 'Invalid prepared attachment rendering');

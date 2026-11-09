@@ -106,14 +106,17 @@ test('authenticated scope discovery advertises only implemented effects and reje
   assert.equal(success.body.header, SESSION_API_SCOPE_HEADER);
   assert.equal(success.body.encoding, 'base64url-utf8-json');
   assert.deepEqual(success.body.effects.map(effect => effect.id), ['run.cancel',
-    'asset.upload.intent', 'asset.upload.body', 'asset.upload.finalize', 'asset.upload.receipt',
+    'asset.upload.intent', 'asset.upload.body', 'asset.upload.chunk', 'asset.upload.checkpoint',
+    'asset.upload.finalize', 'asset.upload.receipt',
     'message.prepare', 'message.preparation.receipt', 'message.commit', 'message.commit.receipt']);
   assert.equal(success.body.effects[1].method, 'POST');
   assert.equal(success.body.effects[2].stagedBeforeGuard, true);
-  assert.equal(success.body.effects[3].verifiedBeforeGuard, true);
+  assert.equal(success.body.effects[3].method, 'PATCH');
   assert.equal(success.body.effects[4].readonly, true);
-  assert.equal(success.body.effects[5].startsRun, false);
+  assert.equal(success.body.effects[5].verifiedBeforeGuard, true);
   assert.equal(success.body.effects[6].readonly, true);
+  assert.equal(success.body.effects[7].startsRun, false);
+  assert.equal(success.body.effects[8].readonly, true);
   assert.equal(success.body.effects[0].cancellationRequestedIsTerminal, false);
   assert.equal((await discover({ auth: { role: 'visitor' } })).status, 403);
   assert.equal((await discover({ auth: { role: 'owner', principalKind: 'run_capability' } })).status, 403);

@@ -734,6 +734,7 @@ async function readSnapshot(client) {
   const nativeAuthRequests = await client.query('select * from native_owner_auth_requests order by completed_at, request_id');
   const accountJoinIntents = await client.query('select * from account_join_intents order by created_at, intent_id');
   const accountEntitlements = await client.query('select * from account_entitlements order by account_id');
+  const accountFileUploads = await client.query('select * from account_file_uploads order by account_id, request_id');
   const turnConnectionLeases = await client.query('select * from account_connection_leases order by created_at, connection_id');
   const accountSyncCatalog = await client.query('select * from account_sync_catalog order by account_id, scope, content_key');
   const accountDevices = await client.query('select * from account_devices order by created_at, device_id');
@@ -792,6 +793,13 @@ async function readSnapshot(client) {
     nativeAuthRequests: nativeAuthRequests.rows.map(rowToNativeAuthRequest),
     accountJoinIntents: accountJoinIntents.rows.map(rowToAccountJoinIntent),
     accountEntitlements: accountEntitlements.rows.map(rowToEntitlement),
+    accountFileUploads: accountFileUploads.rows.map((row) => ({
+      accountId: String(row.account_id), requestId: String(row.request_id), instanceId: String(row.instance_id),
+      quotaBatchId: String(row.quota_batch_id ?? row.request_id), sizeBytes: Number(row.size_bytes),
+      sha256: String(row.sha256), status: String(row.status),
+      reservedUntil: row.reserved_until ? toIso(row.reserved_until) : '',
+      createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+    })),
     turnConnectionLeases: turnConnectionLeases.rows.map(rowToTurnConnectionLease),
     accountSyncCatalog: accountSyncCatalog.rows.map(rowToAccountSyncCatalog),
     accountDevices: accountDevices.rows.map(rowToAccountDevice),
@@ -877,6 +885,15 @@ async function writeSnapshot(client, snapshot, previousSnapshot) {
     ['account_id', 'plan', 'source', 'expires_at', 'updated_at'],
     snapshot.accountEntitlements || [],
     entitlementToRow,
+  );
+  await replaceRows(
+    client,
+    'account_file_uploads',
+    ['account_id', 'request_id', 'instance_id', 'quota_batch_id', 'size_bytes', 'sha256', 'status', 'reserved_until', 'created_at', 'updated_at'],
+    snapshot.accountFileUploads || [],
+    (item) => ({ account_id: item.accountId, request_id: item.requestId, instance_id: item.instanceId,
+      quota_batch_id: item.quotaBatchId, size_bytes: item.sizeBytes, sha256: item.sha256, status: item.status,
+      reserved_until: item.reservedUntil || null, created_at: item.createdAt, updated_at: item.updatedAt }),
   );
   await replaceRows(
     client,
