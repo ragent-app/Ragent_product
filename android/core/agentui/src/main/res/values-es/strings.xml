@@ -77,6 +77,8 @@
     <string name="agentui_slash_palette_loading">Cargando capacidades del entorno…</string>
     <string name="agentui_slash_palette_empty">No hay capacidades coincidentes</string>
     <string name="agentui_slash_palette_partial_error">No se pudieron cargar algunas capacidades</string>
+    <string name="agentui_slash_filter_all">Todo</string>
+    <string name="agentui_slash_palette_category_empty">No hay capacidades de esta categoría configuradas para este harness.</string>
     <string name="agentui_slash_kind_command">Comandos</string>
     <string name="agentui_slash_kind_skill">Habilidades</string>
     <string name="agentui_slash_kind_mcp">Servidores MCP</string>

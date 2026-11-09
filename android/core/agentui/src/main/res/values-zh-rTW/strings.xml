@@ -77,6 +77,8 @@
     <string name="agentui_slash_palette_loading">正在載入執行環境能力…</string>
     <string name="agentui_slash_palette_empty">沒有符合的能力</string>
     <string name="agentui_slash_palette_partial_error">部分能力載入失敗</string>
+    <string name="agentui_slash_filter_all">全部</string>
+    <string name="agentui_slash_palette_category_empty">目前執行環境未設定此類能力。</string>
     <string name="agentui_slash_kind_command">命令</string>
     <string name="agentui_slash_kind_skill">技能</string>
     <string name="agentui_slash_kind_mcp">MCP 伺服器</string>

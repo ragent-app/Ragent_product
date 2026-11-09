@@ -21,10 +21,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import com.andysagent.agentoc.core.agentui.R as AgentUiR
 import java.io.File
 import java.io.FileOutputStream
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 
@@ -150,5 +152,65 @@ class ComposerSlashPaletteUiTest {
         compose.onNodeWithTag(chipTag).assertExists()
         compose.onNodeWithTag(removeTag).assertExists().performClick()
         compose.onNodeWithTag(chipTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun mcpFilterSurfacesNativeMcpAndEmptyPluginState() {
+        val suggestions = listOf(
+            ComposerSlashSuggestion(
+                id = "codex:skill:review",
+                kind = "skill",
+                source = "codex",
+                title = "review",
+                description = "Review the current changes.",
+                invocationText = "\$review ",
+            ),
+            ComposerSlashSuggestion(
+                id = "codex:mcp:files",
+                kind = "mcp",
+                source = "codex",
+                title = "files",
+                description = "Codex MCP server",
+                selectionMode = "attach",
+            ),
+        )
+        var draft by mutableStateOf("/")
+        compose.setContent {
+            val density = LocalDensity.current
+            AgentocTheme(darkTheme = false) {
+                Box(Modifier.fillMaxSize()) {
+                    AgentComposer(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        onSend = {},
+                        onStop = {},
+                        working = false,
+                        onAddAttachment = {},
+                        expanded = true,
+                        runtimeTool = "codex",
+                        slashSuggestions = suggestions,
+                        backdropOrigin = IntOffset(0, with(density) { 700.dp.roundToPx() }),
+                    )
+                }
+            }
+        }
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        compose.waitForIdle()
+        device.waitForIdle()
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val emptyCategory = context.getString(AgentUiR.string.agentui_slash_palette_category_empty)
+        compose.onNodeWithTag("composer-slash-filter-mcp").assertExists().performClick()
+        compose.waitForIdle()
+        device.waitForIdle()
+        assertNotNull("The MCP filter did not surface the native MCP entry", device.wait(Until.findObject(By.text("files")), 5_000))
+        assertNull("The MCP filter should hide unrelated skills", device.findObject(By.text("review")))
+
+        compose.onNodeWithTag("composer-slash-filter-plugin").assertExists().performClick()
+        compose.waitForIdle()
+        device.waitForIdle()
+        assertNull("The plugin filter should hide MCP entries", device.findObject(By.text("files")))
+        assertNotNull("An empty plugin category should explain that this harness has none configured",
+            device.wait(Until.findObject(By.text(emptyCategory)), 5_000))
     }
 }

@@ -84,6 +84,8 @@
     <string name="agentui_slash_palette_loading">Loading harness capabilities…</string>
     <string name="agentui_slash_palette_empty">No matching capabilities</string>
     <string name="agentui_slash_palette_partial_error">Some capabilities could not be loaded</string>
+    <string name="agentui_slash_filter_all">All</string>
+    <string name="agentui_slash_palette_category_empty">No capabilities configured in this category.</string>
     <string name="agentui_slash_kind_command">Commands</string>
     <string name="agentui_slash_kind_skill">Skills</string>
     <string name="agentui_slash_kind_mcp">MCP servers</string>

@@ -77,6 +77,8 @@
     <string name="agentui_slash_palette_loading">하네스 기능을 불러오는 중…</string>
     <string name="agentui_slash_palette_empty">일치하는 기능이 없습니다</string>
     <string name="agentui_slash_palette_partial_error">일부 기능을 불러오지 못했습니다</string>
+    <string name="agentui_slash_filter_all">전체</string>
+    <string name="agentui_slash_palette_category_empty">현재 하네스에 이 범주의 기능이 설정되어 있지 않습니다.</string>
     <string name="agentui_slash_kind_command">명령</string>
     <string name="agentui_slash_kind_skill">스킬</string>
     <string name="agentui_slash_kind_mcp">MCP 서버</string>

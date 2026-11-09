@@ -84,6 +84,8 @@
     <string name="agentui_slash_palette_loading">正在加载运行环境能力…</string>
     <string name="agentui_slash_palette_empty">没有匹配的能力</string>
     <string name="agentui_slash_palette_partial_error">部分能力加载失败</string>
+    <string name="agentui_slash_filter_all">全部</string>
+    <string name="agentui_slash_palette_category_empty">当前运行环境未配置此类能力。</string>
     <string name="agentui_slash_kind_command">命令</string>
     <string name="agentui_slash_kind_skill">技能</string>
     <string name="agentui_slash_kind_mcp">MCP 服务</string>

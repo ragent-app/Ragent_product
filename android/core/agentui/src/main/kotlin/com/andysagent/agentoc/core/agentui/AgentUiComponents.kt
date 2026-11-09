@@ -2651,7 +2651,11 @@ private fun ComposerSlashPalettePopover(
 ) {
     val colors = LocalAgentocColors.current
     val normalizedQuery = query.trim().removePrefix("/").lowercase()
-    val matching = suggestions.asSequence()
+    var selectedKind by remember(query) { mutableStateOf("all") }
+    val kinds = listOf("command", "skill", "mcp", "plugin")
+    val countsByKind = suggestions.groupingBy { it.kind.lowercase() }.eachCount()
+    val filtered = suggestions.asSequence()
+        .filter { selectedKind == "all" || it.kind.equals(selectedKind, ignoreCase = true) }
         .filter { normalizedQuery.isEmpty() || it.title.lowercase().contains(normalizedQuery) || it.description.lowercase().contains(normalizedQuery) }
         .sortedWith(compareBy<ComposerSlashSuggestion>({ slashCapabilityKindOrder(it.kind) }, { it.title.lowercase() }))
         .take(80)
@@ -2692,28 +2696,83 @@ private fun ComposerSlashPalettePopover(
                 }
                 Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.subtleOutline.copy(alpha = 0.28f)))
                 Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    // Keep MCP and plugin filters visible on narrow phones. A single
+                    // horizontal rail can leave these important categories off-screen.
+                    listOf(listOf("all", "command", "skill"), listOf("mcp", "plugin")).forEach { rowKinds ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            rowKinds.forEach { kind ->
+                                val selected = selectedKind == kind
+                                val label = if (kind == "all") {
+                                    stringResource(R.string.agentui_slash_filter_all)
+                                } else {
+                                    slashCapabilityKindLabel(kind)
+                                }
+                                val count = if (kind == "all") suggestions.size else countsByKind[kind] ?: 0
+                                Row(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (selected) colors.actionPrimary.copy(alpha = if (colors.canvas.red < 0.5f) 0.26f else 0.12f)
+                                            else colors.surfaceLow,
+                                        )
+                                        .selectable(selected = selected, role = Role.Tab) { selectedKind = kind }
+                                        .testTag("composer-slash-filter-$kind")
+                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                        color = if (selected) colors.accentPrimary else colors.secondaryContent,
+                                        maxLines = 1,
+                                    )
+                                    Text(
+                                        text = count.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) colors.accentPrimary else colors.tertiaryContent,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
-                    if (loading && matching.isEmpty()) {
+                    if (loading && filtered.isEmpty()) {
                         Text(
                             text = stringResource(R.string.agentui_slash_palette_loading),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 16.dp),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.secondaryContent,
                         )
-                    } else if (matching.isEmpty()) {
+                    } else if (filtered.isEmpty()) {
                         Text(
-                            text = stringResource(R.string.agentui_slash_palette_empty),
+                            text = stringResource(
+                                if (selectedKind == "all") R.string.agentui_slash_palette_empty
+                                else R.string.agentui_slash_palette_category_empty,
+                            ),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 16.dp),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.secondaryContent,
                         )
                     } else {
-                        matching.groupBy { it.kind }.forEach { (kind, entries) ->
+                        filtered.groupBy { it.kind }.forEach { (kind, entries) ->
                             Text(
                                 text = slashCapabilityKindLabel(kind),
                                 modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 9.dp, bottom = 4.dp),
