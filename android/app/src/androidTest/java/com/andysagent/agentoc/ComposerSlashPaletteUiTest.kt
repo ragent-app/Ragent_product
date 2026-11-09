@@ -213,4 +213,56 @@ class ComposerSlashPaletteUiTest {
         assertNotNull("An empty plugin category should explain that this harness has none configured",
             device.wait(Until.findObject(By.text(emptyCategory)), 5_000))
     }
+
+    @Test
+    fun pluginFilterListsNativePluginOptions() {
+        val suggestions = listOf(
+            ComposerSlashSuggestion(
+                id = "codex:plugin:web-search",
+                kind = "plugin",
+                source = "codex",
+                title = "web-search",
+                description = "Search the web from this session.",
+                selectionMode = "attach",
+            ),
+            ComposerSlashSuggestion(
+                id = "codex:mcp:files",
+                kind = "mcp",
+                source = "codex",
+                title = "files",
+                description = "Codex MCP server",
+                selectionMode = "attach",
+            ),
+        )
+        var draft by mutableStateOf("/")
+        compose.setContent {
+            val density = LocalDensity.current
+            AgentocTheme(darkTheme = false) {
+                Box(Modifier.fillMaxSize()) {
+                    AgentComposer(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        onSend = {},
+                        onStop = {},
+                        working = false,
+                        onAddAttachment = {},
+                        expanded = true,
+                        runtimeTool = "codex",
+                        slashSuggestions = suggestions,
+                        onSelectSlashSuggestion = {},
+                        backdropOrigin = IntOffset(0, with(density) { 700.dp.roundToPx() }),
+                    )
+                }
+            }
+        }
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        compose.waitForIdle()
+        compose.onNodeWithTag("composer-slash-filter-plugin").assertExists().performClick()
+        compose.waitForIdle()
+        device.waitForIdle()
+
+        assertNotNull("The plugin filter should display native plugin entries",
+            device.wait(Until.findObject(By.text("web-search")), 5_000))
+        assertNull("The plugin filter should hide MCP entries", device.findObject(By.text("files")))
+    }
 }
