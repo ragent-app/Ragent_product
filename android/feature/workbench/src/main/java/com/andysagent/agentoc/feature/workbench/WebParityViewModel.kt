@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.andysagent.agentoc.core.network.AgentoCTransport
 import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.core.network.ApiResponse
+import com.andysagent.agentoc.core.network.ApiException
 import com.andysagent.agentoc.core.domain.AccountDirectoryDevice
 import com.andysagent.agentoc.core.protocol.AgentocProtocol
 import java.time.Instant
@@ -779,10 +780,16 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
 
     private suspend fun request(method: String, path: String, body: JsonObject? = null): JsonObject {
         val response = execute(ApiRequest(method, path, body?.toString()))
-        val root = runCatching { AgentocProtocol.json.parseToJsonElement(response.body).jsonObject }
-            .getOrElse { error("Invalid response from $path") }
-        if (!response.isSuccessful) error(root.string("error") ?: "Request failed (HTTP ${response.statusCode})")
-        return root
+        val root = runCatching { AgentocProtocol.json.parseToJsonElement(response.body).jsonObject }.getOrNull()
+        if (!response.isSuccessful) throw ApiException(
+            statusCode = response.statusCode,
+            code = root?.string("code"),
+            message = root?.string("error")?.takeIf { it.isNotBlank() } ?: "Request failed (HTTP ${response.statusCode})",
+            retryable = response.statusCode == 408 || response.statusCode == 409 || response.statusCode == 429 || response.statusCode >= 500,
+            headers = response.headers,
+        )
+        val validRoot = root ?: error("Invalid response from $path")
+        return validRoot
     }
 
     private suspend fun browseRequest(path: String): JsonObject {
@@ -1316,7 +1323,10 @@ class WebParityViewModel(
                                 catch (_: Exception) { null }
                             ProviderInstanceSnapshot(target, loading = false, available = true, snapshot = snapshot, rotation = rotation)
                         } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { ProviderInstanceSnapshot(target, loading = false) }
+                        catch (error: Exception) {
+                            ProviderInstanceSnapshot(target, loading = false,
+                                failure = ProviderInstanceFailure.from(error))
+                        }
                         if (generation == pageRefreshGeneration && mutableState.value.page == WebParityPage.ModelProviders) {
                             mutableState.update { old -> old.copy(providerInstances = old.providerInstances.map {
                                 if (it.instance.id == target.id) result else it

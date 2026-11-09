@@ -2,6 +2,7 @@ package com.andysagent.agentoc.feature.workbench
 
 import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.core.network.ApiResponse
+import com.andysagent.agentoc.core.network.ApiException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
@@ -45,12 +46,15 @@ class ProviderInstancesTest {
     private class Backend {
         val requests = mutableListOf<Pair<String, ApiRequest>>()
         var failB = false
+        var failBStatus: Int? = null
         var failMutation = false
         var gate: CompletableDeferred<Unit>? = null
         var oauthComplete = false
         fun repository(id: String) = WebParityRepository { request ->
             requests += id to request
             if (id == "b" && failB) error("unreachable")
+            if (id == "b" && request.path == "/api/native-providers" && request.method == "GET" && failBStatus != null)
+                return@WebParityRepository ApiResponse(failBStatus!!, """{"error":"Owner access required"}""")
             if (request.method != "GET") {
                 gate?.await()
                 if (failMutation) error("write failed")
@@ -87,6 +91,52 @@ class ProviderInstancesTest {
             vm.onEvent(WebParityEvent.DeleteProvider("b-p")); advanceUntilIdle()
             assertTrue(backend.requests.isEmpty())
         } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun `provider read preserves HTTP and transport failure categories without switching targets`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val backend = Backend()
+            val vm = backend.viewModel()
+            vm.onEvent(WebParityEvent.OpenPage(WebParityPage.ModelProviders)); advanceUntilIdle()
+            backend.requests.clear()
+            backend.failBStatus = 403
+            vm.onEvent(WebParityEvent.RetryProviderInstance("b")); advanceUntilIdle()
+            var failed = vm.state.value.providerInstances.single { it.instance.id == "b" }
+            assertFalse(failed.available)
+            assertEquals(ProviderInstanceFailureKind.Forbidden, failed.failure?.kind)
+            assertEquals(403, failed.failure?.httpStatusCode)
+            assertEquals("b", backend.requests.last { it.second.path == "/api/native-providers" }.first)
+
+            backend.failBStatus = 404
+            vm.onEvent(WebParityEvent.RetryProviderInstance("b")); advanceUntilIdle()
+            failed = vm.state.value.providerInstances.single { it.instance.id == "b" }
+            assertEquals(ProviderInstanceFailureKind.NotFound, failed.failure?.kind)
+            assertEquals(404, failed.failure?.httpStatusCode)
+
+            backend.failBStatus = 503
+            vm.onEvent(WebParityEvent.RetryProviderInstance("b")); advanceUntilIdle()
+            failed = vm.state.value.providerInstances.single { it.instance.id == "b" }
+            assertEquals(ProviderInstanceFailureKind.Server, failed.failure?.kind)
+            assertEquals(503, failed.failure?.httpStatusCode)
+
+            backend.failBStatus = null
+            backend.failB = true
+            vm.onEvent(WebParityEvent.RetryProviderInstance("b")); advanceUntilIdle()
+            failed = vm.state.value.providerInstances.single { it.instance.id == "b" }
+            assertEquals(ProviderInstanceFailureKind.Unknown, failed.failure?.kind)
+            assertNull(failed.failure?.httpStatusCode)
+            assertTrue(backend.requests.filter { it.second.path == "/api/native-providers" }.all { it.first == "b" })
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun `network API failure is not classified as an HTTP response`() {
+        val failure = ProviderInstanceFailure.from(ApiException(0, "NETWORK_ERROR", "private transport detail"))
+        assertEquals(ProviderInstanceFailureKind.Network, failure.kind)
+        assertNull(failure.httpStatusCode)
+        val remote = ProviderInstanceFailure.from(ApiException(0, "P2P_REMOTE_ERROR", "private remote detail"))
+        assertEquals(ProviderInstanceFailureKind.Unknown, remote.kind)
+        assertNull(remote.httpStatusCode)
     }
 
     @Test fun `create edit quota rotation and delete all use selected instance without foreground switching`() = runTest {

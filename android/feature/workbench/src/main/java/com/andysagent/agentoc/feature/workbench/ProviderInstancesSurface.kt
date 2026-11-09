@@ -23,11 +23,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
+import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.designsystem.*
 
 @Composable
 internal fun ProviderInstanceSelector(state: WebParityUiState, onEvent: (WebParityEvent) -> Unit,
-    modifier: Modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+    modifier: Modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+    targetConnectionStates: Map<String, RuntimeConnectionState> = emptyMap()) {
     var expanded by remember { mutableStateOf(false) }
     val selected = state.providerInstances.firstOrNull { it.instance.id == state.providerTargetId }
     val canSwitch = !state.actionInProgress && state.providerOAuthJob?.terminal != false
@@ -50,13 +52,31 @@ internal fun ProviderInstanceSelector(state: WebParityUiState, onEvent: (WebPari
                 DropdownMenuItem(text = { Column {
                     Text(target.instance.label)
                     Text(stringResource(when { target.loading -> R.string.pi_loading
-                        target.available -> R.string.pi_connected; else -> R.string.pi_offline_short }),
+                        target.available -> R.string.pi_config_read
+                        targetConnectionStates[target.instance.id] == RuntimeConnectionState.Connected -> R.string.pi_transport_connected
+                        else -> R.string.pi_config_unconfirmed }),
                         style = MaterialTheme.typography.bodySmall)
                 } }, onClick = { expanded = false; onEvent(WebParityEvent.SelectProviderInstance(target.instance.id)) },
                     modifier = Modifier.testTag("provider-instance-${target.instance.id}"))
             }
         }
     }
+}
+
+@Composable
+internal fun ProviderInstanceFailureText(failure: ProviderInstanceFailure?, modifier: Modifier = Modifier) {
+    if (failure == null) return
+    val message = when (failure.kind) {
+        ProviderInstanceFailureKind.Unauthorized -> stringResource(R.string.pi_error_unauthorized)
+        ProviderInstanceFailureKind.Forbidden -> stringResource(R.string.pi_error_forbidden)
+        ProviderInstanceFailureKind.NotFound -> stringResource(R.string.pi_error_not_found)
+        ProviderInstanceFailureKind.Server -> stringResource(R.string.pi_error_server, failure.httpStatusCode ?: 500)
+        ProviderInstanceFailureKind.Http -> stringResource(R.string.pi_error_http, failure.httpStatusCode ?: 0)
+        ProviderInstanceFailureKind.Network -> stringResource(R.string.pi_error_network)
+        ProviderInstanceFailureKind.Unknown -> stringResource(R.string.pi_error_unknown)
+    }
+    Text(message, modifier = modifier, style = MaterialTheme.typography.bodyMedium,
+        color = LocalAgentocColors.current.secondaryContent)
 }
 
 @Composable

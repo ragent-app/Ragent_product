@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.core.network.ApiResponse
+import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.feature.workbench.*
 import kotlinx.serialization.json.*
 import java.io.File
@@ -27,6 +28,7 @@ class ProviderInstancesUiTest {
     private val dark get() = InstrumentationRegistry.getArguments().getString("dark") == "true"
     private val requests = mutableListOf<Pair<String, ApiRequest>>()
     private var failWrite = false
+    private var failOfficeProviderRead = false
     private val names = mutableMapOf("office" to "团队模型", "studio" to "团队模型")
     private val deleted = mutableSetOf<String>()
     private lateinit var vm: WebParityViewModel
@@ -34,6 +36,8 @@ class ProviderInstancesUiTest {
     private fun repo(id: String) = WebParityRepository { request ->
         requests += id to request
         if (id == "offline") error("offline fixture")
+        if (id == "office" && failOfficeProviderRead && request.method == "GET" && request.path == "/api/native-providers")
+            return@WebParityRepository ApiResponse(403, """{"error":"Owner access required"}""")
         if (request.method != "GET" && failWrite) error("暂时无法保存，请重试")
         if (request.method == "PATCH" && request.path.endsWith("/$id-shared")) {
             names[id] = Json.parseToJsonElement(request.body!!).jsonObject["displayName"]!!.jsonPrimitive.content
@@ -50,7 +54,7 @@ class ProviderInstancesUiTest {
         ApiResponse(200, body)
     }
 
-    private fun show() {
+    private fun show(connectionStates: Map<String, RuntimeConnectionState> = emptyMap()) {
         rule.runOnUiThread {
             vm = WebParityViewModel(repo("foreground"),
                 providerInstancesProvider = { listOf(ProviderInstance("office", "办公室电脑"), ProviderInstance("studio", "工作室电脑"), ProviderInstance("offline", "离线笔记本")) },
@@ -64,6 +68,7 @@ class ProviderInstancesUiTest {
             CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config) {
                 AgentocTheme(darkTheme = dark) {
                     WebParitySurface(WebParityPage.ModelProviders, state, vm::onEvent, onBack = {},
+                        targetConnectionStates = connectionStates,
                         targetId = "foreground", targetLabel = "当前工作电脑", connectionAvailable = false)
                 }
             }
@@ -96,9 +101,25 @@ class ProviderInstancesUiTest {
         rule.onNodeWithTag("provider-instance-selector").performClick()
         capture("instance-selector")
         rule.onNodeWithTag("provider-instance-offline").performClick()
-        rule.onNodeWithText("暂时无法访问此实例，配置状态尚未确认。").assertIsDisplayed()
+        rule.onNodeWithText("暂时无法读取模型提供商配置，实例可达状态尚未确认。").assertIsDisplayed()
         rule.onNodeWithTag("provider-delete-offline-shared").assertDoesNotExist()
         capture("unreachable-instance")
+    }
+
+    @Test fun connectedTargetWithForbiddenProviderReadShowsConnectedAndPermissionFailure() {
+        failOfficeProviderRead = true
+        show(mapOf("office" to RuntimeConnectionState.Connected))
+        requests.clear()
+        select("office")
+        rule.onNodeWithText("实例连接正常，但模型提供商配置读取失败。").assertIsDisplayed()
+        rule.onNodeWithText("HTTP 403：当前会话没有管理模型提供商配置的权限。").assertIsDisplayed()
+        assertFalse(vm.state.value.providerInstances.single { it.instance.id == "office" }.available)
+        assertEquals(ProviderInstanceFailureKind.Forbidden,
+            vm.state.value.providerInstances.single { it.instance.id == "office" }.failure?.kind)
+        val providerReads = requests.filter { it.second.path == "/api/native-providers" }
+        assertTrue(providerReads.any { it.first == "office" })
+        assertTrue(providerReads.none { it.first == "foreground" })
+        capture("connected-provider-forbidden")
     }
 
     @Test fun editingStaysOnSelectedInstanceAndFailurePreservesInput() {

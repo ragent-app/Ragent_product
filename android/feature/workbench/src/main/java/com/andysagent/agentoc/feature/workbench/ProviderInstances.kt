@@ -1,15 +1,55 @@
 package com.andysagent.agentoc.feature.workbench
 
+import com.andysagent.agentoc.core.network.ApiException
+
 /** A provider management target is independent of the foreground chat target. */
 data class ProviderInstance(val id: String, val label: String)
 
 data class ProviderInstanceSnapshot(
     val instance: ProviderInstance,
     val loading: Boolean = true,
+    /** True only after the provider configuration endpoint returned a valid response. */
     val available: Boolean = false,
     val snapshot: WebParitySnapshot = WebParitySnapshot(),
     val rotation: Pair<Boolean, List<String>>? = null,
+    val failure: ProviderInstanceFailure? = null,
 )
+
+enum class ProviderInstanceFailureKind {
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    Server,
+    Http,
+    Network,
+    Unknown,
+}
+
+/** Safe diagnostic metadata; deliberately excludes server-provided text and request data. */
+data class ProviderInstanceFailure(
+    val kind: ProviderInstanceFailureKind,
+    val httpStatusCode: Int? = null,
+) {
+    companion object {
+        fun from(error: Exception): ProviderInstanceFailure {
+            val apiError = error as? ApiException
+                ?: return ProviderInstanceFailure(ProviderInstanceFailureKind.Unknown)
+            val status = apiError.statusCode.takeIf { it in 100..599 }
+            val code = apiError.code.orEmpty().uppercase()
+            val kind = when {
+                apiError.statusCode == 401 -> ProviderInstanceFailureKind.Unauthorized
+                apiError.statusCode == 403 -> ProviderInstanceFailureKind.Forbidden
+                apiError.statusCode == 404 -> ProviderInstanceFailureKind.NotFound
+                apiError.statusCode >= 500 -> ProviderInstanceFailureKind.Server
+                apiError.statusCode == 0 && ("NETWORK" in code || "TIMEOUT" in code || code == "CARRIER_UNAVAILABLE") ->
+                    ProviderInstanceFailureKind.Network
+                apiError.statusCode == 0 -> ProviderInstanceFailureKind.Unknown
+                else -> ProviderInstanceFailureKind.Http
+            }
+            return ProviderInstanceFailure(kind, status)
+        }
+    }
+}
 
 val WebProvider.machineLocal: Boolean
     get() = agentType in setOf("codex", "claude", "agy") && authType in setOf("oauth", "oauth-token")

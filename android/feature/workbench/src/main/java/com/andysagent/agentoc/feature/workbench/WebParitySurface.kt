@@ -166,13 +166,18 @@ fun WebParitySurface(
                             WebParityPage.ModelProviders -> if (crossProviders) {
                                 Column(Modifier.fillMaxSize().background(LocalAgentocColors.current.surfaceLow)) {
                                     if (state.providerTargetId == null || selectedProviderInstance?.available != true)
-                                        ProviderInstanceSelector(state, onEvent)
+                                        ProviderInstanceSelector(state, onEvent, targetConnectionStates = targetConnectionStates)
                                     if (state.providerTargetId == null) AccountProvidersOverview(state, onEvent)
                                     else if (selectedProviderInstance?.available == true) key(state.providerTargetId) {
                                         ProvidersPage(restrictDemoParityState(state, LocalRestrictedDemoEnvironment.current), onEvent, providerLabel,
-                                            instanceSelector = { ProviderInstanceSelector(state, onEvent, Modifier) })
+                                            instanceSelector = { ProviderInstanceSelector(state, onEvent, Modifier, targetConnectionStates) })
                                     } else Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Text(stringResource(if (selectedProviderInstance?.loading == true) R.string.pi_loading else R.string.pi_unavailable))
+                                        if (selectedProviderInstance?.loading == true) Text(stringResource(R.string.pi_loading))
+                                        else {
+                                            val connected = selectedProviderInstance?.instance?.id?.let(targetConnectionStates::get) == RuntimeConnectionState.Connected
+                                            Text(stringResource(if (connected) R.string.pi_config_failed_connected else R.string.pi_config_failed))
+                                            ProviderInstanceFailureText(selectedProviderInstance?.failure)
+                                        }
                                         OnboardingTextAction(stringResource(R.string.pi_retry), { state.providerTargetId?.let { onEvent(WebParityEvent.RetryProviderInstance(it)) } })
                                     }
                                 }
