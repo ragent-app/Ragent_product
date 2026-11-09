@@ -64,7 +64,11 @@ export async function maybeNotifyApprovalPending(sessionId, event) {
       const { sendUserAttentionPush } = await import('./push.mjs');
       const session = await getSession(sessionId).catch(() => null);
       if (!session?.id) return false;
-      const detail = describeApprovalEvent(event);
+      const detail = {
+        ...describeApprovalEvent(event),
+        eventId: approvalId.length <= 256 ? approvalId : '',
+        runId: typeof event.runId === 'string' && event.runId.length <= 256 ? event.runId : '',
+      };
       await sendUserAttentionPush({ ...session, id: sessionId }, detail);
       return true;
     } catch (error) {

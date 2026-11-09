@@ -186,11 +186,12 @@ export function createSessionTurnCompletionHelpers(services) {
     return true;
   }
 
-  async function maybeSendSessionCompletionPush(sessionId, fallbackSession = null) {
+  async function maybeSendSessionCompletionPush(sessionId, fallbackSession = null, terminalRun = null) {
     const currentSession = await getSession(sessionId) || fallbackSession;
     if (!currentSession?.id) return false;
     if (isSessionRunning(currentSession)) return false;
     if (getSessionQueueCount(currentSession) > 0) return false;
+    const runId = String(terminalRun?.id || terminalRun?.runId || '').trim();
     // A run that landed in "waiting_user" has not finished from the user's
     // perspective: it is blocked on an approval or a question. Push that as an
     // attention notification instead of a completion, so the user knows they
@@ -198,10 +199,10 @@ export function createSessionTurnCompletionHelpers(services) {
     const normalizedWaiting = String(currentSession?.workflowState || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     const isWaiting = ['waiting', 'waiting_user', 'waiting_for_user', 'waiting_on_user', 'needs_user', 'needs_input'].includes(normalizedWaiting);
     if (isWaiting && typeof sendUserAttentionPush === 'function') {
-      sendUserAttentionPush({ ...currentSession, id: sessionId }, { kind: 'attention', key: 'waiting_user', label: 'needs your attention' }).catch(() => {});
+      sendUserAttentionPush({ ...currentSession, id: sessionId }, { kind: 'attention', key: 'waiting_user', label: 'needs your attention', runId }).catch(() => {});
       return true;
     }
-    sendCompletionPush({ ...currentSession, id: sessionId }).catch(() => {});
+    sendCompletionPush({ ...currentSession, id: sessionId }, { runId, eventId: runId }).catch(() => {});
     return true;
   }
 
@@ -892,7 +893,7 @@ export function createSessionTurnCompletionHelpers(services) {
     // Session labels are now already settled (or safely left provisional), so
     // completion delivery never waits for another provider process.
     if (allowCompletionEffects && !hasQueuedFollowUps) {
-      void maybeSendSessionCompletionPush(sessionId, session);
+      void maybeSendSessionCompletionPush(sessionId, session, finalizedRun);
     }
 
     if (!hasQueuedFollowUps) {

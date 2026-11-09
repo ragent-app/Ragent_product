@@ -58,7 +58,10 @@ class RoomSessionRepositoryEventTest {
         repository.refreshSessions()
         assertEquals(SessionStatus.WaitingApproval, repository.observeSession("session-1").first()?.status)
         transport.responseBody = """{"session":{"id":"session-1","title":"Task","status":"completed"}}"""
+        transport.runResponseBody = """{"run":{"id":"r","sessionId":"session-1","state":"completed"}}"""
         assertEquals(SessionStatus.Completed, repository.refreshSessionDetail("session-1")?.status)
+        assertEquals("resolved", database.dao().getApproval("session-1", "a")?.status)
+        assertTrue(repository.observePendingApprovals("session-1").first().isEmpty())
         repository.close()
     }
     @Test fun persistsServerExplanationsForIndividualAndBatchApprovals() = runBlocking {
@@ -215,6 +218,109 @@ class RoomSessionRepositoryEventTest {
         val repository = RoomSessionRepository(database, transport)
         repository.refreshEvents("session-1")
         assertEquals(listOf("current"), repository.observePendingApprovals("session-1").first().map { it.id })
+        repository.close()
+    }
+
+    @Test fun terminalEventWithoutRunIdUsesRequestIdWithoutRetiringOtherRuns() = runBlocking {
+        database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "working", 0, 0)))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "legacy-approval", sessionId = "session-1", title = "Old", status = "pending",
+                detailsJson = """{"requestId":"request-old"}""", updatedAt = 1),
+            ApprovalEntity(id = "current-approval", sessionId = "session-1", title = "Current", status = "pending",
+                runId = "current-run", detailsJson = """{"requestId":"request-current"}""", updatedAt = 2),
+        ))
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"sessionId":"session-1","events":[{"seq":1,"type":"run_completed","requestId":"request-old"}],"latestSeq":1}""",
+        )))
+
+        repository.refreshEvents("session-1")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "legacy-approval")?.status)
+        assertEquals(listOf("current-approval"), repository.observePendingApprovals("session-1").first().map { it.id })
+        repository.close()
+    }
+
+    @Test fun terminalRunActivitySnapshotRetiresOnlyItsRunWithoutDurableTerminalEvent() = runBlocking {
+        database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "working", 10, 0)))
+        database.dao().upsertCursor(SyncCursorEntity("session-1", 10, null, updatedAt = 0))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "old-approval", sessionId = "session-1", title = "Old", status = "pending", runId = "old-run", updatedAt = 1),
+            ApprovalEntity(id = "current-approval", sessionId = "session-1", title = "Current", status = "pending", runId = "current-run", updatedAt = 2),
+        ))
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"sessionId":"session-1","events":[],"latestSeq":10,"runActivity":{"state":"completed","runId":"old-run"}}""",
+        )))
+
+        repository.refreshEvents("session-1")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "old-approval")?.status)
+        assertEquals(listOf("current-approval"), repository.observePendingApprovals("session-1").first().map { it.id })
+        repository.close()
+    }
+
+    @Test fun idleSyncUsesTerminalSessionDetailForPendingApprovalsWithoutRunIds() = runBlocking {
+        database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "working", 10, 0)))
+        database.dao().upsertCursor(SyncCursorEntity("session-1", 10, null, updatedAt = 0))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "legacy-approval", sessionId = "session-1", title = "Old", status = "pending", updatedAt = 1),
+        ))
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"sessionId":"session-1","events":[],"latestSeq":10,"runActivity":{"state":"idle"}}""",
+            """{"session":{"id":"session-1","title":"Task","status":"completed"}}""",
+        )))
+
+        repository.refreshEvents("session-1")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "legacy-approval")?.status)
+        assertTrue(repository.observeAllPendingApprovals().first().isEmpty())
+        repository.close()
+    }
+
+    @Test fun authoritativeIdleSessionDetailRetiresLegacyApprovalWithoutActiveWait() = runBlocking {
+        database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "working", 10, 0)))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "legacy-approval", sessionId = "session-1", title = "Old", status = "pending", updatedAt = 1),
+        ))
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"session":{"id":"session-1","title":"Task","status":"idle","activity":{}}}""",
+        )))
+
+        repository.refreshSessionDetail("session-1")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "legacy-approval")?.status)
+        assertTrue(repository.observeAllPendingApprovals().first().isEmpty())
+        repository.close()
+    }
+
+    @Test fun idleDetailWithExplicitWaitingActionKeepsApprovalPending() = runBlocking {
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "legacy-approval", sessionId = "session-1", title = "Question", status = "pending", updatedAt = 1),
+        ))
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"session":{"id":"session-1","title":"Task","status":"idle","waitingAction":"reply","activity":{"actionRequired":true}}}""",
+        )))
+
+        repository.refreshSessionDetail("session-1")
+
+        assertEquals("pending", database.dao().getApproval("session-1", "legacy-approval")?.status)
+        repository.close()
+    }
+
+    @Test fun terminalRunInSessionDetailRetiresOnlyItsRun() = runBlocking {
+        database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "working", 10, 0)))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "old-approval", sessionId = "session-1", title = "Old", status = "pending", runId = "old-run", updatedAt = 1),
+            ApprovalEntity(id = "current-approval", sessionId = "session-1", title = "Current", status = "pending", runId = "current-run", updatedAt = 2),
+        ))
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"session":{"id":"session-1","title":"Task","status":"running","activity":{"run":{"id":"old-run","state":"completed"}}}}""",
+        )))
+
+        repository.refreshSessionDetail("session-1")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "old-approval")?.status)
+        assertEquals(listOf("current-approval"), repository.observePendingApprovals("session-1").first().map { it.id })
+        assertEquals(SessionStatus.Working, repository.observeSession("session-1").first()?.status)
         repository.close()
     }
 
@@ -1398,11 +1504,12 @@ private class RecordingTransport : AgentoCTransport {
     private val state = MutableStateFlow(RuntimeConnectionState.Connected)
     val requests = mutableListOf<ApiRequest>()
     var responseBody: String = "{}"
+    var runResponseBody: String? = null
     override val connectionState: StateFlow<RuntimeConnectionState> = state
     override val invalidations: Flow<InvalidationHint> = MutableSharedFlow()
     override suspend fun execute(request: ApiRequest): ApiResponse {
         requests += request
-        return ApiResponse(200, responseBody)
+        return ApiResponse(200, if (request.path.startsWith("/api/runs/")) runResponseBody ?: responseBody else responseBody)
     }
     override fun connectInvalidationSocket() = Unit
     override suspend fun close() = Unit

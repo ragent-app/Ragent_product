@@ -1302,7 +1302,37 @@ class AndroidRuntimeGraph internal constructor(
                     }
                     throw AppApiException(ApiError(code, "Source session could not be verified", failure.retryable))
                 }
-                if (session?.id != request.sessionId) throw AppApiException(ApiError(ApiErrorCode.RESOURCE_NOT_FOUND, "Session was not found on this computer"))
+                val verifiedSession = session?.takeIf { it.id == request.sessionId }
+                    ?: throw AppApiException(ApiError(ApiErrorCode.RESOURCE_NOT_FOUND, "Session was not found on this computer"))
+                val terminalOrInactive = verifiedSession.status in setOf(
+                    com.andysagent.agentoc.core.model.SessionStatus.Completed,
+                    com.andysagent.agentoc.core.model.SessionStatus.Failed,
+                    com.andysagent.agentoc.core.model.SessionStatus.Cancelled,
+                ) || (verifiedSession.status == com.andysagent.agentoc.core.model.SessionStatus.Idle &&
+                    verifiedSession.waitingAction.isNullOrBlank() &&
+                    verifiedSession.workflowState?.trim()?.lowercase() !in setOf(
+                        "waiting", "waiting_user", "waiting_for_user", "waiting_on_user", "needs_user", "needs_input", "waiting_approval",
+                    ))
+                if (terminalOrInactive) {
+                    AgentoCFirebaseMessagingService.Publisher(application)
+                        .cancelAttentionNotifications(application, target, request.sessionId)
+                }
+                if (request.kind.lowercase() in setOf("approval", "question", "plan", "danger", "answer", "permission")) {
+                    val approvalId = request.eventId.ifBlank { request.awaitingKey }
+                    if (approvalId.isNotBlank()) {
+                        val approval = runtime.sessions.findPendingApproval(request.sessionId, approvalId)
+                        if (approval?.status != "pending") {
+                            AgentoCFirebaseMessagingService.Publisher(application).cancelAttentionNotifications(
+                                application,
+                                target,
+                                request.sessionId,
+                                approval?.runId,
+                                approvalId,
+                                request.identity(),
+                            )
+                        }
+                    }
+                }
                 if (configStore.directory.first().computers.none { it.instanceId == target }) {
                     throw AppApiException(ApiError(ApiErrorCode.TARGET_NOT_FOUND, "Computer was unpaired"))
                 }

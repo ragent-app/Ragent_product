@@ -594,6 +594,30 @@ class RoomSessionRepository(
         dao.upsertApprovals(listOf(approval.copy(status = "resolved", updatedAt = System.currentTimeMillis())))
     }
 
+    private suspend fun retirePendingApprovals(
+        sessionId: String,
+        runId: String? = null,
+        requestId: String? = null,
+        runIds: Set<String> = emptySet(),
+        unscoped: Boolean = false,
+    ) {
+        val pending = dao.getPendingApprovals(sessionId)
+        val matches = pending.filter { approval ->
+            when {
+                !runId.isNullOrBlank() && approval.runId == runId -> true
+                !runId.isNullOrBlank() && !approval.runId.isNullOrBlank() -> false
+                runIds.isNotEmpty() && approval.runId in runIds -> true
+                unscoped && approval.runId.isNullOrBlank() -> true
+                !requestId.isNullOrBlank() -> approval.id == requestId || approval.requestIdFromDetails() == requestId
+                else -> false
+            }
+        }
+        if (matches.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            dao.upsertApprovals(matches.map { it.copy(status = "resolved", updatedAt = now) })
+        }
+    }
+
     override suspend fun refreshComputers() {
         val response = execute(ApiRequest("GET", "/api/device-pairing/devices"))
         val payload = codec.decode(serializer<ListTrustedDevicesResponse>(), response.body)
@@ -1156,8 +1180,30 @@ class RoomSessionRepository(
         val item = root["session"]?.jsonObject ?: root
         if (item.string("id").isNullOrBlank()) return null
         val initial = sessionEntityFromClientJson(item, dao.getSession(sessionId), authoritative = true)
-        val entity = initial.copy(status = preservePendingApprovalStatus(sessionId, initial.status, sessionRunId(item)))
-        dao.upsertSessions(listOf(entity))
+        val runId = sessionRunId(item)
+        val terminalSession = hasTerminalSessionDetail(item) || isAuthoritativelyIdleSession(item)
+        val activity = item["activity"] as? JsonObject
+        val activityRun = activity?.get("run") as? JsonObject
+        val activityRunState = (activityRun?.get("state") ?: activityRun?.get("status"))
+            ?.let { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+        val terminalActivityRun = activityRunState in TERMINAL_RUN_ACTIVITY_STATES
+        val entity = initial.copy(
+            status = if (terminalActivityRun) initial.status else preservePendingApprovalStatus(sessionId, initial.status, runId),
+            waitingAction = if (terminalSession) null else initial.waitingAction,
+            workflowState = if (terminalSession && item.string("workflowState").isNullOrBlank()) null else initial.workflowState,
+        )
+        val activityRequestId = ((activity?.get("requestId") ?: activity?.get("turnId")
+            ?: activityRun?.get("requestId") ?: activityRun?.get("turnId")) as? JsonPrimitive)?.contentOrNull
+        val terminalRunIds = if (terminalSession) {
+            verifyTerminalApprovalRuns(sessionId, runId.takeIf { terminalActivityRun }, dao.getPendingApprovals(sessionId))
+        } else emptySet()
+        database.withTransaction {
+            dao.upsertSessions(listOf(entity))
+            when {
+                terminalSession -> retirePendingApprovals(sessionId, runIds = terminalRunIds, unscoped = true)
+                terminalActivityRun -> retirePendingApprovals(sessionId, runId = runId, requestId = activityRequestId)
+            }
+        }
         val result = toDomain(entity)
         if (result.status in setOf(SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled, SessionStatus.Idle)) {
             liveFeedMuted.remove(sessionId)
@@ -1176,6 +1222,39 @@ class RoomSessionRepository(
         return if (dao.getPendingApprovals(sessionId).any { approval ->
                 runId == null || approval.runId.isNullOrBlank() || approval.runId == runId
             }) "waiting_approval" else status
+    }
+
+    private suspend fun verifyTerminalApprovalRuns(
+        sessionId: String,
+        knownTerminalRunId: String?,
+        pending: List<ApprovalEntity>,
+    ): Set<String> {
+        val runIds = pending.mapNotNull { it.runId?.takeIf(String::isNotBlank) }.distinct()
+        val verified = linkedSetOf<String>()
+        knownTerminalRunId?.takeIf { it in runIds }?.let(verified::add)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (terminalApprovalRecoveryAttempts[sessionId]?.let { now - it < 5_000L } == true) return verified
+        terminalApprovalRecoveryAttempts[sessionId] = now
+        val candidates = runIds.filterNot { it in verified }
+        if (candidates.isEmpty()) return verified
+        val start = (terminalApprovalRecoveryOffsets[sessionId] ?: 0) % candidates.size
+        val selected = (candidates.drop(start) + candidates.take(start)).take((8 - verified.size).coerceAtLeast(0))
+        terminalApprovalRecoveryOffsets[sessionId] = (start + selected.size) % candidates.size
+        for (runId in selected) {
+            try {
+                val run = loadRunProjection(runId)
+                val state = (run["state"] as? JsonPrimitive)?.contentOrNull?.lowercase()
+                if ((run["id"] as? JsonPrimitive)?.contentOrNull == runId &&
+                    (run["sessionId"] as? JsonPrimitive)?.contentOrNull == sessionId &&
+                    state in TERMINAL_RUN_ACTIVITY_STATES
+                ) verified += runId
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A failed status lookup is not proof that a request is stale.
+            }
+        }
+        return verified
     }
 
     override suspend fun refreshEvents(sessionId: String): RefreshResult {
@@ -1386,6 +1465,27 @@ class RoomSessionRepository(
             CursorMetadata(page.serverCursor, page.snapshotVersion),
         )) {
             is SyncResult.Applied -> {
+                val activitySnapshot = page.runActivity as? JsonObject
+                val activityState = listOf("state", "status", "runState")
+                    .firstNotNullOfOrNull { key -> (activitySnapshot?.get(key) as? JsonPrimitive)?.contentOrNull }
+                    ?.lowercase()
+                if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
+                    val activityRunId = ((activitySnapshot?.get("runId") ?: activitySnapshot?.get("id")) as? JsonPrimitive)?.contentOrNull
+                    val activityRequestId = ((activitySnapshot?.get("requestId") ?: activitySnapshot?.get("turnId")) as? JsonPrimitive)?.contentOrNull
+                    if (!activityRunId.isNullOrBlank() || !activityRequestId.isNullOrBlank()) {
+                        database.withTransaction {
+                            retirePendingApprovals(sessionId, runId = activityRunId, requestId = activityRequestId)
+                        }
+                    } else {
+                        try {
+                            refreshSessionDetail(sessionId)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // A later durable event or idle reconciliation retries this fallback.
+                        }
+                    }
+                }
                 val artifacts = durableArtifactState.value[sessionId].orEmpty().toMutableList()
                 page.events.filter { event ->
                     val type = event.type.orEmpty().lowercase()
@@ -1457,7 +1557,7 @@ class RoomSessionRepository(
                 // A previous client may have advanced its cursor past the
                 // terminal event. Recheck the exact runs before retiring any
                 // stale requests; an idle session by itself is not proof.
-                if ((activity?.get("state") as? JsonPrimitive)?.contentOrNull == "idle" &&
+                if (activityState == "idle" &&
                     (terminalApprovalRecoveryAttempts[sessionId]?.let { now - it >= 5_000L } != false)) {
                     val pending = dao.getPendingApprovals(sessionId)
                     if (pending.isNotEmpty()) {
@@ -1481,6 +1581,17 @@ class RoomSessionRepository(
                                         })
                                     }
                                 }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) { /* Retry on a later sync. */ }
+                        }
+                        if (pending.any { it.runId.isNullOrBlank() }) {
+                            // A stale approval without run identity cannot be
+                            // safely matched to a run endpoint. The session
+                            // detail is the authoritative fallback; a terminal
+                            // session retires the remaining requests.
+                            try {
+                                refreshSessionDetail(sessionId)
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) { /* Retry on a later sync. */ }
@@ -2842,12 +2953,7 @@ private class RoomEventSink(
             ) })
             // A terminal run can no longer accept its outstanding approvals.
             // Never resolve requests belonging to a different run.
-            event.runId?.takeIf(String::isNotBlank)?.let { runId ->
-                val pending = dao.getPendingApprovals(scope).filter { it.runId == runId }
-                if (pending.isNotEmpty()) dao.upsertApprovals(pending.map {
-                    it.copy(status = "resolved", updatedAt = System.currentTimeMillis())
-                })
-            }
+            retirePendingApprovals(scope, runId = event.runId, requestId = event.requestId)
         }
         val session = dao.getSession(scope)
         if (session != null) {
@@ -2931,7 +3037,55 @@ private class RoomEventSink(
             }
         }
     }
+
+    private suspend fun retirePendingApprovals(
+        sessionId: String,
+        runId: String? = null,
+        requestId: String? = null,
+    ) {
+        val pending = dao.getPendingApprovals(sessionId)
+        val matches = pending.filter { approval ->
+            when {
+                !runId.isNullOrBlank() && approval.runId == runId -> true
+                !runId.isNullOrBlank() && !approval.runId.isNullOrBlank() -> false
+                !requestId.isNullOrBlank() -> approval.id == requestId || approval.requestIdFromDetails() == requestId
+                else -> false
+            }
+        }
+        if (matches.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            dao.upsertApprovals(matches.map { it.copy(status = "resolved", updatedAt = now) })
+        }
+    }
 }
+
+private val TERMINAL_SESSION_STATUS_NAMES = setOf("completed", "complete", "finished", "succeeded", "success", "failed", "error", "cancelled", "canceled", "interrupted", "stopped", "expired")
+private val TERMINAL_RUN_ACTIVITY_STATES = setOf("completed", "complete", "finished", "succeeded", "success", "failed", "error", "cancelled", "canceled", "interrupted", "expired")
+private val WAITING_SESSION_STATES = setOf("waiting", "waiting_user", "waiting_for_user", "waiting_on_user", "needs_user", "needs_input", "waiting_approval")
+
+private fun hasTerminalSessionDetail(item: JsonObject): Boolean {
+    val reportedState = item.string("status") ?: item.string("workflowState") ?: return false
+    return reportedState.trim().lowercase() in TERMINAL_SESSION_STATUS_NAMES
+}
+
+/** Idle detail is authoritative only when it also says there is no active wait or run. */
+private fun isAuthoritativelyIdleSession(item: JsonObject): Boolean {
+    val sessionState = (item.string("status") ?: item.string("workflowState"))?.trim()?.lowercase()
+    if (sessionState != "idle") return false
+    val workflowState = item.string("workflowState")?.trim()?.lowercase()
+    if (workflowState in WAITING_SESSION_STATES) return false
+    val attention = item.string("waitingAction") ?: item.string("attentionKind")
+    if (!attention.isNullOrBlank()) return false
+    val activity = item["activity"] as? JsonObject
+    if ((activity?.get("actionRequired") as? JsonPrimitive)?.booleanOrNull == true) return false
+    val run = activity?.get("run") as? JsonObject ?: return true
+    val runState = (run["state"] ?: run["status"])?.let { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+    return runState == "idle" || runState in TERMINAL_RUN_ACTIVITY_STATES
+}
+
+private fun ApprovalEntity.requestIdFromDetails(): String? = runCatching {
+    detailsJson?.let { AgentocProtocol.json.parseToJsonElement(it).jsonObject["requestId"]?.jsonPrimitive?.contentOrNull }
+}.getOrNull()
 
 private val terminalApprovedActionStates = setOf("denied", "cancelled", "expired", "completed", "failed")
 

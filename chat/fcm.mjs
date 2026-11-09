@@ -162,7 +162,7 @@ export function createFcmMessageData(payload, instanceId) {
     throw new Error('Invalid FCM source or session');
   }
   const data = { notificationContractVersion: '1', instanceId, sessionId: payload.sessionId };
-  for (const [key, limit] of Object.entries({ title: 256, body: 2048, tab: 64, kind: 64, awaitingKey: 512, eventId: 256 })) {
+  for (const [key, limit] of Object.entries({ title: 256, body: 2048, tab: 64, kind: 64, awaitingKey: 512, eventId: 256, runId: 256 })) {
     const value = payload?.[key] ?? '';
     if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > limit || /[\u0000-\u001f]/.test(value)) {
       throw new Error(`Invalid FCM ${key}`);
