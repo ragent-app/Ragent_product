@@ -11,15 +11,18 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const home = mkdtempSync(join(tmpdir(), 'agentoc-approval-sweep-'));
+const instanceRoot = join(home, 'instance');
 const previousEnv = {
   HOME: process.env.HOME,
+  AGENTOC_INSTANCE_ROOT: process.env.AGENTOC_INSTANCE_ROOT,
   AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
   AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, '.agentoc', 'workspace');
+process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
+process.env.AGENTOC_CONFIG_DIR = join(instanceRoot, 'config');
+process.env.AGENTOC_WORK_ROOT_DIR = join(instanceRoot, 'workspace');
 process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 function restoreEnv() {
@@ -55,8 +58,6 @@ try {
       options: { runtimeFamily: 'claude-stream-json-bidi' },
     },
   });
-  await updateRun(terminalRun.id, (current) => ({ ...current, state: 'completed' }));
-
   const runningRun = await createRun({
     status: {
       sessionId: 'session_sweep_running',
@@ -100,6 +101,56 @@ try {
     ts: new Date().toISOString(),
   });
 
+  // These requests were accepted while the run was live. Finalization/boot
+  // repair must still close the unanswered one after the run ends.
+  await updateRun(terminalRun.id, (current) => ({ ...current, state: 'completed' }));
+
+  // A delayed adapter frame arriving after terminal state must be converted
+  // into a cancellation at the history append boundary, never published as a
+  // fresh pending card or attention push.
+  const lateSession = (await createSession(home, 'claude-bidi', 'sweep-late')).id;
+  const lateStored = await appendEvent(lateSession, {
+    type: 'approval_request',
+    approvalId: 'claude:late-after-terminal',
+    runId: terminalRun.id,
+    status: 'pending',
+    ts: new Date().toISOString(),
+  });
+  assert.equal(lateStored?.type, 'approval_response');
+  assert.equal(lateStored?.decision, 'cancelled');
+  assert.equal(lateStored?.source, 'terminal-run-admission');
+  const lateHistory = await loadHistory(lateSession, { includeBodies: false });
+  assert.equal(lateHistory.some((event) => event.type === 'approval_request' && event.approvalId === 'claude:late-after-terminal'), false);
+  assert.equal(lateHistory.filter((event) => event.type === 'approval_response' && event.approvalId === 'claude:late-after-terminal').length, 1);
+
+  const lateBatchSession = (await createSession(home, 'claude-bidi', 'sweep-late-batch')).id;
+  const lateBatchStored = await appendEvent(lateBatchSession, {
+    type: 'privileged_batch_request',
+    batchId: 'late-privileged-batch',
+    runId: terminalRun.id,
+    other: [{ opId: 'late-other' }],
+    delete: [{ opId: 'late-delete' }],
+  });
+  assert.equal(lateBatchStored?.type, 'privileged_batch_response');
+  const lateBatchHistory = await loadHistory(lateBatchSession, { includeBodies: false });
+  assert.equal(lateBatchHistory.some((event) => event.type === 'privileged_batch_request'), false);
+  assert.equal(lateBatchHistory.filter((event) => event.type === 'privileged_batch_response'
+    && event.batchId === 'late-privileged-batch').length, 2);
+
+  const lateActionSession = (await createSession(home, 'claude-bidi', 'sweep-late-action-batch')).id;
+  const lateActionStored = await appendEvent(lateActionSession, {
+    type: 'approved_action_batch_request',
+    batchId: 'late-action-batch',
+    runId: terminalRun.id,
+    actions: [{ actionId: 'late-action-1' }, { actionId: 'late-action-2' }],
+  });
+  assert.equal(lateActionStored?.type, 'approved_action_batch_response');
+  assert.deepEqual(lateActionStored?.decisions, {
+    'late-action-1': 'cancelled',
+    'late-action-2': 'cancelled',
+  });
+  const lateActionHistory = await loadHistory(lateActionSession, { includeBodies: false });
+  assert.equal(lateActionHistory.some((event) => event.type === 'approved_action_batch_request'), false);
   // Session B: pending approval from the STILL-RUNNING run — must survive.
   const sessionB = (await createSession(home, 'claude-bidi', 'sweep-b')).id;
   await appendEvent(sessionB, {

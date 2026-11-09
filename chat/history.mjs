@@ -20,7 +20,7 @@ import { registerCache, registerLruOrMap } from './memory-registry.mjs';
 import { getAdaptiveConcurrencyBudget } from './adaptive-concurrency-registry.mjs';
 import { cacheBudget } from '../lib/cache-budget.mjs';
 import { CHAT_HISTORY_DIR } from '../lib/config.mjs';
-import { normalizeFileChangeType } from './normalizer.mjs';
+import { approvalResponseEvent, normalizeFileChangeType } from './normalizer.mjs';
 import { stripEventAttachmentSavedPaths } from './attachment-utils.mjs';
 import { stripAssistantControlBlocks } from './assistant-control-blocks.mjs';
 import {
@@ -50,6 +50,8 @@ import {
   writeForkHistoryIndex,
 } from './fork-history-index.mjs';
 import { defaultContinuityStore } from './continuity-store.mjs';
+import { getRun, isTerminalRunState } from './runs.mjs';
+import { privilegedBatchResponseEvent } from './privileged-ops.mjs';
 import {
   createKeyedTaskQueue,
   ensureDir,
@@ -1846,7 +1848,100 @@ function getAssistantMessageTimestamp(currentStamp, event) {
   return event.timestamp || currentStamp || Date.now();
 }
 
-async function appendEventUnlocked(sessionId, event) {
+const RUN_BOUND_APPROVAL_REQUEST_TYPES = new Set([
+  'approval_request',
+  'privileged_batch_request',
+  'approved_action_batch_request',
+]);
+
+async function terminalRunApprovalReplacements(sessionId, event, runCache) {
+  if (!RUN_BOUND_APPROVAL_REQUEST_TYPES.has(String(event?.type || ''))) return null;
+  const runId = String(event?.runId || '').trim();
+  if (!runId) return null;
+  let run;
+  if (runCache.has(runId)) {
+    run = runCache.get(runId);
+  } else {
+    try {
+      run = await getRun(runId);
+      runCache.set(runId, run || null);
+    } catch {
+      // A transient run-store read failure must not discard a possibly-live
+      // approval. The bounded run-finalize/boot sweeps remain the fallback.
+      return null;
+    }
+  }
+  // A missing run cannot accept an approval either. Treat it as closed so an
+  // orphaned replay never creates a card with an action that can only 404.
+  if (run && !isTerminalRunState(run.state)) return null;
+
+  const requestId = String(event?.requestId || event?.turnId || '').trim();
+  const common = {
+    runId,
+    ...(requestId ? { requestId } : {}),
+    source: 'terminal-run-admission',
+    timestamp: new Date().toISOString(),
+  };
+  if (event.type === 'approval_request') {
+    const response = approvalResponseEvent({
+      approvalId: String(event?.approvalId || '').trim(),
+      decision: 'cancelled',
+      status: 'cancelled',
+      source: common.source,
+      providerRequestId: String(event?.providerRequestId || '').trim(),
+      providerMethod: String(event?.providerMethod || '').trim(),
+    });
+    return response ? [{ ...response, ...common }] : [];
+  }
+  if (event.type === 'privileged_batch_request') {
+    const batchId = String(event?.batchId || '').trim();
+    if (!batchId) return [];
+    const responses = ['other', 'delete', 'installAuto']
+      .filter((category) => Array.isArray(event?.[category]) && event[category].length > 0)
+      .map((category) => privilegedBatchResponseEvent({
+        batchId,
+        category,
+        decisions: {},
+        source: common.source,
+      }))
+      .filter(Boolean)
+      .map((response) => ({ ...response, ...common }));
+    return responses.length > 0
+      ? responses
+      : [{ type: 'approval_response', role: 'system', approvalId: batchId, decision: 'cancelled', status: 'cancelled', ...common }];
+  }
+
+  const batchId = String(event?.batchId || '').trim();
+  const actions = Array.isArray(event?.actions) ? event.actions : [];
+  if (!batchId || actions.length === 0) return [];
+  const decisions = {};
+  for (const action of actions) {
+    const actionId = String(action?.actionId || '').trim();
+    if (actionId) decisions[actionId] = 'cancelled';
+  }
+  if (Object.keys(decisions).length === 0) return [];
+  return [{
+    type: 'approved_action_batch_response',
+    role: 'system',
+    channel: event.channel || 'approved_action',
+    schemaVersion: event.schemaVersion,
+    batchId,
+    ...(event.sessionId ? { sessionId: event.sessionId } : { sessionId }),
+    ...(event.turnId ? { turnId: event.turnId } : {}),
+    decisions,
+    ...common,
+  }];
+}
+
+async function appendEventUnlocked(sessionId, event, options = {}) {
+  if (options.skipTerminalApprovalGuard !== true) {
+    const replacements = await terminalRunApprovalReplacements(sessionId, event, new Map());
+    if (replacements !== null) {
+      if (replacements.length === 0) return null;
+      const stored = await appendEventsUnlocked(sessionId, replacements, { skipTerminalApprovalGuard: true });
+      return stored.at(-1) || null;
+    }
+  }
   await ensureSessionDir(sessionId);
   const meta = await loadMeta(sessionId);
   const seq = meta.latestSeq + 1;
@@ -1888,13 +1983,15 @@ async function appendEventUnlocked(sessionId, event) {
       error: error?.message || String(error),
     });
   }
-  if (stored?.type === 'approval_request' || stored?.type === 'privileged_batch_request') {
+  if (stored?.type === 'approval_request' || stored?.type === 'privileged_batch_request'
+    || stored?.type === 'approved_action_batch_request') {
     // Fire a one-shot "needs your attention" push for live approval requests —
     // danger-tier privileged batches included (Phase 5: their top-level risk
     // maps to the same 'danger' waiting label). Fire-and-forget: never block
     // the append path on a push attempt.
     maybeNotifyApprovalPending(sessionId, stored).catch(() => {});
   }
+
   if (stored?.type === 'approval_request'
     || stored?.type === 'approval_response'
     || stored?.type === 'privileged_batch_request'
@@ -1915,7 +2012,18 @@ async function appendEventUnlocked(sessionId, event) {
   return stored;
 }
 
-async function appendEventsUnlocked(sessionId, events) {
+async function appendEventsUnlocked(sessionId, events, options = {}) {
+  if (options.skipTerminalApprovalGuard !== true) {
+    const runCache = new Map();
+    const guarded = [];
+    for (const event of events || []) {
+      const replacements = await terminalRunApprovalReplacements(sessionId, event, runCache);
+      if (replacements === null) guarded.push(event);
+      else guarded.push(...replacements);
+    }
+    events = guarded;
+  }
+  if (!Array.isArray(events) || events.length === 0) return [];
   await ensureSessionDir(sessionId);
   const meta = await loadMeta(sessionId);
   let latestSeq = meta.latestSeq;
@@ -1975,8 +2083,12 @@ async function appendEventsUnlocked(sessionId, events) {
     }
     const approvalEvents = appended.filter((event) => event?.type === 'approval_request'
       || event?.type === 'approval_response'
+      || event?.type === 'confirmation_response'
       || event?.type === 'privileged_batch_request'
-      || event?.type === 'privileged_batch_response');
+      || event?.type === 'privileged_batch_response'
+      || event?.type === 'approved_action_batch_request'
+      || event?.type === 'approved_action_batch_response'
+      || event?.type === 'approved_action_state');
     if (approvalEvents.length > 0) {
       // Preserve event order for request→response batches while keeping the
       // canonical append path independent from projection availability.
@@ -1988,6 +2100,11 @@ async function appendEventsUnlocked(sessionId, events) {
           error: error?.message || String(error),
         });
       });
+      for (const event of approvalEvents) {
+        if (RUN_BOUND_APPROVAL_REQUEST_TYPES.has(String(event?.type || ''))) {
+          maybeNotifyApprovalPending(sessionId, event).catch(() => {});
+        }
+      }
     }
     notifySessionEvents(sessionId, latestSeq);
   }
