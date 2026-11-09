@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -26,6 +27,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.model.RuntimeCatalog
+import com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionPhase
+import com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionUiState
+import com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionGate
+import kotlinx.coroutines.delay
 
 val LocalRestrictedDemoEnvironment = staticCompositionLocalOf { false }
 
@@ -76,19 +81,46 @@ fun DemoEnvironmentSurface(
     connection: com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionUiState? = null,
     onRetryConnection: () -> Unit = {},
     onSignOut: () -> Unit = {},
+    computerRecovery: DemoConnectionUiState? = null,
+    onRetryComputerRecovery: () -> Unit = {},
     testAccount: Boolean = restricted,
     content: @Composable () -> Unit,
 ) {
     var connectionDismissed by remember(connection?.targetId) { mutableStateOf(false) }
+    var computerRecoveryDismissed by remember(computerRecovery?.targetId) { mutableStateOf(false) }
+    var computerRecoveryElapsed by remember(computerRecovery?.targetId) { mutableStateOf(0L) }
+    LaunchedEffect(computerRecovery?.active, computerRecovery?.targetId) {
+        if (computerRecovery == null) {
+            computerRecoveryElapsed = 0L
+        } else {
+            val startedAt = System.nanoTime() / 1_000_000
+            while (computerRecoveryElapsed < 5_000L) {
+                computerRecoveryElapsed = (System.nanoTime() / 1_000_000 - startedAt).coerceAtLeast(0)
+                delay(100)
+            }
+            computerRecoveryElapsed = 5_000L
+        }
+    }
     CompositionLocalProvider(LocalRestrictedDemoEnvironment provides restricted) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
                 val showConnection = testAccount && connection != null && !connection.ready && !connectionDismissed
+                val showComputerRecovery = !showConnection && computerRecovery != null && !computerRecoveryDismissed
                 Box(Modifier.fillMaxSize()) {
                     content()
                 }
-                if (showConnection && connection != null) {
-                    com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionGate(connection, onRetryConnection, { connectionDismissed = true })
+                if (showConnection) {
+                    DemoConnectionGate(requireNotNull(connection), onRetryConnection, { connectionDismissed = true })
+                } else if (showComputerRecovery) {
+                    val recovery = requireNotNull(computerRecovery)
+                    DemoConnectionGate(
+                        state = recovery.copy(elapsedMillis = computerRecoveryElapsed),
+                        onRetry = onRetryComputerRecovery,
+                        onDismiss = { computerRecoveryDismissed = true },
+                        titleOverride = androidx.compose.ui.res.stringResource(R.string.home_connection_reconnecting),
+                        detailOverride = androidx.compose.ui.res.stringResource(R.string.workbench_connection_reconnecting_detail),
+                        testTag = "computer-reconnection-gate",
+                    )
                 }
             }
         }

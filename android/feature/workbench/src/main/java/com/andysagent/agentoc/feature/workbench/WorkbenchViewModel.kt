@@ -53,11 +53,13 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -539,6 +541,7 @@ sealed interface ChatEvent {
     data class RemoveHarnessCapability(val id: String) : ChatEvent
     data object SendMessage : ChatEvent
     data object RetryPendingTurn : ChatEvent
+    data object DiscardUnsentNewSession : ChatEvent
     data class SelectAgent(val agentId: String?) : ChatEvent
     data object CancelRun : ChatEvent
     data class Approve(val approvalId: String) : ChatEvent
@@ -711,6 +714,11 @@ class ChatViewModel(
     private val sessionAcceptedTurns = mutableMapOf<Pair<SessionRepository, String>, List<PendingTurnUiState>>()
     private val sessionObservedRequests = mutableMapOf<Pair<SessionRepository, String>, Set<String>>()
     private var newSessionRequested = false
+    private var newSessionProjectId: String? = null
+    /** Session ids created for a first turn remain provisional until the POST is acknowledged. */
+    private val uncommittedNewSessions = mutableMapOf<Pair<SessionRepository, String>, String>()
+    private val discardedInitialTurnRequests = mutableSetOf<String>()
+    private val provisionalCleanupJobs = mutableMapOf<Pair<SessionRepository, String>, Job>()
     private var listedSessionActionTarget: Pair<SessionRepository, String>? = null
     private var listedProjectActionTarget: Pair<SessionRepository, String>? = null
     private var lastRunProjectionRequest: Pair<String, Long>? = null
@@ -892,7 +900,10 @@ class ChatViewModel(
                     selectedSessionJob?.cancel()
                     selectedSessionJob = null
                     sessionGeneration++
-                    if (fixed !== selectedRepository) newSessionRequested = false
+                    if (fixed !== selectedRepository) {
+                        newSessionRequested = false
+                        newSessionProjectId = null
+                    }
                     selectedRepository = fixed
                     sendAfterPendingTurn = false
                     updateState {
@@ -975,6 +986,7 @@ class ChatViewModel(
             }
             ChatEvent.SendMessage -> sendMessage()
             ChatEvent.RetryPendingTurn -> retryPendingTurn()
+            ChatEvent.DiscardUnsentNewSession -> discardUnsentNewSession()
             is ChatEvent.SelectAgent -> {
                 updateState { copy(selectedAgentId = event.agentId) }
                 val sessionId = mutableState.value.sessionId
@@ -1554,6 +1566,7 @@ class ChatViewModel(
         deliverPendingTurn(
             pendingTurn = pendingTurn,
             initialSessionId = current.sessionId,
+            initialProjectId = newSessionProjectId,
         )
     }
 
@@ -1570,12 +1583,14 @@ class ChatViewModel(
         deliverPendingTurn(
             pendingTurn = sending,
             initialSessionId = sessionId,
+            initialProjectId = newSessionProjectId,
         )
     }
 
     private fun deliverPendingTurn(
         pendingTurn: PendingTurnUiState,
         initialSessionId: String?,
+        initialProjectId: String?,
     ) {
         val fixed = activeRepository() ?: return
         // Resolve once before launching, and use this computer for every stage.
@@ -1587,7 +1602,8 @@ class ChatViewModel(
             var generation = initialGeneration
             try {
                 val resolvedSessionId = sessionId
-                    ?: fixed.createSession(name = "", tool = pendingTurn.selection.tool).id.also {
+                    ?: fixed.createSessionInProject(initialProjectId, name = "", tool = pendingTurn.selection.tool).id.also {
+                        uncommittedNewSessions[fixed to it] = pendingTurn.requestId
                         sessionPendingTurns[fixed to it] = pendingTurn
                         if (activeRepository() === fixed && sessionGeneration == initialGeneration) {
                             val followUpRequested = sendAfterPendingTurn
@@ -1652,6 +1668,8 @@ class ChatViewModel(
                     attachments = outboundAttachments,
                     harnessCapabilityIds = pendingTurn.harnessCapabilityIds,
                 )
+                uncommittedNewSessions.remove(fixed to resolvedSessionId, pendingTurn.requestId)
+                discardedInitialTurnRequests.remove(pendingTurn.requestId)
                 // Once the POST succeeds, this one-shot guard has completed
                 // its job. Keeping it through an active run hides Stop and
                 // rejects every subsequent follow-up, even though the server
@@ -1689,6 +1707,14 @@ class ChatViewModel(
                 val failed = pendingTurn.copy(state = PendingTurnState.Failed,
                     error = error.message?.takeIf { it.isNotBlank() } ?: "Message could not be sent")
                 val failedSessionId = sessionId
+                if (discardedInitialTurnRequests.remove(pendingTurn.requestId)) {
+                    if (failedSessionId != null &&
+                        uncommittedNewSessions[fixed to failedSessionId] == pendingTurn.requestId
+                    ) {
+                        scheduleProvisionalSessionCleanup(fixed, failedSessionId)
+                    }
+                    return@launch
+                }
                 if (failedSessionId != null) {
                     if (sessionPendingTurns[fixed to failedSessionId]?.requestId != pendingTurn.requestId) return@launch
                     sessionPendingTurns[fixed to failedSessionId] = failed
@@ -1970,9 +1996,10 @@ class ChatViewModel(
         saveSelectedDraft()
         selectedSessionJob?.cancel()
         selectedSessionJob = null
-        val generation = ++sessionGeneration
+        sessionGeneration++
         selectedRepository = fixed
         newSessionRequested = true
+        newSessionProjectId = projectId
         sendAfterPendingTurn = false
         updateState {
             copy(
@@ -1993,7 +2020,7 @@ class ChatViewModel(
                 approval = null,
                 resolvingApprovalId = null,
                 error = null,
-                isLoading = true,
+                isLoading = false,
                 queuedMessages = emptyList(),
                 activeDecision = null,
                 attachments = emptyList(),
@@ -2006,19 +2033,97 @@ class ChatViewModel(
                 runMetrics = RunMetricsUiState(),
             )
         }
-        viewModelScope.launch {
-            try {
-                val session = fixed.createSessionInProject(projectId, name = "")
-                if (activeRepository() === fixed && sessionGeneration == generation && mutableState.value.sessionId == null) {
-                    selectSession(session.id)
+    }
+
+    private fun discardUnsentNewSession() {
+        val current = mutableState.value
+        val fixed = selectedRepository
+        val sessionId = current.sessionId
+        if (sessionId != null && fixed != null) {
+            val key = fixed to sessionId
+            val initialRequestId = uncommittedNewSessions[key]
+            if (initialRequestId != null && current.pendingTurn?.requestId == initialRequestId) {
+                if (current.pendingTurn.state == PendingTurnState.Sending) {
+                    discardedInitialTurnRequests += initialRequestId
+                } else {
+                    scheduleProvisionalSessionCleanup(fixed, sessionId)
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                if (activeRepository() === fixed && sessionGeneration == generation) showError(error, "Session could not be created")
-            } finally {
-                if (activeRepository() === fixed && sessionGeneration == generation) updateState { copy(isLoading = false) }
+                clearNewSessionDraft()
             }
+            return
+        }
+        if (!newSessionRequested) return
+        current.pendingTurn?.takeIf { it.state == PendingTurnState.Sending }?.let {
+            discardedInitialTurnRequests += it.requestId
+        }
+        clearNewSessionDraft()
+    }
+
+    private fun scheduleProvisionalSessionCleanup(fixed: SessionRepository, sessionId: String) {
+        val key = fixed to sessionId
+        uncommittedNewSessions.remove(key)
+        sessionPendingTurns.remove(key)
+        if (provisionalCleanupJobs[key]?.isActive == true) return
+        provisionalCleanupJobs[key] = viewModelScope.launch {
+            try {
+                while (true) {
+                    try {
+                        if (fixed.connectionState.value != RuntimeConnectionState.Connected) {
+                            fixed.connectionState.first { it == RuntimeConnectionState.Connected }
+                        }
+                        fixed.deleteSession(sessionId)
+                        return@launch
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        if ((error as? SessionRepositoryException)?.statusCode == 404) return@launch
+                        delay(2_000)
+                    }
+                }
+            } finally {
+                provisionalCleanupJobs.remove(key)
+            }
+        }
+    }
+
+    private fun clearNewSessionDraft() {
+        newSessionRequested = false
+        newSessionProjectId = null
+        sendAfterPendingTurn = false
+        selectedSessionJob?.cancel()
+        selectedSessionJob = null
+        sessionGeneration++
+        updateState {
+            copy(
+                sessionId = null,
+                pendingTurn = null,
+                acceptedTurns = emptyList(),
+                composerText = "",
+                goalText = "",
+                sessionTitle = "New session",
+                runStatus = AgentRunStatus.Idle,
+                timelineItems = emptyList(),
+                historyLoading = false,
+                timelineSessionId = null,
+                messageCount = 0,
+                unseenCount = 0,
+                loadingOlder = false,
+                hasOlder = false,
+                approval = null,
+                resolvingApprovalId = null,
+                error = null,
+                isLoading = false,
+                queuedMessages = emptyList(),
+                activeDecision = null,
+                attachments = emptyList(),
+                editingTurnId = null,
+                editingTurnText = null,
+                runSheetOpen = false,
+                selectedDiffFile = null,
+                stepTraces = emptyList(),
+                changedFiles = emptyList(),
+                runMetrics = RunMetricsUiState(),
+            )
         }
     }
 
@@ -2045,6 +2150,7 @@ class ChatViewModel(
         lastRunProjectionRequest = null
         selectedRepository = fixed
         newSessionRequested = false
+        newSessionProjectId = null
         sendAfterPendingTurn = false
         capabilityCatalogJob?.cancel()
         capabilityCatalogKey = null
@@ -2717,7 +2823,11 @@ class ChatViewModel(
         }
     }
 
-    private suspend fun refreshSession(sessionId: String, expectedGeneration: Long? = null) {
+    private suspend fun refreshSession(
+        sessionId: String,
+        expectedGeneration: Long? = null,
+        allowConnectedRecoveryRetry: Boolean = true,
+    ) {
         val fixed = selectedRepository ?: return
         val generation = expectedGeneration ?: sessionGeneration
         // Do not allow an invalidation for a session that is no longer visible
@@ -2753,18 +2863,41 @@ class ChatViewModel(
                 throw error
             } catch (error: Throwable) {
                 if (isCurrentSession(sessionId, generation)) {
+                    val connectionInterrupted = fixed.connectionState.value != RuntimeConnectionState.Connected
+                    val recoverable = isRecoverableConnectionError(error) || connectionInterrupted
                     updateState {
                         copy(
                             historyLoading = false,
-                            timelineItems = if (isRecoverableConnectionError(error) && timelineSessionId == sessionId) timelineItems else emptyList(),
-                            timelineSessionId = if (isRecoverableConnectionError(error) && timelineSessionId == sessionId) timelineSessionId else null,
-                            messageCount = if (isRecoverableConnectionError(error) && timelineSessionId == sessionId) messageCount else 0,
+                            timelineItems = if (recoverable && timelineSessionId == sessionId) timelineItems else emptyList(),
+                            timelineSessionId = if (recoverable && timelineSessionId == sessionId) timelineSessionId else null,
+                            messageCount = if (recoverable && timelineSessionId == sessionId) messageCount else 0,
                         )
                     }
-                    showError(error, "Session could not be refreshed")
+                    showSessionRefreshError(error, recoverable)
+                    // A request may report a carrier failure after the transport
+                    // already emitted Connected. In that ordering the connection
+                    // collector has no later transition to trigger a reload.
+                    if (recoverable && !connectionInterrupted && allowConnectedRecoveryRetry) {
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(500)
+                            if (isCurrentSession(sessionId, generation) &&
+                                fixed.connectionState.value == RuntimeConnectionState.Connected) {
+                                refreshSession(sessionId, generation, allowConnectedRecoveryRetry = false)
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private fun showSessionRefreshError(error: Throwable, recoverable: Boolean) {
+        if (requiresDeviceReauthentication(error)) {
+            updateState { copy(connection = AgentConnectionStatus.AuthenticationRequired, error = "Authentication required. Pair this Android device again.") }
+            return
+        }
+        val detail = error.message?.takeIf { it.isNotBlank() } ?: "Session could not be refreshed"
+        publishError("Session could not be refreshed: $detail", clearWhenConnected = recoverable)
     }
 
     private fun loadOlderTimeline() {
@@ -3077,7 +3210,12 @@ class ChatViewModel(
 
     private fun isRecoverableConnectionError(error: Throwable): Boolean =
         error is java.io.IOException ||
-            (error is SessionRepositoryException && error.retryable && error.code in setOf("CARRIER_UNAVAILABLE", "NETWORK_ERROR")) ||
+            (error is SessionRepositoryException && error.retryable && error.code in setOf(
+                "CARRIER_UNAVAILABLE",
+                "NETWORK_ERROR",
+                "P2P_NETWORK_ERROR",
+                "TURN_NETWORK_ERROR",
+            )) ||
             error.message.orEmpty().contains("No verified TURN/P2P carrier", ignoreCase = true)
 
     private fun publishError(detail: String, clearWhenConnected: Boolean) {
@@ -3205,9 +3343,15 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
         viewModelScope.launch {
             repository.observeSessions().collectLatest { sessions ->
                 sessionsHydrated = true
+                // A first-turn session is created immediately before its message POST.
+                // Keep that provisional empty record out of the picker until the
+                // computer has accepted a message (or started processing it).
+                val listedSessions = sessions.filter {
+                    it.latestSeq > 0L || it.status in setOf(SessionStatus.Working, SessionStatus.WaitingApproval)
+                }
                 updateState {
                     copy(
-                        sessions = sessions,
+                        sessions = listedSessions,
                         hydrated = projectsHydrated && sessionsHydrated,
                     )
                 }

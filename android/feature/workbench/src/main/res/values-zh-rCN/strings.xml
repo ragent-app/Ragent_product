@@ -284,6 +284,7 @@
     <string name="home_connection_offline">当前处于离线状态</string>
     <string name="home_connection_connecting">正在连接…</string>
     <string name="home_connection_reconnecting">正在恢复连接…</string>
+    <string name="workbench_connection_reconnecting_detail">电脑重新连接后，会自动重新加载当前会话。</string>
     <string name="home_connection_authentication_required">需要重新登录才能连接</string>
     <string name="home_connection_failed">无法恢复连接</string>
     <string name="home_needs_attention">需要处理</string>

@@ -85,6 +85,7 @@ import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.designsystem.AgentoDialog
 import com.andysagent.agentoc.core.designsystem.AgentoDialogActionLayout
 import com.andysagent.agentoc.core.designsystem.LocalAgentocColors
+import com.andysagent.agentoc.core.agentui.AgentConnectionStatus
 import com.andysagent.agentoc.core.model.AppLanguage
 import com.andysagent.agentoc.core.model.AppTheme
 import com.andysagent.agentoc.core.model.Computer
@@ -979,6 +980,9 @@ class MainActivity : ComponentActivity() {
                 val foregroundChatRepository by app.runtime.sessions.delegate.collectAsStateWithLifecycle()
                 val foregroundChatTransport by app.runtime.transport.delegate.collectAsStateWithLifecycle()
                 val detailTargetId by tabletChatBinding.targetId.collectAsStateWithLifecycle()
+                LaunchedEffect(shellState.chatOpen) {
+                    if (!shellState.chatOpen) chat.onEvent(ChatEvent.DiscardUnsentNewSession)
+                }
                 LaunchedEffect(foregroundChatRepository, foregroundChatTransport, currentWorkbenchTargetId, tabletDualPane, shellState.chatOpen) {
                     chat.preserveSelectedSessionOnRefresh = tabletDualPane && shellState.chatOpen
                     if (!tabletDualPane || !shellState.chatOpen) {
@@ -1300,6 +1304,15 @@ class MainActivity : ComponentActivity() {
                             (!tabletDualPane || detailTargetId == currentWorkbenchTargetId)) state.sessionId else null),
                     )
                 }
+                val computerRecovery = remember(state.chatConnection, state.chatTargetId, currentWorkbenchTargetId) {
+                    if (state.chatConnection == AgentConnectionStatus.Reconnecting) {
+                        com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionUiState(
+                            active = true,
+                            phase = com.andysagent.agentoc.feature.workbench.accounts.DemoConnectionPhase.Reconnecting,
+                            targetId = state.chatTargetId ?: currentWorkbenchTargetId,
+                        )
+                    } else null
+                }
                 if (pendingSessionNavigation?.targetInstanceId == null && pendingSessionNavigation != null || sessionNavigationError != null) {
                     SessionNavigationDialog(
                         error = sessionNavigationError,
@@ -1313,6 +1326,10 @@ class MainActivity : ComponentActivity() {
                     testAccount = accountsState.isDemoAccount,
                     connection = demoConnectionState,
                     onRetryConnection = demoConnection::retry,
+                    computerRecovery = computerRecovery,
+                    onRetryComputerRecovery = {
+                        app.runtime.retryComputerConnection(computerRecovery?.targetId ?: currentWorkbenchTargetId)
+                    },
                     onSignOut = {
                         runtimeScope.launch {
                             try { app.runtime.logoutAccountSession() }
@@ -1644,7 +1661,10 @@ class MainActivity : ComponentActivity() {
                                     chat.onEvent(ChatEvent.CreateSession(event.projectId))
                                 }
                             }
-                            WorkbenchEvent.CloseChat -> shell.onEvent(AppShellEvent.CloseChat)
+                            WorkbenchEvent.CloseChat -> {
+                                chat.onEvent(ChatEvent.DiscardUnsentNewSession)
+                                shell.onEvent(AppShellEvent.CloseChat)
+                            }
                             is WorkbenchEvent.SessionSearchChanged -> shell.onEvent(AppShellEvent.SessionSearchChanged(event.value))
                             is WorkbenchEvent.OpenProjectSessions -> {
                                 projects.onEvent(ProjectsEvent.SelectProject(event.projectId))

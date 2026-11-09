@@ -296,6 +296,7 @@
     <string name="home_connection_offline">You’re offline</string>
     <string name="home_connection_connecting">Connecting…</string>
     <string name="home_connection_reconnecting">Restoring connection…</string>
+    <string name="workbench_connection_reconnecting_detail">We’ll reload this conversation when the computer is back online.</string>
     <string name="home_connection_authentication_required">Sign in is required to reconnect</string>
     <string name="home_connection_failed">Couldn’t reconnect</string>
     <string name="home_needs_attention">Needs attention</string>

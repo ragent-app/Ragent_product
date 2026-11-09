@@ -11,22 +11,30 @@ import com.andysagent.agentoc.feature.workbench.R
 
 /** Floating connection status; the workbench stays mounted beneath it. */
 @Composable
-fun DemoConnectionGate(state: DemoConnectionUiState, onRetry: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun DemoConnectionGate(
+    state: DemoConnectionUiState,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+    titleOverride: String? = null,
+    detailOverride: String? = null,
+    testTag: String = "demo-connection-gate",
+    modifier: Modifier = Modifier,
+) {
     AgentoConnectionProgress(
-        title = stringResource(when (state.phase) {
+        title = titleOverride ?: stringResource(when (state.phase) {
             DemoConnectionPhase.Discovering -> R.string.demo_connection_finding
             DemoConnectionPhase.Reconnecting -> R.string.demo_connection_reconnecting
             DemoConnectionPhase.Unavailable -> R.string.demo_connection_unavailable
             else -> R.string.demo_connection_connecting
         }),
-        detail = stringResource(if (state.takingLonger) R.string.demo_connection_slow else R.string.demo_connection_detail),
+        detail = detailOverride ?: stringResource(if (state.takingLonger) R.string.demo_connection_slow else R.string.demo_connection_detail),
         busy = state.phase != DemoConnectionPhase.Unavailable,
         showRetry = state.phase == DemoConnectionPhase.Unavailable || state.takingLonger,
         retryLabel = stringResource(R.string.demo_connection_retry),
         exitLabel = stringResource(R.string.demo_connection_close),
         onRetry = onRetry,
         onExit = onDismiss,
-        modifier = modifier.testTag("demo-connection-gate"),
+        modifier = modifier.testTag(testTag),
     )
 }
 
