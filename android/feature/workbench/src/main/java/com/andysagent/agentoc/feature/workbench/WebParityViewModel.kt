@@ -712,6 +712,16 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
     private suspend fun loadProviders(): List<WebProvider> = request("GET", "/api/native-providers")["providers"]?.jsonArray.orEmpty().mapNotNull { value ->
         val item = value.jsonObject
         val id = item.string("id") ?: return@mapNotNull null
+        // Hosts may still return legacy scalar or JSON-encoded policy values.
+        val rawModelPolicy = item["modelPolicy"]
+        val modelPolicy = when (rawModelPolicy) {
+            is JsonObject -> rawModelPolicy
+            is JsonPrimitive -> if (rawModelPolicy.isString) runCatching {
+                AgentocProtocol.json.parseToJsonElement(rawModelPolicy.content) as? JsonObject
+            }.getOrNull() else null
+            else -> null
+        }
+        val legacyModelPolicy = (rawModelPolicy as? JsonPrimitive)?.takeIf { it.isString }?.content
         val quota = item["quota"] ?: try { request("GET", "/api/native-providers/${path(id)}/quota")["quota"] } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
         WebProvider(
             id = id,
@@ -721,9 +731,9 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
             agentType = item.string("agentType") ?: "codex",
             authType = item.string("authType") ?: "api-key",
             baseUrl = item.string("baseUrl") ?: "",
-            defaultModel = item["modelPolicy"]?.jsonObject?.string("defaultModel") ?: item.string("defaultModel") ?: "",
+            defaultModel = modelPolicy?.string("defaultModel") ?: item.string("defaultModel") ?: legacyModelPolicy.orEmpty(),
             protocol = item.string("protocol") ?: "responses",
-            enabled = item["enabled"]?.jsonPrimitive?.booleanOrNull ?: true,
+            enabled = (item["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true,
             quota = (quota as? JsonPrimitive)?.contentOrNull.orEmpty(),
             quotaSnapshot = quota as? JsonObject,
             modelCount = item.int("modelCount") ?: 0,

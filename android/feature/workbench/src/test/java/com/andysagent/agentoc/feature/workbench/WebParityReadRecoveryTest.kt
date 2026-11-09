@@ -59,6 +59,30 @@ class WebParityReadRecoveryTest {
             assertEquals("p", model.state.value.providers.single().id)
         } finally { Dispatchers.resetMain() }
     }
+
+    @Test fun malformedProviderPoliciesDoNotBreakTheProviderList() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val transport = ReadTransport { request ->
+                if (request.path == "/api/native-providers") ApiResponse(200, """{"providers":[
+                    {"id":"legacy-string","modelPolicy":"legacy-model"},
+                    {"id":"serialized-policy","modelPolicy":"{\"defaultModel\":\"gpt-legacy\"}"},
+                    {"id":"legacy-array","modelPolicy":["legacy-model"],"enabled":{"unexpected":true}},
+                    {"id":"valid-policy","modelPolicy":{"defaultModel":"gpt-5"}}
+                ]}""") else ApiResponse(200, "{}")
+            }
+            val model = WebParityViewModel(WebParityRepository(transport))
+            model.onEvent(WebParityEvent.OpenPage(WebParityPage.ModelProviders)); runCurrent()
+
+            assertEquals(listOf("legacy-string", "serialized-policy", "legacy-array", "valid-policy"), model.state.value.providers.map { it.id })
+            assertEquals("legacy-model", model.state.value.providers[0].defaultModel)
+            assertEquals("gpt-legacy", model.state.value.providers[1].defaultModel)
+            assertEquals("", model.state.value.providers[2].defaultModel)
+            assertEquals("gpt-5", model.state.value.providers[3].defaultModel)
+            assertTrue(model.state.value.providers[2].enabled)
+            assertNull(model.state.value.error)
+        } finally { Dispatchers.resetMain() }
+    }
     @Test fun closingAFileDoesNotReleaseAnUnrelatedProviderMutation() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
