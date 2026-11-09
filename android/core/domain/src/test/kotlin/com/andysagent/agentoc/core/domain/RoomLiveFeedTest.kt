@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.andysagent.agentoc.core.database.AgentoCDatabase
+import com.andysagent.agentoc.core.database.ApprovalEntity
 import com.andysagent.agentoc.core.database.SessionEntity
 import com.andysagent.agentoc.core.database.MessageEntity
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
@@ -29,6 +30,30 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], manifest = Config.NONE)
 class RoomLiveFeedTest {
+    @Test fun replayedApprovalRequestCannotReopenLocallyResolvedCard() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AgentoCDatabase::class.java).allowMainThreadQueries().build()
+        val transport = LiveFeedTransport()
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertApprovals(listOf(ApprovalEntity(
+                id = "question-1",
+                sessionId = "session-live",
+                title = "Choose one",
+                status = "resolved",
+                runId = "run-ended",
+                kind = "approval_request",
+                updatedAt = 1,
+            )))
+            transport.body = """{"sessionId":"session-live","events":[{"seq":1,"eventId":"approval-request-1","type":"approval_request","approvalId":"question-1","runId":"run-ended","title":"Choose one","reason":"Choose one"}],"latestSeq":1}"""
+
+            repo.refreshEvents("session-live")
+
+            assertEquals("resolved", database.dao().getApproval("session-live", "question-1")?.status)
+            assertTrue(database.dao().getPendingApprovals("session-live").isEmpty())
+        } finally { repo.close(); database.close() }
+    }
+
     @Test fun previouslyCachedCompactionHandoffIsNotShownAsChat() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AgentoCDatabase::class.java).allowMainThreadQueries().build()

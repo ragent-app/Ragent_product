@@ -3070,11 +3070,18 @@ private class RoomEventSink(
         if (isApprovalRequest && !isServerManagedInstallOnly) {
             val approvalId = event.approvalId ?: event.batchId ?: requestId
             val details = buildApprovalDetails(event)
+            val priorStatus = dao.getApproval(scope, approvalId)?.takeIf { it.runId == event.runId }
+                ?.status?.lowercase()?.takeIf {
+                    it in setOf("resolved", "approved", "denied", "declined", "cancelled", "canceled", "completed", "failed", "expired")
+                }
             dao.upsertApprovals(listOf(ApprovalEntity(
                 id = approvalId,
                 sessionId = scope,
                 title = event.title ?: text ?: event.batchId ?: type,
-                status = "pending",
+                // Event replay and visible-history recovery can encounter an old
+                // request after its response was submitted. Never let that old
+                // request resurrect itself as actionable.
+                status = priorStatus ?: "pending",
                 runId = event.runId,
                 batchId = event.batchId,
                 kind = type,
