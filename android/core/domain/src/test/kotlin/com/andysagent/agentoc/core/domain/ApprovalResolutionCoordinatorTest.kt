@@ -148,6 +148,7 @@ class ApprovalResolutionCoordinatorTest {
         val outcome = coordinator.resolvePlainApproval("s1", "a1", approve = true)
         assertEquals(ApprovalResolutionCoordinator.Outcome.Submitted, outcome)
         assertEquals(Triple("run-1", "a1", "approve"), repository.runtimeApprovals.single())
+        assertEquals("s1" to "a1", repository.retiredApproval)
         assertEquals(listOf("s1"), repository.refreshes)
     }
 
@@ -175,6 +176,36 @@ class ApprovalResolutionCoordinatorTest {
         assertEquals("s1" to "stale-approval", repository.retiredApproval)
         assertEquals("resolved", repository.approvals.single().status)
         assertTrue(repository.runtimeApprovals.isEmpty())
+    }
+
+    @Test
+    fun `terminal runtime rejection retires a cached question approval`() = runTest {
+        val repository = FakeRepository()
+        repository.approvals += Approval(
+            id = "question-1",
+            sessionId = "s1",
+            title = "Choose one",
+            status = "pending",
+            runId = "run-finished",
+            kind = "question",
+            questions = listOf(ApprovalQuestion(question = "Choose", options = listOf(ApprovalOption("A")))),
+        )
+        repository.runtimeApprovalError = ApiException(
+            statusCode = 409,
+            code = "RUN_TERMINAL",
+            message = "Run is no longer active",
+            retryable = false,
+        )
+
+        val outcome = ApprovalResolutionCoordinator(repository).resolveQuestionsApproval(
+            sessionId = "s1",
+            approvalId = "question-1",
+            choices = listOf(0),
+        )
+
+        assertEquals(ApprovalResolutionCoordinator.Outcome.Stale, outcome)
+        assertEquals("s1" to "question-1", repository.retiredApproval)
+        assertEquals("resolved", repository.approvals.single().status)
     }
 
     @Test
@@ -265,6 +296,7 @@ class ApprovalResolutionCoordinatorTest {
         assertEquals(Triple("run-1", "q1", "approve"), repository.runtimeApprovals.single())
         assertEquals(listOf("1"), repository.lastChoices)
         assertEquals(null, repository.lastCustomAnswer)
+        assertEquals("s1" to "q1", repository.retiredApproval)
     }
 
     @Test

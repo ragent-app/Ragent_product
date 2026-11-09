@@ -1421,6 +1421,37 @@ class WorkbenchViewModelTest {
             viewModel.onEvent(ChatEvent.SubmitDecision("q1"))
             advanceUntilIdle()
             assertEquals(listOf("1"), repository.runtimeApprovalChoices)
+            assertEquals(listOf("session-1" to "q1"), repository.retiredStaleApprovalCalls)
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test
+    fun `terminal run rejection retires stale question without retry banner`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val repository = FakeSessionRepository(
+                sessions = listOf(Session("session-1", "Task")),
+                approvals = listOf(Approval(
+                    id = "question-1",
+                    sessionId = "session-1",
+                    title = "Choose",
+                    runId = "run-1",
+                    kind = "question",
+                    questions = listOf(ApprovalQuestion(question = "Choose one", options = listOf(ApprovalOption("A")))),
+                )),
+            ).apply {
+                runtimeApprovalFailure = SessionRepositoryException(409, "RUN_TERMINAL", "Run is no longer active", false)
+            }
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.SelectDecisionOption("question-1", 0))
+            viewModel.onEvent(ChatEvent.SubmitDecision("question-1"))
+            advanceUntilIdle()
+
+            assertEquals(listOf("session-1" to "question-1"), repository.retiredStaleApprovalCalls)
+            assertEquals(null, viewModel.state.value.activeDecision)
+            assertEquals(null, viewModel.state.value.error)
         } finally { Dispatchers.resetMain() }
     }
 
@@ -1714,6 +1745,8 @@ private class FakeSessionRepository(
     var runtimeApprovalChoices: List<String>? = null
     var runtimeApprovalDecision: String? = null
     var runtimeApprovalCustomAnswers: List<String>? = null
+    var runtimeApprovalFailure: Throwable? = null
+    val retiredStaleApprovalCalls = mutableListOf<Pair<String, String>>()
     var createdProject: Project? = null
     var projectRefreshCalls: Int = 0
     var failProjectsRefresh: Throwable? = null
@@ -1753,6 +1786,9 @@ private class FakeSessionRepository(
     override fun observeTimeline(sessionId: String): Flow<List<TimelineItem>> = timelineStates.getOrPut(sessionId) { MutableStateFlow(emptyList()) }
     override fun observePendingApprovals(sessionId: String): Flow<List<Approval>> = MutableStateFlow(approvals.filter { it.sessionId == sessionId })
     override suspend fun findPendingApproval(sessionId: String, approvalId: String): Approval? = approvals.firstOrNull { it.sessionId == sessionId && it.id == approvalId }
+    override suspend fun retireStaleApproval(sessionId: String, approvalId: String) {
+        retiredStaleApprovalCalls += sessionId to approvalId
+    }
     override suspend fun createSession(name: String, tool: String): Session {
         created = true
         createdNames += name
@@ -1855,6 +1891,7 @@ private class FakeSessionRepository(
         }
     }
     override suspend fun resolveRuntimeApproval(runId: String, approvalId: String, decision: String, choices: List<String>, customAnswer: String?, requestId: String) {
+        runtimeApprovalFailure?.let { throw it }
         runtimeApprovalChoices = choices
         runtimeApprovalDecision = decision
     }

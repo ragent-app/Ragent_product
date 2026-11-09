@@ -1863,6 +1863,16 @@ class ChatViewModel(
                         updateState { copy(activeDecision = currentDecision.copy(isSubmitting = false, isSubmitted = true)) }
                         refreshSession(sessionId)
                     }
+                    ApprovalResolutionCoordinator.Outcome.Stale -> {
+                        updateState {
+                            copy(
+                                activeDecision = activeDecision?.takeUnless { it.id == questionId },
+                                approval = approval?.takeUnless { it.id == questionId },
+                                resolvingApprovalId = resolvingApprovalId?.takeUnless { it == questionId },
+                                error = null,
+                            )
+                        }
+                    }
                     else -> {
                         val message = when (outcome) {
                             is ApprovalResolutionCoordinator.Outcome.Failed -> outcome.message
@@ -1913,11 +1923,35 @@ class ChatViewModel(
                         requestId = requestId,
                     )
                 }
+                try {
+                    repository.retireStaleApproval(sessionId, currentDecision.approvalId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // The server already accepted the answer; cache cleanup is best-effort.
+                }
                 updateState {
                     copy(activeDecision = currentDecision.copy(isSubmitting = false, isSubmitted = true))
                 }
                 refreshSession(sessionId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
+                if (error.isTerminalApprovalFailure()) {
+                    try { refreshSession(sessionId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {}
+                    try { repository.retireStaleApproval(sessionId, currentDecision.approvalId) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Throwable) {}
+                    updateState {
+                        copy(
+                            activeDecision = activeDecision?.takeUnless { it.id == questionId },
+                            approval = approval?.takeUnless { it.id == questionId },
+                            resolvingApprovalId = resolvingApprovalId?.takeUnless { it == questionId },
+                            error = null,
+                        )
+                    }
+                    return@launch
+                }
                 updateState {
                     copy(
                         activeDecision = currentDecision.copy(
@@ -2922,6 +2956,13 @@ class ChatViewModel(
                     repository.resolveRuntimeApproval(runId, approvalId, decision)
                 } else {
                     repository.decideConfirmation(sessionId, approvalId, decision)
+                }
+                try {
+                    repository.retireStaleApproval(sessionId, approvalId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // Keep the acknowledged server decision successful even if local cleanup fails.
                 }
                 refreshSession(sessionId)
             } catch (cancelled: CancellationException) {

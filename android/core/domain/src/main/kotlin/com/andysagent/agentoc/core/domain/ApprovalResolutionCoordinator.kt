@@ -74,6 +74,7 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
                         )
                     }
                     runCatching { repository.refreshSessionDetail(sessionId) }
+                    retireResolvedApproval(sessionId, approvalId)
                     Outcome.Submitted
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -159,6 +160,7 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         return try {
             repository.resolveRuntimeApprovalWithMultiChoices(runId, approvalId, selections, answers, requestId)
             runCatching { repository.refreshSessionDetail(sessionId) }
+            retireResolvedApproval(sessionId, approvalId)
             Outcome.Submitted
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -237,6 +239,7 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
                         )
                     }
                     runCatching { repository.refreshSessionDetail(sessionId) }
+                    retireResolvedApproval(sessionId, approvalId)
                     Outcome.Submitted
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -264,6 +267,18 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         throw cancelled
     } catch (error: Throwable) {
         Outcome.Failed(error.message ?: cause.message ?: "过期审批无法清理")
+    }
+
+    /** A successful server response owns the decision; clear its pending local projection too. */
+    private suspend fun retireResolvedApproval(sessionId: String, approvalId: String) {
+        try {
+            repository.retireStaleApproval(sessionId, approvalId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            // The server has already accepted the decision. A local cache cleanup
+            // failure must not turn that success into a retryable submission error.
+        }
     }
 
     private fun Approval.requiresStructuredResolution(): Boolean = batchId != null ||
