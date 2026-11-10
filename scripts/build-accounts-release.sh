@@ -65,5 +65,10 @@ EOF
 
 chmod -R a+rX "$RELEASE_DIR"
 node "$ROOT/scripts/verify-runtime-payload.mjs" "$RELEASE_DIR"
-tar -C "$WORK_DIR" -czf "$OUTPUT" "$RELEASE_NAME"
+# Git Bash on Windows/NTFS reports archived file modes as non-executable even
+# after chmod. Archive the tree, then append the Linux runtime with an explicit
+# executable mode so systemd can start it after extraction on ARM64 hosts.
+tar -C "$WORK_DIR" --exclude="$RELEASE_NAME/runtime/node" -cf "$WORK_DIR/release.tar" "$RELEASE_NAME"
+tar -C "$WORK_DIR" --mode=0755 -rf "$WORK_DIR/release.tar" "$RELEASE_NAME/runtime/node"
+gzip -n -c "$WORK_DIR/release.tar" > "$OUTPUT"
 printf '%s\n' "$OUTPUT"
