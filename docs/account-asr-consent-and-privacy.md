@@ -4,7 +4,7 @@ This addendum updates the canonical [central Accounts ASR plan](account-asr-serv
 
 **Updated:** 2026-11-10
 
-**State:** consent enforcement and the expanded v2 Android disclosure are deployed with Accounts migration 040. The provider key remains blank and cloud ASR stays disabled at the owner's direction. Oracle health/readiness and synthetic PostgreSQL quota/settlement verification passed; a real vendor call and signed-in account transcription remain pending.
+**State:** consent enforcement and the expanded v2 Android disclosure are deployed with Accounts migration 040. The provider key remains blank and cloud ASR stays disabled at the owner's direction. The public privacy notice was published on 2026-11-10. Oracle health/readiness and synthetic PostgreSQL quota/settlement verification passed; a real vendor call and signed-in account transcription remain pending.
 
 ## Product contract
 
@@ -34,7 +34,7 @@ sequenceDiagram
 
 The provider key stays in the central service environment. Android, Windows, per-user files, and the database never receive it. Accounts uses the existing account bearer/device identity and PostgreSQL database; it does not introduce another account system or database.
 
-The existing usage ledger is keyed by account and billing month. It records duration, request count, reservation and settlement state, provider/model and price version, audio hash, and provider cost. It does not persist the WAV or transcript as database columns. The server holds a successful response in process memory for up to five minutes to serve an idempotent retry; that brief cache is disclosed to the user. Account-linked request metadata is normally deleted after 90 days; unresolved provider outcomes remain until reconciled or the account is deleted.
+The existing usage ledger is keyed by account and billing month. It records duration, request count, reservation and settlement state, provider/model and price version, audio hash, and provider cost. It does not persist the WAV or transcript as database columns. The server holds a successful response in process memory for up to five minutes to serve an idempotent retry; that brief cache is disclosed to the user. Successful and failed request metadata is normally deleted after 90 days. Requests whose provider outcome cannot be confirmed are not automatically removed after 90 days and can remain until the account is deleted.
 
 ## API and persistence
 
@@ -44,7 +44,7 @@ The implemented contract is:
 - GET /v1/owner-auth/account/asr/usage reports the current account/month quota and the latest consent state. It remains useful while the provider is disabled.
 - POST /v1/owner-auth/account/asr/transcriptions accepts bounded audio/wav bytes and an idempotency key. A current accepted consent for the disclosure version is required before any provider call, including a cached-result replay.
 
-Migration 039_account_asr_consent creates an append-only consent event ledger. It stores only the random account/device identifiers, disclosure version, accepted/revoked action and timestamp, and retains each event for five years. It has no foreign key, so account deletion cannot silently erase evidence of the user's choice. Migration 040 permits both v1 and v2 evidence records; Accounts only treats an acceptance of the current v2 disclosure as valid, so a prior v1 acceptance requires fresh consent. The account-deletion receipt names this minimal retained evidence. A bounded maintenance job deletes events after their retention deadline.
+Migration 039_account_asr_consent creates an append-only consent event ledger. It stores only account and device identifiers, disclosure version, accepted/revoked action and timestamp, and retains each event for five years. It has no foreign key, so account deletion cannot silently erase evidence of the user's choice. Migration 040 permits both v1 and v2 evidence records; Accounts only treats an acceptance of the current v2 disclosure as valid, so a prior v1 acceptance requires fresh consent. The account-deletion receipt names this minimal retained evidence. A bounded maintenance job deletes events after their retention deadline.
 
 The exact disclosure version is part of the server and Android protocol. A changed recipient, purpose, retention promise, or material policy change must use a new version and require fresh consent.
 
@@ -91,4 +91,4 @@ From the real Windows 11 Pro host (Build 22631), the same public HTTPS endpoints
 
 An isolated PostgreSQL scratch-database test verified v1/v2 consent storage, shared cross-device monthly quota under concurrent reservations, the two-operation cap, and successful settlement from reserved to used time. The scratch database used synthetic IDs and was dropped after the test. This uncovered a date parsing bug in settlement; the query now explicitly reads SQL date text, and the deployed code passed the PostgreSQL smoke test after the fix. It does not claim a valid signed-in Ragent account or provider call.
 
-The public privacy notice and Play Console Data Safety form still need review/update before enablement. The real ElevenLabs transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.
+The public privacy notice is published. The Play Console Data Safety form still needs owner review/update against the actual provider account terms before enablement. The real ElevenLabs transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.

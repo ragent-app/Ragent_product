@@ -1,6 +1,8 @@
-# Draft Google Play Data safety review for optional cloud ASR
+# Google Play Data Safety owner-review worksheet for optional cloud ASR
 
 This is an owner-review worksheet, not a completed Play Console declaration or legal determination. The declaration must match the provider account, signed contract, actual data flows, and every currently distributed version of the app.
+
+**Current status (2026-11-10):** the public privacy notice is published at `https://support.agentoncloud.com/privacy/`. The provider key is absent and cloud ASR is disabled; no vendor transcription is currently forwarded by Ragent Accounts. The Play Console declaration remains unsubmitted and requires owner review against the actual provider account terms before feature activation.
 
 ## Current ASR data flow
 
@@ -16,9 +18,9 @@ This is an owner-review worksheet, not a completed Play Console declaration or l
 | Data type | Candidate collection answer | Purpose to assess | Important handling detail |
 | --- | --- | --- | --- |
 | Audio files → Voice or sound recordings | Collected; optional because users can keep using local recognition and choose whether to upload | App functionality: transcribe the user-selected recording | It leaves the phone and is forwarded from Accounts to ElevenLabs. With standard logging enabled, do not describe this audio as ephemeral. Provider terms, the explicit upload flow, and Play's sharing exceptions must be evaluated separately. |
-| Personal info → User IDs | Account IDs are present in persistent Accounts request and consent records; confirm whether already covered by the existing form | App functionality, account management, security/quota enforcement | Random account IDs are still account-linked identifiers. |
+| Personal info → User IDs | Account IDs are present in persistent Accounts request and consent records; confirm whether already covered by the existing form | App functionality, account management, security/quota enforcement | Account IDs are account-linked identifiers even when pseudonymous. |
 | Device or other identifiers | Device ID is present in persistent request and consent records; confirm the current form taxonomy | App functionality and security/quota enforcement | The provider request does not receive the Ragent device ID. |
-| App activity → Other actions, or the closest applicable category | Assess for account-linked transcription request/usage metadata | App functionality and fraud prevention/security | This metadata persists for up to 90 days, with an exception for unresolved outcomes. |
+| App activity → Other actions, or the closest applicable category | Assess for account-linked transcription request/usage metadata | App functionality and fraud prevention/security | Successful and failed request metadata is normally retained for 90 days; uncertain outcomes have no automatic expiry and can remain until account deletion. |
 | Messages → Other in-app messages, or user-generated content | Assess whether the returned transcription should be listed separately from its audio source | App functionality | The transcript is cached only in server memory for up to five minutes and is not stored in the Ragent database. Include ephemeral processing in the form response even if it is not shown in the store listing. |
 
 For the sharing questions, do not infer the answer from the collection answer. Google Play defines sharing to include server-to-server transfers and lists separate exceptions for service-provider processing and transfers prompted by a user action or prominent disclosure and consent. The Android cloud flow is user-initiated and names ElevenLabs, but the publisher must confirm it meets current policy and document the basis for its answer. The service-provider exception may not apply if ElevenLabs uses content for its own service improvement or model development. A sharing exception does not remove collection obligations.
