@@ -4,7 +4,7 @@ This addendum updates the canonical [central Accounts ASR plan](account-asr-serv
 
 **Updated:** 2026-11-10
 
-**State:** consent enforcement is implemented. The expanded Android disclosure and matching Accounts policy version v2 are being validated before deployment; the provider remains disabled because the owner has not obtained an ElevenLabs API key.
+**State:** consent enforcement and the expanded v2 Android disclosure are deployed with Accounts migration 040. The provider key remains blank and cloud ASR stays disabled at the owner's direction. Oracle health/readiness and synthetic PostgreSQL quota/settlement verification passed; a real vendor call and signed-in account transcription remain pending.
 
 ## Product contract
 
@@ -74,15 +74,19 @@ The v2 disclosure is localized in English, Simplified Chinese, Traditional Chine
 
 | Area | Status |
 |---|---|
-| Central Accounts service and monthly account usage ledger | Implemented and deployed previously; Oracle health/ready checks passed |
-| Provider secret and feature gate | Correctly absent/off; owner has not applied for a key |
-| Consent ledger and enforce-before-forward gate | Implemented; migration 039 applied and matching Accounts release active on Oracle |
+| Central Accounts service and monthly account usage ledger | Deployed on Oracle at release `0.0.1+asr-settlement.20261110.05d444e`; migrations 038–040 applied |
+| Provider secret and feature gate | Key absent and feature flag off by owner instruction |
+| Consent ledger and enforce-before-forward gate | Implemented; migration 040 applied and matching Accounts release active on Oracle |
 | Android explicit consent, decline, revoke, and localized disclosure | Implemented; debug build, unit tests, and seven-locale device test passed |
 | Public privacy-policy and Play Console alignment | Draft prepared; public changes not published |
 | Real ElevenLabs transcription and cost measurement | Cannot be performed until a key is configured securely |
 
-## Verification follow-up — 2026-11-10
+## Latest deployment and verification — 2026-11-10
 
-The Windows `npm run test:owner-auth` suite passed, including the ASR service and Accounts route tests and all four owner-auth Playwright checks. Android debug assembly and relevant unit tests passed, including `AccountSessionManagerTest` and the Workbench tests. On the connected MTN-AN80, `VoiceLocalizationTest` passed both cases across English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. This device check verifies the localized disclosure copy; it is not a real provider transcription test.
+`npm run test:owner-auth`, the ASR unit test, and the Accounts independent release-packaging test passed on Windows. The Android debug/unit tests and the connected MTN-AN80 `VoiceLocalizationTest` passed earlier; the device test covered English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It verifies localized disclosure copy, not provider transcription.
 
-Migration 039 was applied before switching to `agentoc-accounts-0.0.1+asr-consent.20261110.29f924d-arm64`. The service is active, HTTPS health and readiness return 200, readiness reports `speechRecognition: unconfigured`, invalid usage and consent credentials return 401, and transcription returns 503 `asr_unavailable`. The previous immutable release remains available for rollback. The provider flag is off and its key is absent. Real provider transcription and valid-account usage settlement, public privacy-policy publication, and Play Console updates remain separate launch gates.
+Oracle currently runs `agentoc-accounts-0.0.1+asr-settlement.20261110.05d444e-arm64`, built from committed source revision `05d444e80d450857907e750e854bce4dceb70c27`; archive SHA-256 is `8fbe8af52f24f529500af237e571ae9ce8f1f1796d270b577855172b67b222fc`. The prior immutable release remains available for rollback. Public health/readiness both return 200, readiness reports `speechRecognition: unconfigured`, and an invalid usage credential returns 401. The key is absent and the feature flag is off.
+
+An isolated PostgreSQL scratch-database test verified v1/v2 consent storage, shared cross-device monthly quota under concurrent reservations, the two-operation cap, and successful settlement from reserved to used time. The scratch database used synthetic IDs and was dropped after the test. This uncovered a date parsing bug in settlement; the query now explicitly reads SQL date text, and the deployed code passed the PostgreSQL smoke test after the fix. It does not claim a valid signed-in Ragent account or provider call.
+
+The public privacy notice and Play Console Data Safety form still need review/update before enablement. The real ElevenLabs transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.
