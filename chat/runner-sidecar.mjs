@@ -2572,10 +2572,19 @@ function isUnattendedPermissionMode(state) {
   return ['full-auto', 'conservative-auto'].includes(state?.riskMode);
 }
 
-async function denyUnattendedPermissionRequest(runId, state, approval, proc, provider) {
+async function denyUnattendedPermissionRequest(runId, state, approval, proc, provider, gateDecision = null) {
+  const gateReason = typeof gateDecision?.reason === 'string' && gateDecision.reason.trim()
+    ? gateDecision.reason.trim()
+    : 'request did not qualify for automatic approval';
+  const policyMode = typeof state?.riskMode === 'string' && state.riskMode.trim()
+    ? state.riskMode.trim()
+    : 'unattended';
+  const auditReason = `${policyMode}: ${gateReason}`;
   const message = provider === 'codex'
     ? buildCodexAppServerApprovalResponseMessage(approval, 'deny')
-    : buildClaudeBidiApprovalResponseMessage(approval, 'deny');
+    : buildClaudeBidiApprovalResponseMessage(approval, 'deny', null, {
+      message: `Ragent automatically denied this tool request under the ${policyMode} policy: ${gateReason}.`,
+    });
   const sent = message && (provider === 'codex'
     ? writeCodexAppServerMessage(proc, message)
     : writeClaudeBidiMessage(proc, message));
@@ -2596,7 +2605,8 @@ async function denyUnattendedPermissionRequest(runId, state, approval, proc, pro
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
       providerMethod: approval.providerMethod || '',
       autoDenied: true,
-      reason: `${state.riskMode}: unapproved permission request`,
+      reason: auditReason,
+      ...riskAuditFields(gateDecision?.risk),
     },
   });
   const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval));
@@ -2709,7 +2719,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
 
   if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
-    return denyUnattendedPermissionRequest(runId, state, approval, proc, 'codex');
+    return denyUnattendedPermissionRequest(runId, state, approval, proc, 'codex', gateDecision);
   }
 
   if (gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
@@ -2910,7 +2920,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
 
   if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
-    return denyUnattendedPermissionRequest(runId, state, approval, proc, 'claude');
+    return denyUnattendedPermissionRequest(runId, state, approval, proc, 'claude', gateDecision);
   }
 
   if (gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {

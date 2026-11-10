@@ -48,6 +48,9 @@ const APPROVAL_METRIC_FIELDS = Object.freeze([
   'projected',
   'suppressed',
 ]);
+const MAX_APPROVAL_METRIC_RUNS = 128;
+const MAX_APPROVAL_METRIC_DIMENSIONS = 64;
+const MAX_APPROVAL_METRIC_KEY_LENGTH = 96;
 
 function createApprovalMetricBucket() {
   return Object.fromEntries(APPROVAL_METRIC_FIELDS.map((field) => [field, 0]));
@@ -415,26 +418,27 @@ export function createRunProjectionService({
       let approvalRequestInfo = null;
       let approvalRisk = null;
       if (options.countApprovals === true && payload) {
+        const runId = trimString(run?.id);
         approvalRequestInfo = readApprovalRequestInfo(payload);
         if (approvalRequestInfo) {
           approvalRisk = approvalRiskForPayload(payload, run, approvalRequestInfo);
           const provider = approvalRequestInfo.provider;
-          incrementApprovalMetric('received', { provider, risk: approvalRisk });
-          incrementApprovalMetric('requestsSeen', { provider, risk: approvalRisk });
+          incrementApprovalMetric('received', { runId, provider, risk: approvalRisk });
+          incrementApprovalMetric('requestsSeen', { runId, provider, risk: approvalRisk });
         } else if (payload.type === 'agentoc.approval_response') {
           const provider = providerForApprovalPayload(payload);
           const risk = approvalRiskForPayload(payload, run);
           if (payload.autoApproved === true) {
-            incrementApprovalMetric('echoes', { provider, risk });
-            incrementApprovalMetric('autoAllowed', { provider, risk });
+            incrementApprovalMetric('echoes', { runId, provider, risk });
+            incrementApprovalMetric('autoAllowed', { runId, provider, risk });
           } else if (payload.autoDenied === true) {
-            incrementApprovalMetric('echoes', { provider, risk });
-            incrementApprovalMetric('autoDenied', { provider, risk });
+            incrementApprovalMetric('echoes', { runId, provider, risk });
+            incrementApprovalMetric('autoDenied', { runId, provider, risk });
           } else if (['denied', 'cancelled'].includes(trimString(payload.status).toLowerCase())
             || ['denied', 'cancelled', 'reject', 'decline'].includes(trimString(payload.decision).toLowerCase())) {
-            incrementApprovalMetric('ownerDenied', { provider, risk });
+            incrementApprovalMetric('ownerDenied', { runId, provider, risk });
           } else {
-            incrementApprovalMetric('ownerApproved', { provider, risk });
+            incrementApprovalMetric('ownerApproved', { runId, provider, risk });
           }
         }
       }
@@ -466,12 +470,13 @@ export function createRunProjectionService({
           if (event?.type !== 'approval_request') continue;
           const risk = approvalRisk || classifyApprovalRisk(approvalRequestInfo, run);
           const provider = providerForApprovalPayload(payload, event.provider);
-          incrementApprovalMetric('projected', { provider, risk });
-          incrementApprovalMetric('presentedToOwner', { provider, risk });
+          incrementApprovalMetric('projected', { runId: trimString(run?.id), provider, risk });
+          incrementApprovalMetric('presentedToOwner', { runId: trimString(run?.id), provider, risk });
           projectedApprovalCount += 1;
         }
         if (approvalRequestInfo && projectedApprovalCount === 0) {
           incrementApprovalMetric('suppressed', {
+            runId: trimString(run?.id),
             provider: approvalRequestInfo.provider,
             risk: approvalRisk || classifyApprovalRisk(approvalRequestInfo, run),
           });
@@ -576,7 +581,9 @@ export function createRunProjectionService({
     byProvider: Object.create(null),
     byRiskTier: Object.create(null),
     byReasonCode: Object.create(null),
+    byPolicyVersion: Object.create(null),
   };
+  const approvalCountersByRunId = new Map();
 
   const projectionCounters = {
     runs: 0,
@@ -635,25 +642,79 @@ export function createRunProjectionService({
     }),
   });
 
-  function incrementApprovalMetric(field, { provider = 'unknown', risk = null } = {}) {
-    if (!APPROVAL_METRIC_FIELDS.includes(field)) return;
-    approvalCounters[field] += 1;
-    const normalizedProvider = provider === 'claude' || provider === 'codex' ? provider : 'unknown';
-    const providerBucket = approvalCounters.byProvider[normalizedProvider]
-      || (approvalCounters.byProvider[normalizedProvider] = createApprovalMetricBucket());
-    providerBucket[field] += 1;
+  function metricDimensionKey(value) {
+    return trimString(value).slice(0, MAX_APPROVAL_METRIC_KEY_LENGTH);
+  }
 
+  function incrementMetricBucket(counters, dimension, key, field) {
+    const buckets = counters[dimension];
+    let normalizedKey = metricDimensionKey(key);
+    if (!normalizedKey) return;
+    if (!Object.prototype.hasOwnProperty.call(buckets, normalizedKey)
+      && Object.keys(buckets).length >= MAX_APPROVAL_METRIC_DIMENSIONS) {
+      normalizedKey = 'other';
+      if (!Object.prototype.hasOwnProperty.call(buckets, normalizedKey)) {
+        const oldest = Object.keys(buckets)[0];
+        if (oldest !== undefined) delete buckets[oldest];
+      }
+    }
+    const bucket = buckets[normalizedKey]
+      || (buckets[normalizedKey] = createApprovalMetricBucket());
+    bucket[field] += 1;
+  }
+
+  function touchRunApprovalCounters(runId) {
+    const id = metricDimensionKey(runId);
+    if (!id) return null;
+    let counters = approvalCountersByRunId.get(id);
+    if (counters) {
+      approvalCountersByRunId.delete(id);
+      approvalCountersByRunId.set(id, counters);
+      return counters;
+    }
+    if (approvalCountersByRunId.size >= MAX_APPROVAL_METRIC_RUNS) {
+      const oldest = approvalCountersByRunId.keys().next().value;
+      if (oldest !== undefined) approvalCountersByRunId.delete(oldest);
+    }
+    counters = {
+      ...createApprovalMetricBucket(),
+      byProvider: Object.create(null),
+      byRiskTier: Object.create(null),
+      byReasonCode: Object.create(null),
+      byPolicyVersion: Object.create(null),
+    };
+    approvalCountersByRunId.set(id, counters);
+    return counters;
+  }
+
+  function updateApprovalCounters(counters, field, provider, audit) {
+    counters[field] += 1;
+    const normalizedProvider = provider === 'claude' || provider === 'codex' ? provider : 'unknown';
+    incrementMetricBucket(counters, 'byProvider', normalizedProvider, field);
+    if (audit.tier) incrementMetricBucket(counters, 'byRiskTier', audit.tier, field);
+    if (audit.policyVersion) incrementMetricBucket(counters, 'byPolicyVersion', audit.policyVersion, field);
+    for (const code of audit.reasonCodes) incrementMetricBucket(counters, 'byReasonCode', code, field);
+  }
+
+  function snapshotApprovalCounters(counters) {
+    const cloneBuckets = (buckets) => Object.fromEntries(
+      Object.entries(buckets).map(([key, value]) => [key, { ...value }]),
+    );
+    return {
+      ...counters,
+      byProvider: cloneBuckets(counters.byProvider),
+      byRiskTier: cloneBuckets(counters.byRiskTier),
+      byReasonCode: cloneBuckets(counters.byReasonCode),
+      byPolicyVersion: cloneBuckets(counters.byPolicyVersion),
+    };
+  }
+
+  function incrementApprovalMetric(field, { runId = '', provider = 'unknown', risk = null } = {}) {
+    if (!APPROVAL_METRIC_FIELDS.includes(field)) return;
     const audit = readRiskAuditInfo(risk);
-    if (audit.tier) {
-      const tierBucket = approvalCounters.byRiskTier[audit.tier]
-        || (approvalCounters.byRiskTier[audit.tier] = createApprovalMetricBucket());
-      tierBucket[field] += 1;
-    }
-    for (const code of audit.reasonCodes) {
-      const reasonBucket = approvalCounters.byReasonCode[code]
-        || (approvalCounters.byReasonCode[code] = createApprovalMetricBucket());
-      reasonBucket[field] += 1;
-    }
+    updateApprovalCounters(approvalCounters, field, provider, audit);
+    const perRun = touchRunApprovalCounters(runId);
+    if (perRun) updateApprovalCounters(perRun, field, provider, audit);
   }
 
   function approvalRiskForPayload(payload, run, requestInfo = null) {
@@ -663,7 +724,13 @@ export function createRunProjectionService({
   }
   registerCache('approvalSuppression', {
     kind: 'counters',
-    snapshot: () => ({ ...approvalCounters }),
+    snapshot: () => snapshotApprovalCounters(approvalCounters),
+  });
+  registerCache('run.approvalSuppression', {
+    kind: 'counters',
+    snapshot: () => Object.fromEntries(
+      [...approvalCountersByRunId].map(([runId, counters]) => [runId, snapshotApprovalCounters(counters)]),
+    ),
   });
 
   async function getOrCreateDeltaRuntimeInvocation(run, manifest) {
@@ -772,7 +839,10 @@ export function createRunProjectionService({
   return {
     collectNormalizedRunEvents,
     collectNormalizedRunEventDelta,
-    getApprovalSuppressionCounters: () => ({ ...approvalCounters }),
+    getApprovalSuppressionCounters: (runId = '') => {
+      const perRun = runId ? approvalCountersByRunId.get(metricDimensionKey(runId)) : null;
+      return snapshotApprovalCounters(perRun || approvalCounters);
+    },
     releaseRunRuntimeInvocation,
   };
 }

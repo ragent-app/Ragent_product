@@ -56,7 +56,19 @@ for (const mode of ['recommended', 'full-auto']) {
     assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === 'claude:unverified-system-roots'));
   } else {
     assert.equal(sent[0]?.response?.response?.behavior, 'deny', 'unverified system roots must be denied unattended');
+    assert.match(sent[0]?.response?.response?.message || '', /Ragent automatically denied this tool request under the full-auto policy/);
+    assert.match(sent[0]?.response?.response?.message || '', /run path context is unavailable/);
   }
+}
+for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
+  const { run, state, sent, proc } = await fixture(mode);
+  const readWorkspace = { type: 'control_request', request_id: `workspace-read-${mode}`, request: {
+    subtype: 'can_use_tool', tool_name: 'PowerShell',
+    input: { command: `Get-ChildItem -LiteralPath '${workspace.replaceAll("'", "''")}' -Force | Select-Object Name` },
+  } };
+  await trackClaudeBidiApprovalRequest(run.id, state, readWorkspace, proc);
+  assert.equal(sent[0]?.response?.response?.behavior, 'allow', `${mode} should automatically allow a verified workspace directory read`);
+  assert.equal((await getRun(run.id)).appServerPendingApprovals?.length || 0, 0, `${mode} should not surface a verified workspace read for owner approval`);
 }
 for (const mode of ['full-auto', 'recommended', 'conservative-auto']) {
   const { run, state, sent, proc } = await fixture(mode);

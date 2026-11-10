@@ -110,11 +110,11 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 ## 实施顺序
 
-1. **观测先行（部分完成）：** 自动答复和 owner 请求已有 spool 事件、risk tier 与原因；每 Run 汇总仪表、策略版本字段和跨请求重复统计仍需补齐。
+1. **观测先行（部分完成）：** 自动答复和 owner 请求已有 spool 事件、risk tier、原因与策略版本；projection service 已累计 Claude/Codex 的 provider、risk tier、reason code 及 policyVersion 计数，并按最近 128 个 Run 隔离；跨请求语义重复统计仍需补齐。
 2. **Codex 策略兼容（已实现）：** Windows、Linux、macOS gate Run 使用进程级项目 trust 覆盖、有效策略回读与 prompt 前 fail-closed；不会在拒绝后静默降级或重试。已验证 0.147 与 0.167 App Server 策略响应，并在 0.167 命令 fixture 验证 owner prompt、Ragent 自动批准与 full-auto 自动拒绝。
 3. **Windows Codex 命令分类（持续扩展）：** 保留 PowerShell AST、路径与权限边界；已覆盖实测命令和 Windows approval tests。其他 shell、动态命令、上下文不足时仍 fail-closed，继续从真实 App Server argv 采样。
 4. **跨平台策略一致性（已实现，需 Linux/macOS CI）：** 三个平台为 safe、recommended、full-auto、conservative-auto 使用同样的项目级请求入口；POSIX 用共享风险分类器，Windows 用 PowerShell/路径分类器；profile sandbox、写入和网络边界保持独立。`granular` 不能代替逐命令 gate。
-5. **审批聚合与 UI（部分完成）：** 相同 provider request id 已幂等且保留单卡；原因码随审批记录保存。不同 request id 的同一网络或危险操作合并、每 Run 计数指标仍未实现。
+5. **审批聚合与 UI（部分完成）：** 相同 provider request id 已幂等且保留单卡；原因码随审批记录保存。provider、risk tier、reason code 与 policyVersion 计数按最近 128 个 Run 隔离；不同 request id 的同一网络或危险操作合并仍未实现。
 6. **分层验收（部分完成）：** Windows 本机 CLI/App Server 离线 fixture 与协议和策略 suites 已覆盖；荣耀真机上的审批 UI 与本地事件重放已完成离线验收，但尚未覆盖手机 OAuth → Ragent UI → 真实服务审批链路。部署后真实服务回归及 Linux/macOS 原生环境验收仍未完成。
 
 ## 验收用例
@@ -143,7 +143,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 同日尝试 app 模块 `RunDockApprovalIslandTest`：4 个用例中 1 个通过、3 个在卡片首次显示断言处失败；因测试未等待首帧稳定，初步怀疑与 `RunDock` 入场动画/断言时序有关，尚未证实产品卡片通过或失败。本地尝试在首次断言前等待 Compose 动画空闲后，复跑被当前共享工作区 `voice_cloud_upload_disclosure` 字符串中的非法 Unicode 转义阻断；临时测试改动未保留，该字符串属于未提交的 ASR 工作，本次未修改。该 app 模块用例尚未复验。
 - Codex 0.149 的退役行为及当前 `granular` 能力依据官方文档与合并记录；0.167.0 已验证策略字段，但受管策略环境及真实 provider 账号尚未验证。
 - 最近荣耀手机 Codex Official OAuth 运行在审批事件产生前因 refresh token 已使用而失败。用户说明 Codex 账号目前无法登录，免费档额度很少且要求不要消耗；因此本轮只做本地假传输/合成事件验收，没有重试 OAuth 或请求官方模型。手机端完整 OAuth → Ragent UI → 真实审批事件验收仍未完成；没有把 provider 的“可用”状态当作授权成功。
-- 不同 provider request id 的语义重复合并、每 Run 审批仪表、手机端 OAuth、已部署 Windows 服务与 Linux/macOS 原生环境验收仍未完成；当前不把它们记为通过。
+- 不同 provider request id 的语义重复合并、手机端 OAuth、已部署 Windows 服务与 Linux/macOS 原生环境验收仍未完成；当前不把它们记为通过。
 
 ## 外部依据
 

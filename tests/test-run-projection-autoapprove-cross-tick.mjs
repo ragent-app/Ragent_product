@@ -352,6 +352,22 @@ try {
   assert.equal(serviceMetrics.byReasonCode.ordinary_command.autoAllowed, 1,
     'auto-approval should be counted by reason code');
 
+  const claudeRunMetrics = service.getApprovalSuppressionCounters(run.id);
+  const codexRunMetrics = service.getApprovalSuppressionCounters(codexRun.id);
+  assert.ok(claudeRunMetrics.byProvider.claude,
+    'Claude metrics should be available for their Run');
+  assert.equal(claudeRunMetrics.byProvider.codex, undefined,
+    'Claude Run metrics must not include another provider Run');
+  assert.ok(codexRunMetrics.byProvider.codex,
+    'Codex metrics should be available for their Run');
+  assert.equal(codexRunMetrics.byProvider.claude, undefined,
+    'Codex Run metrics must not include another provider Run');
+  assert.equal(codexRunMetrics.byPolicyVersion['risk-v3']?.autoAllowed, 1,
+    'Codex Run metrics should retain the policy version that auto-approved it');
+  assert.equal(service.getApprovalSuppressionCounters('missing-run').requestsSeen,
+    serviceMetrics.requestsSeen,
+    'unknown Run ids should fall back to the service-level aggregate');
+
   console.log('test-run-projection-autoapprove-cross-tick: ok');
 } catch (error) {
   console.error('test-run-projection-autoapprove-cross-tick: FAILED');
