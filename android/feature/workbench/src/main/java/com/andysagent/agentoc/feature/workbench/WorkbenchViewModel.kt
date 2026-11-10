@@ -1626,9 +1626,11 @@ class ChatViewModel(
                             if ((error as? SessionRepositoryException)?.statusCode != 409) throw error
                         }
                 }
-                // The structured message payload is authoritative for this run.
-                // Persisting the picker choice only updates session defaults and
-                // must never delay the user's message POST.
+                // Persisting a picker choice normally only updates the session
+                // default and must not delay the message POST. A newly selected
+                // model without effort levels is different: the API treats a
+                // missing effort as inheritance, so clear the old session value
+                // before sending to avoid applying it to this run.
                 suspend fun persistRuntimeSelection() {
                     fixed.updateRuntimeSelection(
                         resolvedSessionId,
@@ -1640,7 +1642,9 @@ class ChatViewModel(
                     )
                     fixed.runtimeTargetId?.let { id -> runCatching { writeRuntimeCache(id, resolvedSessionId, pendingTurn.selection) } }
                 }
-                if (pendingTurn.selection.effort != null || pendingTurn.selection.model != null) launch {
+                if (pendingTurn.selection.effort == null && pendingTurn.selection.model != null) {
+                    persistRuntimeSelection()
+                } else if (pendingTurn.selection.effort != null || pendingTurn.selection.model != null) launch {
                     runCatching {
                         persistRuntimeSelection()
                     }
