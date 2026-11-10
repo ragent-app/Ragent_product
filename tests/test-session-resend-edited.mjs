@@ -34,7 +34,7 @@ function makeTerminal(runId) {
 }
 
 try {
-  const session = await createSession(home, 'missing-tool', 'Edit resend source', {
+  const session = await createSession(home, 'codex', 'Edit resend source', {
     description: 'Source conversation to edit from',
   });
   const attachmentSourcePath = join(home, 'source.txt');
@@ -91,6 +91,7 @@ try {
 
   const outcome = await resendEditedMessage(session.id, 'req_original', {
     prompt: 'Edited question',
+    skipDispatch: true,
   });
   assert.ok(outcome.run, 'edit-resend should create a new run');
   assert.notEqual(outcome.run.requestId, 'req_original', 'new run should get its own requestId');
@@ -136,6 +137,7 @@ try {
   await makeTerminal(outcome.run.id);
   const second = await resendEditedMessage(session.id, outcome.run.requestId, {
     prompt: 'Edited question v2',
+    skipDispatch: true,
   });
   const secondRun = await getRun(second.run.id);
   const secondManifest = await getRunManifest(second.run.id);
@@ -155,6 +157,7 @@ try {
   await makeTerminal(secondRun.id);
   const regen = await regenerateSessionReply(session.id, secondRun.requestId, {
     requestId: 'req_regenerated',
+    skipDispatch: true,
   });
   const regenRun = await getRun(regen.run.id);
   const regenManifest = await getRunManifest(regen.run.id);
@@ -194,7 +197,7 @@ try {
   assert.equal(crossManifest.options.thinking, true, 'manifest options should carry the override thinking');
   assert.equal(crossManifest.options.runtimeFamily, 'claude-stream-json-bidi', 'manifest options should carry the bidi runtime family');
   const crossSession = await getSession(session.id);
-  assert.equal(crossSession.tool, 'missing-tool', 'session default tool must NOT be rebound by a per-run override');
+  assert.equal(crossSession.tool, 'codex', 'session default tool must NOT be rebound by a per-run override');
   const crossMarker = (await getHistory(session.id)).filter((event) => event.type === 'run_regenerate').at(-1);
   assert.equal(crossMarker.parentRequestId, 'req_original', 'cross-agent resend keeps the original rail');
   await makeTerminal(cross.run.id);

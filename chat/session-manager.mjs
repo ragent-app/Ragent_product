@@ -13866,7 +13866,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   };
 
   let launchResult = null;
-  if (options.deferRunnerLaunch === true) {
+  if (options.skipDispatch === true) {
+    // Internal callers and deterministic tests may persist an accepted Run
+    // without launching a provider. HTTP ingress never forwards this option.
+  } else if (options.deferRunnerLaunch === true) {
     // The Run and user event are already durable. Keep the HTTP acknowledgement
     // independent from broker/provider startup latency, while preserving the
     // same durable failure path if launch cannot be completed.
