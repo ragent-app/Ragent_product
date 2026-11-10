@@ -3,6 +3,7 @@
 This addendum updates the canonical [central Accounts ASR plan](account-asr-service-plan.md), which retains the detailed quota, cost, rollout, and deployment design.
 
 **Updated:** 2026-11-10
+
 **State:** consent enforcement and Android disclosure are implemented and deployed to Oracle. The provider remains disabled because the owner has not obtained an ElevenLabs API key.
 
 ## Product contract
