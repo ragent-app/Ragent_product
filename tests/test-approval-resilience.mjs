@@ -167,12 +167,12 @@ assert.match(
   'the history sweep cancellations must carry the finalized run id',
 );
 // Session-wide sweep (in-process appendEvent, immune to the external-writer
-// race): stale pending approvals whose run is terminal get cancelled at
-// finalize (skipping the current run) and once at boot for historical leaks.
+// race): stale approvals from every protocol are reconciled against their run
+// at finalize and once at boot for historical leaks.
 assert.match(
   managerSource,
-  /sweepStaleApprovalsInSession\(sessionId,\s*\{\s*cancelIds,\s*skipRunId: run\.id,\s*requestId: run\.requestId/,
-  'finalize must sweep stale approvals across the session, skipping the current run',
+  /sweepStaleApprovalsInSession\(sessionId,\s*\{\s*cancelIds,\s*requestId: run\.requestId/,
+  'finalize must reconcile approvals across the session, including the current terminal run',
 );
 assert.match(
   managerSource,

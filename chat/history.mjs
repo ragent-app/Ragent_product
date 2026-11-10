@@ -789,7 +789,11 @@ export async function readAllRuntimeApprovalEvents(sessionId) {
   const index = await ensureEventLookupIndex(sessionId);
   const events = [];
   for (const [key, entries] of Object.entries(index.entries || {})) {
-    if (!key.startsWith(EVENT_LOOKUP_KEY_PREFIXES.approval)) continue;
+    if (![
+      EVENT_LOOKUP_KEY_PREFIXES.approval,
+      EVENT_LOOKUP_KEY_PREFIXES.privilegedBatch,
+      EVENT_LOOKUP_KEY_PREFIXES.approvedAction,
+    ].some((prefix) => key.startsWith(prefix))) continue;
     for (const entry of Array.isArray(entries) ? entries : []) {
       if (entry?.event) events.push(entry.event);
     }

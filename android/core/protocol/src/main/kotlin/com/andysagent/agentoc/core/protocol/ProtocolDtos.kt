@@ -1163,8 +1163,12 @@ fun SessionEventDto.textContent(): String? = text
 /** Harness event IDs may restart at the beginning of each run. */
 fun SessionEventDto.legacyDedupeKey(): String? = when {
     !eventId.isNullOrBlank() -> "event:$eventId"
-    !providerEventId.isNullOrBlank() -> "provider:$providerEventId"
     !id.isNullOrBlank() -> "event:$id"
+    // One provider frame can normalize to several durable events (for
+    // example Claude tool_use + file_change). The normalized event id is the
+    // immutable row identity; providerEventId is only a shared source-frame
+    // identity and must not collapse those distinct rows.
+    !providerEventId.isNullOrBlank() -> "provider:$providerEventId"
     !sourceEventId.isNullOrBlank() -> "source:$sourceEventId"
     else -> null
 }

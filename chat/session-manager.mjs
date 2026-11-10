@@ -8897,15 +8897,13 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
         historyChanged = true;
       }
     }
-    // Same family, approvals: a pending approval_request whose run has already
-    // ended stays pending in session history — full-sync replays of a running
-    // session re-surface it as the newest unresolved request, keeping the card
-    // and popup alive. Cancel those too; the current run's own approvals were
-    // handled above (skip its id set and run id to avoid duplicates).
+    // Reconcile every persisted approval protocol against its exact run, even
+    // for the run being finalized. The direct per-run flush above covers the
+    // normal path; this catches approval events that were durable in session
+    // history but missing from the normalized projection or run-side cache.
     try {
       const cancelledApprovals = await sweepStaleApprovalsInSession(sessionId, {
         cancelIds,
-        skipRunId: run.id,
         requestId: run.requestId || '',
         source: 'run-finalize',
       });
@@ -14589,17 +14587,21 @@ export function collectUnansweredApprovalRequestsFromHistory(history, runId, opt
 
 /**
  * Session-wide stale approval sweep (server-internal, so appended events share
- * the server's seq/meta state — no external-writer race): every pending
- * approval_request whose run has already reached a terminal state gets a
- * cancelled approval_response, dismissing the card on all clients. Runs inside
- * the finalize path (skipping the run being finalized) and once at boot via
- * sweepStaleApprovalsAcrossSessions to backfill historical leaks.
+ * the server's seq/meta state — no external-writer race): unresolved provider,
+ * privileged-batch, and approved-action requests whose owning run is terminal
+ * receive their protocol-specific cancellation response. Runs after every
+ * finalization and at boot to backfill historical leaks for all clients.
  */
 async function sweepStaleApprovalsInSession(sessionId, options = {}) {
   const cancelIds = options.cancelIds instanceof Set ? options.cancelIds : new Set();
   const skipRunId = trimString(options.skipRunId || '');
   const respondedApprovalIds = new Set();
   const approvalRequests = new Map();
+  const privilegedBatchRequests = new Map();
+  const resolvedPrivilegedCategories = new Map();
+  const approvedActionRequests = new Map();
+  const resolvedApprovedActions = new Map();
+  const approvedActionStates = new Map();
   const approvalEvents = await readAllRuntimeApprovalEvents(sessionId);
   for (const event of approvalEvents) {
     if (!event || typeof event !== 'object') continue;
@@ -14608,28 +14610,64 @@ async function sweepStaleApprovalsInSession(sessionId, options = {}) {
       if (id) respondedApprovalIds.add(id);
       continue;
     }
-    if (event.type !== 'approval_request') continue;
-    const approvalId = String(event?.approvalId || '').trim();
-    const normalized = normalizeRuntimeApprovalId(approvalId);
-    if (!approvalId || !normalized) continue;
-    approvalRequests.set(normalized, {
-      approvalId,
-      runId: trimString(event?.runId || ''),
-    });
+    if (event.type === 'approval_request') {
+      const approvalId = String(event?.approvalId || '').trim();
+      const normalized = normalizeRuntimeApprovalId(approvalId);
+      if (!approvalId || !normalized) continue;
+      approvalRequests.set(normalized, {
+        approvalId,
+        runId: trimString(event?.runId || ''),
+      });
+      continue;
+    }
+    if (event.type === 'privileged_batch_request') {
+      const batchId = trimString(event?.batchId || '');
+      if (batchId) privilegedBatchRequests.set(batchId, event);
+      continue;
+    }
+    if (event.type === 'privileged_batch_response') {
+      const batchId = trimString(event?.batchId || '');
+      const category = trimString(event?.category || '');
+      if (!batchId || !category) continue;
+      if (!resolvedPrivilegedCategories.has(batchId)) resolvedPrivilegedCategories.set(batchId, new Set());
+      resolvedPrivilegedCategories.get(batchId).add(category);
+      continue;
+    }
+    if (event.type === 'approved_action_batch_request') {
+      const batchId = trimString(event?.batchId || '');
+      if (batchId) approvedActionRequests.set(batchId, event);
+      continue;
+    }
+    if (event.type === 'approved_action_batch_response') {
+      const batchId = trimString(event?.batchId || '');
+      const decisions = event?.decisions && typeof event.decisions === 'object' ? event.decisions : {};
+      if (!batchId) continue;
+      if (!resolvedApprovedActions.has(batchId)) resolvedApprovedActions.set(batchId, new Set());
+      for (const actionId of Object.keys(decisions)) resolvedApprovedActions.get(batchId).add(actionId);
+      continue;
+    }
+    if (event.type === 'approved_action_state') {
+      const actionId = trimString(event?.actionId || '');
+      const state = trimString(event?.state || '').toLowerCase();
+      if (actionId && state) approvedActionStates.set(actionId, state);
+    }
   }
   let cancelled = 0;
+  const runCache = new Map();
+  const isTerminalApprovalRun = async (runId) => {
+    if (!runId || (skipRunId && runId === skipRunId)) return false;
+    if (!runCache.has(runId)) {
+      try { runCache.set(runId, await getRun(runId) || null); } catch { runCache.set(runId, null); }
+    }
+    return isTerminalRunState(runCache.get(runId)?.state);
+  };
   for (const request of approvalRequests.values()) {
     const approvalId = request.approvalId;
     if (!approvalId) continue;
     const normalized = normalizeRuntimeApprovalId(approvalId);
     if (!normalized || respondedApprovalIds.has(normalized) || cancelIds.has(normalized)) continue;
     const approvalRunId = request.runId;
-    if (skipRunId && approvalRunId === skipRunId) continue;
-    let approvalRun = null;
-    if (approvalRunId) {
-      try { approvalRun = await getRun(approvalRunId); } catch { approvalRun = null; }
-    }
-    if (!approvalRun || !isTerminalRunState(approvalRun.state)) continue;
+    if (!await isTerminalApprovalRun(approvalRunId)) continue;
     const responseEvent = approvalResponseEvent({
       approvalId,
       decision: 'cancelled',
@@ -14642,6 +14680,51 @@ async function sweepStaleApprovalsInSession(sessionId, options = {}) {
       if (options.broadcast !== false) broadcastSessionInvalidation(sessionId);
       cancelled += 1;
     }
+  }
+  for (const [batchId, request] of privilegedBatchRequests) {
+    const runId = trimString(request?.runId || '');
+    if (!await isTerminalApprovalRun(runId)) continue;
+    const resolved = resolvedPrivilegedCategories.get(batchId) || new Set();
+    for (const category of ['other', 'delete', 'installAuto']) {
+      if (!Array.isArray(request?.[category]) || request[category].length === 0 || resolved.has(category)) continue;
+      const responseEvent = privilegedBatchResponseEvent({
+        batchId,
+        category,
+        decisions: {},
+        source: options.source || 'run-finalize',
+      });
+      if (!responseEvent) continue;
+      await appendEvent(sessionId, { ...responseEvent, runId });
+      if (options.broadcast !== false) broadcastSessionInvalidation(sessionId);
+      cancelled += 1;
+    }
+  }
+  for (const [batchId, request] of approvedActionRequests) {
+    const runId = trimString(request?.runId || '');
+    if (!await isTerminalApprovalRun(runId)) continue;
+    const resolved = resolvedApprovedActions.get(batchId) || new Set();
+    const decisions = {};
+    for (const action of Array.isArray(request?.actions) ? request.actions : []) {
+      const actionId = trimString(action?.actionId || '');
+      const state = approvedActionStates.get(actionId) || trimString(action?.state || '').toLowerCase();
+      if (!actionId || resolved.has(actionId) || ['denied', 'cancelled', 'expired', 'completed', 'failed'].includes(state)) continue;
+      decisions[actionId] = 'cancelled';
+    }
+    if (Object.keys(decisions).length === 0) continue;
+    await appendEvent(sessionId, {
+      type: 'approved_action_batch_response',
+      role: 'system',
+      channel: request.channel || 'approved_action',
+      schemaVersion: request.schemaVersion,
+      batchId,
+      sessionId,
+      ...(request.turnId ? { turnId: request.turnId } : {}),
+      runId,
+      decisions,
+      source: options.source || 'run-finalize',
+    });
+    if (options.broadcast !== false) broadcastSessionInvalidation(sessionId);
+    cancelled += 1;
   }
   return cancelled;
 }

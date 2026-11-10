@@ -122,6 +122,37 @@ class SessionSyncEngineTest {
     }
 
     @Test
+    fun distinctNormalizedEventsFromOneProviderFrameBothAdvanceHistoryCursor() = runBlocking {
+        val store = FakeCursorStore().also { it.value = SyncCursor("session:test", lastAppliedSeq = 37) }
+        val sink = SessionEventReducer()
+        val engine = SessionSyncEngine("session:test", store, sink)
+
+        // Claude emits tool_use and file_change from the same provider frame.
+        // They share providerEventId but have different immutable history ids.
+        val result = engine.apply(listOf(
+            SessionEventDto(
+                seq = 38,
+                id = "evt_022659",
+                providerEventId = "claude-frame-94d8349b",
+                runId = "run-a",
+                type = "tool_use",
+                toolName = "Read",
+            ),
+            SessionEventDto(
+                seq = 39,
+                id = "evt_022660",
+                providerEventId = "claude-frame-94d8349b",
+                runId = "run-a",
+                type = "file_change",
+                filePath = "README.md",
+            ),
+        ))
+
+        assertEquals(2, assertIs<SyncResult.Applied>(result).count)
+        assertEquals(39, store.value.lastAppliedSeq)
+    }
+
+    @Test
     fun reusedHarnessEventIdAcrossRunsDoesNotStopSync() = runBlocking {
         val store = FakeCursorStore().also { it.value = SyncCursor("session:test", lastAppliedSeq = 0) }
         val sink = SessionEventReducer()

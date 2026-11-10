@@ -331,11 +331,15 @@ class RoomSessionRepositoryEventTest {
             ApprovalEntity(id = "old", sessionId = "session-1", title = "Old", status = "pending", runId = "old-run", updatedAt = 1),
             ApprovalEntity(id = "active", sessionId = "session-1", title = "Active", status = "pending", runId = "active-run", updatedAt = 2),
         ))
-        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
-            """{"sessionId":"session-1","events":[],"latestSeq":10,"runActivity":{"state":"idle"}}""",
-            """{"run":{"id":"old-run","sessionId":"session-1","state":"completed"}}""",
-            """{"run":{"id":"active-run","sessionId":"session-1","state":"running"}}""",
-        )))
+        val repository = RoomSessionRepository(database, QueuedTransport(
+            responseBodies = listOf(
+                """{"sessionId":"session-1","events":[],"latestSeq":10,"runActivity":{"state":"idle"}}""",
+            ),
+            runResponseBodies = listOf(
+                """{"run":{"id":"old-run","sessionId":"session-1","state":"completed"}}""",
+                """{"run":{"id":"active-run","sessionId":"session-1","state":"running"}}""",
+            ),
+        ))
         repository.refreshEvents("session-1")
         assertEquals(listOf("active"), repository.observePendingApprovals("session-1").first().map { it.id })
         repository.close()
@@ -737,6 +741,44 @@ class RoomSessionRepositoryEventTest {
     }
 
     @Test
+    fun terminalApprovedActionBatchResponseRetiresTheLocalApproval() = runBlocking {
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """
+            {
+              "sessionId":"session-1",
+              "events":[
+                {
+                  "seq":1,
+                  "eventId":"approval-1",
+                  "type":"approved_action_batch_request",
+                  "channel":"approved_action",
+                  "batchId":"batch-1",
+                  "runId":"run-1",
+                  "actions":[
+                    {"actionId":"action-1","state":"waiting_user"},
+                    {"actionId":"action-2","state":"waiting_user"}
+                  ]
+                },
+                {
+                  "seq":2,
+                  "eventId":"approval-response-1",
+                  "type":"approved_action_batch_response",
+                  "batchId":"batch-1",
+                  "runId":"run-1",
+                  "decisions":{"action-1":"cancelled","action-2":"cancelled"}
+                }
+              ],
+              "latestSeq":2
+            }
+            """.trimIndent(),
+        )))
+
+        assertEquals(RefreshResult.Applied(2, 2), repository.refreshEvents("session-1"))
+        assertEquals("resolved", database.dao().getApproval("session-1", "batch-1")?.status)
+        assertTrue(repository.observePendingApprovals("session-1").first().isEmpty())
+    }
+
+    @Test
     fun privilegedBatchPasskeySignalDefaultsToRequiredWhenAbsent() = runBlocking {
         val repository = RoomSessionRepository(database, QueuedTransport(listOf(
             """
@@ -829,6 +871,31 @@ class RoomSessionRepositoryEventTest {
         val message = database.dao().getMessages("session-1").single()
         assertEquals("hello", message.content)
         assertTrue(message.completed)
+    }
+
+    @Test
+    fun distinctEventsFromOneClaudeFrameDoNotBlockFinalAssistantMessage() = runBlocking {
+        database.dao().upsertCursor(SyncCursorEntity("session-1", 37, null, updatedAt = 0))
+        val finalText = "The full analysis is complete, including the findings and generated reports."
+        val repository = RoomSessionRepository(database, QueuedTransport(listOf(
+            """{"sessionId":"session-1","events":[
+              {"seq":38,"id":"evt_tool_use","providerEventId":"claude-frame-94d8349b","type":"tool_use","toolName":"Read","runId":"run-1"},
+              {"seq":39,"id":"evt_file_change","providerEventId":"claude-frame-94d8349b","type":"file_change","filePath":"reports/analysis-results.csv","runId":"run-1"},
+              {"seq":40,"id":"evt_final_message","providerEventId":"claude-final-message","type":"message","canonicalMessageId":"assistant-final","role":"assistant","runId":"run-1","content":"$finalText"}
+            ],"latestSeq":40} """.trimIndent(),
+            """{"sessionId":"session-1","events":[
+              {"seq":40,"id":"evt_final_message","providerEventId":"claude-final-message","type":"message","canonicalMessageId":"assistant-final","role":"assistant","runId":"run-1","content":"$finalText"}
+            ],"latestSeq":40} """.trimIndent(),
+        )))
+
+        assertEquals(RefreshResult.Applied(3, 40), repository.refreshEvents("session-1"))
+        assertEquals(40L, database.dao().getCursor("session-1")?.lastAppliedSeq)
+        assertEquals(finalText, database.dao().getMessages("session-1").single().content)
+        val visibleMessage = repository.observeTimeline("session-1").first()
+            .filterIsInstance<TimelineItem.Message>().single()
+        assertEquals(finalText, visibleMessage.text)
+        assertTrue(visibleMessage.completed)
+        repository.close()
     }
 
     @Test
@@ -1391,6 +1458,26 @@ class RoomSessionRepositoryEventTest {
     }
 
     @Test
+    fun terminalRunRetiresCachedApprovalEvenWhenActivityStillSaysWaiting() = runBlocking {
+        database.dao().upsertSessions(listOf(SessionEntity("session-1", "Task", null, "waiting_approval", 118, 0)))
+        // Simulate a client that already advanced past the terminal event, then
+        // recovered the old request from a stale waiting-approval projection.
+        database.dao().upsertCursor(SyncCursorEntity("session-1", 118, null, updatedAt = 0))
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity(id = "old", sessionId = "session-1", title = "Old", status = "pending", runId = "old-run", updatedAt = 1),
+            ApprovalEntity(id = "active", sessionId = "session-1", title = "Active", status = "pending", runId = "active-run", updatedAt = 2),
+        ))
+        val repository = RoomSessionRepository(database, StaleActivityApprovalTransport())
+
+        repository.refreshEvents("session-1")
+
+        assertEquals("resolved", database.dao().getApproval("session-1", "old")?.status)
+        assertEquals("pending", database.dao().getApproval("session-1", "active")?.status)
+        assertEquals(listOf("active"), repository.observePendingApprovals("session-1").first().map { it.id })
+        repository.close()
+    }
+
+    @Test
     fun staleApprovalRetirementRemovesOnlyTheRequestedApprovalFromThePendingQueue() = runBlocking {
         database.dao().upsertSessions(listOf(
             SessionEntity("session-1", "Task one", null, "completed", 0, 0),
@@ -1477,6 +1564,27 @@ private class TerminalApprovalSyncTransport : AgentoCTransport {
     override suspend fun close() = Unit
 }
 
+private class StaleActivityApprovalTransport : AgentoCTransport {
+    override val connectionState: StateFlow<RuntimeConnectionState> = MutableStateFlow(RuntimeConnectionState.Connected)
+    override val invalidations: Flow<InvalidationHint> = MutableSharedFlow()
+    override val requiresEventPolling: Boolean = true
+    override suspend fun execute(request: ApiRequest): ApiResponse {
+        val body = when {
+            request.path.startsWith("/api/runs/") -> {
+                val run = request.path.substringAfterLast('/')
+                val status = if (run == "old-run") "completed" else "running"
+                """{"run":{"id":"$run","sessionId":"session-1","state":"$status"}}"""
+            }
+            request.path.contains("/events") ->
+                """{"sessionId":"session-1","events":[],"latestSeq":118,"runActivity":{"state":"waiting_user","kind":"approval","actionRequired":true}}"""
+            else -> "{}"
+        }
+        return ApiResponse(200, body)
+    }
+    override fun connectInvalidationSocket() = Unit
+    override suspend fun close() = Unit
+}
+
 private class FakeTransport(private val responseBody: String) : AgentoCTransport {
     private val state = MutableStateFlow(RuntimeConnectionState.Connected)
     override val connectionState: StateFlow<RuntimeConnectionState> = state
@@ -1486,14 +1594,26 @@ private class FakeTransport(private val responseBody: String) : AgentoCTransport
     override suspend fun close() = Unit
 }
 
-private class QueuedTransport(private val responseBodies: List<String>) : AgentoCTransport {
+private class QueuedTransport(
+    private val responseBodies: List<String>,
+    private val runResponseBodies: List<String> = emptyList(),
+) : AgentoCTransport {
     private val state = MutableStateFlow(RuntimeConnectionState.Connected)
     private var index = 0
+    private var runIndex = 0
     val requests = mutableListOf<ApiRequest>()
     override val connectionState: StateFlow<RuntimeConnectionState> = state
     override val invalidations: Flow<InvalidationHint> = MutableSharedFlow()
     override suspend fun execute(request: ApiRequest): ApiResponse {
         requests += request
+        if (request.method == "GET" && request.path.startsWith("/api/runs/") &&
+            !request.path.removePrefix("/api/runs/").contains("/")) {
+            if (runIndex < runResponseBodies.size) {
+                return ApiResponse(200, runResponseBodies[runIndex++])
+            }
+            val runId = request.path.substringAfterLast('/')
+            return ApiResponse(200, """{"run":{"id":"$runId","state":"running"}}""")
+        }
         return ApiResponse(200, responseBodies[index++])
     }
     override fun connectInvalidationSocket() = Unit

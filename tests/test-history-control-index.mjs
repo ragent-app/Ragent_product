@@ -5,21 +5,40 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const home = mkdtempSync(join(tmpdir(), 'agentoc-control-index-'));
+const instanceRoot = join(home, 'instance');
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
+process.env.AGENTOC_CONFIG_DIR = join(instanceRoot, 'config');
+process.env.AGENTOC_MEMORY_DIR = join(instanceRoot, 'memory');
+process.env.AGENTOC_WORK_ROOT_DIR = join(instanceRoot, 'workspace');
 
 const history = await import('../chat/history.mjs');
+const { createRun } = await import('../chat/runs.mjs');
 const sessionId = `control-index-${process.pid}-${Date.now()}`;
-const runId = 'run-control-index';
 const batchId = 'batch-control-index';
 const approvalId = 'approval-control-index';
 const sessionApprovalId = 'session-confirmation-control-index';
 const planId = 'plan-control-index';
 
 try {
+  const run = await createRun({
+    status: {
+      sessionId,
+      requestId: `req-${sessionId}`,
+      state: 'accepted',
+      tool: 'claude-bidi',
+    },
+    manifest: {
+      sessionId,
+      requestId: `req-${sessionId}`,
+      folder: home,
+      tool: 'claude-bidi',
+      runtimeFamily: 'claude-stream-json-bidi',
+      prompt: 'index test',
+      options: { runtimeFamily: 'claude-stream-json-bidi' },
+    },
+  });
+  const runId = run.id;
   await history.appendEvents(sessionId, [
     ...Array.from({ length: 1200 }, (_, index) => ({
       type: 'status', content: `provider progress ${index}`,

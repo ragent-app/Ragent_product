@@ -2,17 +2,6 @@ package com.andysagent.agentoc.feature.workbench
 
 import androidx.compose.runtime.Immutable
 
-/** Preview fallback; the app replaces this with the complete pinned Whisper language catalog. */
-val RAGENT_VOICE_LANGUAGES: List<String> = listOf("auto", "en", "zh", "ja", "ko", "fr", "es")
-
-fun isSupportedRagentVoiceLanguage(languageTag: String): Boolean =
-    languageTag == "auto" || languageTag.matches(Regex("[a-z]{2,3}"))
-
-fun whisperLanguageCode(languageTag: String): String = when (languageTag) {
-    "zh-CN", "zh-TW" -> "zh"
-    else -> languageTag.lowercase()
-}
-
 @Immutable
 data class VoiceComputerState(
     val targetId: String,
@@ -25,7 +14,7 @@ data class VoiceComputerState(
     val ready: Boolean = false,
     val busy: Boolean = false,
     val error: String? = null,
-    /** Language codes advertised by this computer's Whisper endpoint; older versions expose auto only. */
+    /** Retained for compatibility with older computer APIs; voice requests now always use automatic detection. */
     val supportedLanguages: Set<String> = setOf("auto"),
 ) {
     val canRouteVoice: Boolean get() = connected && installed && enabled
@@ -34,19 +23,9 @@ data class VoiceComputerState(
 
 @Immutable
 data class VoiceUiState(
-    val phoneEnabled: Boolean = false,
     val phoneAvailable: Boolean = false,
     val phoneSupported: Boolean = false,
-    val phoneWhisperSupported: Boolean = false,
-    val phoneWhisperInstalled: Boolean = false,
-    val phoneWhisperDownloading: Boolean = false,
-    val phoneWhisperProgress: Int = 0,
-    val phoneWhisperModelSizeMb: Int = 0,
-    val phoneWhisperWorkingMemoryMb: Int = 0,
     val phoneNativeLanguageSupported: Boolean? = null,
-    /** Recognition language, independent of the app's display locale. */
-    val speechLanguage: String = "auto",
-    val speechLanguages: List<String> = RAGENT_VOICE_LANGUAGES,
     val computers: List<VoiceComputerState> = emptyList(),
     val choice: String = "auto",
     val recording: Boolean = false,
@@ -58,7 +37,6 @@ data class VoiceUiState(
     fun choiceLabel(sessionTargetId: String?): String = when (val route = resolveVoiceDestination(
         choice = choice,
         sessionTargetId = sessionTargetId,
-        phoneEnabled = phoneEnabled,
         phoneAvailable = phoneAvailable,
         computers = computers,
     )) {
@@ -78,23 +56,22 @@ sealed interface VoiceDestination {
 fun resolveVoiceDestination(
     choice: String,
     sessionTargetId: String?,
-    phoneEnabled: Boolean,
     phoneAvailable: Boolean,
     computers: List<VoiceComputerState>,
 ): VoiceDestination {
-    fun phone() = if (phoneEnabled && phoneAvailable) VoiceDestination.Phone else null
+    fun phone() = if (phoneAvailable) VoiceDestination.Phone else null
     fun computer(id: String) = computers.firstOrNull { it.targetId == id && it.canRouteVoice }
         ?.let { VoiceDestination.Computer(it.targetId) }
 
     return when {
-        choice == "phone" -> phone() ?: VoiceDestination.Unavailable("Phone-local recognition is disabled or unavailable")
+        choice == "phone" -> phone() ?: VoiceDestination.Unavailable("Phone-local recognition is unavailable")
         choice.startsWith("computer:") -> {
             val targetId = choice.removePrefix("computer:")
             computer(targetId) ?: VoiceDestination.Unavailable("The selected computer cannot process voice")
         }
         sessionTargetId != null && computer(sessionTargetId) != null -> computer(sessionTargetId)!!
         phone() != null -> VoiceDestination.Phone
-        else -> VoiceDestination.Unavailable("Enable voice recognition on this phone or a paired computer")
+        else -> VoiceDestination.Unavailable("Choose a phone or paired computer with voice recognition available")
     }
 }
 

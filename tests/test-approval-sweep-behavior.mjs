@@ -76,8 +76,8 @@ try {
     },
   });
 
-  // Session A: two pending approvals from the terminal run — one already
-  // responded (must NOT be cancelled again), one leaked (must be cancelled).
+  // Session A: one leaked provider approval plus partially answered privileged
+  // and approved-action batches from a run that later becomes terminal.
   const sessionA = (await createSession(home, 'claude-bidi', 'sweep-a')).id;
   await appendEvent(sessionA, {
     type: 'approval_request',
@@ -99,6 +99,37 @@ try {
     runId: terminalRun.id,
     status: 'pending',
     ts: new Date().toISOString(),
+  });
+  await appendEvent(sessionA, {
+    type: 'privileged_batch_request',
+    batchId: 'batch-terminal-partial',
+    runId: terminalRun.id,
+    other: [{ opId: 'other-op' }],
+    delete: [{ opId: 'delete-op' }],
+  });
+  await appendEvent(sessionA, {
+    type: 'privileged_batch_response',
+    batchId: 'batch-terminal-partial',
+    category: 'other',
+    decisions: { 'other-op': 'approved' },
+    runId: terminalRun.id,
+  });
+  await appendEvent(sessionA, {
+    type: 'approved_action_batch_request',
+    channel: 'approved_action',
+    batchId: 'actions-terminal-partial',
+    runId: terminalRun.id,
+    actions: [
+      { actionId: 'action-already-approved', state: 'waiting_user' },
+      { actionId: 'action-still-waiting', state: 'waiting_user' },
+    ],
+  });
+  await appendEvent(sessionA, {
+    type: 'approved_action_batch_response',
+    channel: 'approved_action',
+    batchId: 'actions-terminal-partial',
+    runId: terminalRun.id,
+    decisions: { 'action-already-approved': 'approved' },
   });
 
   // These requests were accepted while the run was live. Finalization/boot
@@ -160,6 +191,19 @@ try {
     status: 'pending',
     ts: new Date().toISOString(),
   });
+  await appendEvent(sessionB, {
+    type: 'privileged_batch_request',
+    batchId: 'batch-still-running',
+    runId: runningRun.id,
+    other: [{ opId: 'live-op' }],
+  });
+  await appendEvent(sessionB, {
+    type: 'approved_action_batch_request',
+    channel: 'approved_action',
+    batchId: 'actions-still-running',
+    runId: runningRun.id,
+    actions: [{ actionId: 'live-action', state: 'waiting_user' }],
+  });
 
   const cancelled = await sweepStaleApprovalsAcrossSessions();
 
@@ -171,6 +215,15 @@ try {
   assert.equal(cancelledInA[0].approvalId, 'claude:sweep-leak-2');
   assert.equal(cancelledInA[0].source, 'boot-backfill');
   assert.equal(cancelledInA[0].runId, terminalRun.id, 'cancellation must carry the owning run id');
+  const batchResponses = historyA.filter((event) => event.type === 'privileged_batch_response'
+    && event.batchId === 'batch-terminal-partial');
+  assert.equal(batchResponses.length, 2, 'only the unanswered privileged batch group must be closed');
+  assert.deepEqual(batchResponses.map((event) => event.category), ['other', 'delete']);
+  assert.equal(batchResponses[1].source, 'boot-backfill');
+  const actionResponses = historyA.filter((event) => event.type === 'approved_action_batch_response'
+    && event.batchId === 'actions-terminal-partial');
+  assert.equal(actionResponses.length, 2, 'an unanswered action batch must be closed after its run ends');
+  assert.deepEqual(actionResponses[1].decisions, { 'action-still-waiting': 'cancelled' });
 
   const historyB = await loadHistory(sessionB, { includeBodies: false });
   assert.equal(
@@ -178,6 +231,10 @@ try {
     0,
     'pending approvals of a still-running run must never be cancelled',
   );
+  assert.equal(historyB.some((event) => event.type === 'privileged_batch_response'
+    && event.batchId === 'batch-still-running'), false, 'live privileged batches must remain actionable');
+  assert.equal(historyB.some((event) => event.type === 'approved_action_batch_response'
+    && event.batchId === 'actions-still-running'), false, 'live approved-action batches must remain actionable');
   assert.equal(cancelled >= 1, true, 'sweep must report the number of cancellations');
 
   console.log('test-approval-sweep-behavior: ok');

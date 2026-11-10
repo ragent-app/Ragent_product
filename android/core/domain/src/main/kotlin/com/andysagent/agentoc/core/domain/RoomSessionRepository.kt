@@ -1560,11 +1560,12 @@ class RoomSessionRepository(
                         // another poll retries recovery after the cooldown.
                     }
                 }
-                // A previous client may have advanced its cursor past the
-                // terminal event. Recheck the exact runs before retiring any
-                // stale requests; an idle session by itself is not proof.
-                if (activityState == "idle" &&
-                    (terminalApprovalRecoveryAttempts[sessionId]?.let { now - it >= 5_000L } != false)) {
+                // A legacy pending approval can keep session metadata in a
+                // waiting state even after its run has ended. Do not gate this
+                // recovery on runActivity being idle: verify each exact run
+                // before retiring its approvals, so stale activity cannot
+                // resurrect an approval after a reconnect or cursor migration.
+                if ((terminalApprovalRecoveryAttempts[sessionId]?.let { now - it >= 5_000L } != false)) {
                     val pending = dao.getPendingApprovals(sessionId)
                     if (pending.isNotEmpty()) {
                         terminalApprovalRecoveryAttempts[sessionId] = now
@@ -3100,6 +3101,12 @@ private class RoomEventSink(
             if (updated.status == "pending") {
                 dao.getSession(scope)?.let { dao.upsertSessions(listOf(it.copy(status = "waiting_approval", updatedAt = System.currentTimeMillis()))) }
             }
+        } else if (type == "approved_action_batch_response") {
+            val batchId = event.batchId ?: return
+            val existing = dao.getApproval(scope, batchId)
+            if (existing != null) {
+                dao.upsertApprovals(listOf(existing.withApprovedActionBatchResponse(event)))
+            }
         } else if (type == "approved_action_state") {
             val batchId = event.batchId ?: event.approvalId ?: requestId
             val existing = dao.getApproval(scope, batchId)
@@ -3223,6 +3230,38 @@ private fun ApprovalEntity.withApprovedActionState(event: SessionEventDto): Appr
     if (actions.isEmpty()) return copy(updatedAt = System.currentTimeMillis())
     val nextDetails = details.toMutableMap()
     nextDetails["actions"] = buildJsonArray { actions.forEach(::add) }
+    val allTerminal = actions.all { action ->
+        action.jsonObject["state"]?.jsonPrimitive?.contentOrNull.orEmpty() in terminalApprovedActionStates
+    }
+    return copy(
+        status = if (allTerminal) "resolved" else "pending",
+        detailsJson = JsonObject(nextDetails).toString(),
+        updatedAt = System.currentTimeMillis(),
+    )
+}
+
+private fun ApprovalEntity.withApprovedActionBatchResponse(event: SessionEventDto): ApprovalEntity {
+    val details = runCatching {
+        detailsJson?.let { AgentocProtocol.json.parseToJsonElement(it).jsonObject }
+    }.getOrNull() ?: return this
+    val decisions = event.decisions ?: return this
+    val actions = details["actions"]?.jsonArray.orEmpty().map { element ->
+        val action = element.jsonObject
+        val actionId = action["actionId"]?.jsonPrimitive?.contentOrNull
+        val decision = actionId?.let { decisions[it]?.jsonPrimitive?.contentOrNull?.lowercase() }
+        val state = when (decision) {
+            "approved" -> "approved"
+            "denied" -> "denied"
+            "cancelled", "canceled" -> "cancelled"
+            "expired" -> "expired"
+            else -> null
+        } ?: return@map element
+        JsonObject(action.toMutableMap().apply { put("state", JsonPrimitive(state)) })
+    }
+    if (actions.isEmpty()) return this
+    val nextDetails = details.toMutableMap().apply {
+        put("actions", buildJsonArray { actions.forEach(::add) })
+    }
     val allTerminal = actions.all { action ->
         action.jsonObject["state"]?.jsonPrimitive?.contentOrNull.orEmpty() in terminalApprovedActionStates
     }

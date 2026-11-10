@@ -126,10 +126,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -3317,10 +3317,9 @@ private fun ChatSurface(
                         title = stringResource(R.string.voice_route_phone),
                         subtitle = stringResource(
                             if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
-                            else if (!state.voice.phoneWhisperInstalled && state.voice.phoneNativeLanguageSupported == false) R.string.voice_phone_native_language_unsupported
-                            else if (!state.voice.phoneAvailable) R.string.voice_phone_model_required
-                            else if (state.voice.phoneEnabled) R.string.voice_phone_ready
-                            else R.string.voice_phone_disabled,
+                            else if (state.voice.phoneNativeLanguageSupported == false) R.string.voice_phone_native_language_unsupported
+                            else if (state.voice.phoneAvailable) R.string.voice_phone_ready
+                            else R.string.voice_phone_unsupported,
                         ),
                         selected = state.voice.choice == "phone",
                         onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("phone")) },
@@ -5478,136 +5477,6 @@ private fun SettingsDetailSurface(
             ) {
                 when (page) {
                     SettingsPage.Voice -> {
-                        item(key = "voice-language-settings") {
-                            var speechLanguageQuery by rememberSaveable { mutableStateOf("") }
-                            val voiceUiLocale = LocalConfiguration.current.locales[0] ?: java.util.Locale.getDefault()
-                            SettingsGroup(
-                                title = stringResource(R.string.voice_language_section),
-                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
-                            ) {
-                                androidx.compose.material3.OutlinedTextField(
-                                    value = speechLanguageQuery,
-                                    onValueChange = { speechLanguageQuery = it },
-                                    label = { Text(stringResource(R.string.voice_language_search)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-                                        .testTag("voice-language-search"),
-                                )
-                                val languages = state.voice.speechLanguages.filter { tag ->
-                                    if (speechLanguageQuery.isBlank()) true
-                                    else {
-                                        val locale = java.util.Locale.forLanguageTag(tag)
-                                        tag.contains(speechLanguageQuery.trim(), ignoreCase = true) ||
-                                            locale.getDisplayName(voiceUiLocale).contains(speechLanguageQuery.trim(), ignoreCase = true) ||
-                                            locale.getDisplayName(locale).contains(speechLanguageQuery.trim(), ignoreCase = true)
-                                    }
-                                }
-                                Column(Modifier.selectableGroup().padding(vertical = 6.dp)) {
-                                    if (languages.isEmpty()) {
-                                        Text(
-                                            stringResource(R.string.voice_language_no_results),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                                        )
-                                    } else {
-                                        languages.forEach { tag ->
-                                            val title = if (tag == "auto") stringResource(R.string.voice_language_auto) else {
-                                                val languageLocale = java.util.Locale.forLanguageTag(tag)
-                                                val translatedName = languageLocale.getDisplayLanguage(voiceUiLocale).ifBlank { tag }
-                                                val nativeName = languageLocale.getDisplayLanguage(languageLocale)
-                                                if (nativeName.isNotBlank() && !nativeName.equals(translatedName, ignoreCase = true)) {
-                                                    "$translatedName · $nativeName"
-                                                } else translatedName
-                                            }
-                                            SettingsChoiceRow(
-                                                title = title,
-                                                subtitle = if (tag == "auto") stringResource(R.string.voice_language_auto_hint) else null,
-                                                selected = state.voice.speechLanguage == tag,
-                                                onClick = { onEvent(WorkbenchEvent.SelectVoiceLanguage(tag)) },
-                                                modifier = Modifier.testTag("voice-language-$tag"),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        item(key = "voice-phone-settings") {
-                            SettingsGroup(
-                                title = stringResource(R.string.voice_phone_section),
-                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
-                            ) {
-                                AgentoSettingRow(
-                                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
-                                    title = stringResource(R.string.voice_route_phone),
-                                    subtitle = stringResource(
-                                        if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
-                                        else if (!state.voice.phoneWhisperInstalled && state.voice.phoneNativeLanguageSupported == false) R.string.voice_phone_native_language_unsupported
-                                        else if (!state.voice.phoneAvailable) R.string.voice_phone_model_required
-                                        else if (state.voice.phoneEnabled) R.string.voice_phone_ready
-                                        else R.string.voice_phone_disabled,
-                                    ),
-                                    trailing = {
-                                        AgentoSwitch(
-                                            checked = state.voice.phoneEnabled,
-                                            onCheckedChange = { onEvent(WorkbenchEvent.SetPhoneLocalVoiceEnabled(it)) },
-                                            enabled = state.voice.phoneSupported && !state.voice.processing,
-                                            modifier = Modifier.testTag("voice-phone-switch"),
-                                        )
-                                    },
-                                    showDivider = false,
-                                )
-                            }
-                        }
-                        item(key = "voice-phone-multilingual-model") {
-                            SettingsGroup(
-                                title = stringResource(R.string.voice_phone_model_section),
-                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
-                            ) {
-                                val modelSubtitle = when {
-                                    state.voice.phoneWhisperDownloading -> stringResource(
-                                        R.string.voice_phone_model_downloading,
-                                        state.voice.phoneWhisperProgress,
-                                    )
-                                    state.voice.phoneWhisperInstalled -> stringResource(
-                                        R.string.voice_phone_model_installed,
-                                        state.voice.phoneWhisperModelSizeMb,
-                                    )
-                                    !state.voice.phoneWhisperSupported -> stringResource(R.string.voice_phone_model_unsupported)
-                                    else -> stringResource(
-                                        R.string.voice_phone_model_available,
-                                        state.voice.phoneWhisperModelSizeMb,
-                                        state.voice.phoneWhisperWorkingMemoryMb,
-                                    )
-                                }
-                                AgentoSettingRow(
-                                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
-                                    title = stringResource(R.string.voice_phone_model_title),
-                                    subtitle = modelSubtitle,
-                                    trailing = {
-                                        if (state.voice.phoneWhisperSupported) {
-                                            AgentoButton(
-                                                text = stringResource(
-                                                    when {
-                                                        state.voice.phoneWhisperDownloading -> R.string.voice_phone_model_downloading_button
-                                                        state.voice.phoneWhisperInstalled -> R.string.voice_phone_model_remove
-                                                        else -> R.string.voice_phone_model_download
-                                                    },
-                                                ),
-                                                onClick = {
-                                                    onEvent(if (state.voice.phoneWhisperInstalled) WorkbenchEvent.RemovePhoneVoiceModel else WorkbenchEvent.DownloadPhoneVoiceModel)
-                                                },
-                                                enabled = !state.voice.phoneWhisperDownloading && !state.voice.processing && !state.voice.recording,
-                                                secondary = true,
-                                                modifier = Modifier.testTag("voice-phone-whisper-model"),
-                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
-                                            )
-                                        }
-                                    },
-                                    showDivider = false,
-                                )
-                            }
-                        }
                         item(key = "voice-computer-settings") {
                             SettingsGroup(
                                 title = stringResource(R.string.voice_computers_section),

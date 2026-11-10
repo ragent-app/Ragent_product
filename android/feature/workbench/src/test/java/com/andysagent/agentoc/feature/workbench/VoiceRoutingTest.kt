@@ -26,14 +26,14 @@ class VoiceRoutingTest {
     )
 
     @Test
-    fun automaticPrefersTheSessionComputerThenFallsBackToEnabledPhone() {
+    fun automaticPrefersTheSessionComputerThenFallsBackToPhone() {
         assertEquals(
             VoiceDestination.Computer("pc-a"),
-            resolveVoiceDestination("auto", "pc-a", true, true, listOf(readyComputer)),
+            resolveVoiceDestination("auto", "pc-a", true, listOf(readyComputer)),
         )
         assertEquals(
             VoiceDestination.Phone,
-            resolveVoiceDestination("auto", "pc-b", true, true, listOf(readyComputer)),
+            resolveVoiceDestination("auto", "pc-b", true, listOf(readyComputer)),
         )
     }
 
@@ -42,57 +42,33 @@ class VoiceRoutingTest {
         val startingComputer = readyComputer.copy(running = false, ready = false)
         assertEquals(
             VoiceDestination.Computer("pc-a"),
-            resolveVoiceDestination("auto", "pc-a", true, true, listOf(startingComputer)),
+            resolveVoiceDestination("auto", "pc-a", true, listOf(startingComputer)),
         )
     }
 
     @Test
     fun automaticNeverSelectsAnUnrelatedComputerWithoutAnExplicitChoice() {
-        val result = resolveVoiceDestination("auto", "pc-b", false, false, listOf(readyComputer))
+        val result = resolveVoiceDestination("auto", "pc-b", false, listOf(readyComputer))
         assertIs<VoiceDestination.Unavailable>(result)
     }
 
     @Test
-    fun automaticFallsBackToTheSessionComputerWhenPhoneLanguageIsUnavailable() {
+    fun automaticPrefersSessionComputerWhenPhoneRecognitionIsUnavailable() {
         assertEquals(
             VoiceDestination.Computer("pc-a"),
-            resolveVoiceDestination("auto", "pc-a", true, false, listOf(readyComputer)),
-        )
-    }
-
-    @Test
-    fun installedPhoneWhisperCanRouteEvenWhenTheSystemRecognizerCannotHandleItsLocale() {
-        assertEquals(
-            VoiceDestination.Phone,
-            resolveVoiceDestination("phone", "pc-a", true, true, emptyList()),
+            resolveVoiceDestination("auto", "pc-a", false, listOf(readyComputer)),
         )
     }
 
     @Test
     fun manualComputerFailureDoesNotSilentlySwitchToThePhone() {
-        val result = resolveVoiceDestination("computer:pc-a", "pc-a", true, true, emptyList())
+        val result = resolveVoiceDestination("computer:pc-a", "pc-a", true, emptyList())
         assertIs<VoiceDestination.Unavailable>(result)
     }
 
     @Test
-    fun disabledPhoneCannotBeSelected() {
-        val result = resolveVoiceDestination("phone", "pc-a", false, true, listOf(readyComputer))
+    fun phoneCannotBeSelectedWhenSystemRecognitionIsUnavailable() {
+        val result = resolveVoiceDestination("phone", "pc-a", false, listOf(readyComputer))
         assertIs<VoiceDestination.Unavailable>(result)
-    }
-
-    @Test
-    fun speechLanguageValidationAllowsWhisperLanguagesBeyondRagentUiLocales() {
-        assertEquals(listOf("auto", "en", "zh", "ja", "ko", "fr", "es"), RAGENT_VOICE_LANGUAGES)
-        assertTrue(RAGENT_VOICE_LANGUAGES.all(::isSupportedRagentVoiceLanguage))
-        assertTrue(isSupportedRagentVoiceLanguage("de"))
-        assertTrue(isSupportedRagentVoiceLanguage("ru"))
-        assertTrue(isSupportedRagentVoiceLanguage("haw"))
-        assertFalse(isSupportedRagentVoiceLanguage("auto-detect"))
-        assertEquals("auto", whisperLanguageCode("auto"))
-        assertEquals("zh", whisperLanguageCode("zh-CN"))
-        assertEquals("zh", whisperLanguageCode("zh-TW"))
-        assertEquals("ko", whisperLanguageCode("ko"))
-        assertEquals("es", whisperLanguageCode("es"))
-        assertEquals("haw", whisperLanguageCode("haw"))
     }
 }

@@ -20,13 +20,6 @@ import com.andysagent.agentoc.core.model.AppTheme
 
 private val Context.agentocConfigDataStore by preferencesDataStore(name = "agentoc-client-config")
 
-private fun isValidVoiceLanguageCode(language: String): Boolean = language == "auto" || language.matches(Regex("[a-z]{2,3}"))
-
-private fun normalizeVoiceLanguageCode(language: String?): String = when (language) {
-    "zh-CN", "zh-TW" -> "zh"
-    else -> language?.takeIf(::isValidVoiceLanguageCode) ?: "auto"
-}
-
 data class StoredInstance(
     val endpoint: String,
     val instanceId: String,
@@ -154,8 +147,6 @@ class ClientConfigStore private constructor(private val context: Context, privat
         val chatRuntimeCache = stringPreferencesKey("chat_runtime_cache_v1")
         val appTheme = stringPreferencesKey("app_theme")
         val appLanguage = stringPreferencesKey("app_language")
-        val phoneLocalVoiceEnabled = booleanPreferencesKey("phone_local_voice_enabled")
-        val voiceRecognitionLanguage = stringPreferencesKey("voice_recognition_language")
         val googleAccountDisplayName = stringPreferencesKey("google_account_display_name")
         val googleAccountEmail = stringPreferencesKey("google_account_email")
         val googleAccountPhotoUrl = stringPreferencesKey("google_account_photo_url")
@@ -222,16 +213,6 @@ class ClientConfigStore private constructor(private val context: Context, privat
     /** Configured app language preference. */
     val appLanguage: Flow<AppLanguage> = preferences.data.map { prefs ->
         AppLanguage.fromValue(prefs[Keys.appLanguage])
-    }
-
-    /** Explicit opt-in for recognition on this phone; it never enables a PC service. */
-    val phoneLocalVoiceEnabled: Flow<Boolean> = preferences.data.map { prefs ->
-        prefs[Keys.phoneLocalVoiceEnabled] ?: false
-    }
-
-    /** Recognition locale is independent of the app UI locale and defaults to multilingual detection. */
-    val voiceRecognitionLanguage: Flow<String> = preferences.data.map { prefs ->
-        normalizeVoiceLanguageCode(prefs[Keys.voiceRecognitionLanguage])
     }
 
     fun chatVoiceChoice(sessionId: String): Flow<String> {
@@ -504,14 +485,14 @@ class ClientConfigStore private constructor(private val context: Context, privat
         }
     }
 
-    suspend fun setPhoneLocalVoiceEnabled(enabled: Boolean) {
-        preferences.edit { prefs -> prefs[Keys.phoneLocalVoiceEnabled] = enabled }
-    }
-
-    suspend fun setVoiceRecognitionLanguage(languageTag: String) {
-        val languageCode = normalizeVoiceLanguageCode(languageTag)
-        require(languageCode == "auto" || languageCode == languageTag)
-        preferences.edit { prefs -> prefs[Keys.voiceRecognitionLanguage] = languageCode }
+    /** Remove phone voice preferences retired with the app-managed Whisper model and language selector. */
+    suspend fun clearRetiredPhoneVoicePreferences() {
+        val phoneVoiceEnabled = booleanPreferencesKey("phone_local_voice_enabled")
+        val voiceRecognitionLanguage = stringPreferencesKey("voice_recognition_language")
+        preferences.edit { prefs ->
+            prefs.remove(phoneVoiceEnabled)
+            prefs.remove(voiceRecognitionLanguage)
+        }
     }
 
     suspend fun setChatVoiceChoice(sessionId: String, choice: String) {

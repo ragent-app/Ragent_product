@@ -125,12 +125,28 @@ class AgentoCApplication : Application(), com.andysagent.agentoc.integration.app
         // bind/start timeout loading the entire runtime on the main thread.
         // Lazy remains the single instance; only lifecycle registration is Main.
         Thread({
+            runCatching { removeRetiredPhoneWhisperModels() }
+                .onFailure { android.util.Log.w("VoiceSettingsMigration", "Could not remove retired phone Whisper files", it) }
             runCatching { ResultMaintenanceSchedule.ensureScheduled(this) }
                 .onFailure { android.util.Log.w("ResultMaintenance", "Local maintenance registration requires retry") }
             val graph = runtime
+            runCatching {
+                kotlinx.coroutines.runBlocking { graph.configStore.clearRetiredPhoneVoicePreferences() }
+            }.onFailure { android.util.Log.w("VoiceSettingsMigration", "Could not clear retired phone voice preferences", it) }
             android.os.Handler(android.os.Looper.getMainLooper()).post { graph.start() }
         }, "AgentoCRuntimeInit").start()
     }
+
+    /** Remove only model files previously downloaded by the retired phone-Whisper feature. */
+    private fun removeRetiredPhoneWhisperModels() {
+        val modelDirectory = java.io.File(filesDir, "voice-models")
+        listOf("ggml-tiny-q5_1.bin", "ggml-base-q5_1.bin").forEach { modelName ->
+            modelDirectory.resolve(modelName).delete()
+            modelDirectory.resolve("$modelName.partial").delete()
+        }
+        if (modelDirectory.isDirectory && modelDirectory.list()?.isEmpty() == true) modelDirectory.delete()
+    }
+
     private fun isDocumentExportProcess(): Boolean {
         val name = if (android.os.Build.VERSION.SDK_INT >= 28) getProcessName()
             else java.io.File("/proc/self/cmdline").readText().substringBefore('\u0000')
