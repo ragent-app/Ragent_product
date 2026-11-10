@@ -155,7 +155,7 @@ const postgresClient = {
     if (normalized.includes('select account_id from account_asr_usage') && normalized.includes('for update')) {
       return { rows: [{ account_id: 'acct_pg_test' }] };
     }
-    if (normalized.includes('select reserved_duration_ms, period_start from account_asr_requests')) {
+    if (normalized.includes('select reserved_duration_ms, period_start::text as period_start from account_asr_requests')) {
       return { rows: [{ reserved_duration_ms: '1000', period_start: '2026-11-01' }] };
     }
     if (normalized.includes('select action, policy_version, occurred_at from account_asr_consent_events')) {
@@ -199,9 +199,11 @@ postgresCalls.length = 0;
 await pgStore.settle({ accountId: 'acct_pg_test', requestId: 'pg-request-1234567890', periodStart: '2026-11-01',
   billableDurationMs: 1000, costMicroUsd: 62, latencyMs: 120, languageCode: 'en' });
 const settleUsageLock = postgresCalls.findIndex((call) => call.sql.includes('select account_id from account_asr_usage') && call.sql.includes('for update'));
-const settleRequestLock = postgresCalls.findIndex((call) => call.sql.includes('select reserved_duration_ms, period_start from account_asr_requests'));
+const settleRequestLock = postgresCalls.findIndex((call) => call.sql.includes('select reserved_duration_ms, period_start::text as period_start from account_asr_requests'));
 assert.ok(settleUsageLock >= 0 && settleUsageLock < settleRequestLock,
   'settlement must lock account-period usage before its request');
+assert.ok(postgresCalls[settleRequestLock].sql.includes('period_start::text as period_start'),
+  'settlement must compare the canonical SQL date text rather than node-postgres Date stringification');
 
 postgresCalls.length = 0;
 await pgStore.fail({ accountId: 'acct_pg_test', requestId: 'pg-request-1234567890', periodStart: '2026-11-01', errorCode: 'test' });

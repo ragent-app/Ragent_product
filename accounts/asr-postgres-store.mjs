@@ -131,7 +131,10 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
       const usage = await client.query(`select account_id from account_asr_usage
         where account_id=$1 and period_start=$2::date for update`, [accountId, periodStart]);
       if (!usage.rows.length) throw asrError('asr_request_state_conflict', 409);
-      const request = await client.query(`select reserved_duration_ms, period_start from account_asr_requests
+      // PostgreSQL DATE is parsed as a JavaScript Date by node-postgres. Read
+      // the canonical SQL date text here so the period comparison is stable
+      // across driver timezone/parser behavior.
+      const request = await client.query(`select reserved_duration_ms, period_start::text as period_start from account_asr_requests
         where account_id=$1 and request_id=$2 and state='processing' for update`, [accountId, requestId]);
       if (!request.rows.length || String(request.rows[0].period_start).slice(0, 10) !== periodStart) {
         throw asrError('asr_request_state_conflict', 409);
