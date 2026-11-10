@@ -10,6 +10,7 @@ OUTPUT_DIR="${AGENTOC_ACCOUNTS_RELEASE_OUTPUT_DIR:-$ROOT/release}"
 NODE_VERSION="${AGENTOC_ACCOUNTS_NODE_VERSION:-v24.18.0}"
 NODE_CACHE_DIR="${AGENTOC_ACCOUNTS_NODE_CACHE_DIR:-$ROOT/cache/node}"
 SOURCE_REVISION="${AGENTOC_ACCOUNTS_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}"
+SOURCE_MODE="${AGENTOC_ACCOUNTS_SOURCE_MODE:-git-objects}"
 if [[ ! "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Accounts source revision must be a full 40-character Git commit SHA" >&2
   exit 1
@@ -36,7 +37,7 @@ trap cleanup EXIT
 
 mkdir -p "$APP_DIR" "$RELEASE_DIR/runtime"
 node "$ROOT/scripts/stage-runtime-payload.mjs" \
-  --source "$ROOT" --destination "$APP_DIR" --profile accounts
+  --source "$ROOT" --destination "$APP_DIR" --profile accounts --source-mode "$SOURCE_MODE"
 install -m 0644 "$ROOT/deploy/accounts/agentoc-accounts.service" "$RELEASE_DIR/agentoc-accounts.service"
 
 (cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
