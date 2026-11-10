@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { analyzeWindowsFileChanges } from './windows-powershell-actions.mjs';
+import { analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 // Parse a literal simple command only. Anything requiring shell expansion,
 // substitutions, redirection, operators, or comments is left for review.
@@ -113,6 +114,12 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   if (split.output && !output) return { complete: false, actions: [], reason: 'Bash redirection path cannot be resolved' };
   const outputEntry = output ? [{ path: output, kind: 'write' }] : [];
   const program = words[0];
+  if (['git', 'git.exe'].includes(String(program).toLowerCase())) {
+    const analyzed = analyzeWindowsReadOnlyGit(words);
+    return analyzed
+      ? { ...analyzed, actions: [...analyzed.actions, ...outputEntry] }
+      : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };
+  }
   if ((program === 'pwd' && words.length === 1) || program === 'echo') {
     return outputEntry.length ? analyzeFiles(outputEntry, context) : { complete: true, actions: [{ kind: 'read', program, target: null }] };
   }

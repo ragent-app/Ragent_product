@@ -30,6 +30,7 @@ function bidiApproval(command, { toolName = 'Bash' } = {}) {
     providerRequestIdString: 'req-1',
     providerMethod: 'can_use_tool',
     kind: toolName === 'Bash' ? 'command' : 'permissions',
+    requestClass: toolName === 'Bash' ? 'command_invocation' : 'tool_invocation',
     params: { tool_name: toolName, input },
   };
 }
@@ -187,6 +188,9 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   eq('op.risk.tier danger', d.op.risk.tier, 'danger');
 }
 
+// POSIX system-path behavior is tested on POSIX hosts; Windows has a separate
+// native policy suite and intentionally uses Windows system roots.
+if (process.platform !== 'win32') {
 // --- recommended + destructive delete on system path => ACCUMULATE (classifier danger tier) ---
 {
   const d = decideRiskGate(bidiApproval('rm -rf /etc/evil'), { riskMode: 'recommended' });
@@ -200,6 +204,7 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   const d = decideRiskGate(bidiApproval('cat /etc/hostname'), { riskMode: 'recommended' });
   eq('read system path => AUTO_ALLOW', d.decision, PRIVILEGED_GATE_DECISION.AUTO_ALLOW);
   eq('risk tier safe', d.risk.tier, 'safe');
+}
 }
 
 // --- recommended + safe command => AUTO_ALLOW with tier attached ---
@@ -218,10 +223,10 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   eq('risk tier caution', d.risk.tier, 'caution');
 }
 
-// --- safe + caution => AUTO_ALLOW too (v1 parity: safe/recommended differ only from phase 4) ---
+// --- safe + caution => owner approval ---
 {
   const d = decideRiskGate(bidiApproval('curl https://example.com'), { riskMode: 'safe' });
-  eq('safe caution => AUTO_ALLOW (v1 parity)', d.decision, PRIVILEGED_GATE_DECISION.AUTO_ALLOW);
+  eq('safe caution => PROMPT', d.decision, PRIVILEGED_GATE_DECISION.PROMPT);
   eq('risk tier caution', d.risk.tier, 'caution');
 }
 
@@ -313,7 +318,7 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   const unknownTool = bidiApproval(undefined, { toolName: 'FutureProviderTool' });
   const d = decideRiskGate(unknownTool, { riskMode: 'recommended' });
   eq('unknown Claude tool => PROMPT', d.decision, PRIVILEGED_GATE_DECISION.PROMPT);
-  check('unknown tool prompt reason', /permission gate requires owner approval/.test(d.reason));
+  check('unknown tool prompt reason', /unknown non-command gate requires owner approval/.test(d.reason));
   eq('unknown tool still carries classifier tier', d.risk.tier, 'safe');
 
   const unknownCodexPermission = {
@@ -352,11 +357,19 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
     providerRequestIdString: '44',
     providerMethod: 'item/fileChange/requestApproval',
     kind: 'file_change',
-    params: { changes: [{ path: '/srv/x/src/a.js' }] },
+    params: { changes: [{ path: '/srv/x/src/a.js', kind: { type: 'update' } }] },
   };
   check('Codex file-change method is known', isKnownFileGate(fileChange));
   const d = decideRiskGate(fileChange, { riskMode: 'recommended', cwd: '/srv/x', projectRoot: '/srv/x' });
   eq('Codex file-change => AUTO_ALLOW', d.decision, PRIVILEGED_GATE_DECISION.AUTO_ALLOW);
+  const missing = decideRiskGate({ ...fileChange, params: { itemId: 'patch-1' } }, {
+    riskMode: 'recommended', cwd: '/srv/x', projectRoot: '/srv/x',
+  });
+  eq('Codex file-change without correlated details => PROMPT', missing.decision, PRIVILEGED_GATE_DECISION.PROMPT);
+  const deletion = decideRiskGate({ ...fileChange, params: { changes: [{ path: '/srv/x/src/a.js', kind: { type: 'delete' } }] } }, {
+    riskMode: 'recommended', cwd: '/srv/x', projectRoot: '/srv/x',
+  });
+  eq('Codex file deletion => PROMPT', deletion.decision, PRIVILEGED_GATE_DECISION.PROMPT);
 }
 
 // --- sentinel-declared op => ACCUMULATE with wrapper preserved for resolve rewrite ---

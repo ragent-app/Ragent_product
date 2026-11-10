@@ -39,8 +39,19 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal((await decideWindowsApproval(command, { ...state, riskMode }, { analyze: unknown })).decision, 'prompt');
 }
 assert.equal((await decideWindowsApproval(command, { ...state, riskMode: 'conservative-auto' }, { analyze: async () => ({ complete: true, actions: [{ kind: 'write', workspace: false, target: {} }] }) })).decision, 'prompt');
+assert.equal((await decideWindowsApproval(command, { ...state, riskMode: 'safe' }, { analyze: async () => ({ complete: true, actions: [{ kind: 'write', workspace: false, target: {} }] }) })).decision, 'prompt');
 const write = { approvalId: 'file-1', kind: 'permissions', params: { tool_name: 'Write', input: { file_path: 'C:\\work\\a' } } };
 assert.equal((await decideWindowsApproval(write, { ...state, riskMode: 'full-auto' }, { analyzeFiles: safe })).decision, 'auto-allow');
+const safeTool = { approvalId: 'tool-1', providerMethod: 'can_use_tool', requestClass: 'tool_invocation', kind: 'permissions',
+  params: { tool_name: 'TodoWrite', input: { todos: [] } } };
+assert.equal((await decideWindowsApproval(safeTool, { ...state, riskMode: 'recommended', riskContextValid: false })).decision, 'auto-allow');
+const webSearch = { ...safeTool, approvalId: 'tool-2', params: { tool_name: 'WebSearch', input: { query: 'PowerShell docs' } } };
+assert.equal((await decideWindowsApproval(webSearch, { ...state, riskMode: 'recommended' })).decision, 'auto-allow');
+assert.equal((await decideWindowsApproval(webSearch, { ...state, riskMode: 'safe' })).decision, 'prompt');
+const unknownTool = { ...safeTool, approvalId: 'tool-3', params: { tool_name: 'UnknownFutureTool', input: {} } };
+assert.equal((await decideWindowsApproval(unknownTool, { ...state, riskMode: 'recommended' })).decision, 'prompt');
+const extraPermission = { ...safeTool, approvalId: 'tool-4', params: { ...safeTool.params, additionalPermissions: { network: true } } };
+assert.equal((await decideWindowsApproval(extraPermission, { ...state, riskMode: 'recommended' })).decision, 'prompt');
 const missingChanges = { approvalId: 'file-2', kind: 'file_change', providerMethod: 'item/fileChange/requestApproval', params: { changes: [{ path: 'C:\\work\\a' }] } };
 assert.equal((await decideWindowsApproval(missingChanges, state)).decision, 'prompt');
 const observed = { ...missingChanges, params: { itemId: 'item-1' } };
@@ -48,10 +59,12 @@ const observedState = { ...state, activeItems: new Map([['item-1', { type: 'file
 assert.equal((await decideWindowsApproval(observed, observedState, { analyzeFiles: safe })).decision, 'auto-allow');
 assert.equal((await decideWindowsApproval(observed, { ...state, activeItems: new Map([['item-1', { type: 'commandExecution', changes: [{ path: 'C:\\work\\a', kind: { type: 'update' } }] }]]) }, { analyzeFiles: safe })).decision, 'prompt');
 assert.equal((await decideWindowsApproval({ ...observed, params: { ...observed.params, grantRoot: 'C:\\work' } }, observedState, { analyzeFiles: safe })).decision, 'prompt');
-let moveEntries;
+assert.equal((await decideWindowsApproval({ ...observed, params: { itemId: 'item-1' } }, {
+  ...observedState,
+  activeItems: new Map([['item-1', { type: 'fileChange', changes: [{ path: 'C:\\work\\a', kind: { type: 'delete' } }] }]]),
+}, { analyzeFiles: safe })).decision, 'prompt');
 const moveState = { ...state, activeItems: new Map([['item-1', { type: 'fileChange', changes: [{ path: 'C:\\work\\a', kind: { type: 'update', move_path: 'C:\\other\\b' } }] }]]) };
-await decideWindowsApproval(observed, moveState, { analyzeFiles: async (entries) => { moveEntries = entries; return safe(); } });
-assert.deepEqual(moveEntries.map((entry) => entry.kind), ['delete', 'write']);
+assert.equal((await decideWindowsApproval(observed, moveState, { analyzeFiles: safe })).decision, 'prompt', 'a Codex move includes a deletion and requires owner review');
 assert.equal((await decideWindowsApproval(command, { ...state, riskContextValid: false })).decision, 'prompt');
 for (const extra of [
   { networkApprovalContext: { host: 'example.com', protocol: 'https' } },

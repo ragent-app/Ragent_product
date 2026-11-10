@@ -28,6 +28,7 @@
 import { classifyPrivilegedOperation } from './privileged-classifier.mjs';
 import { parsePrivilegedSentinel } from './privileged-sentinel.mjs';
 import { classifyRisk, RISK_TIER } from './risk-classifier.mjs';
+import { decideClaudeToolApproval } from './claude-tool-policy.mjs';
 
 export const PRIVILEGED_GATE_DECISION = Object.freeze({
   PASS: 'pass',
@@ -84,8 +85,81 @@ export function isKnownFileGate(approval, toolName = '') {
 }
 
 function requiresOwnerPrompt(approval) {
-  return trimString(approval?.kind) === 'permissions'
+  const requestClass = trimString(approval?.requestClass);
+  return (trimString(approval?.kind) === 'permissions' && requestClass !== 'tool_invocation')
     || OWNER_PROMPT_GATE_METHODS.has(trimString(approval?.providerMethod));
+}
+
+function codexFileChangeEntries(approval) {
+  const params = approval?.params && typeof approval.params === 'object' ? approval.params : {};
+  const raw = params.changes;
+  const changes = Array.isArray(raw) ? raw
+    : raw && typeof raw === 'object'
+      ? Object.entries(raw).map(([filePath, change]) => ({ ...(change || {}), path: filePath }))
+      : [];
+  if (!changes.length || changes.length > 1024) return null;
+
+  const entries = [];
+  for (const change of changes) {
+    if (!change || typeof change !== 'object' || Array.isArray(change)) return null;
+    const filePath = trimString(change.path || change.file_path);
+    if (!filePath || filePath.length > 32768) return null;
+    const rawKind = typeof change.kind === 'object' && change.kind
+      ? change.kind.type
+      : change.kind || change.type;
+    const kind = trimString(rawKind).toLowerCase();
+    const movePath = trimString(change.kind?.move_path || change.kind?.movePath || change.move_path || change.movePath);
+    if (movePath) {
+      entries.push({ filePath, kind: 'delete' }, { filePath: movePath, kind: 'write' });
+    } else if (['delete', 'remove', 'deleted'].includes(kind)) {
+      entries.push({ filePath, kind: 'delete' });
+    } else if (['add', 'create', 'created', 'update', 'modify', 'modified', 'write'].includes(kind)) {
+      entries.push({ filePath, kind: 'write' });
+    } else if (['read', 'unchanged'].includes(kind)) {
+      entries.push({ filePath, kind: 'read' });
+    } else {
+      return null;
+    }
+  }
+  return entries.length <= 2048 ? entries : null;
+}
+
+function classifyCodexFileChangeRisk(approval, options) {
+  if (!['item/fileChange/requestApproval', 'applyPatchApproval'].includes(trimString(approval?.providerMethod))) return null;
+  const entries = codexFileChangeEntries(approval);
+  if (!entries) {
+    return {
+      complete: false,
+      risk: { tier: RISK_TIER.DANGER, confidence: 'unknown', platform: 'file_change',
+        signals: { reasons: ['Codex file-change details are unavailable'], needsPrivilegedExecution: true, targetPaths: [] } },
+    };
+  }
+
+  const classified = entries.map((entry) => entry.kind === 'delete'
+    ? { tier: RISK_TIER.DANGER, confidence: 'high', signals: { reasons: ['Codex file deletion requires owner review'], targetPaths: [entry.filePath], needsPrivilegedExecution: true } }
+    : classifyRisk({
+      toolName: entry.kind === 'read' ? 'Read' : 'Write',
+      toolInput: { file_path: entry.filePath },
+      cwd: options.cwd,
+      projectRoot: options.projectRoot,
+      home: options.home,
+      riskContext: options.riskContext,
+    }));
+  const rank = { [RISK_TIER.SAFE]: 0, [RISK_TIER.CAUTION]: 1, [RISK_TIER.DANGER]: 2 };
+  const tier = classified.reduce((highest, item) => (rank[item.tier] > rank[highest] ? item.tier : highest), RISK_TIER.SAFE);
+  const reasons = [...new Set(classified.flatMap((item) => item.signals?.reasons || []))];
+  const targetPaths = [...new Set(classified.flatMap((item) => item.signals?.targetPaths || []))];
+  const needsPrivilegedExecution = classified.some((item) => item.signals?.needsPrivilegedExecution === true);
+  return {
+    complete: true,
+    risk: {
+      ...classified.find((item) => item.tier === tier),
+      tier,
+      platform: 'file_change',
+      confidence: classified.some((item) => item.confidence !== 'high') ? 'medium' : 'high',
+      signals: { reasons, targetPaths, needsPrivilegedExecution },
+    },
+  };
 }
 
 // Permission modes that still emit a per-tool-call permission request
@@ -248,16 +322,10 @@ function readGateToolContext(approval) {
  * every tool call is classified safe/caution/danger, and the gate accumulates
  * exactly the ops that need the privileged executor or are danger-tier.
  *
- * v1 mapping (until plan phase 4 closes the execution gap and phase 3 flips the
- * default): ACCUMULATE iff tier === danger || needsPrivilegedExecution. Caution
- * auto-allows in both safe and recommended — the approve-then-run-native path
- * for caution does not exist yet, so the safe/recommended distinction is wired
- * through (riskMode is accepted) but behavior is identical for caution in v1.
- * Known file tools (no shell command) auto-allow: the executor runs shell
- * commands as root, not file writes; privileged file-writes are future work.
- * Unknown tools and permission requests without an inspectable command return
- * PROMPT and stay on the owner approval path. The classifier tier is always
- * attached for audit/display.
+ * Recommended mode auto-allows caution-tier work. Safe mode sends caution-tier
+ * work to the owner. Danger and privileged operations enter the existing
+ * privileged approval flow; unknown tools, capability grants, and incomplete
+ * Codex file-change requests remain on the owner path.
  *
  * @param {object} approval   Normalized approval record.
  * @param {object} [options]
@@ -295,6 +363,21 @@ export function decideRiskGate(approval, options = {}) {
 
   const reasonText = `risk ${risk.tier}: ${(risk.signals?.reasons || []).join('; ') || 'no reason'}`;
 
+  const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode });
+  if (claudeToolDecision) return { ...claudeToolDecision, command, risk: claudeToolDecision.risk };
+
+  const codexFileChange = classifyCodexFileChangeRisk(approval, options);
+  if (codexFileChange) {
+    const fileRisk = codexFileChange.risk;
+    const fileReason = `risk ${fileRisk.tier}: ${(fileRisk.signals?.reasons || []).join('; ') || 'file change'}`;
+    if (!codexFileChange.complete || fileRisk.tier === RISK_TIER.DANGER
+        || fileRisk.signals?.needsPrivilegedExecution === true
+        || (fileRisk.tier === RISK_TIER.CAUTION && riskMode === 'safe')) {
+      return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${fileReason}; Codex file change requires owner review`, command: '', risk: fileRisk };
+    }
+    return { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: fileReason, command: '', risk: fileRisk };
+  }
+
   // A permissions request grants capability rather than asking to execute the
   // command represented in its payload. Command risk alone cannot authorize
   // that grant, so keep all such provider shapes on the owner path.
@@ -308,9 +391,8 @@ export function decideRiskGate(approval, options = {}) {
   }
 
   // Known file tools have no shell command to route through the privileged
-  // executor. Keep ordinary/cautionary file work on the existing automatic
-  // path, but never auto-allow a danger-tier file request: the owner approval
-  // path is the only safe route until native file execution is modeled.
+  // executor. Keep ordinary file work automatic; safe mode sends caution-tier
+  // writes to the owner. Danger-tier requests always require owner review.
   if (!realCommand) {
     if (isKnownFileGate(approval, toolName)) {
       if (risk.tier === RISK_TIER.DANGER || risk.signals?.needsPrivilegedExecution === true) {
@@ -321,6 +403,9 @@ export function decideRiskGate(approval, options = {}) {
           risk,
         };
       }
+      if (risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
+        return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; safe mode requires owner approval`, command: '', risk };
+      }
       return { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: reasonText, command: '', risk };
     }
     return {
@@ -329,6 +414,10 @@ export function decideRiskGate(approval, options = {}) {
       command: '',
       risk,
     };
+  }
+
+  if (risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; safe mode requires owner approval`, command, risk };
   }
 
   const shouldAccumulate = risk.tier === RISK_TIER.DANGER

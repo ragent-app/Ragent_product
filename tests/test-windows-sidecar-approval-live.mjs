@@ -104,6 +104,31 @@ for (const mode of ['full-auto', 'recommended', 'conservative-auto']) {
     assert.equal(sent[5].response?.response?.behavior, 'deny');
   }
 }
+for (const mode of ['recommended', 'safe']) {
+  const { run, state, sent, proc } = await fixture(mode);
+  const local = (id, toolName, input) => ({ type: 'control_request', request_id: id,
+    request: { subtype: 'can_use_tool', tool_name: toolName, input } });
+  for (const [index, [toolName, input]] of [
+    ['TodoWrite', { todos: [{ content: 'Review parser', status: 'in_progress' }] }],
+    ['Skill', { skill: 'reviewing-code', args: 'Inspect the parser' }],
+    ['EnterPlanMode', {}],
+  ].entries()) {
+    await trackClaudeBidiApprovalRequest(run.id, state, local(`local-${index}`, toolName, input), proc);
+    assert.equal(sent[index]?.response?.response?.behavior, 'allow', `${mode} should auto-allow local ${toolName}`);
+  }
+  await trackClaudeBidiApprovalRequest(run.id, state, local('unknown-local', 'FutureTool', {}), proc);
+  assert.equal(sent.length, 3, 'unknown Claude tools remain owner-gated');
+  assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === 'claude:unknown-local'));
+}
+for (const mode of ['recommended', 'full-auto']) {
+  const { run, state, sent, proc } = await fixture(mode);
+  const request = { type: 'control_request', request_id: 'git-status', request: {
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'git status --short' },
+  } };
+  await trackClaudeBidiApprovalRequest(run.id, state, request, proc);
+  assert.equal(sent[0]?.response?.response?.behavior, 'allow', `${mode} should auto-allow read-only git status`);
+  assert.equal((await getRun(run.id)).appServerPendingApprovals?.length || 0, 0, 'read-only Git status should not open a phone approval');
+}
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
   state.turnActive = true;
@@ -269,6 +294,21 @@ await new Promise((resolve) => preflightServer.close(resolve));
   const wrapped = `'${shell}' -NoProfile -Command 'Get-Content readme.txt'`;
   await trackCodexAppServerApprovalRequest(run.id, state, { id: 8, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread', turnId: 'turn', cwd: workspace, command: wrapped } }, proc);
   assert.equal(sent[1]?.result?.decision, 'accept', 'Codex PowerShell request must be analyzed using the real parser');
+}
+{
+  const { run, state, sent, proc } = await fixture('recommended');
+  const permission = { id: 80, method: 'item/permissions/requestApproval', params: {
+    threadId: 'thread', turnId: 'turn', permissions: { network: true }, command: 'git status --short',
+  } };
+  await trackCodexAppServerApprovalRequest(run.id, state, permission, proc);
+  assert.equal(sent.length, 0, 'a Codex capability grant must not inherit a safe command classification');
+  assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === 'item/permissions/requestApproval:80'));
+
+  await trackCodexAppServerApprovalRequest(run.id, state, {
+    id: 81, method: 'item/fileChange/requestApproval', params: { threadId: 'thread', turnId: 'turn', itemId: 'missing' },
+  }, proc);
+  assert.equal(sent.length, 0, 'missing Codex file-change item details should stay owner-gated');
+  assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === 'item/fileChange/requestApproval:81'));
 }
 console.log('windows-sidecar-approval-live: Claude and Codex sidecar decisions passed');
 const actualRoot = await realpath(root);

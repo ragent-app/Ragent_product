@@ -2,6 +2,7 @@ import path from 'node:path';
 import { lstat, realpath, readdir } from 'node:fs/promises';
 import { parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
 import { systemPathRootsForPlatform } from './risk-policy.mjs';
+import { analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 const win = path.win32;
 const FILE_COMMANDS = new Map([
@@ -308,6 +309,15 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     }
     const redirectionReason = await appendRedirects(entry, program);
     if (redirectionReason) return { complete: false, actions, reason: redirectionReason };
+    if (program === 'git' || program === 'git.exe') {
+      if (entry.pipelineInput !== false || !entry.elements.every((element) => element.kind === 'literal')) {
+        return { complete: false, actions, reason: 'Git arguments are dynamic or come from pipeline input' };
+      }
+      const git = analyzeWindowsReadOnlyGit(entry.elements.map((element) => String(element.value)));
+      if (!git) return { complete: false, actions, reason: 'Git command is not on the read-only allowlist' };
+      actions.push(...git.actions);
+      continue;
+    }
     if (FILTERS.has(program)) {
       const filterArgs = parseArguments(entry.elements, SAFE_FILTER_PARAMS, SAFE_FILTER_SWITCHES);
       if (!filterArgs) return { complete: false, actions, reason: 'unsupported filter arguments' };

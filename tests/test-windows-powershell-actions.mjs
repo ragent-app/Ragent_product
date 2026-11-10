@@ -62,6 +62,12 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
 let result = await inspect('Get-Content readme.txt | Select-Object -First 1');
 assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
+for (const command of ['git status --short', 'git diff --stat', 'git branch --show-current']) {
+  assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
+}
+for (const command of ['git add .', 'git commit -m test', 'git diff', 'git status --ignored=matching']) {
+  assert.equal((await inspect(command)).decision, 'review', `${command} is not on the read-only Git allowlist`);
+}
 result = await inspect(`Set-Content -LiteralPath '${path.join(workspace, 'chain.txt')}' -Value PASS && Get-Content -LiteralPath '${path.join(workspace, 'chain.txt')}' 2>&1 | Out-String`);
 assert.equal(result.decision, 'allow', 'a literal PowerShell 7 success chain of safe workspace operations is eligible');
 assert.deepEqual(result.actions.map(action => action.kind), ['write', 'read', 'read']);

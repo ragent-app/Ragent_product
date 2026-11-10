@@ -4,6 +4,7 @@ import { analyzeWindowsBash, parseLiteralBashWords } from './windows-bash-action
 import { parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
 import { isKnownFileGate } from './privileged-gate.mjs';
 import { resolveWindowsSystemPaths } from './windows-system-paths.mjs';
+import { decideClaudeToolApproval } from './claude-tool-policy.mjs';
 
 const win = path.win32;
 const text = (value) => typeof value === 'string' ? value.trim() : '';
@@ -104,7 +105,7 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
   const params = approval?.params || {};
   const toolName = text(params.tool_name);
   const mode = text(state.riskMode);
-  const conservative = mode === 'conservative-auto';
+  const conservative = mode === 'safe' || mode === 'conservative-auto';
   const riskContext = state.riskContext || {};
   const requestCwd = text(params.cwd);
   if (requestCwd && !win.isAbsolute(requestCwd)) return { decision: 'prompt', reason: 'command working directory is not absolute' };
@@ -114,13 +115,15 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
     trustedWorkspaceRoot: riskContext.trustedWorkspaceRoot || '',
     requireAbsolutePaths: approval?.providerMethod === 'can_use_tool',
   };
-  if (state.riskContextValid === false) return { decision: 'prompt', reason: 'run path context is unavailable' };
   // These requests can grant more than execution of the displayed command.
   // Command classification alone cannot authorize additional permissions.
   if (params.networkApprovalContext || params.network_approval_context
       || params.additionalPermissions || params.additional_permissions) {
     return { decision: 'prompt', reason: 'additional permissions require owner approval' };
   }
+  const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode: mode });
+  if (claudeToolDecision) return claudeToolDecision;
+  if (state.riskContextValid === false) return { decision: 'prompt', reason: 'run path context is unavailable' };
   let result; let command = ''; let platform = 'powershell';
   if (isKnownFileGate(approval, toolName)) {
     if (text(params.grantRoot)) return { decision: 'prompt', reason: 'a continuing file permission grant requires owner approval' };
@@ -145,6 +148,9 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
       : filePath ? [{ path: filePath, kind: ['Read', 'Glob', 'Grep', 'LS', 'List'].includes(toolName) ? 'read' : 'write' }]
         : [];
     if (entries.length > 10000 || entries.some((entry) => !entry.path || entry.kind === 'unknown')) return { decision: 'prompt', reason: 'file change details are incomplete or too large' };
+    if (approval?.providerMethod === 'item/fileChange/requestApproval' && entries.some((entry) => entry.kind === 'delete')) {
+      return { decision: 'prompt', reason: 'Codex file deletion requires owner review' };
+    }
     result = await analyzeFiles(entries, context);
   } else {
     if (approval?.kind !== 'command') return { decision: 'prompt', reason: 'non-command request requires owner decision' };

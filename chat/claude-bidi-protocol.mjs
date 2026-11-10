@@ -58,16 +58,20 @@ export function readClaudeBidiApprovalRequest(message) {
   const request = message.request;
   const toolName = typeof request.tool_name === 'string' ? request.tool_name : '';
   let kind = 'permissions';
+  let requestClass = 'tool_invocation';
   if (toolName === 'Bash' || toolName === 'PowerShell') {
     kind = 'command';
+    requestClass = 'command_invocation';
   } else if (toolName === 'AskUserQuestion') {
     kind = 'question';
+    requestClass = 'user_question';
   } else if (toolName === 'ExitPlanMode') {
     // Claude Code in plan mode (`--permission-mode plan`) asks permission to
     // leave plan mode via ExitPlanMode; the request input carries the drafted
     // plan ({ plan: { title, text } }). Classify it as a plan approval so the
     // card can show the actual plan instead of a bare tool-name prompt.
     kind = 'plan';
+    requestClass = 'plan_review';
   }
   return {
     approvalId: `claude:${requestId}`,
@@ -75,6 +79,7 @@ export function readClaudeBidiApprovalRequest(message) {
     providerRequestIdString: requestId,
     providerMethod: 'can_use_tool',
     kind,
+    requestClass,
     params: request,
     request: message,
   };

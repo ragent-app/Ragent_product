@@ -2617,6 +2617,16 @@ function isAutoApprovedMcpServer(state, serverName) {
   return serverName === state?.mcpExpectedServerName;
 }
 
+function withCurrentCodexFileChanges(approval, state) {
+  if (approval?.providerMethod !== 'item/fileChange/requestApproval') return approval;
+  const params = approval.params && typeof approval.params === 'object' ? approval.params : {};
+  if (Array.isArray(params.changes) && params.changes.length) return approval;
+  const itemId = typeof params.itemId === 'string' ? params.itemId.trim() : '';
+  const item = itemId && state?.activeItems instanceof Map ? state.activeItems.get(itemId) : null;
+  if (!item || item.type !== 'fileChange' || !Array.isArray(item.changes) || !item.changes.length) return approval;
+  return { ...approval, params: { ...params, changes: item.changes } };
+}
+
 export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe') } = {}) {
   if (!state || !parsed) return null;
   const approval = readCodexAppServerApprovalRequest(parsed);
@@ -2679,7 +2689,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled Windows installation' }
     : managedMcp || approval.providerMethod === 'mcpServer/elicitation/request'
     ? { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'MCP elicitation requires explicit server binding or user approval' }
-    : await decideRunGate(approval, state);
+    : await decideRunGate(withCurrentCodexFileChanges(approval, state), state);
 
   if (process.platform === 'win32' && isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {

@@ -425,6 +425,15 @@ const approvalRequestMessage = {
 const approvalRequest = readCodexAppServerApprovalRequest(approvalRequestMessage);
 assert.equal(approvalRequest.approvalId, 'item/commandExecution/requestApproval:approval-1');
 assert.equal(approvalRequest.kind, 'command');
+assert.equal(approvalRequest.requestClass, 'command_invocation');
+const fileChangeApproval = readCodexAppServerApprovalRequest({ method: 'item/fileChange/requestApproval', id: 2, params: { itemId: 'patch-1' } });
+assert.equal(fileChangeApproval.kind, 'file_change');
+assert.equal(fileChangeApproval.requestClass, 'file_change');
+const capabilityApproval = readCodexAppServerApprovalRequest({ method: 'item/permissions/requestApproval', id: 3, params: {} });
+assert.equal(capabilityApproval.kind, 'permissions');
+assert.equal(capabilityApproval.requestClass, 'capability_grant');
+const elicitationApproval = readCodexAppServerApprovalRequest({ method: 'mcpServer/elicitation/request', id: 4, params: {} });
+assert.equal(elicitationApproval.requestClass, 'mcp_elicitation');
 assert.deepEqual(
   buildCodexAppServerApprovalResponseMessage(approvalRequest, 'approve'),
   { id: 'approval-1', result: { decision: 'accept' } },

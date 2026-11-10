@@ -46,7 +46,8 @@ const installCommand = process.env.AGENTOC_QA_HOOK_WRAPPED_INSTALL === '1'
 const managedDelete = process.env.AGENTOC_QA_HOOK_MANAGED_DELETE === '1';
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
-if (['git-status', 'uninstall'].includes(fileCommand) && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('review fixture must expect review');
+if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
+if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall fixture must expect review');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
 if (outsideWrite && fileCommand !== 'dotnet') throw new Error('outside-write fixture requires the fixed dotnet command');
 const outsideWriteRoot = outsideWrite ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
@@ -90,7 +91,9 @@ const server = createServer((req, res) => {
       return;
     }
     const tools = (data.tools || []).map(item => ({ type: item.type, name: item.name || item.function?.name || '' }));
-    if (!tools.some(item => item.name === 'exec_command')) { process.stderr.write('exec_command missing\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
+    if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] provider tools: ${JSON.stringify(tools)}\n`);
+    const shellToolName = tools.find(item => ['exec_command', 'shell_command'].includes(item.name))?.name;
+    if (!shellToolName) { process.stderr.write('Codex shell tool missing\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
     providerRequests++;
     if (managedElevation && providerRequests > 1) {
       if (!JSON.stringify(data).includes('agentoc_request_actions')) { process.stderr.write('managed elevation instruction did not reach model\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
@@ -107,8 +110,8 @@ const server = createServer((req, res) => {
     const relativeTarget = dangerousRetry ? path.relative(alternateCwd, deleteTarget) : 'delete-target';
     const deleteCommand = managedDeleteRelative && providerRequests === 1 ? `Remove-Item -LiteralPath '${relativeTarget.replace(/'/g, "''")}' -Recurse -Force` : `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
     const adminCommand = process.env.AGENTOC_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.AGENTOC_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start agentoc-fixture' : process.env.AGENTOC_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name agentoc-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
-    const args = JSON.stringify({ cmd: managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'", yield_time_ms: 1000, ...(process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete ? { workdir: alternateCwd } : {}) });
-    const call = { id: managedDeleteRelative && providerRequests > 1 ? 'fc_fixture_retry' : 'fc_fixture', type: 'function_call', name: 'exec_command', call_id: managedDeleteRelative && providerRequests > 1 ? 'call_fixture_retry' : 'call_fixture', arguments: args, status: 'completed' };
+    const args = JSON.stringify({ command: managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'", yield_time_ms: 1000, ...(process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete ? { workdir: alternateCwd } : {}) });
+    const call = { id: managedDeleteRelative && providerRequests > 1 ? 'fc_fixture_retry' : 'fc_fixture', type: 'function_call', name: shellToolName, call_id: managedDeleteRelative && providerRequests > 1 ? 'call_fixture_retry' : 'call_fixture', arguments: args, status: 'completed' };
     const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'gpt-5.4', output: [call], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     for (const event of [
@@ -178,9 +181,18 @@ if (productionStartup) {
 // Bypassing hook trust is limited to this disposable home with one fixed,
 // test-owned hook. Never copy this setting into production thread options: it
 // would also trust unrelated user, project, or plugin hooks.
-const child = spawn(process.env.AGENTOC_TEST_CODEX_BINARY, ['app-server', '--disable', 'plugins', '--disable', 'remote_plugin', '--disable', 'plugin_sharing', '--listen', 'stdio://'], { cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-child.stderr.resume();
-const timeout = setTimeout(() => { process.stderr.write('fixture timed out\n'); child.kill(); server.close(); process.exitCode = 1; }, 30000);
+const codexBinary = process.env.AGENTOC_TEST_CODEX_BINARY;
+const codexArgs = ['app-server', '--disable', 'plugins', '--disable', 'remote_plugin', '--disable', 'plugin_sharing', '--listen', 'stdio://'];
+const codexEntrypoint = process.env.AGENTOC_TEST_CODEX_ENTRYPOINT;
+const child = spawn(codexBinary, codexEntrypoint ? [codexEntrypoint, ...codexArgs] : codexArgs, {
+  cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+});
+let codexStderr = '';
+child.stderr.on('data', chunk => {
+  codexStderr = (codexStderr + String(chunk)).slice(-6000);
+  if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] Codex stderr: ${String(chunk).slice(-2000)}\n`);
+});
+const timeout = setTimeout(() => { process.stderr.write(`fixture timed out${codexStderr ? `: ${codexStderr}` : ''}\n`); child.kill(); server.close(); process.exitCode = 1; }, 30000);
 let stage = 0; let hookCompleted = false; let hookFailed = false; let hookBlocked = false;
 let fixtureHookKey = '';
 let managedHookSetup = null;
@@ -192,6 +204,7 @@ function startThread() {
 function fixtureError(message) { process.stderr.write(message + '\n'); process.exitCode = 1; stage = 3; child.kill(); server.close(); }
 createInterface({ input: child.stdout }).on('line', async line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
+  if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] app-server: ${JSON.stringify({ id: msg.id, method: msg.method, error: msg.error?.message, resultKeys: Object.keys(msg.result || {}) })}\n`);
   if (process.env.AGENTOC_QA_TRACE_LIFECYCLE === '1' && ['item/started', 'hook/started', 'hook/completed', 'item/commandExecution/requestApproval'].includes(msg.method)) process.stderr.write('fixture event: ' + JSON.stringify({ method: msg.method, params: msg.params }) + '\n');
   if (hookExperiment && msg.method === 'hook/completed' && msg.params?.run?.eventName === 'preToolUse') { hookCompleted = msg.params.run.status === 'completed'; hookFailed = msg.params.run.status === 'failed'; hookBlocked = msg.params.run.status === 'blocked'; }
   if (productionState?.codexManagedHookSetup?.consume(msg)) return;
@@ -333,6 +346,14 @@ createInterface({ input: child.stdout }).on('line', async line => {
   } else if (stage === 2 && msg.method === 'item/completed' && msg.params?.item?.type === 'commandExecution') {
     if (managedElevation) { fixtureError('direct elevation unexpectedly executed'); return; }
     if (managedDeleteRelative && msg.params.item.id === 'call_fixture') return;
+    if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION === 'auto-allow') {
+      if (msg.params.item.exitCode !== 0 || !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) {
+        fixtureError('read-only Git status did not return the isolated fixture entry'); return;
+      }
+      stage = 5;
+      process.stdout.write('codex-windows-local-gate: real Codex CLI git status completed without an approval request\n');
+      child.kill(); server.close(); return;
+    }
     stage = 3;
     process.stderr.write('command completed without a gate request\n'); process.exitCode = 1;
     child.kill(); server.close();

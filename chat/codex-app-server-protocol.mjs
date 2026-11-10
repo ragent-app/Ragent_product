@@ -496,6 +496,9 @@ export function readCodexAppServerApprovalRequest(message) {
     providerRequestIdString: String(providerRequestId),
     providerMethod: method,
     kind,
+    requestClass: kind === 'command' ? 'command_invocation'
+      : kind === 'file_change' ? 'file_change'
+        : method === 'mcpServer/elicitation/request' ? 'mcp_elicitation' : 'capability_grant',
     params: message.params && typeof message.params === 'object' ? message.params : {},
     request: message,
   };

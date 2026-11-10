@@ -69,6 +69,7 @@ const approvalRequest = readClaudeBidiApprovalRequest({
 });
 assert.equal(approvalRequest.approvalId, 'claude:approval-1');
 assert.equal(approvalRequest.kind, 'command');
+assert.equal(approvalRequest.requestClass, 'command_invocation');
 assert.deepEqual(
   buildClaudeBidiApprovalResponseMessage(approvalRequest, 'approve'),
   {
@@ -150,6 +151,7 @@ const askUserApproval = readClaudeBidiApprovalRequest({
 });
 // Forward: kind='question', questions/options preserved on params.
 assert.equal(askUserApproval.kind, 'question');
+assert.equal(askUserApproval.requestClass, 'user_question');
 assert.equal(askUserApproval.params.input.questions, askUserQuestions);
 
 // Return: a selected option INDEX is resolved against the original questions and mapped
@@ -255,6 +257,7 @@ const exitPlanApproval = readClaudeBidiApprovalRequest({
 // Plan-exit prompts classify as plan approvals so the card can show the plan
 // content instead of a bare tool-name prompt.
 assert.equal(exitPlanApproval.kind, 'plan');
+assert.equal(exitPlanApproval.requestClass, 'plan_review');
 assert.equal(exitPlanApproval.params.input.plan.title, 'Refactor approval card');
 // Approve exits plan mode by allowing ExitPlanMode with the plan echoed back;
 // deny keeps the run in plan mode.

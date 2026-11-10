@@ -102,6 +102,10 @@ const server = createServer((req, res) => {
     }
     if (req.method !== 'POST' || !req.url.startsWith('/v1/messages')) { res.writeHead(404).end(); return; }
     requests++;
+    if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
+      const last = request.messages?.at(-1);
+      process.stderr.write(`[fixture] model request ${requests}: ${JSON.stringify({ url: req.url, lastRole: last?.role, lastContentTypes: Array.isArray(last?.content) ? last.content.map(item => item.type) : [], toolNames: (request.tools || []).map(item => item.name), toolChoice: request.tool_choice })}\n`);
+    }
     const tool = requests === 1;
     const toolName = nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
@@ -157,9 +161,11 @@ if (installCase) {
   gateState.windowsManagedActionChannel = true;
   gateState.windowsManagedActionBinding = { endpoint, token: 'fixture-token', sessionId: 'claude-local-fixture', runId: run.id, turnId: 'fixture-turn' };
 }
-const child = spawn(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: 2 }), { cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+const child = spawn(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: 2 }), {
+  cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], shell: /\.cmd$/i.test(binary),
+});
 let errors = ''; child.stderr.on('data', (chunk) => { errors = (errors + String(chunk)).slice(-6000); });
-let approvals = 0; let terminal = null; let handlerFailure = null; let gitOwnerReviewObserved = false;
+let approvals = 0; let terminal = null; let handlerFailure = null;
 const output = createInterface({ input: child.stdout });
 const completed = new Promise((resolve, reject) => {
   const timer = setTimeout(() => { child.kill(); reject(new Error(`Claude fixture timed out: ${errors}`)); }, 45000);
@@ -169,6 +175,9 @@ const completed = new Promise((resolve, reject) => {
 output.on('line', (line) => {
   void (async () => {
     let event; try { event = JSON.parse(line); } catch { return; }
+    if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
+      process.stderr.write(`[fixture] CLI event: ${JSON.stringify({ type: event.type, subtype: event.subtype || event.request?.subtype, toolName: event.request?.tool_name || event.name, toolUseName: event.message?.content?.find?.(item => item.type === 'tool_use')?.name })}\n`);
+    }
     const approval = readClaudeBidiApprovalRequest(event);
     if (approval) {
       approvals++;
@@ -182,10 +191,8 @@ output.on('line', (line) => {
       await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : {});
       if (readCase === 'git-status' && mode === 'recommended') {
         const current = await getRun(run.id);
-        if (current.appServerPendingApprovals?.some((item) => item.approvalId === approval.approvalId)) {
-          gitOwnerReviewObserved = true;
-          child.stdin.write(serializeClaudeBidiMessage(buildClaudeBidiApprovalResponseMessage(approval, 'deny')));
-        }
+        assert.ok(!current.appServerPendingApprovals?.some((item) => item.approvalId === approval.approvalId),
+          'read-only git status must not create a phone approval');
       }
       if (reviewCase && mode === 'recommended') {
         const current = await getRun(run.id);
@@ -221,15 +228,15 @@ try {
     assert.ok(guidanceObserved, 'real Claude must receive managed executor guidance');
   } else if (readCase) {
     assert.equal(await readFile(artifact, 'utf8'), 'local read fixture\n');
-    if (readCase !== 'git-status' || approvals === 0) assert.ok(toolResultObserved, 'actual Claude must receive the read result');
-    if (readCase === 'git-status' && approvals && mode === 'recommended') assert.ok(gitOwnerReviewObserved, 'Git must wait for owner when not auto-approved');
+    assert.ok(toolResultObserved, 'actual Claude must receive the read result');
+    if (readCase === 'git-status') assert.equal(approvals, 0, 'Claude Code should not emit an approval request for read-only git status');
   } else if (protectedCase || conservativeOutside || uninstallCase) await assert.rejects(access(artifact), { code: 'ENOENT' });
   else assert.equal((await readFile(artifact, 'utf8')).replace(/^\uFEFF/, ''), dotnetCase ? 'dotnet fixture' : 'local fixture\n');
   assert.ok(requests >= 2, 'local model must receive the tool result');
   const spool = await readRunSpoolRecords(run.id);
   if (deleteCase && !reviewCase) assert.ok(spool.some((record) => record.json?.reason === 'handle-bound workspace deletion'), 'actual sidecar must use the handle-bound deletion helper');
   else if (guidanceCase) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true && record.json?.reason?.includes('agentoc_request_actions')), 'actual sidecar must persist managed executor guidance');
-  else if (readCase === 'git-status' && approvals && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true), 'unattended Git request must be denied when not auto-approved');
+  else if (readCase === 'git-status' && approvals > 0) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'a surfaced read-only Git request must be automatically approved');
   else if (!reviewCase && (!readCase || approvals) && readCase !== 'git-status') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'actual sidecar must persist the automatic decision');
   else if (reviewCase && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true), 'unattended protected write must be denied');
   console.log(`claude-windows-local-gate: ${mode} real CLI${nativePowerShell ? ' native PowerShell' : ''} ${installCase ? 'controlled install reached mock service' : reviewCase ? 'dangerous operation denied' : deleteCase ? 'handle-bound fixture deletion completed' : guidanceCase ? 'managed executor guidance received' : readCase ? `${readCase} ${approvals ? 'approval observed' : 'read completed without approval request'}` : dotnetCase ? 'trusted PowerShell wrapped file write completed' : outsideFileCase ? 'outside-workspace file write completed' : 'file approval completed'}`);
