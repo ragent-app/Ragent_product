@@ -87,6 +87,8 @@ The v2 disclosure is localized in English, Simplified Chinese, Traditional Chine
 
 Oracle currently runs `agentoc-accounts-0.0.1+asr-settlement.20261110.05d444e-arm64`, built from committed source revision `05d444e80d450857907e750e854bce4dceb70c27`; archive SHA-256 is `8fbe8af52f24f529500af237e571ae9ce8f1f1796d270b577855172b67b222fc`. The prior immutable release remains available for rollback. Public health/readiness both return 200, readiness reports `speechRecognition: unconfigured`, and an invalid usage credential returns 401. The key is absent and the feature flag is off.
 
+From the real Windows 11 Pro host (Build 22631), the same public HTTPS endpoints returned health/ready 200, invalid usage 401, and disabled transcription 503 `asr_unavailable`. This confirms the desktop's network path to Oracle and the fail-closed disabled state; it does not claim a valid account or a provider transcription.
+
 An isolated PostgreSQL scratch-database test verified v1/v2 consent storage, shared cross-device monthly quota under concurrent reservations, the two-operation cap, and successful settlement from reserved to used time. The scratch database used synthetic IDs and was dropped after the test. This uncovered a date parsing bug in settlement; the query now explicitly reads SQL date text, and the deployed code passed the PostgreSQL smoke test after the fix. It does not claim a valid signed-in Ragent account or provider call.
 
 The public privacy notice and Play Console Data Safety form still need review/update before enablement. The real ElevenLabs transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.
