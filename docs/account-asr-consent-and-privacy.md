@@ -74,21 +74,21 @@ The v2 disclosure is localized in English, Simplified Chinese, Traditional Chine
 
 | Area | Status |
 |---|---|
-| Central Accounts service and monthly account usage ledger | Deployed on Oracle at release `0.0.1+asr-settlement.20261110.05d444e`; migrations 038–040 applied |
+| Central Accounts service and monthly account usage ledger | Deployed on Oracle at release `0.0.1+asr-reconciliation.20261110.d2cc946`; migrations 038–041 applied |
 | Provider secret and feature gate | Key absent and feature flag off by owner instruction |
 | Consent ledger and enforce-before-forward gate | Implemented; migration 040 applied and matching Accounts release active on Oracle |
 | Android explicit consent, decline, revoke, and localized disclosure | Implemented; debug build, unit tests, and seven-locale device test passed |
-| Public privacy-policy and Play Console alignment | Draft prepared; public changes not published |
+| Public privacy-policy and Play Console alignment | Privacy notice published; Play Console Data Safety still needs owner review against actual provider terms |
 | Real ElevenLabs transcription and cost measurement | Cannot be performed until a key is configured securely |
 
 ## Latest deployment and verification — 2026-11-10
 
 `npm run test:owner-auth`, the ASR unit test, and the Accounts independent release-packaging test passed on Windows. The Android debug/unit tests and the connected MTN-AN80 `VoiceLocalizationTest` passed earlier; the device test covered English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It verifies localized disclosure copy, not provider transcription.
 
-Oracle currently runs `agentoc-accounts-0.0.1+asr-settlement.20261110.05d444e-arm64`, built from committed source revision `05d444e80d450857907e750e854bce4dceb70c27`; archive SHA-256 is `8fbe8af52f24f529500af237e571ae9ce8f1f1796d270b577855172b67b222fc`. The prior immutable release remains available for rollback. Public health/readiness both return 200, readiness reports `speechRecognition: unconfigured`, and an invalid usage credential returns 401. The key is absent and the feature flag is off.
+Oracle now runs `agentoc-accounts-0.0.1+asr-reconciliation.20261110.d2cc946-arm64`, built from committed source revision `d2cc946c2730fd61ce5a4dc01e1fdbece0089932`; archive SHA-256 is `3c39ee49423e6a3dbde933e86602b7ef1a64f3f24a3e7ff1dc26f5e636027feb`. The prior immutable settlement release remains available for rollback. Migration 041 is applied. Public health/readiness both return 200, readiness reports `speechRecognition: unconfigured`, and an invalid usage credential returns 401. The key is empty and the feature flag is off.
 
-From the real Windows 11 Pro host (Build 22631), the same public HTTPS endpoints returned health/ready 200, invalid usage 401, and disabled transcription 503 `asr_unavailable`. This confirms the desktop's network path to Oracle and the fail-closed disabled state; it does not claim a valid account or a provider transcription.
+From the real Windows 11 Pro host (Build 22631), public readiness returned 200 with `speechRecognition: unconfigured`, invalid usage returned 401, and disabled transcription returned 503 `asr_unavailable`. This confirms the desktop's network path to Oracle and the fail-closed disabled state; it does not claim a valid account or a provider transcription.
 
-An isolated PostgreSQL scratch-database test verified v1/v2 consent storage, shared cross-device monthly quota under concurrent reservations, the two-operation cap, and successful settlement from reserved to used time. The scratch database used synthetic IDs and was dropped after the test. This uncovered a date parsing bug in settlement; the query now explicitly reads SQL date text, and the deployed code passed the PostgreSQL smoke test after the fix. It does not claim a valid signed-in Ragent account or provider call.
+An isolated PostgreSQL scratch-database test verified v1/v2 consent storage, shared cross-device monthly quota under concurrent reservations, the two-operation cap, and successful settlement from reserved to used time. A separate disposable-schema test exercised migration 041, both reconciliation outcomes, idempotent repeat resolution, quota/cost accounting, and account-deletion cascade; it dropped the schema afterward. These tests do not claim a valid signed-in Ragent account or provider call.
 
 The public privacy notice is published. The Play Console Data Safety form still needs owner review/update against the actual provider account terms before enablement. The real ElevenLabs transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.
