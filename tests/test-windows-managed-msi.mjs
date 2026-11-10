@@ -22,6 +22,14 @@ const activationTrialSource=await readFile(resolve('packaging/windows/owner-serv
 const serviceHostSource=await readFile(resolve('packaging/windows/AgentoC.ServiceHost.cs'),'utf8');
 const activationCheck=await readFile(resolve('packaging/windows/check-owner-msi-activation.ps1'),'utf8');
 const upgradeAdmission=await readFile(resolve('packaging/windows/check-owner-msi-upgrade.ps1'),'utf8');
+assert.doesNotMatch(upgradeAdmission,/\[IO\.(?:Directory|File)\]::GetAccessControl\(/,'the upgrade admission must not call ACL APIs absent from PowerShell 7');
+assert.equal((upgradeAdmission.match(/Get-OwnerPathAcl -Path/g)||[]).length,3,'upgrade admission reads ACLs for directories and files through its PowerShell-compatible helper');
+const pwsh=(await exec('where.exe',['pwsh.exe'],{windowsHide:true,timeout:10000,maxBuffer:4096})).stdout.split(/\r?\n/)[0].trim();
+assert.ok(pwsh,'PowerShell 7 must be available for the upgrade ACL compatibility regression');
+const admissionPath=resolve('packaging/windows/check-owner-msi-upgrade.ps1').replaceAll("'","''"),aclProbeRoot=root.replaceAll("'","''"),aclProbeFile=exe.replaceAll("'","''");
+const aclProbe=`$ErrorActionPreference='Stop';. '${admissionPath}' -LibraryOnly;$directoryAcl=Get-OwnerPathAcl -Path '${aclProbeRoot}';$fileAcl=Get-OwnerPathAcl -Path '${aclProbeFile}';if($directoryAcl -isnot [System.Security.AccessControl.DirectorySecurity]){throw 'Expected DirectorySecurity'};if($fileAcl -isnot [System.Security.AccessControl.FileSecurity]){throw 'Expected FileSecurity'};'UPGRADE_ACL_PWSH7_PASS'`;
+const aclProbeResult=await exec(pwsh,['-NoProfile','-NonInteractive','-Command',aclProbe],{windowsHide:true,timeout:30000,maxBuffer:16384});
+assert.match(aclProbeResult.stdout,/UPGRADE_ACL_PWSH7_PASS/,'upgrade ACL reads must work for both files and directories in PowerShell 7');
 const upgradePreparation=await readFile(resolve('packaging/windows/prepare-owner-msi-upgrade.ps1'),'utf8');
 const removal=await readFile(resolve('packaging/windows/remove-owner-msi-policy.ps1'),'utf8');
 const removeRollback=await readFile(resolve('packaging/windows/rollback-owner-msi-uninstall.ps1'),'utf8');

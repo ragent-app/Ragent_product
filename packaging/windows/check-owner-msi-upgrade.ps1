@@ -54,7 +54,7 @@ function Assert-UpgradePath([string]$Path,[bool]$Directory){
  foreach($cursor in $chain){
   $attributes=[IO.File]::GetAttributes($cursor)
   if(($attributes -band [IO.FileAttributes]::ReparsePoint) -or ($cursor -cne $full -and -not ($attributes -band [IO.FileAttributes]::Directory))){throw 'OUG_SOURCE_PATH_UNSAFE'}
-  $acl=if($attributes -band [IO.FileAttributes]::Directory){[IO.Directory]::GetAccessControl($cursor)}else{[IO.File]::GetAccessControl($cursor)}
+  $acl=Get-OwnerPathAcl -Path $cursor
   $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if($cursor -ceq $full -and $owner -notin (Get-OwnerAdministrativeSids)){throw 'OUG_SOURCE_OWNER_REFUSED'}
   $mask=if($cursor -ceq $full -and -not $Directory){0x500d0156L}else{0x500d0152L}
@@ -77,6 +77,10 @@ function Read-UpgradeReceipt([string]$Name,[int]$Maximum=8192){
  try{$bytes=Read-OwnerPinnedFile $path @(Get-OwnerAdministrativeSids) $pins $Maximum;$value=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)|ConvertFrom-Json}
  catch{throw 'OUG_ACTIVE_RECEIPT_INVALID'}
  return @{bytes=$bytes;value=$value}
+}
+function Get-OwnerPathAcl([string]$Path){
+ if([string]::IsNullOrWhiteSpace($Path)){throw 'OUG_ACL_PATH_REQUIRED'}
+ return Get-Acl -LiteralPath $Path -ErrorAction Stop
 }
 function Invoke-OwnerUpgradeAdmission {
  $script:upgradeStage='install-state'
@@ -126,7 +130,7 @@ function Invoke-OwnerUpgradeAdmission {
  foreach($row in $layout){
   $path=if($row.relative){Join-Path $root $row.relative}else{$root}
   if(-not (Test-OwnerServicePreparationPresence $path)){$missing++;continue}
-  $pins.Add([AgentoCOwnerFilePin]::Directory($path));$actual=[IO.Directory]::GetAccessControl($path);$expected=New-OwnerDataAcl $row.grants $row.traverseOnly
+  $pins.Add([AgentoCOwnerFilePin]::Directory($path));$actual=Get-OwnerPathAcl -Path $path;$expected=New-OwnerDataAcl $row.grants $row.traverseOnly
   $actualSddl=Get-OwnerDataAclSddl $actual ([Security.AccessControl.AccessControlSections]::Access);$expectedSddl=Get-OwnerDataAclSddl $expected ([Security.AccessControl.AccessControlSections]::Access)
   $metadataPath=$row.relative -cin @('','instances','instances\owner')
   $legacySddl=if($metadataPath){Get-OwnerDataAclSddl (New-LegacyOwnerMetadataAcl $control.sid $executor.sid) ([Security.AccessControl.AccessControlSections]::Access)}else{$null}
@@ -139,7 +143,7 @@ function Invoke-OwnerUpgradeAdmission {
   Assert-UpgradeDataFile $path $allowed
  }
  foreach($kind in @('security','file')){
-  $path=if($kind -ceq 'security'){Join-Path $ownerRoot 'security'}else{$policyPath};$acl=if($kind -ceq 'security'){[IO.Directory]::GetAccessControl($path)}else{[IO.File]::GetAccessControl($path)}
+  $path=if($kind -ceq 'security'){Join-Path $ownerRoot 'security'}else{$policyPath};$acl=Get-OwnerPathAcl -Path $path
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -cne (New-OwnerPolicySecurity $policy $kind).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)){throw 'OUG_INSTALL_POLICY_ACL_MISMATCH'}
  }
  $script:upgradeStage='broker';$broker=[AgentoCOwnerUpgradeTokenReader]::ReadBroker('AgentoC-PrivilegedBroker')
