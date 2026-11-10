@@ -51,7 +51,7 @@ if [ ! -f "$NODE_CACHE_PATH" ]; then
   curl -fsSL --retry 3 --connect-timeout 15 "$NODE_BASE_URL/$NODE_TARBALL" -o "$NODE_CACHE_PATH"
 fi
 curl -fsSL --retry 3 --connect-timeout 15 "$NODE_BASE_URL/SHASUMS256.txt" -o "$WORK_DIR/SHASUMS256.txt"
-EXPECTED_SHA="$(awk -v name="$NODE_TARBALL" '{ filename = $2; sub(/^\*/, "", filename); if (filename == name) print $1 }' "$WORK_DIR/SHASUMS256.txt")"
+EXPECTED_SHA="$(awk -v name="$NODE_TARBALL" '{ filename = $2; sub(/^\*/, "", filename); sub(/\r$/, "", filename); if (filename == name) print $1 }' "$WORK_DIR/SHASUMS256.txt")"
 ACTUAL_SHA="$(sha256sum "$NODE_CACHE_PATH" | awk '{ print $1 }')"
 [ -n "$EXPECTED_SHA" ] && [ "$EXPECTED_SHA" = "$ACTUAL_SHA" ] || {
   echo "Accounts Node runtime checksum mismatch" >&2
