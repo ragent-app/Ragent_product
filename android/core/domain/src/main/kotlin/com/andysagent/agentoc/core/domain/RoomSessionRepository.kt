@@ -1010,7 +1010,11 @@ class RoomSessionRepository(
                 dao.deleteOperation(requestId)
             } catch (error: Throwable) {
                 val recoverable = dao.getPendingOperation(requestId) ?: operation
-                dao.upsertOperation(recoverable.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
+                dao.upsertOperation(recoverable.copy(
+                    state = if (isPermanentClientFailure(error)) "failed" else "pending",
+                    updatedAt = System.currentTimeMillis(),
+                    lastError = error.message,
+                ))
                 throw error
             }
         }
@@ -2694,7 +2698,11 @@ class RoomSessionRepository(
                 completed += 1
             } catch (error: Throwable) {
                 val recoverable = dao.getPendingOperation(operation.requestId) ?: operation
-                dao.upsertOperation(recoverable.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
+                dao.upsertOperation(recoverable.copy(
+                    state = if (isPermanentClientFailure(error)) "failed" else "pending",
+                    updatedAt = System.currentTimeMillis(),
+                    lastError = error.message,
+                ))
             }
         }
         return completed
@@ -2780,10 +2788,18 @@ class RoomSessionRepository(
             dao.deleteOperation(requestId)
             return response
         } catch (error: Throwable) {
-            dao.upsertOperation(operation.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
+            dao.upsertOperation(operation.copy(
+                state = if (isPermanentClientFailure(error)) "failed" else "pending",
+                updatedAt = System.currentTimeMillis(),
+                lastError = error.message,
+            ))
             throw error
         }
     }
+
+    private fun isPermanentClientFailure(error: Throwable): Boolean =
+        error is SessionRepositoryException && !error.retryable && error.statusCode in 400..499
+            && error.statusCode !in setOf(401, 403)
 
     private fun decodeHeaders(value: String): Map<String, String> = runCatching {
         AgentocProtocol.json.parseToJsonElement(value).jsonObject.mapNotNull { (key, element) ->

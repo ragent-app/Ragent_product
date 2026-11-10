@@ -57,6 +57,8 @@ try {
   });
   const originalRunId = original.run.id;
   const originalManifest = await getRunManifest(originalRunId);
+  assert.equal(originalManifest.id, originalRunId, 'source manifest must be bound to its own Run');
+  assert.ok(originalManifest.runPublication?.publicationId, 'source manifest must carry its publication identity');
   assert.equal(originalManifest.options.images[0].assetId, sourceAsset.id, 'normal submit should stage the exact asset id');
   assert.match(originalManifest.options.images[0].relativePath, /^inputs[\\/]fasset_[a-f0-9]{24}\.txt$/);
   assert.equal(originalManifest.options.images[0].inputPath, undefined, 'manifest must not expose an absolute input path');
@@ -99,6 +101,9 @@ try {
   const run = await getRun(outcome.run.id);
   const manifest = await getRunManifest(outcome.run.id);
   assert.ok(manifest, 'edit-resend should persist a prompt manifest');
+  assert.equal(manifest.id, outcome.run.id, 'edit-resend must bind the child manifest to the new Run');
+  assert.notEqual(manifest.runPublication.publicationId, originalManifest.runPublication.publicationId,
+    'edit-resend must receive a fresh publication identity');
   assert.equal(manifest.editResend, true, 'manifest should carry the edit-resend flag');
   assert.equal(manifest.regenerate, true, 'edit-resend should share the regenerate rail semantics');
   assert.equal(manifest.regenerateParentRequestId, 'req_original', 'manifest should fold under the original user request');
@@ -134,6 +139,9 @@ try {
   });
   const secondRun = await getRun(second.run.id);
   const secondManifest = await getRunManifest(second.run.id);
+  assert.equal(secondManifest.id, second.run.id, 'repeated edit-resend must bind the next child manifest');
+  assert.notEqual(secondManifest.runPublication.publicationId, manifest.runPublication.publicationId,
+    'each edit-resend must get a distinct publication identity');
   assert.equal(secondManifest.regenerateParentRequestId, 'req_original', 'v2 edit should still fold under the original user request');
   assert.equal(secondManifest.editResendParentRequestId, outcome.run.requestId, 'v2 edit should record its immediate source');
   const marker2 = (await getHistory(session.id)).filter((event) => event.type === 'run_regenerate').at(-1);
@@ -150,6 +158,9 @@ try {
   });
   const regenRun = await getRun(regen.run.id);
   const regenManifest = await getRunManifest(regen.run.id);
+  assert.equal(regenManifest.id, regen.run.id, 'regenerate must bind the child manifest to the new Run');
+  assert.notEqual(regenManifest.runPublication.publicationId, secondManifest.runPublication.publicationId,
+    'regenerate must get a fresh publication identity');
   assert.equal(regenManifest.regenerateParentRequestId, 'req_original', 'regenerate after an edit keeps the ORIGINAL rail root');
   assert.equal(regenManifest.options.images[0].assetId, sourceAsset.id, 'regenerate should re-stage the parent asset');
   assert.equal(regenManifest.options.images[0].inputPath, undefined, 'regenerate must not expose an absolute input path');

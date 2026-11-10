@@ -1293,17 +1293,7 @@ class ChatViewModel(
                 )
             }
             ChatEvent.CancelEditTurn -> updateState { copy(editingTurnId = null, editingTurnText = null) }
-            is ChatEvent.SubmitEditTurn -> {
-                updateState {
-                    copy(
-                        editingTurnId = null,
-                        editingTurnText = null,
-                        composerText = event.text,
-                        attachments = event.attachments,
-                    )
-                }
-                resendEditedMessage(event.messageId, event.text, event.attachments)
-            }
+            is ChatEvent.SubmitEditTurn -> resendEditedMessage(event.messageId, event.text, event.attachments)
             is ChatEvent.ResendQueuedMessage -> resendQueuedMessage(event.messageId, event.text, event.attachments)
 
             // Queued messages & Steer
@@ -1432,6 +1422,9 @@ class ChatViewModel(
     ) {
         val current = mutableState.value
         val sessionId = current.sessionId ?: return
+        val editingSourceText = current.editingTurnText
+        val repositoryAtStart = selectedRepository
+        val generation = sessionGeneration
         val prompt = editedText.trim()
         if (parentRequestId.isBlank() || prompt.isBlank()) return
         if (current.connection != AgentConnectionStatus.Connected) {
@@ -1480,11 +1473,23 @@ class ChatViewModel(
                 )
                 refreshSession(sessionId)
             } catch (error: Throwable) {
-                showError(error, "Edited message could not be resent")
+                if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) {
+                    updateState {
+                        copy(
+                            composerText = prompt,
+                            editingTurnId = parentRequestId,
+                            editingTurnText = editingSourceText,
+                            attachments = replacementAttachments,
+                        )
+                    }
+                    showError(error, "Edited message could not be resent")
+                }
             } finally {
-                val status = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
-                    ?: AgentRunStatus.Idle
-                updateState { copy(isLoading = false, runStatus = status) }
+                if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) {
+                    val status = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
+                        ?: AgentRunStatus.Idle
+                    updateState { copy(isLoading = false, runStatus = status) }
+                }
             }
         }
     }

@@ -13962,6 +13962,17 @@ export {
 // reply into a version rail. The source run is marked superseded and stays
 // fully auditable in its run record.
 export async function regenerateSessionReply(sessionId, parentRequestId, options = {}) {
+  const requestId = typeof options.requestId === 'string' && options.requestId.trim()
+    ? options.requestId.trim()
+    : createInternalRequestId('regen');
+  return withMessageRequestIdentity(sessionId, requestId, async () => {
+    const existing = await existingDerivedRunOutcome(sessionId, requestId);
+    if (existing) return existing;
+    return regenerateSessionReplyUnlocked(sessionId, parentRequestId, { ...options, requestId });
+  });
+}
+
+async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, options = {}) {
   const normalizedParentRequestId = typeof parentRequestId === 'string' ? parentRequestId.trim() : '';
   if (!normalizedParentRequestId) {
     throw new Error('regenerate requires a source requestId');
@@ -14111,7 +14122,7 @@ export async function regenerateSessionReply(sessionId, parentRequestId, options
   };
 
   const manifest = {
-    ...parentManifest,
+    ...manifestForDerivedRun(parentManifest),
     sessionId,
     requestId,
     responseId,
@@ -14194,7 +14205,9 @@ export async function regenerateSessionReply(sessionId, parentRequestId, options
     } : {}),
   });
 
-  const launchResult = await launchDetachedRunWithAgySlot(sessionId, run, admission.manifest);
+  const launchResult = options.skipDispatch
+    ? null
+    : await launchDetachedRunWithAgySlot(sessionId, run, admission.manifest);
 
   broadcastSessionInvalidation(sessionId);
   return {
@@ -14218,6 +14231,17 @@ export async function regenerateSessionReply(sessionId, parentRequestId, options
  * run's runtime contract (tool, model, modes, attachments unless replaced).
  */
 export async function resendEditedMessage(sessionId, parentRequestId, options = {}) {
+  const requestId = typeof options.requestId === 'string' && options.requestId.trim()
+    ? options.requestId.trim()
+    : createInternalRequestId('edit');
+  return withMessageRequestIdentity(sessionId, requestId, async () => {
+    const existing = await existingDerivedRunOutcome(sessionId, requestId);
+    if (existing) return existing;
+    return resendEditedMessageUnlocked(sessionId, parentRequestId, { ...options, requestId });
+  });
+}
+
+async function resendEditedMessageUnlocked(sessionId, parentRequestId, options = {}) {
   const normalizedParentRequestId = typeof parentRequestId === 'string' ? parentRequestId.trim() : '';
   if (!normalizedParentRequestId) {
     throw new Error('resend-edited requires a source requestId');
@@ -14403,7 +14427,7 @@ export async function resendEditedMessage(sessionId, parentRequestId, options = 
   };
 
   const manifest = {
-    ...parentManifest,
+    ...manifestForDerivedRun(parentManifest),
     sessionId,
     requestId,
     responseId,
@@ -14525,6 +14549,36 @@ export async function resendEditedMessage(sessionId, parentRequestId, options = 
 function normalizeRuntimeApprovalId(value) {
   const normalized = trimString(value);
   return normalized ? normalized.slice(0, 240) : '';
+}
+
+// A parent Run manifest contains publication and input-staging identities
+// that are valid only for that exact Run. Keep its reusable prompt/runtime
+// configuration, but let prepareRunExecution/createRun establish fresh
+// per-Run identities for every derived Run.
+function manifestForDerivedRun(parentManifest) {
+  const manifest = parentManifest && typeof parentManifest === 'object' && !Array.isArray(parentManifest)
+    ? { ...parentManifest }
+    : {};
+  delete manifest.id;
+  delete manifest.runPublication;
+  delete manifest.attachmentStaging;
+  // This binding is scoped to the original prepared message/request. An
+  // explicit edit or regeneration is admitted through its own owner route.
+  delete manifest.appApiMessage;
+  return manifest;
+}
+
+async function existingDerivedRunOutcome(sessionId, requestId) {
+  const run = await findRunByRequest(sessionId, requestId);
+  if (!run) return null;
+  return {
+    requestId,
+    duplicate: true,
+    queued: false,
+    run,
+    session: await getSession(sessionId),
+    response: run.responseId ? await getSessionReplyPublication(sessionId, run.responseId) : null,
+  };
 }
 
 /**

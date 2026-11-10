@@ -1318,6 +1318,28 @@ class RoomSessionRepositoryEventTest {
     }
 
     @Test
+    fun permanentEditedResendRejectionIsRetainedForReviewButNotAutoRetried() = runBlocking {
+        val transport = PermanentClientErrorTransport()
+        val repository = RoomSessionRepository(database, transport)
+
+        val error = runCatching {
+            repository.resendEditedMessage(
+                sessionId = "session-1",
+                parentRequestId = "run-source",
+                prompt = "Updated task",
+                selection = RuntimeSelection(tool = "claude"),
+                requestId = "failed-edit",
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is SessionRepositoryException)
+        assertEquals("failed", database.dao().getPendingOperation("failed-edit")?.state)
+        assertTrue(database.dao().pendingOperations().isEmpty())
+        assertEquals(0, repository.resumePendingOperations())
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
     fun pendingForkReplayPersistsReturnedChildSessionBeforeDeletingOperation() = runBlocking {
         database.dao().upsertOperation(
             PendingOperationEntity(
@@ -1661,6 +1683,19 @@ private class ConflictTransport : AgentoCTransport {
     override suspend fun execute(request: ApiRequest): ApiResponse {
         requests += request
         throw ApiException(409, "SESSION_TEMPLATE_CONFLICT", "Templates can only be applied before the first message", retryable = true)
+    }
+    override fun connectInvalidationSocket() = Unit
+    override suspend fun close() = Unit
+}
+
+private class PermanentClientErrorTransport : AgentoCTransport {
+    private val state = MutableStateFlow(RuntimeConnectionState.Connected)
+    val requests = mutableListOf<ApiRequest>()
+    override val connectionState: StateFlow<RuntimeConnectionState> = state
+    override val invalidations: Flow<InvalidationHint> = MutableSharedFlow()
+    override suspend fun execute(request: ApiRequest): ApiResponse {
+        requests += request
+        throw ApiException(400, "INVALID_ARGUMENT", "Run execution publication is unavailable or inconsistent", retryable = false)
     }
     override fun connectInvalidationSocket() = Unit
     override suspend fun close() = Unit

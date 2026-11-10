@@ -242,6 +242,45 @@ class ChatModernizationParityTest {
     }
 
     @Test
+    fun `failed edit resend restores editable prompt and attachments`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val repository = TestSessionRepository(
+                sessions = listOf(Session("s1", "Test Session", status = SessionStatus.Idle)),
+                failEditedResend = com.andysagent.agentoc.core.domain.SessionRepositoryException(
+                    400,
+                    "INVALID_ARGUMENT",
+                    "Run execution publication is unavailable or inconsistent",
+                    retryable = false,
+                ),
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.StartEditTurn("msg-1", "Original prompt"))
+            val attachment = ComposerAttachment(
+                id = "att-1",
+                name = "notes.txt",
+                mimeType = "text/plain",
+                sizeBytes = 12,
+                localPath = "G:/AgentoC/test/notes.txt",
+            )
+            viewModel.onEvent(ChatEvent.AddAttachment(attachment))
+            viewModel.onEvent(ChatEvent.SubmitEditTurn("msg-1", "Edited prompt", listOf(attachment)))
+            advanceUntilIdle()
+
+            assertEquals("Edited prompt", viewModel.state.value.composerText)
+            assertEquals("msg-1", viewModel.state.value.editingTurnId)
+            assertEquals("Original prompt", viewModel.state.value.editingTurnText)
+            assertEquals(listOf(attachment), viewModel.state.value.attachments)
+            assertFalse(viewModel.state.value.isLoading)
+            assertNotNull(viewModel.state.value.error)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `queued messages during agent working state and steer interrupt`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
@@ -917,6 +956,7 @@ private class TestSessionRepository(
     private val timelines: Map<String, List<TimelineItem>> = emptyMap(),
     private val runProjections: Map<String, kotlinx.serialization.json.JsonObject> = emptyMap(),
     private val beforeGoalUpdate: suspend () -> Unit = {},
+    private val failEditedResend: Throwable? = null,
 ) : SessionRepository {
     private val connectionStateValue = MutableStateFlow(connection)
     override val connectionState: StateFlow<RuntimeConnectionState> = connectionStateValue.asStateFlow()
@@ -1019,6 +1059,7 @@ private class TestSessionRepository(
         requestId: String,
     ) {
         editedPrompts += prompt
+        failEditedResend?.let { throw it }
         sessionState.value = sessionState.value.map {
             if (it.id == sessionId) it.copy(status = SessionStatus.Idle) else it
         }
