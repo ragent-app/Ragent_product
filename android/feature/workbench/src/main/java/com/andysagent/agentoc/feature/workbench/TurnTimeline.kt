@@ -89,6 +89,7 @@ import com.andysagent.agentoc.core.designsystem.AgentocTextStyles
 import com.andysagent.agentoc.core.designsystem.LocalAgentocColors
 import com.andysagent.agentoc.core.designsystem.agentoPressScale
 import com.andysagent.agentoc.core.designsystem.theme.AgentoFrostedTokens
+import com.andysagent.agentoc.core.domain.FileUploadPhase
 import com.andysagent.agentoc.core.timeline.FileChangeItem
 import com.andysagent.agentoc.core.timeline.PlanStepItem
 import com.andysagent.agentoc.core.timeline.TimelineItem
@@ -291,6 +292,25 @@ fun UserPromptBlock(
                         AttachmentThumbnailCard(attachment = attachment, onRemove = null)
                     }
                 }
+            }
+
+            if (prompt.isSending && prompt.attachments.isNotEmpty()) {
+                val progress = prompt.attachmentUploadProgress
+                val hasTransferProgress = progress != null && progress.phase in setOf(
+                    FileUploadPhase.TRANSFERRING,
+                    FileUploadPhase.VERIFYING,
+                    FileUploadPhase.CONFIRMED,
+                )
+                Text(
+                    text = if (hasTransferProgress) {
+                        stringResource(
+                            R.string.workbench_upload_progress,
+                            ((progress!!.fraction * 100f).toInt()).coerceIn(0, 100),
+                        )
+                    } else stringResource(R.string.workbench_upload_preparing),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryContent,
+                )
             }
 
             Box {

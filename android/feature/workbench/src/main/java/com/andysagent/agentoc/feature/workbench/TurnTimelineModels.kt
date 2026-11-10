@@ -2,6 +2,7 @@ package com.andysagent.agentoc.feature.workbench
 
 import androidx.compose.runtime.Immutable
 import com.andysagent.agentoc.core.agentui.AgentRunStatus
+import com.andysagent.agentoc.core.domain.AttachmentUploadProgress
 import com.andysagent.agentoc.core.timeline.FileChangeItem
 import com.andysagent.agentoc.core.timeline.PlanStepItem
 import com.andysagent.agentoc.core.timeline.TimelineItem
@@ -18,8 +19,10 @@ data class TurnUserPrompt(
     val id: String,
     val text: String,
     val attachments: List<ComposerAttachment> = emptyList(),
+    val attachmentUploadProgress: AttachmentUploadProgress? = null,
     val timestamp: String? = null,
     val isPending: Boolean = false,
+    val isSending: Boolean = false,
     val pendingFailed: Boolean = false,
     val pendingError: String? = null,
     val seq: Long = 0L,
@@ -167,7 +170,9 @@ class TurnGroupProjector {
             id = "pending-${pending.requestId}",
             text = pending.text,
             attachments = pending.attachments,
+            attachmentUploadProgress = pending.attachmentUploadProgress,
             isPending = true,
+            isSending = pending.state == PendingTurnState.Sending,
             pendingFailed = pending.state == PendingTurnState.Failed,
             pendingError = pending.error,
             requestId = pending.requestId,

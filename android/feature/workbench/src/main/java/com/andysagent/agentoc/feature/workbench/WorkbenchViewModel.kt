@@ -1627,8 +1627,8 @@ class ChatViewModel(
                         }
                 }
                 // The structured message payload is authoritative for this run.
-                // Persisting the picker choice is useful, but must never delay
-                // the user's local echo or the message POST.
+                // Persisting the picker choice only updates session defaults and
+                // must never delay the user's message POST.
                 suspend fun persistRuntimeSelection() {
                     fixed.updateRuntimeSelection(
                         resolvedSessionId,
@@ -1640,11 +1640,7 @@ class ChatViewModel(
                     )
                     fixed.runtimeTargetId?.let { id -> runCatching { writeRuntimeCache(id, resolvedSessionId, pendingTurn.selection) } }
                 }
-                if (pendingTurn.selection.effort == null && pendingTurn.selection.model != null) {
-                    // The server can otherwise inherit an old session effort for
-                    // a newly selected model which has no configurable levels.
-                    persistRuntimeSelection()
-                } else if (pendingTurn.selection.effort != null) launch {
+                if (pendingTurn.selection.effort != null || pendingTurn.selection.model != null) launch {
                     runCatching {
                         persistRuntimeSelection()
                     }
