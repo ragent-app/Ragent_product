@@ -95,7 +95,7 @@ internal fun latestTurnHasTerminalRun(items: List<TimelineItem>, pending: Pendin
     return sessionStatus in terminal || matchingRun
 }
 
-/** Preserve explicit phases; recover older completed transcripts only when their last entry is a finished reply. */
+/** Preserve explicit final phases; at terminal state, recover a missing final phase from the last completed reply. */
 internal fun splitTurnEntries(
     entries: List<TimelineItem>,
     allowTerminalFallback: Boolean = false,
@@ -106,7 +106,11 @@ internal fun splitTurnEntries(
     val finalIndex = if (explicitIndex >= 0) explicitIndex else if (allowTerminalFallback) {
         val last = entries.indexOfLast { it !is TimelineItem.Notice }
         val reply = entries.getOrNull(last) as? TimelineItem.Message
-        if (reply?.role == TimelineRole.Agent && reply.completed && reply.messagePhase == null) last else -1
+        if (reply?.let {
+                it.role == TimelineRole.Agent && it.completed &&
+                    it.messagePhase?.lowercase() in setOf(null, "commentary")
+            } == true
+        ) last else -1
     } else -1
     if (finalIndex < 0) return emptyList<TimelineItem>() to entries
     return entries.take(finalIndex) to entries.drop(finalIndex)

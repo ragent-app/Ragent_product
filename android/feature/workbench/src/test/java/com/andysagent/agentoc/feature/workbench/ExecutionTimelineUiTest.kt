@@ -50,6 +50,21 @@ class ExecutionTimelineUiTest {
         rule.onNodeWithText("Final result").assertIsDisplayed()
     }
 
+    @Test fun terminalCompletedCommentaryIsShownAsReplyWhenFinalPhaseIsMissing() {
+        val entries = listOf(
+            TimelineItem.Operation("tool", 1, TimelineOperationKind.Tool, "Fetched video transcript", "", TimelineOperationStatus.Completed),
+            TimelineItem.Message("answer", 2, TimelineRole.Agent, "The finished answer is visible", true, messagePhase = "commentary"),
+        )
+        val turn = TurnGroupProjector().project(entries).single()
+        rule.setContent { AgentocTheme { TurnTimelineView(turn, true, null, null, {}, { _, _ -> }, {}, {}) } }
+
+        rule.onNodeWithText("The finished answer is visible").assertIsDisplayed()
+        rule.onNodeWithTag("process-operation").assertDoesNotExist()
+        rule.onNodeWithTag("turn-process-toggle").performClick()
+        rule.onNodeWithTag("process-operation").assertIsDisplayed()
+        rule.onNodeWithText("The finished answer is visible").assertIsDisplayed()
+    }
+
     @Test fun userMessageBranchCopiesThroughTheSelectedPrompt() {
         var branch: Pair<Long, String>? = null
         val turn = TurnGroup(id = "turn", userPrompt = TurnUserPrompt(id = "prompt", text = "Original prompt", seq = 8))
