@@ -10,7 +10,9 @@ import { ACCOUNT_ASR_PRICE_VERSION, estimateAccountAsrCostMicroUsd } from '../ac
 const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL || '';
 assert(databaseUrl, 'Set AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL to an isolated scratch database URL');
 const target = new URL(databaseUrl);
-assert(/(?:test|scratch|qa)/i.test(target.pathname), 'The isolated test database name must contain test, scratch, or qa');
+assert(/(?:test|scratch|qa)/i.test(target.pathname)
+  || process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_ALLOW_SCHEMA === '1',
+'Use a database named test/scratch/qa, or explicitly authorize a disposable schema inside a test database');
 const schema = `qa_asr_reconcile_${randomBytes(12).toString('hex')}`;
 assert(/^qa_asr_reconcile_[a-f0-9]{24}$/.test(schema));
 
@@ -29,7 +31,7 @@ try {
     const migrations = (await readdir(migrationDir)).filter(name => name.endsWith('.up.sql')).sort();
     for (const file of migrations) {
       const sql = await readFile(resolve(migrationDir, file), 'utf8');
-      assert(!/\b(?:create\s+database|drop\s+database|alter\s+system|create\s+extension)\b/i.test(sql),
+      assert(!/\bpublic\s*\.|\b(?:create\s+database|drop\s+database|alter\s+system|create\s+extension)\b/i.test(sql),
         `Isolated ASR migration cannot contain global database operations: ${file}`);
       await client.query(sql);
     }
