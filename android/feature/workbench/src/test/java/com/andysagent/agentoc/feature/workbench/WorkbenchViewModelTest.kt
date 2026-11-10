@@ -1086,7 +1086,7 @@ class WorkbenchViewModelTest {
     }
 
     @Test
-    fun `explicit new session selects the created session`() = runTest {
+    fun `explicit new session stays provisional until the first turn`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
             val repository = FakeSessionRepository(connection = RuntimeConnectionState.Connected)
@@ -1096,9 +1096,18 @@ class WorkbenchViewModelTest {
             viewModel.onEvent(ChatEvent.CreateSession())
             advanceUntilIdle()
 
+            assertFalse(repository.created)
+            assertEquals(null, viewModel.state.value.sessionId)
+            assertFalse(viewModel.state.value.isLoading)
+
+            viewModel.onEvent(ChatEvent.ComposerChanged("first message"))
+            viewModel.onEvent(ChatEvent.SendMessage)
+            advanceUntilIdle()
+
             assertTrue(repository.created)
             assertEquals(listOf(""), repository.createdNames)
             assertEquals("session-created", viewModel.state.value.sessionId)
+            assertEquals(listOf("first message"), repository.sentTexts)
             assertFalse(viewModel.state.value.isLoading)
         } finally {
             Dispatchers.resetMain()
@@ -1182,7 +1191,7 @@ class WorkbenchViewModelTest {
     }
 
     @Test
-    fun `failed new session cannot reuse the previously selected session`() {
+    fun `failed first-turn session creation cannot reuse the previously selected session`() {
         val scheduler = kotlinx.coroutines.test.TestCoroutineScheduler()
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(scheduler))
         try {
@@ -1200,11 +1209,14 @@ class WorkbenchViewModelTest {
 
             assertEquals(null, viewModel.state.value.sessionId)
             assertEquals("New session", viewModel.state.value.sessionTitle)
-            assertTrue(viewModel.state.value.error?.startsWith("Session could not be created") == true)
+            assertFalse(repository.created)
+            assertEquals(null, viewModel.state.value.error)
 
             viewModel.onEvent(ChatEvent.ComposerChanged("Must not reach the old session"))
             viewModel.onEvent(ChatEvent.SendMessage)
             scheduler.advanceUntilIdle()
+            assertTrue(repository.created)
+            assertTrue(viewModel.state.value.error?.contains("creation failed") == true)
             assertTrue(repository.sentTexts.isEmpty())
         } finally {
             Dispatchers.resetMain()
