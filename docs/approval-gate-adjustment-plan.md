@@ -115,7 +115,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 3. **Windows Codex 命令分类（持续扩展）：** 保留 PowerShell AST、路径与权限边界；已覆盖实测命令和 Windows approval tests。其他 shell、动态命令、上下文不足时仍 fail-closed，继续从真实 App Server argv 采样。
 4. **跨平台策略一致性（已实现，需 Linux/macOS CI）：** 三个平台为 safe、recommended、full-auto、conservative-auto 使用同样的项目级请求入口；POSIX 用共享风险分类器，Windows 用 PowerShell/路径分类器；profile sandbox、写入和网络边界保持独立。`granular` 不能代替逐命令 gate。
 5. **审批聚合与 UI（部分完成）：** 相同 provider request id 已幂等且保留单卡；原因码随审批记录保存。不同 request id 的同一网络或危险操作合并、每 Run 计数指标仍未实现。
-6. **分层验收（部分完成）：** Windows 本机 CLI/App Server 离线 fixture 与协议和策略 suites 已覆盖；手机 OAuth → Ragent UI → 审批事件、部署后真实服务回归及 Linux/macOS 原生环境验收仍未完成。OAuth refresh 问题修复前不将手机端验收记为通过。
+6. **分层验收（部分完成）：** Windows 本机 CLI/App Server 离线 fixture 与协议和策略 suites 已覆盖；荣耀真机上的审批 UI 与本地事件重放已完成离线验收，但尚未覆盖手机 OAuth → Ragent UI → 真实服务审批链路。部署后真实服务回归及 Linux/macOS 原生环境验收仍未完成。
 
 ## 验收用例
 
@@ -139,8 +139,10 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 本机 Windows Codex CLI `0.147.0` 与隔离安装的 `0.167.0`：真实 App Server 启动时只设置当前 cwd 项目 trust，不发送已退役的审批枚举；返回有效 `approvalPolicy=untrusted`、reviewer=user、sandbox 和 workspace root。0.167.0 使用本机 fake Responses provider、隔离 `CODEX_HOME` 和测试 key，命令级 owner prompt、无害命令自动批准、full-auto 危险命令拒绝均通过；没有使用 Codex 账号或官方模型额度。
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
 - 本机真实 managed Hook：Ragent hook 通过 App Server 注册和信任校验，执行 preToolUse 并改写安装命令；由于当前 Codex shell argv 缺少 `-NoProfile`，sidecar 将改写后的命令保留为 owner-gated，没有自动执行。
+- 2026-11-10 荣耀 MTN-AN80（`MTN-AN80` / `ADNQ6R5716008635`）离线真机验收：`ApprovalAttentionDeviceTest` 16/16 通过；`ApprovalReplayDeviceTest` 使用本地合成 approval event、fake transport 和 in-memory Room 重放，1/1 通过，验证事件字段持久化以及真机卡片中的危险操作目标、条件状态和 approve/deny 控件。两组均未调用 OAuth、Codex 官方 provider 或模型额度。
+- 同日尝试 app 模块 `RunDockApprovalIslandTest`：4 个用例中 1 个通过、3 个在卡片首次显示断言处失败；因测试未等待首帧稳定，初步怀疑与 `RunDock` 入场动画/断言时序有关，尚未证实产品卡片通过或失败。本地尝试在首次断言前等待 Compose 动画空闲后，复跑被当前共享工作区 `voice_cloud_upload_disclosure` 字符串中的非法 Unicode 转义阻断；临时测试改动未保留，该字符串属于未提交的 ASR 工作，本次未修改。该 app 模块用例尚未复验。
 - Codex 0.149 的退役行为及当前 `granular` 能力依据官方文档与合并记录；0.167.0 已验证策略字段，但受管策略环境及真实 provider 账号尚未验证。
-- 最近荣耀手机 Codex Official OAuth 运行在审批事件产生前因 refresh token 已使用而失败。手机端完整 OAuth → Ragent UI → 审批事件验收仍未完成；没有把 provider 的“可用”状态当作授权成功。
+- 最近荣耀手机 Codex Official OAuth 运行在审批事件产生前因 refresh token 已使用而失败。用户说明 Codex 账号目前无法登录，免费档额度很少且要求不要消耗；因此本轮只做本地假传输/合成事件验收，没有重试 OAuth 或请求官方模型。手机端完整 OAuth → Ragent UI → 真实审批事件验收仍未完成；没有把 provider 的“可用”状态当作授权成功。
 - 不同 provider request id 的语义重复合并、每 Run 审批仪表、手机端 OAuth、已部署 Windows 服务与 Linux/macOS 原生环境验收仍未完成；当前不把它们记为通过。
 
 ## 外部依据
