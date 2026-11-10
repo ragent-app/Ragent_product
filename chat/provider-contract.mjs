@@ -557,11 +557,11 @@ export function getGatedPermissionModeId(runtimeFamily) {
   return PRIVILEGED_GATED_MODES[trimString(runtimeFamily)] || '';
 }
 
-function getProfileGatedPermissionModeId(runtimeFamily, platform) {
-  // Codex on-request delegates the decision to ask to the model, so it is
-  // not an interception gate in danger-full-access. On Windows, request
-  // approval for the harness's untrusted commands before our policy runs.
-  if (runtimeFamily === 'codex-app-server-json' && platform === 'win32') return 'untrusted-danger-full-access';
+function getProfileGatedPermissionModeId(runtimeFamily) {
+  // App Server project trust creates a per-command approval boundary on every
+  // supported host. Keep this separate from the sandbox, which controls what
+  // the command can reach after Ragent responds to the approval request.
+  if (runtimeFamily === 'codex-app-server-json') return 'untrusted-danger-full-access';
   return getGatedPermissionModeId(runtimeFamily);
 }
 
@@ -601,7 +601,7 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
       ? 'auto'
       : capabilities.provider === 'codex'
         ? (capabilities.runtimeFamily === 'codex-app-server-json'
-          ? 'on-request-workspace-write'
+          ? 'untrusted-workspace-write'
           : 'never-workspace-write')
         : capabilities.runtimeFamily === 'qwen-code-acp'
           ? 'auto'
@@ -617,8 +617,9 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
     // Windows autonomous runs must reach the same AgentoC decision gate as
     // approval runs; only the treatment of an ASK differs. Keep unsupported
     // harnesses explicit instead of silently claiming that bypass is gated.
-    if ((options.platform || process.platform) === 'win32') {
-      const gatedId = getProfileGatedPermissionModeId(capabilities.runtimeFamily, options.platform || process.platform);
+    if ((options.platform || process.platform) === 'win32'
+        || capabilities.runtimeFamily === 'codex-app-server-json') {
+      const gatedId = getProfileGatedPermissionModeId(capabilities.runtimeFamily);
       return gatedId ? cloneJson(findPermissionMode(capabilities, gatedId)) : null;
     }
     const mode = findPermissionMode(capabilities, capabilities.defaultPermissionMode);
@@ -632,7 +633,7 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
   // a session's risk policy cannot be silently disabled by the provider mode.
   const gatedByRiskMode = riskMode === 'safe' || riskMode === 'recommended';
   if ((options.privilegedMode === true && riskMode !== 'full-auto' && riskMode !== 'conservative-auto') || gatedByRiskMode) {
-    const gatedId = getProfileGatedPermissionModeId(capabilities.runtimeFamily, options.platform || process.platform);
+    const gatedId = getProfileGatedPermissionModeId(capabilities.runtimeFamily);
     if (gatedId) {
       const gatedMode = findPermissionMode(capabilities, gatedId);
       if (gatedMode) return cloneJson(gatedMode);

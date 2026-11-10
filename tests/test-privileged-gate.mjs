@@ -161,13 +161,13 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
 
 // ==================== decideRiskGate (plan phase 2) ====================
 
-// --- risk mode off => PASS (full-auto semantics: today's behavior, byte-for-byte) ---
+// --- risk mode off => PASS; unattended profiles reuse the shared risk bands ---
 {
   const dUnset = decideRiskGate(bidiApproval('sudo rm -rf /'), {});
   eq('risk mode unset => PASS', dUnset.decision, PRIVILEGED_GATE_DECISION.PASS);
   eq('risk mode off reason', dUnset.reason, 'risk mode off');
   const dFull = decideRiskGate(bidiApproval('sudo rm -rf /'), { riskMode: 'full-auto' });
-  eq('full-auto risk mode => PASS', dFull.decision, PRIVILEGED_GATE_DECISION.PASS);
+  eq('full-auto danger => ACCUMULATE for caller denial', dFull.decision, PRIVILEGED_GATE_DECISION.ACCUMULATE);
   const dEmpty = decideRiskGate({}, { riskMode: 'recommended' });
   eq('no approvalId => PASS', dEmpty.decision, PRIVILEGED_GATE_DECISION.PASS);
 }
@@ -221,6 +221,18 @@ if (process.platform !== 'win32') {
   const d = decideRiskGate(bidiApproval('curl https://example.com'), { riskMode: 'recommended' });
   eq('recommended caution => AUTO_ALLOW (v1)', d.decision, PRIVILEGED_GATE_DECISION.AUTO_ALLOW);
   eq('risk tier caution', d.risk.tier, 'caution');
+}
+
+// --- full-auto reuses recommended's safe+caution classifier band ---
+{
+  const d = decideRiskGate(bidiApproval('curl https://example.com'), { riskMode: 'full-auto' });
+  eq('full-auto caution => AUTO_ALLOW for caller policy', d.decision, PRIVILEGED_GATE_DECISION.AUTO_ALLOW);
+}
+
+// --- conservative-auto reuses safe's band, allowing the sidecar to deny caution without waiting ---
+{
+  const d = decideRiskGate(bidiApproval('curl https://example.com'), { riskMode: 'conservative-auto' });
+  eq('conservative-auto caution => PROMPT for caller denial', d.decision, PRIVILEGED_GATE_DECISION.PROMPT);
 }
 
 // --- safe + caution => owner approval ---

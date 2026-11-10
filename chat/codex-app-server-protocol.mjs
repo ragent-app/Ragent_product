@@ -51,8 +51,9 @@ export function isCodexAppServerRagentApprovalGateEnabled({ riskMode, permission
   const selectedRiskMode = String(riskMode || '').trim();
   const selectedPermissionMode = String(permissionMode || '').trim();
   const explicitUntrustedMode = selectedPermissionMode === 'untrusted' || selectedPermissionMode.startsWith('untrusted-');
-  return explicitUntrustedMode || (platform === 'win32'
-    && ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(selectedRiskMode));
+  void platform;
+  return explicitUntrustedMode
+    || ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(selectedRiskMode);
 }
 
 function buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate) {

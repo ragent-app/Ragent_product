@@ -92,10 +92,16 @@ const server = createServer((req, res) => {
       else { submissions++; res.end(JSON.stringify({ kind: 'automatic_install', status: 'succeeded' })); }
       return;
     }
-    const tools = (data.tools || []).map(item => ({ type: item.type, name: item.name || item.function?.name || '' }));
-    if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] provider tools: ${JSON.stringify(tools)}\n`);
-    const shellToolName = tools.find(item => ['exec_command', 'shell_command'].includes(item.name))?.name;
-    if (!shellToolName) { process.stderr.write('Codex shell tool missing\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
+    const toolSpecs = Array.isArray(data.tools) ? data.tools : [];
+    const shellToolSpec = toolSpecs.find(item => ['exec_command', 'shell_command'].includes(item?.name || item?.function?.name));
+    const shellToolName = shellToolSpec?.name || shellToolSpec?.function?.name || '';
+    const shellToolSchema = shellToolSpec?.parameters || shellToolSpec?.function?.parameters || shellToolSpec?.input_schema || {};
+    const shellToolProperties = shellToolSchema?.properties && typeof shellToolSchema.properties === 'object'
+      ? shellToolSchema.properties : {};
+    const shellCommandField = Object.hasOwn(shellToolProperties, 'cmd') ? 'cmd'
+      : Object.hasOwn(shellToolProperties, 'command') ? 'command' : '';
+    if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] shell tool: ${JSON.stringify({ name: shellToolName, properties: Object.keys(shellToolProperties), required: shellToolSchema.required || [] })}\n`);
+    if (!shellToolName || !shellCommandField) { process.stderr.write('Codex shell tool schema missing a supported command field\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
     providerRequests++;
     if (managedElevation && providerRequests > 1) {
       if (!JSON.stringify(data).includes('agentoc_request_actions')) { process.stderr.write('managed elevation instruction did not reach model\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
@@ -112,7 +118,11 @@ const server = createServer((req, res) => {
     const relativeTarget = dangerousRetry ? path.relative(alternateCwd, deleteTarget) : 'delete-target';
     const deleteCommand = managedDeleteRelative && providerRequests === 1 ? `Remove-Item -LiteralPath '${relativeTarget.replace(/'/g, "''")}' -Recurse -Force` : `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
     const adminCommand = process.env.AGENTOC_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.AGENTOC_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start agentoc-fixture' : process.env.AGENTOC_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name agentoc-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
-    const args = JSON.stringify({ command: managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'", yield_time_ms: 1000, ...(process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete ? { workdir: alternateCwd } : {}) });
+    const shellCommand = managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
+    const argsObject = { [shellCommandField]: shellCommand };
+    if (Object.hasOwn(shellToolProperties, 'yield_time_ms')) argsObject.yield_time_ms = 1000;
+    if (Object.hasOwn(shellToolProperties, 'workdir') && (process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete)) argsObject.workdir = alternateCwd;
+    const args = JSON.stringify(argsObject);
     const call = { id: managedDeleteRelative && providerRequests > 1 ? 'fc_fixture_retry' : 'fc_fixture', type: 'function_call', name: shellToolName, call_id: managedDeleteRelative && providerRequests > 1 ? 'call_fixture_retry' : 'call_fixture', arguments: args, status: 'completed' };
     const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'gpt-5.4', output: [call], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });

@@ -23,6 +23,7 @@ for (const [tool, input] of [
 
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js docs' }), { riskMode: 'recommended' }).decision, 'auto-allow');
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js docs' }), { riskMode: 'full-auto' }).decision, 'auto-allow');
+assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js docs' }), { riskMode: 'conservative-auto' }).decision, 'prompt');
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js docs' }), { riskMode: 'safe' }).decision, 'prompt');
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'x', arbitrary: true }), { riskMode: 'recommended' }).decision, 'prompt');
 assert.equal(decideClaudeToolApproval(request('TodoWrite', {}), { riskMode: 'recommended' }).decision, 'prompt');

@@ -2548,14 +2548,14 @@ async function decideRunGate(approval, state) {
     }
     return decideWindowsApproval(approval, state);
   }
-  const gated = riskMode === 'safe' || riskMode === 'recommended'
+  const gated = ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(riskMode)
     || isGatedPermissionMode(state?.permissionMode || '');
   if (gated) {
     if (isManagedLearningProfileWrite(approval)) {
       return { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'managed learning profile write' };
     }
     return decideRiskGate(approval, {
-      riskMode: riskMode === 'safe' || riskMode === 'recommended' ? riskMode : 'recommended',
+      riskMode: ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(riskMode) ? riskMode : 'recommended',
       cwd: state.cwd,
       projectRoot: state.projectRoot || '',
       home: state.home || '',
@@ -2647,6 +2647,16 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   const requestTurn = typeof approval.params?.turnId === 'string' ? approval.params.turnId.trim() : '';
   if ((requestThread && state.threadId && requestThread !== state.threadId)
       || (requestTurn && state.turnId && requestTurn !== state.turnId)) return null;
+  // App Server can replay a request notification while the run is still alive.
+  // Reuse the first decision/card for that JSON-RPC id: responding twice can
+  // produce protocol errors, and an already auto-approved MCP request must not
+  // fall through into a user-facing elicitation card on replay.
+  if (state.pendingApprovals instanceof Map && state.pendingApprovals.has(approval.approvalId)) {
+    return state.pendingApprovals.get(approval.approvalId) || null;
+  }
+  if (state.autoApprovedMcpRequestIds instanceof Set && state.autoApprovedMcpRequestIds.has(approval.approvalId)) {
+    return null;
+  }
   const managedMcp = readCodexAppServerManagedMcpRequest(parsed);
 
   if (managedMcp
@@ -2678,10 +2688,6 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     }
   }
 
-  if (process.platform !== 'win32' && isUnattendedPermissionMode(state, approval)) {
-    return denyUnattendedPermissionRequest(runId, state, approval, proc, 'codex');
-  }
-
   // Privileged-approval gate (P1c-3): in privileged mode, intercept the gate
   // and decide whether to auto-allow (ordinary command) or accumulate (real
   // privileged op). Non-privileged sessions pass through unchanged.
@@ -2701,7 +2707,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     ? { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'MCP elicitation requires explicit server binding or user approval' }
     : await decideRunGate(withCurrentCodexFileChanges(approval, state), state);
 
-  if (process.platform === 'win32' && isUnattendedPermissionMode(state)
+  if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
     return denyUnattendedPermissionRequest(runId, state, approval, proc, 'codex');
   }
@@ -2779,6 +2785,14 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   if (!state || !parsed) return null;
   const approval = readClaudeBidiApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
+  // Claude's bidi stream can also replay a control_request. Reuse the first
+  // automatic response or owner card for this request id.
+  if (state.pendingApprovals instanceof Map && state.pendingApprovals.has(approval.approvalId)) {
+    return state.pendingApprovals.get(approval.approvalId) || null;
+  }
+  if (state.autoApprovedMcpRequestIds instanceof Set && state.autoApprovedMcpRequestIds.has(approval.approvalId)) {
+    return null;
+  }
   const managedMcp = readClaudeBidiManagedMcpRequest(parsed);
   const isMcpTool = isClaudeBidiMcpToolName(approval.params?.tool_name);
 
@@ -2809,10 +2823,6 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
       });
       return null;
     }
-  }
-
-  if (process.platform !== 'win32' && isUnattendedPermissionMode(state, approval)) {
-    return denyUnattendedPermissionRequest(runId, state, approval, proc, 'claude');
   }
 
   if (process.platform === 'win32' && !isMcpTool && state.turnActive === true && approval.kind === 'command' &&
@@ -2898,7 +2908,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
 
-  if (process.platform === 'win32' && isUnattendedPermissionMode(state)
+  if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
     return denyUnattendedPermissionRequest(runId, state, approval, proc, 'claude');
   }

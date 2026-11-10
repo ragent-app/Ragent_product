@@ -193,7 +193,7 @@ const codexGatedInvocation = buildRuntimeInvocation('codex-app-server-json', 'he
   riskMode: 'recommended',
 }, 'codex');
 assert.equal(codexGatedInvocation.args.includes('--full-auto'), false);
-assert.equal(codexGatedInvocation.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+assert.equal(codexGatedInvocation.permissionMode, 'untrusted-danger-full-access');
 
 const claudeBidiInvocation = buildRuntimeInvocation('claude-stream-json-bidi', 'hello', {}, 'claude-bidi');
 assert.equal(claudeBidiInvocation.capabilities.provider, 'claude');
@@ -308,7 +308,7 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'full-auto' }).id,
-  process.platform === 'win32' ? 'untrusted-danger-full-access' : 'never-danger-full-access',
+  'untrusted-danger-full-access',
 );
 assert.equal(
   resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'conservative-auto', permissionMode: 'bypassPermissions' }).id,
@@ -316,7 +316,7 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'conservative-auto', permissionMode: 'never-danger-full-access' }).id,
-  'on-request-workspace-write',
+  'untrusted-workspace-write',
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-json', { riskMode: 'conservative-auto' }).id,

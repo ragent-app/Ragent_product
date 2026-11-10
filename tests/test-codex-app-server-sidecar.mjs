@@ -892,7 +892,7 @@ try {
   assert.equal(planRun.providerCapabilities?.supportsSteer, true);
   assert.equal(planRun.providerCapabilities?.supportsInterrupt, true);
   assert.equal(planRun.providerCapabilities?.supportsExternalUsageProjection, false);
-  assert.equal(planRun.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+  assert.equal(planRun.permissionMode, 'untrusted-danger-full-access');
   let approvalRequest;
   try {
     approvalRequest = await waitForApprovalRequest(port, session.id);
@@ -917,16 +917,14 @@ try {
     }
     throw error;
   }
-  if (process.platform === 'win32') {
-    const processStart = await waitFor(() => {
-      try { return readRecordedMessages(recordPath).find((message) => Array.isArray(message.agentocFixtureProcessArgs)) || false; }
-      catch { return false; }
-    }, 'Run-scoped Codex project trust process arguments');
-    const processArgs = processStart.agentocFixtureProcessArgs || [];
-    const trustOverride = processArgs.find((arg) => typeof arg === 'string' && arg.startsWith('projects='));
-    assert.ok(processArgs.includes('-c') && trustOverride?.includes('trust_level="untrusted"'),
-      'Ragent-gated Windows Codex must start with a Run-scoped project trust override');
-  }
+  const processStart = await waitFor(() => {
+    try { return readRecordedMessages(recordPath).find((message) => Array.isArray(message.agentocFixtureProcessArgs)) || false; }
+    catch { return false; }
+  }, 'Run-scoped Codex project trust process arguments');
+  const processArgs = processStart.agentocFixtureProcessArgs || [];
+  const trustOverride = processArgs.find((arg) => typeof arg === 'string' && arg.startsWith('projects='));
+  assert.ok(processArgs.includes('-c') && trustOverride?.includes('trust_level="untrusted"'),
+    'Ragent-gated Codex must start with a Run-scoped project trust override');
   assert.equal(approvalRequest.kind, 'command');
   assert.equal(approvalRequest.command, 'sudo systemctl restart agentoc-fixture');
   assert.equal(approvalRequest.runId, planRun.id);
@@ -934,7 +932,7 @@ try {
   assert.equal(approvalRequest.runtimeFamily, 'codex-app-server-json');
   assert.equal(approvalRequest.providerCapabilities?.supportsSteer, true);
   assert.equal(approvalRequest.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(approvalRequest.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+  assert.equal(approvalRequest.permissionMode, 'untrusted-danger-full-access');
   const approvalRes = await request(
     port,
     'POST',
@@ -949,14 +947,14 @@ try {
   assert.equal(approvalRes.json.run.runtimeFamily, 'codex-app-server-json');
   assert.equal(approvalRes.json.run.providerCapabilities?.supportsSteer, true);
   assert.equal(approvalRes.json.run.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(approvalRes.json.run.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+  assert.equal(approvalRes.json.run.permissionMode, 'untrusted-danger-full-access');
   const approvalResponse = await waitForApprovalResponse(port, session.id, approvalRequest.approvalId);
   assert.equal(approvalResponse.decision, 'approved');
   assert.equal(approvalResponse.provider, 'codex');
   assert.equal(approvalResponse.runtimeFamily, 'codex-app-server-json');
   assert.equal(approvalResponse.providerCapabilities?.supportsSteer, true);
   assert.equal(approvalResponse.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(approvalResponse.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+  assert.equal(approvalResponse.permissionMode, 'untrusted-danger-full-access');
   const terminalPlan = await waitForRunTerminal(port, planRun.id);
   assert.equal(terminalPlan.state, 'completed');
   assert.equal(terminalPlan.codexThreadId, 'thread-fake-plan');
@@ -964,7 +962,7 @@ try {
   assert.equal(terminalPlan.runtimeFamily, 'codex-app-server-json');
   assert.equal(terminalPlan.providerCapabilities?.supportsSteer, true);
   assert.equal(terminalPlan.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(terminalPlan.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+  assert.equal(terminalPlan.permissionMode, 'untrusted-danger-full-access');
   const terminalPlanWithTurn = await waitForRunAppServerTurn(port, planRun.id, 'turn-req-app-server-plan');
   assert.equal(terminalPlanWithTurn.appServerTurnId, 'turn-req-app-server-plan');
   await waitForSessionCodexThread(port, session.id, 'thread-fake-plan');
@@ -1422,7 +1420,7 @@ try {
   assert.equal(appServerPlanEvent.runtimeFamily, 'codex-app-server-json');
   assert.equal(appServerPlanEvent.providerCapabilities?.supportsSteer, true);
   assert.equal(appServerPlanEvent.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(appServerPlanEvent.permissionMode, process.platform === 'win32' ? 'untrusted-danger-full-access' : 'on-request-danger-full-access');
+  assert.equal(appServerPlanEvent.permissionMode, 'untrusted-danger-full-access');
 
   await stopServer(server);
   server = await startServer({

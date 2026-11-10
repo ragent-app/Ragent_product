@@ -337,7 +337,10 @@ function readGateToolContext(approval) {
  * @returns {{decision:string, reason:string, command?:string, risk?:object, sentinel?:object|null, op?:object}}
  */
 export function decideRiskGate(approval, options = {}) {
-  const riskMode = trimString(options.riskMode);
+  const requestedRiskMode = trimString(options.riskMode);
+  const riskMode = requestedRiskMode === 'full-auto' ? 'recommended'
+    : requestedRiskMode === 'conservative-auto' ? 'safe'
+      : requestedRiskMode;
   if (riskMode !== 'safe' && riskMode !== 'recommended') {
     return { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'risk mode off' };
   }
