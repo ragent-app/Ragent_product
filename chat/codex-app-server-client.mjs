@@ -9,11 +9,13 @@ import {
 import { applyManagedRuntimeEnv } from './runtime-policy.mjs';
 import { buildPlatformSpawnSpec } from '../lib/executable-resolution.mjs';
 import { spawnManagedProviderProcess, terminateProviderProcessTree } from '../lib/windows-managed-spawn.mjs';
+import { buildCodexAppServerProjectTrustArgs } from './adapters/codex-app-server.mjs';
 import {
   buildCodexAppServerInitializeMessage,
   buildCodexAppServerInitializedNotification,
   buildCodexAppServerModelListMessage,
   buildCodexAppServerThreadForkMessage,
+  isCodexAppServerRagentApprovalGateEnabled,
   readCodexAppServerThreadId,
 } from './codex-app-server-protocol.mjs';
 import {
@@ -457,10 +459,12 @@ async function runCodexAppServerForkRequest({
   developerInstructions,
   interactionMode,
   permissionMode,
+  riskMode,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 } = {}) {
   const sourceThreadId = trimString(threadId);
   if (!sourceThreadId) return null;
+  const agentocApprovalGate = isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode });
   const { command, env } = await resolveCodexToolInvocation(toolId);
   const forkMessage = buildCodexAppServerThreadForkMessage({
     id: CODEX_APP_SERVER_REQUEST_IDS.fork,
@@ -470,10 +474,12 @@ async function runCodexAppServerForkRequest({
     developerInstructions,
     interactionMode,
     permissionMode,
+    agentocApprovalGate,
   });
   if (!forkMessage) return null;
 
-  const spawnSpec = buildPlatformSpawnSpec(command, ['app-server', '--stdio'], {
+  const args = ['app-server', '--stdio', ...(agentocApprovalGate ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
+  const spawnSpec = buildPlatformSpawnSpec(command, args, {
     cwd: trimString(cwd) || process.cwd(),
     env,
   });

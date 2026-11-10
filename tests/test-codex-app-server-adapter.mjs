@@ -8,6 +8,7 @@ import {
   buildCodexAppServerModelListMessage,
   buildCodexAppServerMcpServerStatusListMessage,
   buildCodexAppServerThreadMessage,
+  buildCodexAppServerThreadForkMessage,
   buildCodexAppServerTurnInterruptMessage,
   buildCodexAppServerTurnStartMessage,
   buildCodexAppServerTurnSteerMessage,
@@ -30,10 +31,18 @@ import {
 } from '../chat/codex-app-server-protocol.mjs';
 import {
   buildCodexAppServerArgs,
+  buildCodexAppServerProjectTrustArgs,
   createCodexAppServerAdapter,
 } from '../chat/adapters/codex-app-server.mjs';
 
 assert.deepEqual(buildCodexAppServerArgs(), ['app-server', '--stdio']);
+assert.deepEqual(buildCodexAppServerArgs({ cwd: 'G:/QA/project', agentocApprovalGate: true }), [
+  'app-server', '--stdio', '-c', 'projects={"G:/QA/project"={trust_level="untrusted"}}',
+]);
+assert.deepEqual(buildCodexAppServerProjectTrustArgs('G:\\QA\\Ragent "fixture"'), [
+  '-c', 'projects={"G:\\\\QA\\\\Ragent \\\"fixture\\\""={trust_level="untrusted"}}',
+]);
+assert.throws(() => buildCodexAppServerProjectTrustArgs('relative/project'), /absolute Run working directory/);
 assert.deepEqual(buildCodexAppServerConfig('plan'), { mode: 'plan' });
 assert.deepEqual(buildCodexAppServerConfig('agent'), { mode: 'default' });
 
@@ -230,6 +239,18 @@ assert.equal(executeThreadResume.method, 'thread/resume');
 assert.equal(executeThreadResume.params.threadId, 'thread-123');
 assert.equal(executeThreadResume.params.sandbox, 'danger-full-access');
 assert.equal(executeThreadResume.params.config.mode, 'default');
+
+const gatedThreadFork = buildCodexAppServerThreadForkMessage({
+  id: 10,
+  threadId: 'source-thread',
+  cwd: 'G:/QA/project',
+  permissionMode: 'untrusted-danger-full-access',
+  agentocApprovalGate: true,
+});
+assert.equal(gatedThreadFork.method, 'thread/fork');
+assert.equal(Object.hasOwn(gatedThreadFork.params, 'approvalPolicy'), false);
+assert.equal(gatedThreadFork.params.approvalsReviewer, 'user');
+assert.equal(gatedThreadFork.params.config.allow_login_shell, false);
 
 const readOnlyThreadStart = buildCodexAppServerThreadMessage({
   permissionMode: 'read-only',

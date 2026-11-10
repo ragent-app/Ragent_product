@@ -11,6 +11,8 @@ import { buildClaudeWindowsInstallBridge } from '../chat/windows-auto-install-br
 import { createCodexManagedHookSetup } from '../chat/codex-managed-hook-setup.mjs';
 import { prepareManagedMcpOverlay } from '../chat/approved-action-mcp-overlay.mjs';
 import { buildWindowsSafeDeleteBridge } from '../chat/windows-safe-delete-bridge.mjs';
+import { buildCodexAppServerProjectTrustArgs } from '../chat/adapters/codex-app-server.mjs';
+import { validateCodexAppServerApprovalContext } from '../chat/codex-app-server-protocol.mjs';
 if (process.platform !== 'win32' || process.env.AGENTOC_RUN_CODEX_LOCAL_GATE !== '1') {
   console.log('codex-windows-local-gate: skipped (opt-in Windows integration test)');
   process.exit(0);
@@ -47,7 +49,7 @@ const managedDelete = process.env.AGENTOC_QA_HOOK_MANAGED_DELETE === '1';
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
-if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall fixture must expect review');
+if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
 if (outsideWrite && fileCommand !== 'dotnet') throw new Error('outside-write fixture requires the fixed dotnet command');
 const outsideWriteRoot = outsideWrite ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
@@ -182,7 +184,8 @@ if (productionStartup) {
 // test-owned hook. Never copy this setting into production thread options: it
 // would also trust unrelated user, project, or plugin hooks.
 const codexBinary = process.env.AGENTOC_TEST_CODEX_BINARY;
-const codexArgs = ['app-server', '--disable', 'plugins', '--disable', 'remote_plugin', '--disable', 'plugin_sharing', '--listen', 'stdio://'];
+const codexArgs = ['app-server', '--disable', 'plugins', '--disable', 'remote_plugin', '--disable', 'plugin_sharing', '--listen', 'stdio://',
+  ...buildCodexAppServerProjectTrustArgs(home)];
 const codexEntrypoint = process.env.AGENTOC_TEST_CODEX_ENTRYPOINT;
 const child = spawn(codexBinary, codexEntrypoint ? [codexEntrypoint, ...codexArgs] : codexArgs, {
   cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
@@ -199,7 +202,7 @@ let managedHookSetup = null;
 let productionState = null;
 function startThread() {
   stage = 1;
-  child.stdin.write(JSON.stringify({ id: 2, method: 'thread/start', params: { cwd: home, model: 'gpt-5.4', modelProvider: 'agentoc_fixture', approvalPolicy: 'untrusted', approvalsReviewer: 'user', sandbox: 'danger-full-access', config: { allow_login_shell: false, ...(hookShouldRun && !exactTrust ? { bypass_hook_trust: true } : {}) } } }) + '\n');
+  child.stdin.write(JSON.stringify({ id: 2, method: 'thread/start', params: { cwd: home, model: 'gpt-5.4', modelProvider: 'agentoc_fixture', approvalsReviewer: 'user', sandbox: 'danger-full-access', config: { allow_login_shell: false, ...(hookShouldRun && !exactTrust ? { bypass_hook_trust: true } : {}) } } }) + '\n');
 }
 function fixtureError(message) { process.stderr.write(message + '\n'); process.exitCode = 1; stage = 3; child.kill(); server.close(); }
 createInterface({ input: child.stdout }).on('line', async line => {
@@ -243,8 +246,14 @@ createInterface({ input: child.stdout }).on('line', async line => {
     startThread();
   } else if (stage === 1 && msg.id === 2) {
     if (msg.error) { process.stderr.write('thread rejected: '+msg.error.message+'\n'); process.exitCode = 1; child.kill(); server.close(); return; }
+    const approvalContext = validateCodexAppServerApprovalContext({
+      response: msg.result,
+      cwd: home,
+      permissionMode: 'untrusted-danger-full-access',
+    });
+    if (!approvalContext.ok) { fixtureError(`effective Codex approval context was not verified: ${approvalContext.reasonCode}`); return; }
     if (productionStartup && productionState.codexManagedHookReady !== true) { fixtureError('production startup did not verify the managed hook'); return; }
-    stage = 2; child.stdin.write(JSON.stringify({ id: 3, method: 'turn/start', params: { threadId: msg.result.thread.id, cwd: home, input: [{type:'text',text:'Fixture only',text_elements:[]}], approvalPolicy: 'untrusted', approvalsReviewer: 'user', sandboxPolicy: {type:'dangerFullAccess'} } }) + '\n');
+    stage = 2; child.stdin.write(JSON.stringify({ id: 3, method: 'turn/start', params: { threadId: msg.result.thread.id, cwd: home, input: [{type:'text',text:'Fixture only',text_elements:[]}], approvalsReviewer: 'user', sandboxPolicy: {type:'dangerFullAccess'} } }) + '\n');
   } else if (stage === 2 && msg.method === 'item/commandExecution/requestApproval') {
     if (managedElevation) { fixtureError('direct elevation unexpectedly reached command approval'); return; }
     if (dangerousRetry) {
@@ -267,10 +276,33 @@ createInterface({ input: child.stdout }).on('line', async line => {
       const expectedBridge = managedInstall ? buildClaudeWindowsInstallBridge({ approval: { approvalId: 'call_fixture', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: installCommand } } },
         state: { windowsManagedActionChannel: true, windowsManagedActionBinding: { windowsUserInstallIdentity: pinnedIdentity }, riskMode: 'recommended', riskContextValid: true }, runId: run.id, nodePath: process.execPath,
         scriptPath: fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)) }) : null;
-      const invocation = readWindowsPowerShellInvocation({ params: { command: decodeCodexShlexArgv(msg.params.command) } });
-      if (!hookCompleted || (managedDelete ? invocation?.command !== expectedDelete?.updatedCommand || msg.params.cwd.toLowerCase() !== alternateCwd.toLowerCase() : managedInstall ? invocation?.command !== expectedBridge?.updatedCommand || preflights !== 1 || submissions !== 0 : !String(msg.params.command || '').includes('agentoc-rewritten'))) {
-        process.stderr.write('approval did not contain the completed hook rewrite\n'); process.exitCode = 1; stage = 3;
+      const decodedArgv = decodeCodexShlexArgv(msg.params.command);
+      const invocation = readWindowsPowerShellInvocation({ params: { command: decodedArgv } });
+      const rewrittenCommand = managedInstall ? decodedArgv?.at(-1) : '';
+      const rewriteMatches = managedDelete
+        ? invocation?.command === expectedDelete?.updatedCommand && msg.params.cwd.toLowerCase() === alternateCwd.toLowerCase()
+        : managedInstall
+          ? rewrittenCommand === expectedBridge?.updatedCommand && preflights === 1 && submissions === 0
+          : String(msg.params.command || '').includes('agentoc-rewritten');
+      if (!hookCompleted || !rewriteMatches) {
+        process.stderr.write(`approval did not contain the completed hook rewrite (hookCompleted=${hookCompleted}, rewriteMatches=${rewriteMatches}, preflights=${preflights}, submissions=${submissions})\n`); process.exitCode = 1; stage = 3;
         child.stdin.write(JSON.stringify({ id: msg.id, result: { decision: 'decline' } }) + '\n'); child.kill(); server.close(); return;
+      }
+      if (managedInstall && !invocation) {
+        const state = { riskMode, cwd: home, riskContextValid: true, riskContext: { trustedWorkspaceRoot: home }, startedTurn: true,
+          windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.AGENTOC_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
+          threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set() };
+        const sent = [];
+        await trackCodexAppServerApprovalRequest(run.id, state, msg, { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } });
+        const pending = (await getRun(run.id)).appServerPendingApprovals || [];
+        if (sent.length !== 0 || pending.length !== 1 || submissions !== 0) {
+          fixtureError('managed install wrapper without a verified no-profile PowerShell identity must remain owner-gated'); return;
+        }
+        process.stdout.write('codex-windows-local-gate: managed hook rewrote the install; unverified shell startup remained owner-gated\n');
+        stage = 3;
+        child.stdin.write(JSON.stringify({ id: msg.id, result: { decision: 'decline' } }) + '\n');
+        setTimeout(() => { child.kill(); server.close(); }, 100);
+        return;
       }
       if (managedInstall || managedDelete) {
         const state = { riskMode, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, startedTurn: true,
@@ -303,7 +335,8 @@ createInterface({ input: child.stdout }).on('line', async line => {
     const expected = process.env.AGENTOC_QA_EXPECT_DECISION || 'auto-allow';
     const pending = (await getRun(run.id)).appServerPendingApprovals || [];
     const routed = expected === 'auto-allow' ? sent[0]?.result?.decision === 'accept'
-      : riskMode !== 'recommended' ? sent[0]?.result?.decision === 'decline'
+      : riskMode === 'full-auto' ? sent[0]?.result?.decision === 'decline' && pending.length === 0
+        : riskMode !== 'recommended' ? sent[0]?.result?.decision === 'decline'
         : sent.length === 0 && pending.length === 1;
     if (!recognized || policy.decision !== expected || !routed) {
       process.stderr.write(`unexpected gate result: recognized=${recognized} decision=${policy.decision} routed=${routed}\n`); process.exitCode = 1;
@@ -314,7 +347,9 @@ createInterface({ input: child.stdout }).on('line', async line => {
       stage = 4; child.stdin.write(JSON.stringify(sent[0]) + '\n');
     } else {
       if (outsideWrite && await readFile(fileFixture, 'utf8') !== 'fixture content') { fixtureError('outside review fixture was modified'); return; }
-      process.stdout.write(`codex-windows-local-gate: ${expected} passed\n`);
+      process.stdout.write(riskMode === 'full-auto'
+        ? 'codex-windows-local-gate: full-auto denied the dangerous command without creating an owner prompt\n'
+        : `codex-windows-local-gate: ${expected} passed\n`);
       child.stdin.write(JSON.stringify({ id: msg.id, result: { decision: 'decline' } }) + '\n');
       setTimeout(() => { child.kill(); server.close(); }, 100);
     }

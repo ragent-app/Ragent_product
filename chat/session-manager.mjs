@@ -15612,6 +15612,7 @@ async function maybeForkNativeCodexThread(source) {
       model: source.model || undefined,
       interactionMode: source.interactionMode || undefined,
       permissionMode: source.permissionMode || undefined,
+      riskMode: resolveSessionRiskMode(source),
     });
     return trimString(result?.threadId);
   } catch (error) {

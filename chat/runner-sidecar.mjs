@@ -10,6 +10,7 @@ import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createToolInvocation, prependAttachmentPaths, resolveCommandSpawnSpec } from './process-runner.mjs';
 import { readPiTerminalOutcome } from './adapters/pi.mjs';
+import { buildCodexAppServerProjectTrustArgs } from './adapters/codex-app-server.mjs';
 import {
   CODEX_APP_SERVER_BROKER_SCRIPT,
   codexAppServerBrokerLockPath,
@@ -70,6 +71,7 @@ import {
   buildCodexAppServerThreadGoalClearMessage,
   evaluateCodexAppServerMcpReadiness,
   formatCodexAppServerApprovalDecision,
+  isCodexAppServerRagentApprovalGateEnabled,
   isCodexAppServerEventForThread,
   isCodexAppServerTurnTerminalMessage,
   normalizeCodexAppServerApprovalDecision,
@@ -80,6 +82,7 @@ import {
   readCodexAppServerMcpStatusList,
   readCodexAppServerThreadId,
   readCodexAppServerTurnId,
+  validateCodexAppServerApprovalContext,
 } from './codex-app-server-protocol.mjs';
 import {
   buildClaudeBidiApprovalResponseMessage,
@@ -1564,6 +1567,8 @@ export async function createCodexAppServerRunState({
     turnId: '',
     interactionMode: typeof options.interactionMode === 'string' ? options.interactionMode : '',
     permissionMode: typeof options.permissionMode === 'string' ? options.permissionMode : '',
+    agentocApprovalGate: isCodexAppServerRagentApprovalGateEnabled({ riskMode: options.riskMode, permissionMode: options.permissionMode }),
+    approvalPolicyVerified: false,
     privilegedMode: options.privilegedMode === true,
     riskMode: typeof options.riskMode === 'string' ? options.riskMode : '',
     riskContext: riskContextBinding.riskContext,
@@ -1843,7 +1848,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     developerInstructions: state.developerInstructions,
     interactionMode: state.interactionMode,
     permissionMode: state.permissionMode,
-    agentocApprovalGate: process.platform === 'win32' && ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(state.riskMode),
+    agentocApprovalGate: state.agentocApprovalGate,
   }));
   if (written) state.threadRequestSent = true;
   return written;
@@ -2175,6 +2180,7 @@ function recoverCodexAppServerFromStaleResume(proc, state) {
   state.nextControlRequestId += 1;
   state.turnId = '';
   state.startedTurn = false;
+  state.approvalPolicyVerified = false;
   state.threadRequestSent = false;
   state.mcpStatusRequestId = null;
   state.mcpStatusRequestAfterReady = false;
@@ -2295,6 +2301,10 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
   const threadId = readCodexAppServerThreadId(parsed);
   if (!threadId) return false;
   state.threadId = threadId;
+  if (state.agentocApprovalGate && state.approvalPolicyVerified !== true) {
+    state.providerStage = 'verifying_approval_policy';
+    return false;
+  }
   state.providerStage = 'thread_started';
 
   // MCP timing fix: Do not start turn until startup and the required tool
@@ -2323,7 +2333,7 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
     reasoningEffort: state.reasoningEffort,
     interactionMode: state.interactionMode,
     permissionMode: state.permissionMode,
-    agentocApprovalGate: process.platform === 'win32' && ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(state.riskMode),
+    agentocApprovalGate: state.agentocApprovalGate,
   }));
   if (written) state.startedTurn = true;
   if (written) state.providerStage = 'turn_start_sent';
@@ -3538,16 +3548,26 @@ async function main() {
     baselineRoots: [resolvedFolder.cwd, PROJECT_ROOT],
     captureRunBaseline: true,
   });
+  const appServerManifest = isCodexAppServerFamily && permissionMode
+    ? { ...manifest, options: { ...(manifest.options || {}), permissionMode } }
+    : manifest;
   const appServerState = isCodexAppServerFamily
     ? await createCodexAppServerRunState({
       prompt,
       freshRecoveryPrompt,
-      manifest,
+      manifest: appServerManifest,
       cwd: resolvedFolder.cwd,
       codexHomeDir: runnerCodexHomeDir,
       forceFreshRecovery: forceFreshCodexRecovery,
     })
     : null;
+  if (appServerState?.agentocApprovalGate) {
+    // The OAuth app-server broker is shared by multiple Run directories, so
+    // it cannot carry one Run's project trust setting. Project-trust gated
+    // Codex Runs use a private app-server process; the existing native OAuth
+    // lock keeps refresh-token mutation exclusive while the process is active.
+    args = [...args, ...buildCodexAppServerProjectTrustArgs(resolvedFolder.cwd)];
+  }
   if (appServerState && manifest.tool === 'codex') {
     await validateCodexProviderHome(runnerCodexHomeDir);
   }
@@ -3945,7 +3965,8 @@ async function main() {
     ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
     : null;
   const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
-  const runSpecificCodexMcp = isCodexAppServerFamily && Boolean(managedMcpOverlay);
+  const runSpecificCodexMcp = isCodexAppServerFamily
+    && (Boolean(managedMcpOverlay) || appServerState?.agentocApprovalGate === true);
   let codexAppServerBrokered = false;
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
       && !isSandboxAvailable({ env: spawnEnv })) {
@@ -4849,6 +4870,36 @@ async function main() {
       runPatch.staleResumeProvider = 'claude';
     }
     if (appServerState && parsed) {
+      const threadStartResult = parsed.id === appServerState.threadRequestId
+        && parsed.result?.thread
+        ? parsed.result
+        : null;
+      if (appServerState.agentocApprovalGate && threadStartResult) {
+        const approvalContext = validateCodexAppServerApprovalContext({
+          response: threadStartResult,
+          cwd: appServerState.cwd,
+          permissionMode: appServerState.permissionMode,
+        });
+        if (!approvalContext.ok) {
+          const reason = approvalContext.reasonCode || 'CODEX_APPROVAL_CONTEXT_UNVERIFIED';
+          appServerState.approvalPolicyVerified = false;
+          markCodexAppServerFailure(appServerState, {
+            error: { code: reason, message: 'Codex did not confirm the expected Ragent approval policy and workspace boundary' },
+          }, 'Codex approval policy could not be verified');
+          await appendRunSpoolRecord(runId, {
+            ts: nowIso(),
+            stream: 'error',
+            json: { type: 'status', role: 'system', code: reason, content: 'Codex approval policy could not be verified; the Run was stopped before its prompt started' },
+          });
+          await logSidecarDiagnostic(runId, 'Codex approval context verification failed before turn/start', {
+            phase: 'codex-app-server-approval-policy-verification',
+            reasonCode: reason,
+          });
+          await terminateManagedProcess();
+          return;
+        }
+        appServerState.approvalPolicyVerified = true;
+      }
       if (maybeStartCodexAppServerTurn(proc, appServerState, parsed)) {
         runPatch.appServerThreadId = appServerState.threadId;
       }
@@ -4914,7 +4965,7 @@ async function main() {
                 reasoningEffort: appServerState.reasoningEffort,
                 interactionMode: appServerState.interactionMode,
                 permissionMode: appServerState.permissionMode,
-                agentocApprovalGate: process.platform === 'win32' && ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(appServerState.riskMode),
+                agentocApprovalGate: appServerState.agentocApprovalGate,
               });
               if (writeCodexAppServerMessage(proc, retryMessage)) {
                 appServerState.startedTurn = true;

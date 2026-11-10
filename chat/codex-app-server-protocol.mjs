@@ -1,5 +1,5 @@
 import { resolveProviderPermissionPolicy } from './provider-contract.mjs';
-import { isAbsolute, win32 } from 'node:path';
+import { isAbsolute, resolve, win32 } from 'node:path';
 
 export const CODEX_APP_SERVER_REQUEST_IDS = Object.freeze({
   initialize: 0,
@@ -47,6 +47,65 @@ function resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode
   }) || {};
 }
 
+export function isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode, platform = process.platform } = {}) {
+  const selectedRiskMode = String(riskMode || '').trim();
+  const selectedPermissionMode = String(permissionMode || '').trim();
+  const explicitUntrustedMode = selectedPermissionMode === 'untrusted' || selectedPermissionMode.startsWith('untrusted-');
+  return explicitUntrustedMode || (platform === 'win32'
+    && ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(selectedRiskMode));
+}
+
+function buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate) {
+  // Ragent-gated runs derive the stricter approval policy from the process-
+  // scoped untrusted project trust setting. The explicit approvalPolicy value
+  // "untrusted" was retired in Codex 0.149.
+  if (permissionPolicy.approvalPolicy === 'untrusted' && agentocApprovalGate !== true) {
+    throw new Error('Codex untrusted permission mode requires a Run-scoped project trust gate');
+  }
+  if (agentocApprovalGate === true) return {};
+  return { approvalPolicy: permissionPolicy.approvalPolicy || 'never' };
+}
+
+function normalizeCodexWorkspacePath(value) {
+  const candidate = typeof value === 'string' ? value.trim() : '';
+  if (!candidate) return '';
+  if (win32.isAbsolute(candidate)) return win32.normalize(candidate).replace(/[\\/]+$/, '').toLowerCase();
+  if (isAbsolute(candidate)) return resolve(candidate);
+  return '';
+}
+
+export function validateCodexAppServerApprovalContext({ response, cwd, permissionMode } = {}) {
+  const projectRoot = normalizeCodexWorkspacePath(cwd);
+  const result = response && typeof response === 'object' ? response : {};
+  if (result.approvalPolicy !== 'untrusted') {
+    return { ok: false, reasonCode: 'CODEX_APPROVAL_POLICY_UNVERIFIED' };
+  }
+  if (result.approvalsReviewer !== 'user') {
+    return { ok: false, reasonCode: 'CODEX_APPROVAL_REVIEWER_UNVERIFIED' };
+  }
+  if (!projectRoot || normalizeCodexWorkspacePath(result.cwd) !== projectRoot) {
+    return { ok: false, reasonCode: 'CODEX_APPROVAL_CWD_UNVERIFIED' };
+  }
+  const roots = Array.isArray(result.runtimeWorkspaceRoots) ? result.runtimeWorkspaceRoots : [];
+  if (!roots.some((root) => normalizeCodexWorkspacePath(root) === projectRoot)) {
+    return { ok: false, reasonCode: 'CODEX_APPROVAL_WORKSPACE_ROOT_UNVERIFIED' };
+  }
+
+  const permissionPolicy = resolveCodexAppServerPermissionPolicy({ permissionMode });
+  const expectedSandboxType = permissionPolicy.sandbox === 'workspace-write'
+    ? 'workspaceWrite'
+    : permissionPolicy.sandbox === 'read-only'
+      ? 'readOnly'
+      : 'dangerFullAccess';
+  if (result.sandbox?.type !== expectedSandboxType) {
+    return { ok: false, reasonCode: 'CODEX_APPROVAL_SANDBOX_UNVERIFIED' };
+  }
+  if (permissionPolicy.sandboxPolicy?.networkAccess === false && result.sandbox?.networkAccess !== false) {
+    return { ok: false, reasonCode: 'CODEX_APPROVAL_NETWORK_BOUNDARY_UNVERIFIED' };
+  }
+  return { ok: true, reasonCode: null };
+}
+
 export function buildCodexAppServerThreadOptions({
   cwd,
   model,
@@ -59,7 +118,7 @@ export function buildCodexAppServerThreadOptions({
   return {
     ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
     ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
-    approvalPolicy: permissionPolicy.approvalPolicy || 'never',
+    ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
     ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
     sandbox: permissionPolicy.sandbox || 'danger-full-access',
     config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}) },
@@ -205,7 +264,7 @@ export function buildCodexAppServerTurnStartMessage({
         : {}),
       input: buildCodexAppServerInput(text),
       ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
-      approvalPolicy: permissionPolicy.approvalPolicy || 'never',
+      ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
       ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
       sandboxPolicy: permissionPolicy.sandboxPolicy?.type === 'workspaceWrite'
         ? {

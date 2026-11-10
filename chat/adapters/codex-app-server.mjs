@@ -20,6 +20,7 @@ import {
 import { explanationForApproval } from '../risk-explanation.mjs';
 import { annotateProviderError, getProviderCapabilities } from '../provider-contract.mjs';
 import { getHarnessAdapterCompatibility } from '../harness-compatibility.mjs';
+import { isAbsolute, win32 } from 'node:path';
 
 export const CODEX_APP_SERVER_RUNTIME_FAMILY = 'codex-app-server-json';
 
@@ -27,8 +28,21 @@ export function isCodexAppServerRuntimeFamily(runtimeFamily) {
   return String(runtimeFamily || '').trim() === CODEX_APP_SERVER_RUNTIME_FAMILY;
 }
 
-export function buildCodexAppServerArgs() {
-  return ['app-server', '--stdio'];
+export function buildCodexAppServerProjectTrustArgs(cwd) {
+  const projectRoot = typeof cwd === 'string' ? cwd.trim() : '';
+  if (!projectRoot || (!isAbsolute(projectRoot) && !win32.isAbsolute(projectRoot))) {
+    throw new TypeError('Codex project trust requires an absolute Run working directory');
+  }
+  // JSON string literals are valid TOML basic strings and safely quote Windows
+  // paths, including backslashes and quotes. Keep the override scoped to the
+  // current App Server process; never write the user's config.toml.
+  return ['-c', `projects={${JSON.stringify(projectRoot)}={trust_level="untrusted"}}`];
+}
+
+export function buildCodexAppServerArgs({ cwd, agentocApprovalGate = false } = {}) {
+  const args = ['app-server', '--stdio'];
+  if (agentocApprovalGate === true) args.push(...buildCodexAppServerProjectTrustArgs(cwd));
+  return args;
 }
 
 export function createCodexAppServerAdapter() {

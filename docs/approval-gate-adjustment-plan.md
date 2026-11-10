@@ -1,13 +1,15 @@
 # Ragent 审批链路调整方案：Claude Code 与 Codex
 
 日期：2026-11-10  
-状态：方案；尚未实现本文件中的新增兼容性调整
+状态：Windows Codex 项目级审批入口与旧版真实 CLI 验证已实现；Android 真机 OAuth/E2E 与新版 Codex 真机验证待完成
 
 ## 结论
 
 现在的审批请求过多，不宜简单归因于“自动审批器坏了”。Ragent 已有自动决策和自动响应路径；问题主要在于 Harness 是否会把动作送到该路径、Ragent 能否识别请求，以及识别失败时的保守回退。Claude Code 与 Codex 的权限协议不同，不能用一个 Harness 档位名假定它们会产生相同的审批事件。
 
-Codex 有一个明确的兼容性风险：Ragent 当前在 Windows 的受控档位中显式发送 `approvalPolicy=untrusted`。本机已安装的 Codex CLI 是 `0.147.0`，该版本的命令行帮助仍接受它；当前 Codex 官方配置文档已说明 `approval_policy="untrusted"` 不再支持，较新版本可能在运行开始时拒绝此值。官方迁移方式是设置项目 `trust_level="untrusted"`，并省略显式 `approval_policy`。因此应改成每个 Ragent Run 的项目级信任配置，不能继续依赖已废弃的审批枚举。
+Codex 0.149 起不再支持显式 `approvalPolicy="untrusted"`。Ragent 在 Windows 受控 Run 的私有 App Server 进程上只注入该 Run 的 `trust_level="untrusted"`，并在 `thread/start`、`thread/resume`、`thread/fork`、`turn/start` 中省略 `approvalPolicy`。Codex 会从不信任项目派生严格审批策略：命令逐条请求审批，执行策略明确允许的命令除外。启动响应仍须确认有效策略为 `untrusted`、reviewer 为 `user`、sandbox、cwd 和 workspace root 均匹配，否则 prompt 前停止。
+
+Codex OAuth App Server broker 按账号共享，不能为单个 Run 绑定独占的项目 trust；受控 Run 因此使用私有 App Server，并沿用现有 OAuth 锁避免并发刷新同一凭据。代价是受控 Run 会串行占用 Codex OAuth 执行通道。经本机验证，`thread/start.config.projects` 不会改变有效审批策略，不能替代进程级项目配置。
 
 Codex 的 `approvalsReviewer="user"` 只表示把已产生的审批请求交给用户；它不会制造请求，也不会自动批准。改成 Codex 的 `auto_review` 会把决定权交给 Codex reviewer，而不是 Ragent 审批器，不应作为本问题的默认修复。
 
@@ -30,21 +32,21 @@ Codex 的 `approvalsReviewer="user"` 只表示把已产生的审批请求交给�
 
 ### 当前 Codex 档位映射
 
-| Ragent 档位 | 当前 Codex Windows Harness | 当前非 Windows Harness | 结果与限制 |
+| Ragent 档位 | Codex Windows Harness | Codex 非 Windows Harness | 结果与限制 |
 |---|---|---|---|
-| safe / recommended | `untrusted` + `danger-full-access`，`approvalsReviewer=user` | `on-request` + `danger-full-access` | Windows 旧版 Codex 会为非 trusted 命令发请求，Ragent 再分类；非 Windows `on-request` 只覆盖 Codex 自己决定升级的动作，Ragent 看不到每条普通命令 |
-| full-auto | Windows 仍强制使用 `untrusted` 以便 Ragent 拦截；非 Windows 当前默认为 `never` + `danger-full-access` | Codex 请求不能由分类器自动放行时会自动拒绝 | Windows 旧版链路能实现“安全自动、风险拒绝”；非 Windows 当前无普通命令审批入口，不能宣称危险命令由 Ragent 拒绝；新 Codex 版本还需解决 `untrusted` 兼容性 |
-| conservative-auto | `on-request` + `workspace-write` | 同左 | 沙箱限制工作区与网络，但普通工作区命令不会全部经过 Ragent 分类；如果档位承诺逐命令风险审核，这个映射不够 |
+| safe / recommended | Run 级项目 trust `untrusted`（省略 `approvalPolicy`）+ 当前 profile sandbox，`approvalsReviewer=user` | 当前实现为 `on-request` + profile sandbox；目标改为 Run 级项目 trust gate | Windows 受控 Run 的命令审批请求进入 Ragent 分类。0.147 的 `git status` fixture 没有 owner 卡，但不能据此断言是 Ragent 自动答复；也可能是 Codex 执行策略直接允许。非 Windows `on-request` 只覆盖 Codex 升级审批 |
+| full-auto | Run 级项目 trust `untrusted` + profile sandbox；安全请求自动答复，其余请求自动拒绝 | 当前实现为 `never` + `danger-full-access`；目标改为 Run 级项目 trust gate | Windows 已可对进入 gate 的危险请求自动拒绝。当前非 Windows 映射允许 sandbox 内的普通命令直接执行，Ragent 没有逐条拒绝危险命令的机会 |
+| conservative-auto | Run 级项目 trust `untrusted` + `workspace-write`、关闭网络 | 当前实现为 `on-request` + `workspace-write`、关闭网络；目标改为 Run 级项目 trust gate | Windows 命令请求进入分类，sandbox 限制写入与网络；当前非 Windows 工作区内命令可能直接执行，不会逐条经过 Ragent |
 
 此处 `danger-full-access`、`workspace-write` 是 Harness sandbox，不等于 Ragent 的风险档位。Ragent 不应把 `approvalPolicy=never` 或绕过审批作为消除提示的办法；这样会让危险操作绕过审批事件入口。
 
 ### 为什么 Codex 仍可能产生多张人工审批卡
 
-1. **请求触发面不同。** `on-request` 只覆盖 Codex 要求升级权限的动作。它不会保证所有命令都到 Ragent 风险分类器。Codex 不发请求时，Ragent 无法替它审查该动作。
+1. **请求触发面不同。** `on-request` 只覆盖 Codex 要求升级权限的动作，不会保证普通命令进入 Ragent 分类器。Windows 项目 trust gate 会把需要审批的命令送进 Ragent；执行策略明确允许的命令仍可不发请求。0.147 的 `git status` 实测无 owner 卡，只能证明没有用户提示，不能证明是 Ragent 自动答复。新版官方语义仍是“不信任项目命令逐条审批，显式 exec-policy allow 除外”。
 2. **Windows 分类器只对可证明的命令自动放行。** `windows-approval-gate.mjs` 目前要求 Codex 命令能被还原为受信任的 PowerShell 可执行文件、`-NoProfile` 参数及可静态分析脚本。未知 shell、非 PowerShell 命令、工作目录/路径上下文缺失、额外权限、未知工具、没有对应活动项的文件变更都会保守地转人工审批。这个 fail-closed 行为安全，但覆盖面不足会表现为大量提示。
-3. **Codex `untrusted` 的旧语义本身会发出较多请求。** 在仍支持该枚举的 Codex 版本中，它会对非内置 trusted 命令请求审批。Ragent 必须成功自动答复这些请求，用户才不会看到卡片。
+3. **执行策略可能绕过 Ragent 入口。** 即使项目 trust 是 `untrusted`，Codex 执行策略允许的命令也不会触发审批事件。Ragent 必须区分“Codex 没有发事件”和“Ragent 自动答复”；不能仅凭零张 owner 卡判断自动审批器工作正常。对已允许命令应审计来源与规则，确保允许项来自经过审查的策略。
 4. **有些请求应保留人工确认。** `item/permissions/requestApproval`、MCP elicitation、额外文件系统/网络权限、信息不完整的文件变更、Codex 删除/移动请求目前不能只凭命令文本证明安全，不能为了降提示量而放宽。
-5. **当前真机复现被 OAuth 阻断。** 荣耀手机最近一次 Codex Official Account 只读运行在执行命令前报 refresh token 已使用，未到审批阶段。本机 Windows Codex CLI 的本地 fixture 已验证 `git status --short` 自动通过、危险 `winget uninstall` 在执行前进入拒绝/审批路径；这证明了该 fixture 的 gate 行为，但还不能证明手机实际会话中的提示数量。
+5. **受控安装 Hook 还受 shell 证明条件限制。** 荣耀手机最近一次 Codex Official Account 只读运行在执行命令前报 refresh token 已使用，未到审批阶段。本机 0.147.0 的 managed Hook 确实执行并改写安装命令；但 App Server 给出的 PowerShell argv 缺少 Ragent 要求的 `-NoProfile`，sidecar 无法证明 shell 身份，因此保留 owner 审批，不会自动运行 Hook 改写后的安装命令。
 
 ## 调整目标
 
@@ -52,15 +54,17 @@ Codex 的 `approvalsReviewer="user"` 只表示把已产生的审批请求交给�
 
 ## 完整调整方案
 
-### 1. 移除对 Codex `approvalPolicy=untrusted` 的直接依赖
+### 1. 用 Run 级项目 trust 替代已退役的显式审批枚举
 
-为需要 Ragent 逐命令决策的 Codex 档位，给当前 Run 的工作目录配置 `projects.<cwd>.trust_level="untrusted"`，不写入用户的全局 Codex 配置、不改项目文件；同时在 Codex `thread/start`、`thread/resume`、`thread/fork` 与 `turn/start` 中省略显式 `approvalPolicy`。官方文档指出显式 `on-request` 会覆盖项目派生策略，因此只改项目 trust 而仍发送 `on-request` 不会生效。
+Windows `safe`、`recommended`、`full-auto`、`conservative-auto` 以及显式选择 `untrusted-*` 权限模式的 Run，都在私有 App Server 进程参数中加入 `projects={"<cwd>"={trust_level="untrusted"}}`。不写用户全局 `config.toml`，不改项目配置，也不发送 `approvalPolicy="untrusted"`。旧版 0.147.0 的真实 thread/start 在仅设置项目 trust、并省略 `approvalPolicy` 时返回有效 `approvalPolicy=untrusted`；新版 Codex 的源码合并记录表明不信任项目仍逐命令请求审批。真实新版尚未安装，继续执行 prompt 前校验。
 
-优先验证能否通过 App Server 进程的配置覆盖参数设置此项目级值。`codex app-server` 支持 `-c/--config key=value`，但含 Windows 路径的项目键如何转义、进程级覆盖是否只作用于当前 Run，须在 fixture 中验证后才能采用。禁止为试验改写用户的 `~/.codex/config.toml`，也不复制或迁移 OAuth 凭据。
+Codex 的进程级 `-c/--config key=value` 接受 TOML inline table；本机 `config/read` 能看到项目条目，并与现有项目配置合并。`thread/start.config.projects` 的线程级字段没有改变有效审批策略，因此不使用。
 
-在首个 thread 响应中校验有效 `approvalPolicy`、`approvalsReviewer`、sandbox 与目标 cwd。若没有取得受控审批策略，或 Codex 版本/组织 requirements 不允许项目级策略，就在送入用户 prompt 前中止该 Run 并显示兼容性错误；不得悄悄退回 `on-request` 后仍声称 Ragent 会逐命令风险审查。
+每个 gate Run 在 prompt 前校验响应中的 `approvalPolicy=untrusted`、`approvalsReviewer=user`、sandbox 类型与网络边界、`cwd` 和 `runtimeWorkspaceRoots`。响应缺项、返回 `on-request`、reviewer 不匹配或 cwd/root 越界时，Run 以明确兼容性错误停止；不会悄悄继续。`thread/fork` 同样省略已退役字段并在新 Run 启动时重新绑定 cwd 和项目 trust。
 
-项目 `trust_level="untrusted"` 会跳过仓库内 `.codex/` 层的配置、hooks 与 rules。需要在方案实施时确认 Ragent 对应配置来自进程/用户层而不是项目层，并明确告知这一差异；如果会破坏现有用户工作流，应改用经验证的进程级审批策略方案，不可静默覆盖。
+项目 `trust_level="untrusted"` 会跳过仓库内 `.codex/` 层的配置、hooks 与 rules。用户层配置仍由 Codex 读取；Ragent 的托管 hook 继续通过 App Server hook 接口注册到托管 home。使用此档位时，仓库内自定义 Codex hooks/rules 不会生效，用户需把必须保留的配置迁移到用户层。
+
+Windows 的 `safe/recommended/full-auto/conservative-auto` 已接入此 Run 级入口；Linux/macOS 尚需用相同的项目 trust 入口和 POSIX 风险分类器完成策略对齐。`on-request` 适合“sandbox 内自动运行，越界时询问”的 Codex 原生交互，不满足 Ragent 逐命令分类目标。新版本支持的 `approval_policy.granular` 可选择 sandbox 升级、执行规则、MCP elicitation、权限请求和 skill 审批等提示类别；它用于按类别放行或自动拒绝，不会把 sandbox 内每条普通命令都转成 Ragent 审批事件，不能替代项目 trust gate。
 
 ### 2. 将 harness 适配与风险判定分开
 
@@ -107,9 +111,9 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 ## 实施顺序
 
 1. **观测先行：** 对每个进入 owner 流程的 Claude/Codex 请求记录脱敏的 `providerMethod`、risk mode、`policyVersion`、分类结果、提示原因码、权限增量及是否自动响应失败。增加仪表字段统计每 Run 的总请求、自动放行、自动拒绝、人工提示和重复请求数。
-2. **Codex 策略兼容：** 实现并验证进程级项目 trust 设置、`approvalPolicy` 省略行为、有效策略回读和错误提示。先覆盖本机 `0.147.0`，再覆盖当前不支持直接 `approval_policy="untrusted"` 的版本；同时验证 managed requirements 限制。
+2. **Codex 策略兼容：** 已实现 Windows gate Run 的进程级项目 trust 覆盖、有效策略回读与 prompt 前 fail-closed；没有在新版拒绝后静默降级或重试。当前本机 `0.147.0` 真实 CLI 已验直接策略路径；需在当前 Codex 版本和受管策略环境上验证派生审批响应、项目配置跳过行为与策略限制。
 3. **Windows Codex 命令分类：** 从本机真实 app-server 事件中采样命令形状，按实际 argv 与 shell 解析扩充分类，新增每类的 allow/prompt/deny 测试。任何无法静态解释的情况仍保持 fail-closed。
-4. **跨平台策略一致性：** 让 Linux Codex 的逐命令 gate 使用同样可验证的项目级请求入口；若无法获取全量请求，就明确标注该档位只依赖 Codex 的 sandbox/升级审批，不能宣称 Ragent 分类过所有命令。
+4. **跨平台策略一致性：** 为 Linux/macOS 的 safe、recommended、full-auto、conservative-auto 采用同样可验证的项目级请求入口，并由 POSIX 风险分类器答复；保留 sandbox 写入/网络边界。若某个 Codex 版本或 managed requirement 不允许此入口，就明确退回 Codex 原生 sandbox/升级审批并标示未经过 Ragent 全量分类，不得伪称同档位策略一致。评估 `granular` 作为类别级拒绝补充，不将它当作逐命令 gate。
 5. **审批聚合与 UI：** 增加重复请求幂等、明确原因码与风险摘要；不要延长“批准一次”的范围，除非用户明确选择。
 6. **分层验收：** 先跑规范化 adapter / policy tests，再用 Codex 官方账号 provider 和 Claude CLI 在本机 Windows 做真实命令回归，最后由荣耀手机通过 Ragent UI 验证自动操作不弹卡、危险动作只弹一张可解释审批卡、拒绝后未执行。OAuth refresh 问题修复前，Codex 真机验收项保持未完成。
 
@@ -117,7 +121,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 | 用例 | 预期 |
 |---|---|
-| Codex `git status --short`、工作区内只读查看 | 单个请求自动响应；owner 提示为 0 |
+| Codex `git status --short`、工作区内只读查看 | Codex trusted allowlist 或 Ragent 自动响应；owner 提示为 0。验收须区分“Codex 未发审批事件”和“Ragent 已自动答复” |
 | Codex 工作区内可证明的普通文件编辑 | 按当前 Ragent 档位自动处理；不重复展示 file change 和 command 两张同义卡 |
 | Codex 删除工作区目录、访问敏感凭据、shell 拼接/动态执行 | safe/recommended 走审批或拒绝；full-auto 拒绝；原目标文件未改变 |
 | Codex `winget uninstall` 或系统服务修改 | 绝不作为普通命令自动放行；显示一个带目标和风险原因的 owner 请求 |
@@ -132,14 +136,17 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 ## 当前证据与未决项
 
-- 本机 Windows Codex CLI：`0.147.0`；其 `codex --help` 仍列出 `untrusted`。Codex 官方当前配置文档已标记该枚举 unsupported，因此必须覆盖版本迁移。
-- 现有本地真实 CLI fixture：Codex `git status --short` 自动通过；危险 `winget uninstall` 在执行前被拦截。该结果不能替代通过荣耀手机走完整服务与 Ragent UI 的验收。
-- 最近荣耀手机 Codex 官方 OAuth 运行在审批事件产生前因 refresh token 已使用而失败；目前不能用这次运行判断审批提示量。
-- 在方案第 2 步前需要确认运行中的 Codex App Server 是否为每 Run 独立进程，以及 `-c projects."<cwd>".trust_level="untrusted"` 是否能对 thread 返回预期的有效 `approvalPolicy`。未通过前不应修改已通过的 Claude/Codex gate 源码。
+- 本机 Windows Codex CLI `0.147.0`：启动参数只设置当前 cwd 项目 trust，不发送审批枚举；真实 `thread/start` 返回 `approvalPolicy=untrusted`、reviewer=user、正确 sandbox 和 workspace root。
+- 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
+- 本机真实 managed Hook：Ragent hook 通过 App Server 注册和信任校验，执行 preToolUse 并改写安装命令；由于当前 Codex shell argv 缺少 `-NoProfile`，sidecar 将改写后的命令保留为 owner-gated，没有自动执行。
+- Codex 0.149 的退役行为及当前 `granular` 能力依据官方文档与合并记录；新版真实 CLI 不在当前机器上，尚未验证它的 App Server 响应字段。
+- 最近荣耀手机 Codex Official OAuth 运行在审批事件产生前因 refresh token 已使用而失败。手机端完整 OAuth → Ragent UI → 审批事件验收仍未完成；没有把 provider 的“可用”状态当作授权成功。
+- 审批原因聚合、owner UI 原因呈现、跨平台逐命令策略及更广的 Windows shell 识别仍按上方实施顺序推进；当前不把它们记为完成。
 
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
+- [Codex 合并记录：移除 `approval_policy="untrusted"`](https://github.com/openai/codex/pull/39630)
 - [Codex 审批与安全：从已废弃的 untrusted approval policy 迁移](https://learn.chatgpt.com/codex/agent-approvals-security)
 - [Codex App Server：审批请求与响应协议](https://developers.openai.com/codex/app-server/)
 - [Codex App Server README：managed human command checkpoints](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)

@@ -146,6 +146,7 @@ let mcpReadySent = false;
 let fixtureHookTrusted = false;
 let mcpMode = process.env.FAKE_CODEX_APP_SERVER_MCP_MODE || '';
 const delayedTurnStartMs = Number(process.env.FAKE_CODEX_APP_SERVER_TURN_START_DELAY_MS || '0');
+if (recordPath) fs.appendFileSync(recordPath, JSON.stringify({ agentocFixtureProcessArgs: process.argv.slice(2) }) + '\\n');
 function record(message) {
   messages.push(message);
   // A stale-resume handoff starts a second app-server process. Append each
@@ -186,6 +187,24 @@ function threadPayload(id) {
     gitInfo: null,
     name: null,
     turns: [],
+  };
+}
+function threadStartResult(params, id) {
+  const sandboxType = params?.sandbox === 'workspace-write'
+    ? 'workspaceWrite'
+    : params?.sandbox === 'read-only'
+      ? 'readOnly'
+      : 'dangerFullAccess';
+  return {
+    thread: threadPayload(id),
+    cwd: params?.cwd || '',
+    runtimeWorkspaceRoots: params?.cwd ? [params.cwd] : [],
+    approvalPolicy: params?.approvalPolicy || (params?.approvalsReviewer === 'user' ? 'untrusted' : 'on-request'),
+    approvalsReviewer: params?.approvalsReviewer || null,
+    sandbox: {
+      type: sandboxType,
+      ...(sandboxType === 'workspaceWrite' || sandboxType === 'readOnly' ? { networkAccess: false } : {}),
+    },
   };
 }
 function finishTurn(turnId, { keepAliveMs = 0 } = {}) {
@@ -249,7 +268,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     if (message.params?.model === 'fake-mcp-unsupported') mcpMode = 'unsupported';
     if (message.params?.model === 'fake-mcp-inventory-blocked') mcpMode = 'inventory-blocked';
     threadId = recoveredThread ? 'thread-fake-recovered' : 'thread-fake-plan';
-    send({ id: message.id, result: { thread: threadPayload(threadId) } });
+      send({ id: message.id, result: threadStartResult(message.params, threadId) });
     send({ method: 'thread/started', params: { thread: threadPayload(threadId) } });
     return;
   }
@@ -269,7 +288,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       return;
     }
     threadId = message.params.threadId || 'thread-fake-plan';
-    send({ id: message.id, result: { thread: threadPayload(threadId) } });
+    send({ id: message.id, result: threadStartResult(message.params, threadId) });
     return;
   }
   if (message.method === 'mcpServerStatus/list') {
@@ -898,6 +917,16 @@ try {
     }
     throw error;
   }
+  if (process.platform === 'win32') {
+    const processStart = await waitFor(() => {
+      try { return readRecordedMessages(recordPath).find((message) => Array.isArray(message.agentocFixtureProcessArgs)) || false; }
+      catch { return false; }
+    }, 'Run-scoped Codex project trust process arguments');
+    const processArgs = processStart.agentocFixtureProcessArgs || [];
+    const trustOverride = processArgs.find((arg) => typeof arg === 'string' && arg.startsWith('projects='));
+    assert.ok(processArgs.includes('-c') && trustOverride?.includes('trust_level="untrusted"'),
+      'Ragent-gated Windows Codex must start with a Run-scoped project trust override');
+  }
   assert.equal(approvalRequest.kind, 'command');
   assert.equal(approvalRequest.command, 'sudo systemctl restart agentoc-fixture');
   assert.equal(approvalRequest.runId, planRun.id);
@@ -941,12 +970,20 @@ try {
   await waitForSessionCodexThread(port, session.id, 'thread-fake-plan');
 
   let recorded = readRecordedMessages(recordPath);
-  const planThreadStart = recorded.find((message) => message.method === 'thread/start');
+  const planThreadStarts = recorded.filter((message) => message.method === 'thread/start');
+  const planThreadStart = planThreadStarts[0];
   const planTurnStart = recorded.find((message) => message.method === 'turn/start');
   assert.equal(planThreadStart.params.config.mode, 'plan');
   assert.equal(planThreadStart.params.sandbox, 'danger-full-access');
   assert.deepEqual(planTurnStart.params.sandboxPolicy, { type: 'dangerFullAccess' });
   assert.equal(planTurnStart.params.effort, 'high');
+  if (process.platform === 'win32') {
+    assert.equal(planThreadStarts.length, 1, 'the gate must not send the retired untrusted policy value');
+    assert.equal(Object.hasOwn(planThreadStart.params, 'approvalPolicy'), false,
+      'the approval policy must be derived from the Run project trust');
+    assert.equal(Object.hasOwn(planTurnStart.params, 'approvalPolicy'), false,
+      'turn/start must not override the derived approval policy');
+  }
   const approvalReply = recorded.find((message) => message.id === 'approval-1' && message.result);
   assert.ok(approvalReply, `provider should receive approval response; got ${JSON.stringify(recorded)}`);
   assert.deepEqual(approvalReply.result, { decision: 'accept' });
