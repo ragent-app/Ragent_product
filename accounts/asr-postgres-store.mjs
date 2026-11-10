@@ -190,6 +190,62 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
     });
   }
 
+  function rowToConsent(row) {
+    if (!row) return null;
+    return {
+      action: String(row.action),
+      policyVersion: String(row.policy_version),
+      occurredAt: row.occurred_at ? new Date(row.occurred_at).toISOString() : null,
+    };
+  }
+
+  async function getConsent({ accountId }) {
+    return withClient(async (client) => {
+      const result = await client.query(`select action, policy_version, occurred_at
+        from account_asr_consent_events where account_id=$1
+        order by consent_event_id desc limit 1`, [accountId]);
+      return rowToConsent(result.rows[0]);
+    });
+  }
+
+  async function setConsent({ accountId, deviceId, action, policyVersion }) {
+    if (!['accepted', 'revoked'].includes(action) || !policyVersion) {
+      throw asrError('asr_consent_invalid', 400);
+    }
+    return transaction(async (client) => {
+      // Serialize per-account consent changes so the latest event always wins.
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [accountId]);
+      const priorResult = await client.query(`select action, policy_version, occurred_at
+        from account_asr_consent_events where account_id=$1
+        order by consent_event_id desc limit 1`, [accountId]);
+      const prior = rowToConsent(priorResult.rows[0]);
+      if (prior?.action === action && prior.policyVersion === policyVersion) return prior;
+      if (action === 'revoked' && !prior) return null;
+      const inserted = await client.query(`insert into account_asr_consent_events
+        (account_id, device_id, policy_version, action)
+        values ($1,$2,$3,$4)
+        returning action, policy_version, occurred_at`,
+      [accountId, deviceId, policyVersion, action]);
+      return rowToConsent(inserted.rows[0]);
+    });
+  }
+
+  async function purgeExpiredConsents({ batchSize = 1_000 } = {}) {
+    const limit = Number(batchSize);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5_000) {
+      throw new TypeError('A valid ASR consent retention batch size is required');
+    }
+    return transaction(async (client) => {
+      const result = await client.query(`with expired as (
+          select consent_event_id from account_asr_consent_events
+          where retain_until <= now()
+          order by retain_until limit $1 for update skip locked
+        ) delete from account_asr_consent_events event using expired
+          where event.consent_event_id=expired.consent_event_id`, [limit]);
+      return result.rowCount || 0;
+    });
+  }
+
   async function expireStaleReservations({ olderThanMs = 120_000, batchSize = 500 } = {}) {
     const age = Number(olderThanMs);
     const limit = Number(batchSize);
@@ -270,8 +326,9 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
   async function checkReady() {
     return withClient(async (client) => {
       const result = await client.query(`select to_regclass('account_asr_usage') as usage_table,
-        to_regclass('account_asr_requests') as requests_table`);
-      if (!result.rows[0]?.usage_table || !result.rows[0]?.requests_table) {
+        to_regclass('account_asr_requests') as requests_table,
+        to_regclass('account_asr_consent_events') as consent_events_table`);
+      if (!result.rows[0]?.usage_table || !result.rows[0]?.requests_table || !result.rows[0]?.consent_events_table) {
         throw asrError('asr_schema_unavailable', 503, 'The ASR usage schema has not been installed.');
       }
       return true;
@@ -279,5 +336,6 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
   }
 
   return Object.freeze({ reserve, markProcessing, settle, fail, markUnknown, getUsage,
+    getConsent, setConsent, purgeExpiredConsents,
     expireStaleReservations, markStaleProcessingUnknown, purgeTerminalRequests, checkReady });
 }

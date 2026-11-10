@@ -102,9 +102,95 @@ internal class LocalVoiceController(
     fun selectChoice(choice: String) {
         if (choice != "auto" && choice != "phone" && choice != "cloud"
             && !choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}"))) return
+        if (choice == "cloud") {
+            requestCloudRoute()
+            return
+        }
+        persistChoice(choice)
+    }
+
+    private fun persistChoice(choice: String) {
         val sessionId = activeSessionId ?: return
         mutableState.update { it.copy(choice = choice, message = null) }
         scope.launch { runCatching { app.runtime.configStore.setChatVoiceChoice(sessionId, choice) } }
+    }
+
+    fun acceptCloudVoiceConsent() {
+        if (mutableState.value.cloudConsentBusy) return
+        mutableState.update { it.copy(cloudConsentBusy = true, message = null) }
+        scope.launch {
+            runCatching { app.runtime.accountSessions.setAccountAsrConsent(accepted = true) }
+                .onSuccess { consent ->
+                    mutableState.update { it.copy(
+                        cloudConsentKnown = true,
+                        cloudConsentGranted = consent.granted,
+                        cloudConsentPrompt = false,
+                        cloudConsentBusy = false,
+                    ) }
+                    if (consent.granted) persistChoice("cloud")
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(cloudConsentBusy = false,
+                        message = cloudErrorMessage(error)) }
+                }
+        }
+    }
+
+    fun declineCloudVoiceConsent() {
+        mutableState.update { it.copy(cloudConsentPrompt = false, cloudConsentBusy = false) }
+        if (mutableState.value.choice == "cloud" && !mutableState.value.cloudConsentGranted) persistChoice("auto")
+    }
+
+    fun revokeCloudVoiceConsent() {
+        if (mutableState.value.cloudConsentBusy) return
+        mutableState.update { it.copy(cloudConsentBusy = true, message = null) }
+        scope.launch {
+            runCatching { app.runtime.accountSessions.setAccountAsrConsent(accepted = false) }
+                .onSuccess {
+                    val sessionId = activeSessionId
+                    mutableState.update { it.copy(cloudConsentKnown = true, cloudConsentGranted = false,
+                        cloudConsentPrompt = false, cloudConsentBusy = false,
+                        choice = if (it.choice == "cloud") "auto" else it.choice) }
+                    if (sessionId != null) runCatching {
+                        app.runtime.configStore.setChatVoiceChoice(sessionId, mutableState.value.choice)
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(cloudConsentBusy = false,
+                        message = cloudErrorMessage(error)) }
+                }
+        }
+    }
+
+    private fun requestCloudRoute() {
+        scope.launch {
+            runCatching { app.runtime.accountSessions.getAccountAsrUsage() }
+                .onSuccess { usage ->
+                    val consentGranted = usage.consent.granted
+                    mutableState.update { it.copy(
+                        cloudAvailable = usage.available && usage.remainingMs > 0,
+                        cloudLimitMs = usage.limitMs,
+                        cloudUsedMs = usage.usedMs,
+                        cloudReservedMs = usage.reservedMs,
+                        cloudRemainingMs = usage.remainingMs,
+                        cloudConsentKnown = true,
+                        cloudConsentGranted = consentGranted,
+                    ) }
+                    if (!usage.available || usage.remainingMs <= 0) {
+                        mutableState.update { it.copy(message = app.getString(
+                            com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_unavailable)) }
+                    } else if (consentGranted) {
+                        persistChoice("cloud")
+                    } else {
+                        mutableState.update { it.copy(cloudConsentPrompt = true, message = null) }
+                    }
+                }
+                .onFailure { error -> mutableState.update { it.copy(
+                    cloudConsentKnown = false,
+                    cloudConsentGranted = false,
+                    message = cloudErrorMessage(error),
+                ) } }
+        }
     }
 
     fun setComputerEnabled(targetId: String, enabled: Boolean) {
@@ -150,6 +236,10 @@ internal class LocalVoiceController(
             return
         }
         if (current.processing) return
+        if (current.choice == "cloud" && !current.cloudConsentGranted) {
+            requestCloudRoute()
+            return
+        }
         val destination = resolveVoiceDestination(
             choice = current.choice,
             sessionTargetId = sessionTargetId,
@@ -320,7 +410,12 @@ internal class LocalVoiceController(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                mutableState.update { it.copy(message = cloudErrorMessage(error)) }
+                if ((error as? AccountSessionException)?.code == "asr_consent_required") {
+                    mutableState.update { it.copy(cloudConsentKnown = false, cloudConsentGranted = false,
+                        cloudConsentPrompt = true, message = null) }
+                } else {
+                    mutableState.update { it.copy(message = cloudErrorMessage(error)) }
+                }
                 refreshCloudUsage()
             } finally {
                 activeJob = null
@@ -342,6 +437,8 @@ internal class LocalVoiceController(
                     cloudUsedMs = usage?.usedMs ?: 0,
                     cloudReservedMs = usage?.reservedMs ?: 0,
                     cloudRemainingMs = usage?.remainingMs ?: 0,
+                    cloudConsentKnown = usage != null,
+                    cloudConsentGranted = usage?.consent?.granted == true,
                 )
             }
         }

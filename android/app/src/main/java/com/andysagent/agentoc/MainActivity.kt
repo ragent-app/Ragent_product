@@ -1512,6 +1512,9 @@ class MainActivity : ComponentActivity() {
                             }
                             WorkbenchEvent.CancelVoiceInput -> voiceController.cancelVoiceInput()
                             is WorkbenchEvent.SelectVoiceChoice -> voiceController.selectChoice(event.choice)
+                            WorkbenchEvent.AcceptCloudVoiceConsent -> voiceController.acceptCloudVoiceConsent()
+                            WorkbenchEvent.DeclineCloudVoiceConsent -> voiceController.declineCloudVoiceConsent()
+                            WorkbenchEvent.RevokeCloudVoiceConsent -> voiceController.revokeCloudVoiceConsent()
                             is WorkbenchEvent.SetComputerVoiceEnabled -> voiceController.setComputerEnabled(event.targetId, event.enabled)
                             is WorkbenchEvent.InstallComputerVoice -> voiceController.installComputer(event.targetId)
                             is WorkbenchEvent.VoiceTranscriptionReceived -> appendVoiceTranscript(event.text)

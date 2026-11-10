@@ -97,7 +97,7 @@ export function createAccountDeletionRepository({ pool, schema = 'public', verif
     return { schemaVersion: 1, jobId: job.job_id, requestId: job.request_id, status: job.status,
       requestedAt: iso(job.requested_at), updatedAt: iso(job.updated_at), cloudErasedAt: iso(job.cloud_erased_at),
       computers: { total: counts.total, awaitingAcknowledgment: counts.waiting, requiresOwner: counts.requires_owner },
-      retainedRecords: ['deletion-receipt', 'account-revocation-fence', 'instance-authority-generations', 'workbench-deletion-acknowledgments'],
+      retainedRecords: ['deletion-receipt', 'account-revocation-fence', 'instance-authority-generations', 'workbench-deletion-acknowledgments', 'voice-processing-consent-evidence'],
       localFilesAutomaticallyErased: false };
   }
 

@@ -499,9 +499,16 @@ class AccountSessionManagerTest {
         val requestId = "8e4f76e8-7727-4d75-949b-8e110526f813"
         val audio = ByteArray(128) { (it % 127).toByte() }
         val transcript = """{"contractVersion":1,"requestId":"$requestId","text":"hello world","languageCode":"en","durationMs":1200}"""
-        val usage = """{"contractVersion":1,"available":true,"policyVersion":"account-asr-monthly-v1","period":"2026-11","plan":"plus","limitMs":7200000,"usedMs":1200,"reservedMs":0,"remainingMs":7198800,"requestCount":1}"""
+        val usage = """{"contractVersion":1,"available":true,"policyVersion":"account-asr-monthly-v1","period":"2026-11","plan":"plus","limitMs":7200000,"usedMs":1200,"reservedMs":0,"remainingMs":7198800,"requestCount":1,"consent":{"granted":false,"policyVersion":null,"recordedAt":null}}"""
         val transport = RecordingTransport { request ->
-            if (request.method == "POST") ApiResponse(200, transcript) else ApiResponse(200, usage)
+            when {
+                request.path.endsWith("/transcriptions") -> ApiResponse(200, transcript)
+                request.path.endsWith("/asr/consent") && request.body?.contains("\"accept\"") == true ->
+                    ApiResponse(200, """{"contractVersion":1,"policyVersion":"account-asr-third-party-processing-v1","consent":{"granted":true,"policyVersion":"account-asr-third-party-processing-v1","recordedAt":"2026-11-10T00:00:00Z"}}""")
+                request.path.endsWith("/asr/consent") ->
+                    ApiResponse(200, """{"contractVersion":1,"policyVersion":"account-asr-third-party-processing-v1","consent":{"granted":false,"policyVersion":null,"recordedAt":"2026-11-10T00:00:00Z"}}""")
+                else -> ApiResponse(200, usage)
+            }
         }
         val credentials = FakeAccountCredentialStore("rac_active")
         val metadata = FakeAccountSessionMetadataStore("adev_test", AccountSessionMetadata(
@@ -519,6 +526,14 @@ class AccountSessionManagerTest {
         val accountUsage = manager.getAccountAsrUsage()
         assertEquals(7_198_800L, accountUsage.remainingMs)
         assertEquals("/v1/owner-auth/account/asr/usage", transport.requests[1].path)
+
+        val granted = manager.setAccountAsrConsent(accepted = true)
+        assertTrue(granted.granted)
+        assertEquals("/v1/owner-auth/account/asr/consent", transport.requests[2].path)
+        assertTrue(transport.requests[2].body!!.contains("account-asr-third-party-processing-v1"))
+        val revoked = manager.setAccountAsrConsent(accepted = false)
+        assertEquals(false, revoked.granted)
+        assertTrue(transport.requests[3].body!!.contains("\"revoke\""))
     }
 
     @Test

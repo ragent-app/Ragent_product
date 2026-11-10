@@ -214,6 +214,9 @@ sealed interface WorkbenchEvent {
     data object ToggleVoiceInput : WorkbenchEvent
     data object CancelVoiceInput : WorkbenchEvent
     data class SelectVoiceChoice(val choice: String) : WorkbenchEvent
+    data object AcceptCloudVoiceConsent : WorkbenchEvent
+    data object DeclineCloudVoiceConsent : WorkbenchEvent
+    data object RevokeCloudVoiceConsent : WorkbenchEvent
     data class SetComputerVoiceEnabled(val targetId: String, val enabled: Boolean) : WorkbenchEvent
     data class InstallComputerVoice(val targetId: String) : WorkbenchEvent
     data object RefreshVoiceDevices : WorkbenchEvent

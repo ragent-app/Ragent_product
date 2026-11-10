@@ -515,9 +515,37 @@ export async function startAccountsServer(options = {}) {
   const basePath = new URL(serverOptions.publicBaseUrl).pathname.replace(/\/+$/, '');
   const asrTranscriptionPath = '/v1/owner-auth/account/asr/transcriptions';
   const asrUsagePath = '/v1/owner-auth/account/asr/usage';
+  const asrConsentPath = '/v1/owner-auth/account/asr/consent';
   const asrPath = (path) => [...new Set([path, ...(basePath && basePath !== '/' ? [`${basePath}${path}`] : [])])];
   fastify.addContentTypeParser('audio/wav', { parseAs: 'buffer', bodyLimit: ACCOUNT_ASR_MAX_AUDIO_BYTES },
     (_request, body, done) => done(null, body));
+  for (const path of asrPath(asrConsentPath)) {
+    fastify.post(path, { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async (request, reply) => {
+      reply.headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+      if (!app.asrService || app.asrStatus === 'unavailable') {
+        return reply.code(503).send({ code: 'asr_unavailable' });
+      }
+      const body = request.body;
+      if (!body || Array.isArray(body) || typeof body !== 'object'
+        || Object.keys(body).some((key) => !['action', 'policyVersion'].includes(key))
+        || !['accept', 'revoke'].includes(body.action)
+        || (body.action === 'accept' && typeof body.policyVersion !== 'string')
+        || (body.action === 'revoke' && body.policyVersion !== undefined && typeof body.policyVersion !== 'string')) {
+        return reply.code(400).send({ code: 'asr_consent_invalid' });
+      }
+      const authorization = request.headers.authorization || '';
+      const credential = /^Bearer\s+(.+)$/i.exec(authorization)?.[1] || '';
+      try {
+        const result = await app.asrService.setConsent({ credential, action: body.action,
+          policyVersion: body.policyVersion || '' });
+        return reply.code(200).send(result);
+      } catch (error) {
+        const status = Number.isInteger(error?.statusCode) ? error.statusCode : 503;
+        const safeStatus = status >= 400 && status <= 599 ? status : 503;
+        return reply.code(safeStatus).send({ code: typeof error?.code === 'string' ? error.code : 'asr_unavailable' });
+      }
+    });
+  }
   for (const path of asrPath(asrTranscriptionPath)) {
     fastify.post(path, { bodyLimit: ACCOUNT_ASR_MAX_AUDIO_BYTES,
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request, reply) => {

@@ -17,7 +17,11 @@
     <string name="voice_cloud_retry_new_recording">Cet enregistrement a déjà été traité. Faites un nouvel enregistrement si vous avez encore besoin d’une transcription.</string>
     <string name="voice_cloud_outcome_uncertain">Résultat incertain. Cet enregistrement ne sera pas renvoyé et ses minutes peuvent rester réservées. Vérifiez l’utilisation avant de réessayer.</string>
     <string name="voice_cloud_sign_in_required">Connectez-vous à votre compte Ragent pour utiliser la reconnaissance dans le cloud.</string>
-    <string name="voice_cloud_upload_disclosure">La reconnaissance dans le cloud envoie cet enregistrement à Ragent Accounts et ElevenLabs pour le transcrire. Ragent ne conserve pas durablement l’audio ni le texte, mais ElevenLabs peut les conserver selon sa politique de données. Le texte est ajouté uniquement au brouillon et n’est jamais envoyé automatiquement.</string>
+    <string name="voice_cloud_upload_disclosure">Pour transcrire votre voix, cet enregistrement est envoyé depuis ce téléphone à ElevenLabs via Ragent Accounts. Ragent ne stocke ni les enregistrements ni les transcriptions dans sa base de données ; la transcription peut rester brièvement en mémoire serveur pour permettre une nouvelle tentative. ElevenLabs peut conserver ces données selon sa politique. Ragent conserve une preuve minimale de votre choix pendant cinq ans au maximum, y compris après la suppression du compte. Le texte est ajouté uniquement au brouillon et n’est jamais envoyé automatiquement.</string>
+    <string name="voice_cloud_consent_title">Autoriser la reconnaissance vocale dans le cloud ?</string>
+    <string name="voice_cloud_consent_accept">Autoriser et continuer</string>
+    <string name="voice_cloud_consent_decline">Pas maintenant</string>
+    <string name="voice_cloud_consent_revoke">Retirer le consentement vocal cloud</string>
     <string name="voice_computers_section">Ordinateurs associés</string>
     <string name="voice_phone_unsupported">La reconnaissance vocale sur l’appareil est indisponible sur ce téléphone</string>
     <string name="voice_phone_ready">Reconnaissance sur l’appareil disponible</string>

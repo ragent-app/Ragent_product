@@ -4,6 +4,7 @@ import {
   ACCOUNT_ASR_MODEL,
   ACCOUNT_ASR_PRICE_VERSION,
   ACCOUNT_ASR_PROVIDER,
+  ACCOUNT_ASR_CONSENT_POLICY_VERSION,
   accountAsrPeriodStart,
   estimateAccountAsrCostMicroUsd,
   normalizeAccountAsrPeriod,
@@ -40,7 +41,8 @@ export function createAccountAsrService({
   maxConcurrentPerAccount = 2,
 } = {}) {
   if (typeof authenticateAccount !== 'function') throw new TypeError('Account authentication is required');
-  if (!repository || typeof repository.reserve !== 'function' || typeof repository.getUsage !== 'function') {
+  if (!repository || typeof repository.reserve !== 'function' || typeof repository.getUsage !== 'function'
+    || typeof repository.getConsent !== 'function' || typeof repository.setConsent !== 'function') {
     throw new TypeError('An ASR usage repository is required');
   }
   const resultCache = new Map();
@@ -57,7 +59,10 @@ export function createAccountAsrService({
     const principal = await authenticateAccount({ credential });
     const period = normalizeAccountAsrPeriod(rawPeriod, clock());
     const limits = resolveAccountAsrLimits(principal.plan, env);
-    const usage = await repository.getUsage({ accountId: principal.accountId, periodStart: `${period}-01` });
+    const [usage, consent] = await Promise.all([
+      repository.getUsage({ accountId: principal.accountId, periodStart: `${period}-01` }),
+      repository.getConsent({ accountId: principal.accountId }),
+    ]);
     const remainingMs = Math.max(0, limits.monthlyLimitMs - usage.usedMs - usage.reservedMs);
     return {
       contractVersion: 1,
@@ -70,7 +75,36 @@ export function createAccountAsrService({
       reservedMs: usage.reservedMs,
       remainingMs,
       requestCount: usage.requestCount,
+      consent: consentDto(consent),
     };
+  }
+
+  function consentDto(record) {
+    const current = record?.action === 'accepted'
+      && record.policyVersion === ACCOUNT_ASR_CONSENT_POLICY_VERSION;
+    return {
+      granted: current,
+      policyVersion: current ? record.policyVersion : null,
+      recordedAt: record?.occurredAt || null,
+    };
+  }
+
+  async function setConsent({ credential = '', action = '', policyVersion = '' } = {}) {
+    if (!['accept', 'revoke'].includes(action)) throw asrError('asr_consent_action_invalid', 400);
+    if (action === 'accept' && policyVersion !== ACCOUNT_ASR_CONSENT_POLICY_VERSION) {
+      throw asrError('asr_consent_policy_invalid', 400);
+    }
+    const principal = await authenticateAccount({ credential });
+    const record = await repository.setConsent({
+      accountId: principal.accountId,
+      deviceId: principal.deviceId,
+      action: action === 'accept' ? 'accepted' : 'revoked',
+      policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION,
+    });
+    audit({ event: action === 'accept' ? 'account_asr.consent_granted' : 'account_asr.consent_revoked',
+      policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+    return { contractVersion: 1, policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION,
+      consent: consentDto(record) };
   }
 
   async function runMaintenance() {
@@ -82,17 +116,20 @@ export function createAccountAsrService({
         ? await repository.expireStaleReservations({ olderThanMs: 120_000, batchSize: 500 }) : 0;
       const purgedRequests = typeof repository.purgeTerminalRequests === 'function'
         ? await repository.purgeTerminalRequests({ olderThanMs: ASR_REQUEST_RETENTION_MS, batchSize: 1_000 }) : 0;
-      if (unknownOutcomes || expiredReservations || purgedRequests) {
-        audit({ event: 'account_asr.maintenance', unknownOutcomes, expiredReservations, purgedRequests });
+      const purgedConsentEvents = typeof repository.purgeExpiredConsents === 'function'
+        ? await repository.purgeExpiredConsents({ batchSize: 1_000 }) : 0;
+      if (unknownOutcomes || expiredReservations || purgedRequests || purgedConsentEvents) {
+        audit({ event: 'account_asr.maintenance', unknownOutcomes, expiredReservations, purgedRequests, purgedConsentEvents });
       }
-      return { unknownOutcomes, expiredReservations, purgedRequests };
+      return { unknownOutcomes, expiredReservations, purgedRequests, purgedConsentEvents };
     })();
     try { return await maintenancePromise; } finally { maintenancePromise = null; }
   }
 
   function startMaintenance() {
     if (maintenanceTimer || (typeof repository.expireStaleReservations !== 'function'
-      && typeof repository.purgeTerminalRequests !== 'function')) return;
+      && typeof repository.purgeTerminalRequests !== 'function'
+      && typeof repository.purgeExpiredConsents !== 'function')) return;
     runMaintenance().catch((error) => audit({ event: 'account_asr.maintenance_failed',
       code: typeof error?.code === 'string' ? error.code : 'maintenance_unavailable' }));
     maintenanceTimer = setInterval(() => {
@@ -116,6 +153,10 @@ export function createAccountAsrService({
     }
     const inspected = inspectAccountAsrWav(audio);
     const principal = await authenticateAccount({ credential });
+    const consent = await repository.getConsent({ accountId: principal.accountId });
+    if (consent?.action !== 'accepted' || consent.policyVersion !== ACCOUNT_ASR_CONSENT_POLICY_VERSION) {
+      throw asrError('asr_consent_required', 403, 'Explicit consent is required before cloud speech recognition.');
+    }
     const periodStart = accountAsrPeriodStart(clock());
     const limits = resolveAccountAsrLimits(principal.plan, env);
     const audioSha256 = createHash('sha256').update(audio).digest('hex');
@@ -216,7 +257,7 @@ export function createAccountAsrService({
     try { return await operation; } finally { inFlight.delete(cacheKey); }
   }
 
-  return Object.freeze({ enabled: Boolean(enabled && typeof transcribe === 'function'), getUsage, transcribeAudio,
+  return Object.freeze({ enabled: Boolean(enabled && typeof transcribe === 'function'), getUsage, setConsent, transcribeAudio,
     startMaintenance, runMaintenance, close,
     checkReady: typeof repository.checkReady === 'function' ? () => repository.checkReady() : async () => true });
 }

@@ -17,7 +17,11 @@
     <string name="voice_cloud_retry_new_recording">这段录音已处理。如仍需转写，请重新录音。</string>
     <string name="voice_cloud_outcome_uncertain">无法确认识别结果。这段录音不会再次发送，用量可能仍处于预留状态；请先查看用量再重试。</string>
     <string name="voice_cloud_sign_in_required">请登录 Ragent 账号后使用云端识别。</string>
-    <string name="voice_cloud_upload_disclosure">云端识别会将本次录音发送至 Ragent Accounts 和 ElevenLabs 进行转写。Ragent 不会持久保存音频或转写文本；ElevenLabs 可能按其数据政策保留这些内容。识别文字只写入草稿，不会自动发送。</string>
+    <string name="voice_cloud_upload_disclosure">为了转写语音，本次录音会从手机经由 Ragent Accounts 发送给 ElevenLabs。Ragent 不会将录音或转写文本存入数据库；为支持重试，转写文本可能在服务器内存中短暂保留。ElevenLabs 可能按其数据政策保留这些内容。Ragent 会将你的选择记录最多保留五年，即使删除账号也会保留。识别文字只写入草稿，不会自动发送。</string>
+    <string name="voice_cloud_consent_title">允许使用云端语音识别？</string>
+    <string name="voice_cloud_consent_accept">允许并继续</string>
+    <string name="voice_cloud_consent_decline">暂不允许</string>
+    <string name="voice_cloud_consent_revoke">撤回云端语音同意</string>
     <string name="voice_computers_section">已配对电脑</string>
     <string name="voice_phone_unsupported">此手机不支持设备端语音识别</string>
     <string name="voice_phone_ready">设备端识别可用</string>

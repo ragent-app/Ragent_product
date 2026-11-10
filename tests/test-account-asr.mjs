@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createElevenLabsScribeTranscriber } from '../accounts/asr-elevenlabs.mjs';
 import { ACCOUNT_ASR_MAX_AUDIO_BYTES, inspectAccountAsrWav } from '../accounts/asr-audio.mjs';
-import { accountAsrPeriodStart, estimateAccountAsrCostMicroUsd, resolveAccountAsrLimits } from '../accounts/asr-policy.mjs';
+import { accountAsrPeriodStart, estimateAccountAsrCostMicroUsd, resolveAccountAsrLimits,
+  ACCOUNT_ASR_CONSENT_POLICY_VERSION } from '../accounts/asr-policy.mjs';
 import { createAccountAsrService } from '../accounts/asr-service.mjs';
 import { createAccountAsrPostgresStore } from '../accounts/asr-postgres-store.mjs';
 import { startAccountsServer } from '../accounts/server.mjs';
@@ -23,7 +24,7 @@ function wav(durationMs = 1000, fill = 0) {
 }
 
 class MemoryRepository {
-  constructor() { this.requests = new Map(); this.usage = new Map(); }
+  constructor() { this.requests = new Map(); this.usage = new Map(); this.consents = new Map(); }
   usageKey(accountId, periodStart) { return `${accountId}:${periodStart}`; }
   async reserve(input) {
     const usageKey = this.usageKey(input.accountId, input.periodStart);
@@ -79,6 +80,15 @@ class MemoryRepository {
     return this.usage.get(this.usageKey(accountId, periodStart))
       || { usedMs: 0, reservedMs: 0, providerCostMicroUsd: 0, requestCount: 0 };
   }
+  async getConsent({ accountId }) { return this.consents.get(accountId) || null; }
+  async setConsent({ accountId, deviceId, action, policyVersion }) {
+    const prior = this.consents.get(accountId);
+    if (prior?.action === action && prior.policyVersion === policyVersion) return prior;
+    if (action === 'revoked' && !prior) return null;
+    const record = { action, policyVersion, deviceId, occurredAt: new Date(Date.UTC(2026, 10, 10)).toISOString() };
+    this.consents.set(accountId, record);
+    return record;
+  }
   async expireStaleReservations() { return 0; }
   async markStaleProcessingUnknown() { return 0; }
   async purgeTerminalRequests() { return 0; }
@@ -132,6 +142,7 @@ await assert.rejects(() => oversizedProviderResponse(audio), { code: 'asr_provid
 // Keep the ASR repository tenant-safe and free of aggregate/request lock-order
 // inversions that can deadlock an idempotent retry against settlement.
 const postgresCalls = [];
+let postgresConsentRow = null;
 const postgresClient = {
   async query(sql, params = []) {
     const normalized = String(sql).replace(/\s+/g, ' ').trim();
@@ -147,10 +158,18 @@ const postgresClient = {
     if (normalized.includes('select reserved_duration_ms, period_start from account_asr_requests')) {
       return { rows: [{ reserved_duration_ms: '1000', period_start: '2026-11-01' }] };
     }
+    if (normalized.includes('select action, policy_version, occurred_at from account_asr_consent_events')) {
+      return { rows: postgresConsentRow ? [postgresConsentRow] : [] };
+    }
+    if (normalized.startsWith('insert into account_asr_consent_events')) {
+      postgresConsentRow = { action: params[3], policy_version: params[2], occurred_at: new Date(Date.UTC(2026, 10, 10)) };
+      return { rowCount: 1, rows: [postgresConsentRow] };
+    }
     if (normalized.includes('select used_audio_ms, reserved_audio_ms, request_count from account_asr_usage')) {
       return { rows: [{ used_audio_ms: '1000', reserved_audio_ms: '0', request_count: '1' }] };
     }
-    if (normalized.includes('to_regclass')) return { rows: [{ usage_table: 'account_asr_usage', requests_table: 'account_asr_requests' }] };
+    if (normalized.includes('to_regclass')) return { rows: [{ usage_table: 'account_asr_usage',
+      requests_table: 'account_asr_requests', consent_events_table: 'account_asr_consent_events' }] };
     if (normalized.startsWith('update account_asr_requests set state=') || normalized.startsWith('update account_asr_usage set')) {
       return { rowCount: 1, rows: [] };
     }
@@ -191,6 +210,31 @@ const failRequestLock = postgresCalls.findIndex((call) => call.sql.includes('sel
 assert.ok(failUsageLock >= 0 && failUsageLock < failRequestLock,
   'failure settlement must use the same lock order');
 
+postgresCalls.length = 0;
+const pgAccepted = await pgStore.setConsent({ accountId: 'acct_pg_test', deviceId: 'adev_pg_test',
+  action: 'accepted', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+assert.equal(pgAccepted.action, 'accepted');
+const consentLock = postgresCalls.findIndex((call) => call.sql.includes('pg_advisory_xact_lock'));
+const consentRead = postgresCalls.findIndex((call) => call.sql.includes('select action, policy_version, occurred_at'));
+const consentInsert = postgresCalls.findIndex((call) => call.sql.startsWith('insert into account_asr_consent_events'));
+assert.ok(consentLock >= 0 && consentLock < consentRead && consentRead < consentInsert,
+  'consent mutations must serialize before reading and appending account history');
+await pgStore.setConsent({ accountId: 'acct_pg_test', deviceId: 'adev_pg_test',
+  action: 'accepted', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+assert.equal(postgresCalls.filter((call) => call.sql.startsWith('insert into account_asr_consent_events')).length, 1,
+  'repeated acceptance of the same policy must be idempotent');
+const pgRevoked = await pgStore.setConsent({ accountId: 'acct_pg_test', deviceId: 'adev_pg_test',
+  action: 'revoked', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+assert.equal(pgRevoked.action, 'revoked');
+assert.equal((await pgStore.getConsent({ accountId: 'acct_pg_test' })).action, 'revoked');
+postgresCalls.length = 0;
+await pgStore.purgeExpiredConsents();
+assert.ok(postgresCalls.some((call) => call.sql.includes('retain_until <= now()')),
+  'consent events may be deleted only after their five-year retention deadline');
+await pgStore.checkReady();
+assert.ok(postgresCalls.some((call) => call.sql.includes("to_regclass('account_asr_consent_events')")),
+  'ASR readiness requires the consent evidence schema');
+
 const repository = new MemoryRepository();
 const auditEvents = [];
 let providerCalls = 0;
@@ -208,6 +252,14 @@ const asrService = createAccountAsrService({
   audit: (event) => auditEvents.push(event),
 });
 const requestId = '2a596b38-4340-4de6-bff6-9b6538944c4f';
+await assert.rejects(() => asrService.transcribeAudio({ credential, requestId, audio }),
+  { code: 'asr_consent_required', statusCode: 403 });
+await assert.rejects(() => asrService.setConsent({ credential, action: 'accept', policyVersion: 'old-policy' }),
+  { code: 'asr_consent_policy_invalid', statusCode: 400 });
+const acceptedConsent = await asrService.setConsent({ credential, action: 'accept',
+  policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+assert.equal(acceptedConsent.consent.granted, true);
+assert.equal(acceptedConsent.policyVersion, ACCOUNT_ASR_CONSENT_POLICY_VERSION);
 const result = await asrService.transcribeAudio({ credential, requestId, audio });
 assert.equal(result.text, '测试语音');
 assert.equal(providerCalls, 1);
@@ -231,15 +283,24 @@ const usage = await asrService.getUsage({ credential });
 assert.equal(usage.usedMs, 1000);
 assert.equal(usage.reservedMs, 0);
 assert.equal(usage.remainingMs, 59_000);
+assert.equal(usage.consent.granted, true);
 assert.equal(Object.hasOwn(usage, 'providerCostMicroUsd'), false,
   'customer usage must not expose Ragent provider cost');
 assert.equal(repository.usage.get('acct_asr_test:2026-11-01').providerCostMicroUsd, 62,
   'estimated provider cost remains available to Accounts operations but is not returned to clients');
-assert.deepEqual(await asrService.runMaintenance(), { unknownOutcomes: 0, expiredReservations: 0, purgedRequests: 0 });
+assert.deepEqual(await asrService.runMaintenance(), { unknownOutcomes: 0, expiredReservations: 0,
+  purgedRequests: 0, purgedConsentEvents: 0 });
+await asrService.setConsent({ credential, action: 'revoke' });
+assert.equal((await asrService.getUsage({ credential })).consent.granted, false);
+await assert.rejects(() => asrService.transcribeAudio({ credential, requestId, audio }),
+  { code: 'asr_consent_required', statusCode: 403 });
+assert.equal(providerCalls, 1, 'revocation must block even a cached transcript replay');
 assert.equal(JSON.stringify(auditEvents).includes('测试语音'), false, 'transcripts must not be written to audit events');
 assert.equal(JSON.stringify(auditEvents).includes(credential), false, 'credentials must not be written to audit events');
 
 const unknownRepository = new MemoryRepository();
+await unknownRepository.setConsent({ accountId: 'acct_unknown', deviceId: 'adev', action: 'accepted',
+  policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
 let uncertainCalls = 0;
 const uncertainService = createAccountAsrService({ authenticateAccount: async () => ({ accountId: 'acct_unknown', deviceId: 'adev', plan: 'free' }),
   repository: unknownRepository, transcribe: async () => { uncertainCalls += 1; throw Object.assign(new Error('timeout'), { code: 'asr_provider_outcome_unknown', statusCode: 503 }); },
@@ -266,22 +327,22 @@ const makeHttpRequest = (port, { method, path, headers = {}, body } = {}) => new
 });
 
 let receivedAudio = null;
-const injectedService = {
+let httpProviderCalls = 0;
+const injectedService = createAccountAsrService({
+  authenticateAccount: async ({ credential: presented }) => {
+    assert.equal(presented, credential);
+    return { accountId: 'acct_http_asr_test', deviceId: 'adev_http_asr_test', plan: 'free' };
+  },
+  repository: new MemoryRepository(),
+  transcribe: async (requestAudio) => {
+    receivedAudio = requestAudio;
+    httpProviderCalls += 1;
+    return { text: '真实 HTTP 音频', languageCode: 'zh' };
+  },
   enabled: true,
-  async checkReady() { return true; },
-  async transcribeAudio(input) {
-    receivedAudio = input.audio;
-    assert.equal(input.credential, credential);
-    assert.equal(input.requestId, requestId);
-    return { contractVersion: 1, requestId, text: '真实 HTTP 音频', languageCode: 'zh', durationMs: 1000 };
-  },
-  async getUsage(input) {
-    assert.equal(input.credential, credential);
-    return { contractVersion: 1, available: true, policyVersion: 'account-asr-monthly-v1',
-      period: '2026-11', plan: 'free', limitMs: 60_000, usedMs: 1000, reservedMs: 0,
-      remainingMs: 59_000, requestCount: 1 };
-  },
-};
+  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  clock: () => Date.UTC(2026, 10, 10),
+});
 
 const server = await startAccountsServer({ host: '127.0.0.1', port: 0, logger: { level: 'silent' },
   dataFile: join(tempDir, 'accounts.json'), signingKeyFile: join(tempDir, 'signing-key.json'),
@@ -289,20 +350,57 @@ const server = await startAccountsServer({ host: '127.0.0.1', port: 0, logger: {
   allowInsecurePublicBaseUrl: true, asrService: injectedService });
 try {
   const port = server.server.address().port;
+  const blocked = await makeHttpRequest(port, { method: 'POST', path: '/accounts/v1/owner-auth/account/asr/transcriptions',
+    headers: { authorization: `Bearer ${credential}`, 'content-type': 'audio/wav', 'idempotency-key': requestId }, body: audio });
+  assert.equal(blocked.status, 403);
+  assert.equal(JSON.parse(blocked.body).code, 'asr_consent_required');
+  assert.equal(httpProviderCalls, 0, 'the HTTP route must not reach the provider before consent');
+
+  const usageResponse = await makeHttpRequest(port, { method: 'GET',
+    path: '/accounts/v1/owner-auth/account/asr/usage?period=2026-11', headers: { authorization: `Bearer ${credential}` } });
+  assert.equal(usageResponse.status, 200);
+  const usageBody = JSON.parse(usageResponse.body);
+  assert.equal(usageBody.remainingMs, 60_000);
+  assert.equal(usageBody.consent.granted, false);
+  assert.equal(Object.hasOwn(usageBody, 'providerCostMicroUsd'), false,
+    'the public usage contract must not expose Ragent provider costs');
+
+  const consentResponse = await makeHttpRequest(port, { method: 'POST',
+    path: '/accounts/v1/owner-auth/account/asr/consent',
+    headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
+    body: Buffer.from(JSON.stringify({ action: 'accept', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION })) });
+  assert.equal(consentResponse.status, 200);
+  assert.equal(JSON.parse(consentResponse.body).consent.granted, true);
+  assert.equal(consentResponse.headers['cache-control'], 'no-store');
+  const grantedUsage = await makeHttpRequest(port, { method: 'GET',
+    path: '/accounts/v1/owner-auth/account/asr/usage?period=2026-11',
+    headers: { authorization: `Bearer ${credential}` } });
+  assert.equal(JSON.parse(grantedUsage.body).consent.granted, true);
+
   const post = await makeHttpRequest(port, { method: 'POST', path: '/accounts/v1/owner-auth/account/asr/transcriptions',
     headers: { authorization: `Bearer ${credential}`, 'content-type': 'audio/wav', 'idempotency-key': requestId }, body: audio });
   assert.equal(post.status, 200);
   assert.equal(JSON.parse(post.body).text, '真实 HTTP 音频');
   assert.equal(receivedAudio.equals(audio), true, 'Fastify must pass raw WAV bytes without JSON reconstruction');
   assert.equal(post.headers['cache-control'], 'no-store');
-
-  const usageResponse = await makeHttpRequest(port, { method: 'GET',
-    path: '/accounts/v1/owner-auth/account/asr/usage?period=2026-11', headers: { authorization: `Bearer ${credential}` } });
-  assert.equal(usageResponse.status, 200);
-  const usageBody = JSON.parse(usageResponse.body);
-  assert.equal(usageBody.remainingMs, 59_000);
-  assert.equal(Object.hasOwn(usageBody, 'providerCostMicroUsd'), false,
-    'the public usage contract must not expose Ragent provider costs');
+  assert.equal(httpProviderCalls, 1);
+  const invalidConsent = await makeHttpRequest(port, { method: 'POST',
+    path: '/accounts/v1/owner-auth/account/asr/consent',
+    headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
+    body: Buffer.from(JSON.stringify({ action: 'accept', policyVersion: 'stale', unexpected: true })) });
+  assert.equal(invalidConsent.status, 400);
+  const revokeResponse = await makeHttpRequest(port, { method: 'POST',
+    path: '/accounts/v1/owner-auth/account/asr/consent',
+    headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
+    body: Buffer.from(JSON.stringify({ action: 'revoke' })) });
+  assert.equal(JSON.parse(revokeResponse.body).consent.granted, false);
+  const replayAfterRevoke = await makeHttpRequest(port, { method: 'POST',
+    path: '/accounts/v1/owner-auth/account/asr/transcriptions',
+    headers: { authorization: `Bearer ${credential}`, 'content-type': 'audio/wav', 'idempotency-key': requestId },
+    body: audio });
+  assert.equal(replayAfterRevoke.status, 403);
+  assert.equal(JSON.parse(replayAfterRevoke.body).code, 'asr_consent_required');
+  assert.equal(httpProviderCalls, 1, 'revocation blocks cached transcripts on the HTTP route');
 
   const oversized = await makeHttpRequest(port, { method: 'POST', path: '/accounts/v1/owner-auth/account/asr/transcriptions',
     headers: { authorization: `Bearer ${credential}`, 'content-type': 'audio/wav', 'idempotency-key': requestId },

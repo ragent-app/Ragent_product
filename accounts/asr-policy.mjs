@@ -1,4 +1,5 @@
 export const ACCOUNT_ASR_POLICY_VERSION = 'account-asr-monthly-v1';
+export const ACCOUNT_ASR_CONSENT_POLICY_VERSION = 'account-asr-third-party-processing-v1';
 export const ACCOUNT_ASR_PROVIDER = 'elevenlabs';
 export const ACCOUNT_ASR_MODEL = 'scribe_v2';
 export const ACCOUNT_ASR_PRICE_VERSION = 'elevenlabs-scribe-v2-2026-11';

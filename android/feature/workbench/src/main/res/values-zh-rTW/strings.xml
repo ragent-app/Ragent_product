@@ -17,7 +17,11 @@
     <string name="voice_cloud_retry_new_recording">這段錄音已處理。如仍需要轉寫，請重新錄音。</string>
     <string name="voice_cloud_outcome_uncertain">無法確認辨識結果。這段錄音不會再次傳送，用量可能仍處於預留狀態；請先查看用量再重試。</string>
     <string name="voice_cloud_sign_in_required">請登入 Ragent 帳號後使用雲端辨識。</string>
-    <string name="voice_cloud_upload_disclosure">雲端辨識會將本次錄音傳送至 Ragent Accounts 和 ElevenLabs 進行轉寫。Ragent 不會持久保存音訊或轉寫文字；ElevenLabs 可能依其資料政策保留這些內容。辨識文字只會寫入草稿，不會自動傳送。</string>
+    <string name="voice_cloud_upload_disclosure">為了轉寫語音，這段錄音會從手機經由 Ragent Accounts 傳送至 ElevenLabs。Ragent 不會將錄音或轉寫文字存入資料庫；為支援重試，轉寫文字可能會在伺服器記憶體中短暫保留。ElevenLabs 可能依其資料政策保留這些內容。Ragent 會將你的選擇紀錄保留最長五年，即使刪除帳號也會保留。辨識文字只會寫入草稿，不會自動傳送。</string>
+    <string name="voice_cloud_consent_title">允許使用雲端語音辨識？</string>
+    <string name="voice_cloud_consent_accept">允許並繼續</string>
+    <string name="voice_cloud_consent_decline">暫不允許</string>
+    <string name="voice_cloud_consent_revoke">撤回雲端語音同意</string>
     <string name="voice_computers_section">已配對電腦</string>
     <string name="voice_phone_unsupported">此手機無法使用裝置端語音辨識</string>
     <string name="voice_phone_ready">裝置端辨識可用</string>

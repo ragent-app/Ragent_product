@@ -3350,13 +3350,17 @@ private fun ChatSurface(
                         onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("cloud")) },
                         modifier = Modifier.testTag("voice-route-cloud"),
                     )
-                    if (state.voice.choice == "cloud") {
-                        Text(
-                            text = stringResource(R.string.voice_cloud_upload_disclosure),
-                            color = colors.secondaryContent,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                        )
+                    if (state.voice.cloudConsentGranted) {
+                        androidx.compose.material3.TextButton(
+                            onClick = { onEvent(WorkbenchEvent.RevokeCloudVoiceConsent) },
+                            enabled = state.voice.cloudConsentGranted && !state.voice.cloudConsentBusy,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                contentColor = colors.secondaryContent,
+                            ),
+                        ) {
+                            Text(stringResource(R.string.voice_cloud_consent_revoke))
+                        }
                     }
                     state.voice.computers.forEach { computer ->
                         SettingsChoiceRow(
@@ -3373,6 +3377,41 @@ private fun ChatSurface(
                             onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("computer:${computer.targetId}")) },
                             modifier = Modifier.testTag("voice-route-computer-${computer.targetId}"),
                         )
+                    }
+                }
+            },
+        )
+    }
+
+    if (state.voice.cloudConsentPrompt) {
+        com.andysagent.agentoc.core.designsystem.AgentoAlertDialog(
+            onDismissRequest = { onEvent(WorkbenchEvent.DeclineCloudVoiceConsent) },
+            modifier = Modifier.testTag("voice-cloud-consent-dialog"),
+            title = { Text(stringResource(R.string.voice_cloud_consent_title)) },
+            text = { Text(stringResource(R.string.voice_cloud_upload_disclosure)) },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { onEvent(WorkbenchEvent.DeclineCloudVoiceConsent) },
+                    enabled = !state.voice.cloudConsentBusy,
+                ) {
+                    Text(stringResource(R.string.voice_cloud_consent_decline))
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { onEvent(WorkbenchEvent.AcceptCloudVoiceConsent) },
+                    enabled = !state.voice.cloudConsentBusy,
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = colors.accentPrimary,
+                    ),
+                ) {
+                    if (state.voice.cloudConsentBusy) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(stringResource(R.string.voice_cloud_consent_accept))
                     }
                 }
             },

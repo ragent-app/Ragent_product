@@ -17,7 +17,11 @@
     <string name="voice_cloud_retry_new_recording">이 녹음은 이미 처리되었습니다. 전사 결과가 더 필요하면 새로 녹음해 주세요.</string>
     <string name="voice_cloud_outcome_uncertain">결과를 확인할 수 없습니다. 이 녹음은 다시 전송하지 않으며 사용 시간이 예약 상태로 남을 수 있습니다. 다시 시도하기 전에 사용량을 확인하세요.</string>
     <string name="voice_cloud_sign_in_required">클라우드 인식을 사용하려면 Ragent 계정에 로그인하세요.</string>
-    <string name="voice_cloud_upload_disclosure">클라우드 인식을 선택하면 이 녹음이 전사를 위해 Ragent Accounts와 ElevenLabs로 전송됩니다. Ragent는 오디오나 전사 내용을 영구 저장하지 않지만, ElevenLabs는 데이터 정책에 따라 보관할 수 있습니다. 인식된 텍스트는 초안에만 추가되며 자동 전송되지 않습니다.</string>
+    <string name="voice_cloud_upload_disclosure">음성을 텍스트로 변환하기 위해 이 녹음은 휴대전화에서 Ragent Accounts를 거쳐 ElevenLabs로 전송됩니다. Ragent는 녹음이나 전사 내용을 데이터베이스에 저장하지 않지만 재시도를 위해 전사 내용을 서버 메모리에 잠시 보관할 수 있습니다. ElevenLabs는 데이터 정책에 따라 보관할 수 있습니다. Ragent는 선택 기록을 최대 5년간 보관하며 계정 삭제 후에도 유지됩니다. 인식된 텍스트는 초안에만 추가되며 자동 전송되지 않습니다.</string>
+    <string name="voice_cloud_consent_title">클라우드 음성 인식을 허용할까요?</string>
+    <string name="voice_cloud_consent_accept">허용하고 계속</string>
+    <string name="voice_cloud_consent_decline">지금은 허용 안 함</string>
+    <string name="voice_cloud_consent_revoke">클라우드 음성 인식 동의 철회</string>
     <string name="voice_computers_section">페어링된 컴퓨터</string>
     <string name="voice_phone_unsupported">이 휴대폰에서는 기기 내 음성 인식을 사용할 수 없습니다</string>
     <string name="voice_phone_ready">기기 내 인식을 사용할 수 있습니다</string>

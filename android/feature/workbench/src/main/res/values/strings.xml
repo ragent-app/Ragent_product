@@ -17,7 +17,11 @@
     <string name="voice_cloud_retry_new_recording">This recording was already processed. Start a new recording if you still need a transcript.</string>
     <string name="voice_cloud_outcome_uncertain">We could not confirm the result. This recording will not be sent again, and its minutes may stay reserved. Check usage before retrying.</string>
     <string name="voice_cloud_sign_in_required">Sign in to your Ragent account to use cloud recognition.</string>
-    <string name="voice_cloud_upload_disclosure">Cloud recognition sends this recording to Ragent Accounts and ElevenLabs for transcription. Ragent does not persist audio or transcripts; ElevenLabs may retain them under its data policy. The transcript is added to your draft only and is never sent automatically.</string>
+    <string name="voice_cloud_upload_disclosure">To transcribe your speech, this recording is sent from this phone through Ragent Accounts to ElevenLabs. Ragent does not store recordings or transcripts in its database; the transcript may remain briefly in server memory for retries. ElevenLabs may retain them under its data policy. Ragent keeps a minimal record of your choice for up to five years, including after account deletion. The transcript is added to your draft only and is never sent automatically.</string>
+    <string name="voice_cloud_consent_title">Allow cloud voice recognition?</string>
+    <string name="voice_cloud_consent_accept">Allow and continue</string>
+    <string name="voice_cloud_consent_decline">Not now</string>
+    <string name="voice_cloud_consent_revoke">Revoke cloud voice consent</string>
     <string name="voice_computers_section">Paired computers</string>
     <string name="voice_phone_unsupported">On-device speech recognition is unavailable on this phone</string>
     <string name="voice_phone_ready">On-device recognition is available</string>

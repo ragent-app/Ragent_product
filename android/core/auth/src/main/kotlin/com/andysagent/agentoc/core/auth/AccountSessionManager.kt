@@ -9,6 +9,9 @@ import com.andysagent.agentoc.core.protocol.AccountJoinAuthorizationRequest
 import com.andysagent.agentoc.core.protocol.AccountJoinAuthorizationResponse
 import com.andysagent.agentoc.core.protocol.AccountAsrTranscriptionDto
 import com.andysagent.agentoc.core.protocol.AccountAsrUsageDto
+import com.andysagent.agentoc.core.protocol.AccountAsrConsentResponseDto
+import com.andysagent.agentoc.core.protocol.AccountAsrConsentStateDto
+import com.andysagent.agentoc.core.protocol.ACCOUNT_ASR_CONSENT_POLICY_VERSION
 import com.andysagent.agentoc.core.protocol.AccountSessionCredentialDto
 import com.andysagent.agentoc.core.protocol.CompleteAccountSessionRequest
 import com.andysagent.agentoc.core.protocol.CompleteAccountSessionResponse
@@ -890,9 +893,35 @@ class AccountSessionManager(
             && listOf(usage.limitMs, usage.usedMs, usage.reservedMs, usage.remainingMs,
                 usage.requestCount).all { it >= 0 }
             && usage.remainingMs == (usage.limitMs - usage.usedMs - usage.reservedMs).coerceAtLeast(0)
+            && isValidAsrConsent(usage.consent)
         if (!valid) throw AccountSessionException(502, "asr_usage_invalid", "Accounts returned invalid speech recognition usage.")
         return usage
     }
+
+    suspend fun setAccountAsrConsent(accepted: Boolean): AccountAsrConsentStateDto {
+        ensureActiveCredential()
+        val body = if (accepted) {
+            json.encodeToString(mapOf("action" to "accept", "policyVersion" to ACCOUNT_ASR_CONSENT_POLICY_VERSION))
+        } else {
+            json.encodeToString(mapOf("action" to "revoke"))
+        }
+        val result = decode<AccountAsrConsentResponseDto>(executeAuthenticated(ApiRequest(
+            method = "POST",
+            path = "/v1/owner-auth/account/asr/consent",
+            body = body,
+            contentType = "application/json",
+        )))
+        if (result.contractVersion != 1 || result.policyVersion != ACCOUNT_ASR_CONSENT_POLICY_VERSION
+            || !isValidAsrConsent(result.consent)
+            || (accepted && !result.consent.granted) || (!accepted && result.consent.granted)) {
+            throw AccountSessionException(502, "asr_consent_invalid", "Accounts returned an invalid voice consent status.")
+        }
+        return result.consent
+    }
+
+    private fun isValidAsrConsent(consent: AccountAsrConsentStateDto): Boolean =
+        (!consent.granted || consent.policyVersion == ACCOUNT_ASR_CONSENT_POLICY_VERSION)
+            && (consent.recordedAt == null || runCatching { Instant.parse(consent.recordedAt) }.isSuccess)
 
     override suspend fun listOwnTurnConnections(afterConnectionId: String?): AccountTurnConnectionsPage {
         if (afterConnectionId != null && !isTurnReservationId(afterConnectionId)) {

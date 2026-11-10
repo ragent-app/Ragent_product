@@ -29,13 +29,13 @@ class VoiceLocalizationTest {
     fun cloudVoiceDisclosureNamesRecipientRetentionAndDraftHandlingInEveryRagentUiLocale() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val expectedDisclosure = mapOf(
-            "en" to listOf("Ragent Accounts", "ElevenLabs", "does not persist", "may retain", "draft only"),
-            "zh-CN" to listOf("Ragent Accounts", "ElevenLabs", "不会持久保存", "可能", "草稿"),
-            "zh-TW" to listOf("Ragent Accounts", "ElevenLabs", "不會持久保存", "可能", "草稿"),
-            "ja" to listOf("Ragent Accounts", "ElevenLabs", "永続保存しません", "保持する場合があります", "下書き"),
-            "ko" to listOf("Ragent Accounts", "ElevenLabs", "영구 저장하지 않지만", "보관할 수 있습니다", "초안"),
-            "fr" to listOf("Ragent Accounts", "ElevenLabs", "ne conserve pas durablement", "peut les conserver", "brouillon"),
-            "es" to listOf("Ragent Accounts", "ElevenLabs", "no conserva", "puede conservarlos", "borrador"),
+            "en" to listOf("Ragent Accounts", "ElevenLabs", "does not store", "may retain", "five years", "draft only"),
+            "zh-CN" to listOf("Ragent Accounts", "ElevenLabs", "存入数据库", "可能", "五年", "草稿"),
+            "zh-TW" to listOf("Ragent Accounts", "ElevenLabs", "不會將", "可能", "五年", "草稿"),
+            "ja" to listOf("Ragent Accounts", "ElevenLabs", "データベースに保存しません", "保持する場合があります", "5年間", "下書き"),
+            "ko" to listOf("Ragent Accounts", "ElevenLabs", "데이터베이스에 저장하지 않지만", "보관할 수 있습니다", "5년간", "초안"),
+            "fr" to listOf("Ragent Accounts", "ElevenLabs", "ne stocke ni", "peut conserver", "cinq ans", "brouillon"),
+            "es" to listOf("Ragent Accounts", "ElevenLabs", "no guarda", "puede conservar", "cinco años", "borrador"),
         )
         expectedDisclosure.forEach { (tag, markers) ->
             val localized = base.createConfigurationContext(
@@ -43,6 +43,8 @@ class VoiceLocalizationTest {
             ).resources
             val disclosure = localized.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_upload_disclosure)
             markers.forEach { marker -> assertTrue("$tag disclosure missing '$marker': $disclosure", disclosure.contains(marker, ignoreCase = true)) }
+            assertTrue(tag, localized.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_consent_accept).isNotBlank())
+            assertTrue(tag, localized.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_consent_revoke).isNotBlank())
         }
     }
 }
