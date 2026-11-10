@@ -26,44 +26,64 @@ data class VoiceUiState(
     val phoneAvailable: Boolean = false,
     val phoneSupported: Boolean = false,
     val phoneNativeLanguageSupported: Boolean? = null,
+    val cloudAvailable: Boolean = false,
+    val cloudLimitMs: Long = 0,
+    val cloudUsedMs: Long = 0,
+    val cloudReservedMs: Long = 0,
+    val cloudRemainingMs: Long = 0,
     val computers: List<VoiceComputerState> = emptyList(),
     val choice: String = "auto",
     val recording: Boolean = false,
     val processing: Boolean = false,
     val waveformLevel: Float = 0f,
     val operationTargetId: String? = null,
+    val bufferedCaptureActive: Boolean = false,
     val message: String? = null,
 ) {
-    fun choiceLabel(sessionTargetId: String?): String = when (val route = resolveVoiceDestination(
-        choice = choice,
-        sessionTargetId = sessionTargetId,
-        phoneAvailable = phoneAvailable,
-        computers = computers,
-    )) {
-        is VoiceDestination.Computer -> computers.firstOrNull { it.targetId == route.targetId }?.label ?: "Computer"
-        VoiceDestination.Phone -> "This phone"
-        is VoiceDestination.Unavailable -> "Unavailable"
+    fun choiceLabel(
+        sessionTargetId: String?,
+        phoneLabel: String = "This phone",
+        cloudLabel: String = "Cloud recognition",
+        computerFallbackLabel: String = "Computer",
+    ): String {
+        if (choice == "cloud") return cloudLabel
+        return when (val route = resolveVoiceDestination(
+            choice = choice,
+            sessionTargetId = sessionTargetId,
+            phoneAvailable = phoneAvailable,
+            computers = computers,
+            cloudAvailable = cloudAvailable,
+        )) {
+            is VoiceDestination.Computer -> computers.firstOrNull { it.targetId == route.targetId }?.label ?: computerFallbackLabel
+            VoiceDestination.Phone -> phoneLabel
+            VoiceDestination.Cloud -> cloudLabel
+            is VoiceDestination.Unavailable -> "Unavailable"
+        }
     }
 }
 
 sealed interface VoiceDestination {
     data class Computer(val targetId: String) : VoiceDestination
     data object Phone : VoiceDestination
+    data object Cloud : VoiceDestination
     data class Unavailable(val reason: String) : VoiceDestination
 }
 
-/** Route speech locally. Automatic mode prefers an enabled session computer, then this phone. */
+/** Automatic mode stays local; cloud recognition is only used after explicit selection. */
 fun resolveVoiceDestination(
     choice: String,
     sessionTargetId: String?,
     phoneAvailable: Boolean,
     computers: List<VoiceComputerState>,
+    cloudAvailable: Boolean = false,
 ): VoiceDestination {
     fun phone() = if (phoneAvailable) VoiceDestination.Phone else null
     fun computer(id: String) = computers.firstOrNull { it.targetId == id && it.canRouteVoice }
         ?.let { VoiceDestination.Computer(it.targetId) }
 
     return when {
+        choice == "cloud" -> if (cloudAvailable) VoiceDestination.Cloud
+            else VoiceDestination.Unavailable("Cloud speech recognition is unavailable")
         choice == "phone" -> phone() ?: VoiceDestination.Unavailable("Phone-local recognition is unavailable")
         choice.startsWith("computer:") -> {
             val targetId = choice.removePrefix("computer:")

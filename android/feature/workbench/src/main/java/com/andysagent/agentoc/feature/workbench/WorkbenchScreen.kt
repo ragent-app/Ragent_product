@@ -3238,7 +3238,15 @@ private fun ChatSurface(
                 leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Info, contentDescription = null) },
             )
             AgentoDropdownMenuItem(
-                text = stringResource(R.string.voice_menu_device, state.voice.choiceLabel(state.chatTargetId)),
+                text = stringResource(
+                    R.string.voice_menu_device,
+                    state.voice.choiceLabel(
+                        state.chatTargetId,
+                        phoneLabel = stringResource(R.string.voice_route_phone),
+                        cloudLabel = stringResource(R.string.voice_route_cloud),
+                        computerFallbackLabel = stringResource(R.string.voice_computers_section),
+                    ),
+                ),
                 onClick = {
                     onEvent(WorkbenchEvent.CloseSessionMenu)
                     onEvent(WorkbenchEvent.RefreshVoiceDevices)
@@ -3325,6 +3333,31 @@ private fun ChatSurface(
                         onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("phone")) },
                         modifier = Modifier.testTag("voice-route-phone"),
                     )
+                    val cloudRemainingMinutes = ((state.voice.cloudRemainingMs + 59_999L) / 60_000L)
+                        .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                    val cloudSubtitle = when {
+                        state.voice.cloudLimitMs > 0 && state.voice.cloudRemainingMs <= 0 ->
+                            stringResource(R.string.voice_cloud_quota_exceeded)
+                        state.voice.cloudAvailable -> stringResource(R.string.voice_cloud_ready, cloudRemainingMinutes)
+                        else -> stringResource(R.string.voice_cloud_unavailable)
+                    }
+                    SettingsChoiceRow(
+                        title = stringResource(R.string.voice_route_cloud),
+                        subtitle = cloudSubtitle,
+                        selected = state.voice.choice == "cloud",
+                        enabled = (state.voice.cloudAvailable && state.voice.cloudRemainingMs > 0)
+                            || state.voice.choice == "cloud",
+                        onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("cloud")) },
+                        modifier = Modifier.testTag("voice-route-cloud"),
+                    )
+                    if (state.voice.choice == "cloud") {
+                        Text(
+                            text = stringResource(R.string.voice_cloud_upload_disclosure),
+                            color = colors.secondaryContent,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
+                    }
                     state.voice.computers.forEach { computer ->
                         SettingsChoiceRow(
                             title = computer.label,

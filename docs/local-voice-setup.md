@@ -6,7 +6,13 @@ app selects the active session's enabled Whisper computer automatically, then
 uses phone-local recognition when that computer has no enabled Whisper
 service. Users can override the route for each chat from the chat's three-dot
 menu. Transcripts are inserted into the draft; Ragent never sends them
-automatically and does not forward voice audio to a cloud speech service.
+automatically. Automatic mode stays local and never silently uploads audio.
+
+Android also has an optional, explicit Accounts cloud recognition route. When
+the user selects it, Ragent Accounts sends the recording to its configured
+speech provider and returns only the transcript to the app. The cloud route is
+not used as a fallback for local recognition. The app explains the audio
+transfer and provider data policy before a cloud recording is made.
 
 The Windows setup package selects the Whisper runtime and multilingual base
 model by default. A fresh installation that includes Whisper starts the

@@ -217,10 +217,18 @@ class OkHttpAgentoCTransport(
     private suspend fun executeHttpCancellable(request: Request): ApiResponse = suspendCancellableCoroutine { continuation ->
         val isUploadChunk = request.method == "PATCH"
             && request.url.encodedPath.matches(Regex("/api/assets/[^/]+/upload"))
-        val requestClient = if (isUploadChunk) client.newBuilder()
-            .readTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .writeTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .build() else client
+        val isAccountAsr = request.url.encodedPath.endsWith("/v1/owner-auth/account/asr/transcriptions")
+        val requestClient = when {
+            isUploadChunk -> client.newBuilder()
+                .readTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .writeTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build()
+            isAccountAsr -> client.newBuilder()
+                .readTimeout(ACCOUNT_ASR_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .callTimeout(ACCOUNT_ASR_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build()
+            else -> client
+        }
         val call = requestClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : okhttp3.Callback {
@@ -504,6 +512,8 @@ class OkHttpAgentoCTransport(
         internal const val MAX_HTTP_RESPONSE_BYTES = 64L * 1024L * 1024L
         internal const val MAX_CARRIER_RESPONSE_BYTES = 24 * 1024 * 1024
         private const val UPLOAD_CHUNK_HTTP_TIMEOUT_MS = 165_000L
+        private const val ACCOUNT_ASR_READ_TIMEOUT_MS = 45_000L
+        private const val ACCOUNT_ASR_CALL_TIMEOUT_MS = 60_000L
         private const val MAX_ERROR_BODY_BYTES = 64L * 1024L
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = "".toRequestBody(JSON_MEDIA_TYPE)

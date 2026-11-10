@@ -8,6 +8,16 @@
     <string name="voice_route_automatic">Automatic</string>
     <string name="voice_route_automatic_hint">Use this session’s enabled computer, then this phone</string>
     <string name="voice_route_phone">This phone</string>
+    <string name="voice_route_cloud">Cloud recognition</string>
+    <string name="voice_cloud_ready">Available · %1$d min left this month</string>
+    <string name="voice_cloud_unavailable">Cloud recognition is unavailable</string>
+    <string name="voice_cloud_quota_exceeded">Monthly cloud recognition limit reached</string>
+    <string name="voice_cloud_recording_too_long">Keep recordings under 20 seconds</string>
+    <string name="voice_cloud_recording_invalid">The recording could not be processed. Please try again.</string>
+    <string name="voice_cloud_retry_new_recording">This recording was already processed. Start a new recording if you still need a transcript.</string>
+    <string name="voice_cloud_outcome_uncertain">We could not confirm the result. This recording will not be sent again, and its minutes may stay reserved. Check usage before retrying.</string>
+    <string name="voice_cloud_sign_in_required">Sign in to your Ragent account to use cloud recognition.</string>
+    <string name="voice_cloud_upload_disclosure">Cloud recognition sends audio to Ragent Accounts and ElevenLabs under the provider’s data policy. The transcript is added to your draft and is never sent automatically.</string>
     <string name="voice_computers_section">Paired computers</string>
     <string name="voice_phone_unsupported">On-device speech recognition is unavailable on this phone</string>
     <string name="voice_phone_ready">On-device recognition is available</string>
@@ -28,7 +38,7 @@
     <string name="voice_no_computers">Pair a computer to manage its Whisper service here.</string>
     <string name="voice_install">Install</string>
     <string name="voice_installing">Installing…</string>
-    <string name="voice_privacy_note">The selected device processes audio locally. Whisper can automatically detect about 100 languages; the phone’s built-in recognizer supports languages set by its provider. Transcripts are added to the draft and are never sent automatically.</string>
+    <string name="voice_privacy_note">Automatic mode uses the session computer when available, then this phone. Audio stays on that device. Cloud recognition sends audio to Ragent Accounts and ElevenLabs; only the transcript is added to your draft, and it is never sent automatically.</string>
     <string name="settings_sharing_agents">Sharing and agents</string>
     <string name="run_dock_stop">Stop</string>
     <string name="run_dock_stop_description">Stop run</string>

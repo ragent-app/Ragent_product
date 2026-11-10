@@ -52,7 +52,8 @@ const CLEANUP = [
     'target_runtime_authorizations', 'provider_refresh_leases', 'provider_refresh_meta', 'account_sync_catalog',
     'account_connection_leases', 'native_owner_auth_requests', 'account_join_intents', 'owner_auth_transactions',
     'instance_authority_completions', 'account_credentials', 'account_device_keys', 'account_devices',
-    'devices', 'instance_bindings', 'account_file_uploads', 'account_entitlements', 'binding_history', 'accounts'].map(table => [table, 'q.account_id=$1']),
+    'devices', 'instance_bindings', 'account_asr_requests', 'account_asr_usage', 'account_file_uploads',
+    'account_entitlements', 'binding_history', 'accounts'].map(table => [table, 'q.account_id=$1']),
 ];
 
 export function buildAccountDeletionAcknowledgment({ jobId, instanceId, issuedAt, localCopies }) {

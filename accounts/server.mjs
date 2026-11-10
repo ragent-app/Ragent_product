@@ -27,6 +27,11 @@ import { handleTemporaryControlRoutes } from './temporary-control-routes.mjs';
 import { createAccountPairingBroker } from './account-pairing-broker.mjs';
 import { handleAccountPairingRoutes } from './account-pairing-routes.mjs';
 import { createPostgresStoreFromUrl } from './store/postgres.mjs';
+import { ACCOUNT_ASR_MAX_AUDIO_BYTES } from './asr-audio.mjs';
+import { ACCOUNT_ASR_MODEL } from './asr-policy.mjs';
+import { createAccountAsrPostgresStore } from './asr-postgres-store.mjs';
+import { createAccountAsrService } from './asr-service.mjs';
+import { createElevenLabsScribeTranscriber } from './asr-elevenlabs.mjs';
 import { buildHarnessPolicyDocument } from '../lib/harness-policy.mjs';
 import {
   createGoogleIdTokenVerifier as createNativeGoogleIdTokenVerifier,
@@ -185,6 +190,13 @@ export async function createAccountsServer({
   demoAccountPolicyFile = '',
   contentReportFile = '',
   contentReportStore,
+  asrService: injectedAsrService,
+  asrRepository,
+  asrTranscribe,
+  asrEnabled: asrEnabledOverride,
+  elevenLabsApiKey,
+  asrZeroRetention,
+  asrTimeoutMs,
   accountDeletionEnabled = false,
   googleNativeClientIds = resolveGoogleNativeServerClientIds(),
   accountDeletionWorkerIntervalMs = 1000,
@@ -251,6 +263,33 @@ export async function createAccountsServer({
     audit,
     clock,
   });
+  const asrKey = text(elevenLabsApiKey ?? process.env.ELEVENLABS_API_KEY);
+  const asrEnabled = (asrEnabledOverride ?? process.env.AGENTOC_ACCOUNTS_ASR_ENABLED === '1') && Boolean(asrKey);
+  let asrService = injectedAsrService || null;
+  let asrStatus = asrService ? (asrService.enabled ? 'ready' : 'disabled') : 'unconfigured';
+  if (!asrService && typeof stateStore.accountAsrContext === 'function') {
+    const repository = asrRepository || createAccountAsrPostgresStore({ ...stateStore.accountAsrContext(), clock });
+    const transcribe = asrTranscribe || (asrKey ? createElevenLabsScribeTranscriber({
+      apiKey: asrKey,
+      fetchImpl,
+      modelId: ACCOUNT_ASR_MODEL,
+      zeroRetention: (asrZeroRetention ?? process.env.AGENTOC_ACCOUNTS_ASR_ZERO_RETENTION) === '1',
+      timeoutMs: Number(asrTimeoutMs ?? process.env.AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS) || 30_000,
+    }) : undefined);
+    asrService = createAccountAsrService({ authenticateAccount: broker.authenticateAccountAsr,
+      repository, transcribe, enabled: asrEnabled, env: process.env, clock, audit });
+  }
+  if (asrService) {
+    try {
+      await asrService.checkReady?.();
+      asrService.startMaintenance?.();
+      asrStatus = asrService.enabled ? 'ready' : asrKey ? 'disabled' : 'unconfigured';
+    } catch (error) {
+      asrStatus = 'unavailable';
+      audit({ event: 'account_asr.store_unavailable', code: typeof error?.code === 'string'
+        ? error.code : 'asr_schema_unavailable' });
+    }
+  }
   const jwks = createJwksHandler(keyRing, { clock });
   const turnBrokerJwks = createJwksHandler(turnBrokerKeyRing, { clock });
   const refreshLeaseBroker = createRefreshLeaseBroker({ store: stateStore, clock, audit });
@@ -344,6 +383,8 @@ export async function createAccountsServer({
     contentReportStatus,
     accountDeletion,
     accountDeletionStatus,
+    asrService,
+    asrStatus,
     keyRecord: keyRing,
     turnBrokerKeyRecord: turnBrokerKeyRing,
   };
@@ -415,9 +456,21 @@ export async function startAccountsServer(options = {}) {
   });
   await fastify.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   fastify.addHook('preClose', async () => { app.broker.closeRendezvousInboxWaiters(); });
-  fastify.addHook('onClose', async () => { await app.accountDeletion?.close(); });
+  fastify.addHook('onClose', async () => {
+    await app.accountDeletion?.close();
+    await app.asrService?.close?.();
+  });
   fastify.setErrorHandler((error, request, reply) => {
-    if (String(request.url).split(/[?#]/, 1)[0].includes('/v1/account-deletion/')) {
+    const path = String(request.url).split(/[?#]/, 1)[0];
+    if (path.includes('/v1/owner-auth/account/asr/')) {
+      const status = error.statusCode === 413 ? 413 : error.statusCode === 415 ? 415
+        : error.statusCode === 429 ? 429 : error.statusCode === 400 ? 400 : error.statusCode >= 500 ? 503 : 400;
+      return reply.code(status).headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer' }).send({ code: status === 413 ? 'asr_audio_too_large'
+        : status === 415 ? 'asr_audio_content_type_unsupported' : status === 429 ? 'asr_rate_limited'
+          : status === 400 ? 'asr_audio_invalid' : 'asr_unavailable' });
+    }
+    if (path.includes('/v1/account-deletion/')) {
       const status = error.statusCode === 413 ? 413 : error.statusCode === 415 ? 415
         : error.statusCode === 429 ? 429 : error.statusCode >= 500 ? 503 : 400;
       return reply.code(status).headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
@@ -438,6 +491,7 @@ export async function startAccountsServer(options = {}) {
         turnBrokerSigningKey: Boolean(app.turnBrokerKeyRecord),
         contentReporting: app.contentReportStatus,
         accountDeletion: app.accountDeletionStatus,
+        speechRecognition: app.asrStatus,
         ...(app.accountDeletion ? { accountDeletionWorker: app.accountDeletion.workerStatus() } : {}),
       };
     } catch (error) {
@@ -453,6 +507,64 @@ export async function startAccountsServer(options = {}) {
   const rateLimits = resolveAccountsRateLimits({ options: rateLimitOptions, env: process.env });
   fastify.log.info({ getMax: rateLimits.getMax, postMax: rateLimits.postMax, authorityMax: rateLimits.authorityMax }, 'accounts rate limits');
   const basePath = new URL(serverOptions.publicBaseUrl).pathname.replace(/\/+$/, '');
+  const asrTranscriptionPath = '/v1/owner-auth/account/asr/transcriptions';
+  const asrUsagePath = '/v1/owner-auth/account/asr/usage';
+  const asrPath = (path) => [...new Set([path, ...(basePath && basePath !== '/' ? [`${basePath}${path}`] : [])])];
+  fastify.addContentTypeParser('audio/wav', { parseAs: 'buffer', bodyLimit: ACCOUNT_ASR_MAX_AUDIO_BYTES },
+    (_request, body, done) => done(null, body));
+  for (const path of asrPath(asrTranscriptionPath)) {
+    fastify.post(path, { bodyLimit: ACCOUNT_ASR_MAX_AUDIO_BYTES,
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request, reply) => {
+      reply.headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+      if (!/^audio\/wav(?:\s*;|$)/i.test(String(request.headers['content-type'] || ''))) {
+        return reply.code(415).send({ code: 'asr_audio_content_type_unsupported' });
+      }
+      if (!app.asrService || app.asrStatus === 'unavailable' || app.asrStatus === 'unconfigured') {
+        return reply.code(503).send({ code: 'asr_unavailable' });
+      }
+      const authorization = request.headers.authorization || '';
+      const credential = /^Bearer\s+(.+)$/i.exec(authorization)?.[1] || '';
+      const controller = new AbortController();
+      const abortIfDisconnected = () => {
+        if (!reply.raw.writableEnded && !controller.signal.aborted) controller.abort();
+      };
+      request.raw.once('aborted', abortIfDisconnected);
+      reply.raw.once('close', abortIfDisconnected);
+      try {
+        const result = await app.asrService.transcribeAudio({ credential,
+          requestId: String(request.headers['idempotency-key'] || ''), audio: request.body, signal: controller.signal });
+        return reply.code(200).send(result);
+      } catch (error) {
+        const status = Number.isInteger(error?.statusCode) ? error.statusCode : 503;
+        const safeStatus = status >= 400 && status <= 599 ? status : 503;
+        return reply.code(safeStatus).send({ code: typeof error?.code === 'string' ? error.code : 'asr_unavailable' });
+      } finally {
+        request.raw.off('aborted', abortIfDisconnected);
+        reply.raw.off('close', abortIfDisconnected);
+      }
+    });
+  }
+  for (const path of asrPath(asrUsagePath)) {
+    fastify.get(path, async (request, reply) => {
+      reply.headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+      // Keep account-scoped usage visible while the provider is disabled or
+      // its key has not been provisioned. `available` communicates readiness;
+      // the usage endpoint itself remains useful for the Android settings UI.
+      if (!app.asrService || app.asrStatus === 'unavailable') {
+        return reply.code(503).send({ code: 'asr_unavailable' });
+      }
+      const authorization = request.headers.authorization || '';
+      const credential = /^Bearer\s+(.+)$/i.exec(authorization)?.[1] || '';
+      try {
+        const result = await app.asrService.getUsage({ credential, period: request.query?.period });
+        return reply.code(200).send(result);
+      } catch (error) {
+        const status = Number.isInteger(error?.statusCode) ? error.statusCode : 503;
+        const safeStatus = status >= 400 && status <= 599 ? status : 503;
+        return reply.code(safeStatus).send({ code: typeof error?.code === 'string' ? error.code : 'asr_unavailable' });
+      }
+    });
+  }
   const inboxPath = '/v1/owner-auth/rendezvous/inbox';
   const inboxPaths = new Set([inboxPath, ...(basePath && basePath !== '/' ? [`${basePath}${inboxPath}`] : [])]);
   const authorityPath = '/v1/owner-auth/instances/authority';

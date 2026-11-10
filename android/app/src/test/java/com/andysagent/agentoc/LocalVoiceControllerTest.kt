@@ -26,8 +26,8 @@ class LocalVoiceControllerTest {
     @Test
     fun stoppingComputerCaptureFinalizesRecordingInsteadOfCancellingRecognition() {
         assertEquals(
-            VoiceStopAction.FinishComputerRecording,
-            voiceStopAction(recording = true, processing = false, computerRoute = true),
+            VoiceStopAction.FinishBufferedRecording,
+            voiceStopAction(recording = true, processing = false, bufferedRoute = true),
         )
     }
 
@@ -35,7 +35,7 @@ class LocalVoiceControllerTest {
     fun stoppingPhoneCaptureStopsTheOnDeviceRecognizer() {
         assertEquals(
             VoiceStopAction.StopPhoneRecording,
-            voiceStopAction(recording = true, processing = false, computerRoute = false),
+            voiceStopAction(recording = true, processing = false, bufferedRoute = false),
         )
     }
 
@@ -43,7 +43,7 @@ class LocalVoiceControllerTest {
     fun stoppingDuringTranscriptionCancelsTheActiveRequest() {
         assertEquals(
             VoiceStopAction.CancelProcessing,
-            voiceStopAction(recording = false, processing = true, computerRoute = true),
+            voiceStopAction(recording = false, processing = true, bufferedRoute = true),
         )
     }
 
@@ -51,7 +51,7 @@ class LocalVoiceControllerTest {
     fun stopWhileIdleDoesNothing() {
         assertEquals(
             VoiceStopAction.NoOp,
-            voiceStopAction(recording = false, processing = false, computerRoute = false),
+            voiceStopAction(recording = false, processing = false, bufferedRoute = false),
         )
     }
 

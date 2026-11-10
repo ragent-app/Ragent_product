@@ -1,0 +1,35 @@
+[Unit]
+Description=AgentoC accounts API (production)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentoc-accounts
+Group=agentoc-accounts
+RuntimeDirectory=agentoc-accounts
+# Accounts has its own versioned release and runtime. It must not execute from
+# the local-control-plane Deb tree under /opt/agentoc.
+ExecStart=/opt/agentoc-accounts/current/runtime/node /opt/agentoc-accounts/current/app/accounts/server.mjs
+EnvironmentFile=/etc/agentoc/accounts.env
+WorkingDirectory=/opt/agentoc-accounts/current/app
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+TimeoutStopSec=20
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agentoc/accounts
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

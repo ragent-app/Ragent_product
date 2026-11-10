@@ -3,6 +3,7 @@ package com.andysagent.agentoc
 import android.content.Context
 import android.speech.SpeechRecognizer
 import android.util.Base64
+import com.andysagent.agentoc.core.auth.AccountSessionException
 import com.andysagent.agentoc.core.model.RemoteTarget
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.network.ApiRequest
@@ -29,6 +30,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class LocalVoiceController(
@@ -47,8 +49,10 @@ internal class LocalVoiceController(
     private var activeSessionId: String? = null
     private var activeJob: Job? = null
     private var stopRequested: AtomicBoolean? = null
+    private var cloudUsageJob: Job? = null
 
     init {
+        refreshCloudUsage()
         scope.launch {
             val installedLanguage = runCatching { localRecognizer.hasInstalledLanguage(Locale.getDefault()) }.getOrNull()
             mutableState.update { current ->
@@ -76,6 +80,7 @@ internal class LocalVoiceController(
     }
 
     fun refreshComputers(targets: List<RemoteTarget>) {
+        refreshCloudUsage()
         val distinct = targets.distinctBy { it.instanceId }
         scope.launch {
             val fetched = distinct.map { target ->
@@ -95,7 +100,8 @@ internal class LocalVoiceController(
     }
 
     fun selectChoice(choice: String) {
-        if (choice != "auto" && choice != "phone" && !choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}"))) return
+        if (choice != "auto" && choice != "phone" && choice != "cloud"
+            && !choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}"))) return
         val sessionId = activeSessionId ?: return
         mutableState.update { it.copy(choice = choice, message = null) }
         scope.launch { runCatching { app.runtime.configStore.setChatVoiceChoice(sessionId, choice) } }
@@ -149,11 +155,20 @@ internal class LocalVoiceController(
             sessionTargetId = sessionTargetId,
             phoneAvailable = current.phoneAvailable,
             computers = current.computers,
+            cloudAvailable = current.cloudAvailable,
         )
         when (destination) {
             VoiceDestination.Phone -> startPhoneRecognition(onText)
+            VoiceDestination.Cloud -> startCloudRecognition(onText)
             is VoiceDestination.Computer -> startComputerRecognition(destination.targetId, onText)
-            is VoiceDestination.Unavailable -> mutableState.update { it.copy(message = destination.reason) }
+            is VoiceDestination.Unavailable -> {
+                val message = if (current.choice == "cloud" && current.cloudLimitMs > 0 && current.cloudRemainingMs <= 0) {
+                    app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_quota_exceeded)
+                } else if (current.choice == "cloud") {
+                    app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_unavailable)
+                } else destination.reason
+                mutableState.update { it.copy(message = message) }
+            }
         }
     }
 
@@ -162,9 +177,9 @@ internal class LocalVoiceController(
         when (voiceStopAction(
             recording = current.recording,
             processing = current.processing,
-            computerRoute = current.operationTargetId != null,
+            bufferedRoute = current.operationTargetId != null || current.bufferedCaptureActive,
         )) {
-            VoiceStopAction.FinishComputerRecording -> {
+            VoiceStopAction.FinishBufferedRecording -> {
                 val stop = stopRequested
                 if (stop == null) {
                     cancelVoiceInput()
@@ -172,7 +187,7 @@ internal class LocalVoiceController(
                 }
                 stop.set(true)
                 mutableState.update { state ->
-                    if (state.recording && state.operationTargetId != null) {
+                    if (state.recording && (state.operationTargetId != null || state.bufferedCaptureActive)) {
                         state.copy(recording = false, processing = true)
                     } else state
                 }
@@ -180,7 +195,7 @@ internal class LocalVoiceController(
             }
             VoiceStopAction.StopPhoneRecording -> {
                 val stop = stopRequested
-                if (stop != null && current.operationTargetId == null) {
+                if (stop != null && current.operationTargetId == null && !current.bufferedCaptureActive) {
                     stop.set(true)
                     mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
                 } else {
@@ -195,14 +210,21 @@ internal class LocalVoiceController(
     }
 
     fun cancelVoiceInput() {
-        if ((mutableState.value.recording || mutableState.value.processing) && mutableState.value.operationTargetId == null) {
+        val current = mutableState.value
+        val cloudRequestMayBeInFlight = current.processing && current.choice == "cloud"
+        if ((current.recording || current.processing)
+            && current.operationTargetId == null && !current.bufferedCaptureActive) {
             localRecognizer.stop(destroy = true, cancel = true)
         }
         stopRequested?.set(true)
         activeJob?.cancel()
         activeJob = null
         stopRequested = null
-        mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, operationTargetId = null) }
+        mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f,
+            operationTargetId = null, bufferedCaptureActive = false,
+            message = if (cloudRequestMayBeInFlight) {
+                app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_outcome_uncertain)
+            } else it.message) }
     }
 
     fun clearMessage() = mutableState.update { it.copy(message = null) }
@@ -220,7 +242,8 @@ internal class LocalVoiceController(
             mutableState.update { it.copy(message = message) }
             return
         }
-        mutableState.update { it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = null) }
+        mutableState.update { it.copy(recording = true, processing = false, waveformLevel = 0f, message = null,
+            operationTargetId = null, bufferedCaptureActive = false) }
         localRecognizer.start(
             onResult = { text ->
                 mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f) }
@@ -245,7 +268,8 @@ internal class LocalVoiceController(
         val stop = AtomicBoolean(false)
         stopRequested = stop
         mutableState.update {
-            it.copy(recording = true, processing = false, waveformLevel = 0f, message = null, operationTargetId = targetId)
+            it.copy(recording = true, processing = false, waveformLevel = 0f, message = null,
+                operationTargetId = targetId, bufferedCaptureActive = false)
         }
         activeJob = scope.launch {
             try {
@@ -273,9 +297,72 @@ internal class LocalVoiceController(
             } finally {
                 activeJob = null
                 stopRequested = null
-                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f, operationTargetId = null) }
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f,
+                    operationTargetId = null, bufferedCaptureActive = false) }
             }
         }
+    }
+
+    private fun startCloudRecognition(onText: (String) -> Unit) {
+        val stop = AtomicBoolean(false)
+        stopRequested = stop
+        mutableState.update { it.copy(recording = true, processing = false, waveformLevel = 0f, message = null,
+            operationTargetId = null, bufferedCaptureActive = true) }
+        activeJob = scope.launch {
+            try {
+                val audio = recordVoiceWav(stop) { level -> mutableState.update { it.copy(waveformLevel = level) } }
+                mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
+                val requestId = UUID.randomUUID().toString()
+                val result = app.runtime.accountSessions.transcribeAccountAudio(audio, requestId)
+                onText(result.text)
+                mutableState.update { it.copy(message = null) }
+                refreshCloudUsage()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                mutableState.update { it.copy(message = cloudErrorMessage(error)) }
+                refreshCloudUsage()
+            } finally {
+                activeJob = null
+                stopRequested = null
+                mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f,
+                    operationTargetId = null, bufferedCaptureActive = false) }
+            }
+        }
+    }
+
+    private fun refreshCloudUsage() {
+        cloudUsageJob?.cancel()
+        cloudUsageJob = scope.launch {
+            val usage = runCatching { app.runtime.accountSessions.getAccountAsrUsage() }.getOrNull()
+            mutableState.update { current ->
+                current.copy(
+                    cloudAvailable = usage?.available == true && usage.remainingMs > 0,
+                    cloudLimitMs = usage?.limitMs ?: 0,
+                    cloudUsedMs = usage?.usedMs ?: 0,
+                    cloudReservedMs = usage?.reservedMs ?: 0,
+                    cloudRemainingMs = usage?.remainingMs ?: 0,
+                )
+            }
+        }
+    }
+
+    private fun cloudErrorMessage(error: Throwable): String = when ((error as? AccountSessionException)?.code) {
+        "asr_monthly_quota_exceeded" -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_quota_exceeded)
+        "owner_auth_account_credential_invalid", "owner_auth_account_credential_expired",
+        "owner_auth_account_device_revoked", "account_session_reauthorization_required" ->
+            app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_sign_in_required)
+        "asr_provider_outcome_unknown", "asr_request_outcome_unknown", "asr_request_in_progress" ->
+            app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_outcome_uncertain)
+        "asr_idempotency_result_expired" ->
+            app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_retry_new_recording)
+        "asr_unavailable", "asr_provider_unavailable", "asr_provider_rate_limited" ->
+            app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_unavailable)
+        "asr_audio_too_long", "asr_audio_too_large" -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_recording_too_long)
+        "asr_audio_too_short", "asr_audio_format_unsupported", "asr_audio_invalid",
+        "asr_provider_rejected_audio", "asr_provider_invalid_response" ->
+            app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_recording_invalid)
+        else -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_unavailable)
     }
 
     private suspend fun pollInstall(targetId: String, operationId: String): VoiceComputerState {
@@ -375,7 +462,7 @@ internal fun phoneRecognitionErrorStringResource(errorCode: Int): Int = when (er
 }
 
 internal enum class VoiceStopAction {
-    FinishComputerRecording,
+    FinishBufferedRecording,
     StopPhoneRecording,
     CancelProcessing,
     NoOp,
@@ -387,8 +474,8 @@ internal fun usableComputerVoiceTranscript(transcript: String?): String? {
     return text.takeUnless(silenceMarker::matches)
 }
 
-internal fun voiceStopAction(recording: Boolean, processing: Boolean, computerRoute: Boolean): VoiceStopAction = when {
-    recording && computerRoute -> VoiceStopAction.FinishComputerRecording
+internal fun voiceStopAction(recording: Boolean, processing: Boolean, bufferedRoute: Boolean): VoiceStopAction = when {
+    recording && bufferedRoute -> VoiceStopAction.FinishBufferedRecording
     recording -> VoiceStopAction.StopPhoneRecording
     processing -> VoiceStopAction.CancelProcessing
     else -> VoiceStopAction.NoOp

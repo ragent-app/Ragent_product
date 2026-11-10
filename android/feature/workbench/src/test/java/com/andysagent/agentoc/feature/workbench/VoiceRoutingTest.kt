@@ -71,4 +71,20 @@ class VoiceRoutingTest {
         val result = resolveVoiceDestination("phone", "pc-a", false, listOf(readyComputer))
         assertIs<VoiceDestination.Unavailable>(result)
     }
+
+    @Test
+    fun cloudRecognitionIsOnlySelectedExplicitlyAndRequiresAvailability() {
+        assertEquals(
+            VoiceDestination.Cloud,
+            resolveVoiceDestination("cloud", "pc-a", true, listOf(readyComputer), cloudAvailable = true),
+        )
+        assertIs<VoiceDestination.Unavailable>(
+            resolveVoiceDestination("cloud", "pc-a", true, listOf(readyComputer), cloudAvailable = false),
+        )
+        assertEquals(
+            VoiceDestination.Computer("pc-a"),
+            resolveVoiceDestination("auto", "pc-a", false, listOf(readyComputer), cloudAvailable = true),
+            "Automatic mode must not upload audio to cloud recognition without an explicit choice",
+        )
+    }
 }

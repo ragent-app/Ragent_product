@@ -21,7 +21,9 @@ case "$ARCH" in
   *) echo "Unsupported Accounts release architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-WORK_DIR="$(mktemp -d /tmp/agentoc-accounts-release.XXXXXX)"
+mkdir -p "$OUTPUT_DIR" "$NODE_CACHE_DIR"
+WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.agentoc-accounts-release.XXXXXX")"
+export npm_config_cache="${AGENTOC_ACCOUNTS_NPM_CACHE:-$WORK_DIR/npm-cache}"
 RELEASE_NAME="agentoc-accounts-${VERSION}-${ARCH}"
 RELEASE_DIR="$WORK_DIR/$RELEASE_NAME"
 APP_DIR="$RELEASE_DIR/app"
@@ -32,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$APP_DIR" "$RELEASE_DIR/runtime" "$OUTPUT_DIR" "$NODE_CACHE_DIR"
+mkdir -p "$APP_DIR" "$RELEASE_DIR/runtime"
 node "$ROOT/scripts/stage-runtime-payload.mjs" \
   --source "$ROOT" --destination "$APP_DIR" --profile accounts
 install -m 0644 "$ROOT/deploy/accounts/agentoc-accounts.service" "$RELEASE_DIR/agentoc-accounts.service"

@@ -7,6 +7,8 @@ import com.andysagent.agentoc.core.network.ApiException
 import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.core.protocol.AccountJoinAuthorizationRequest
 import com.andysagent.agentoc.core.protocol.AccountJoinAuthorizationResponse
+import com.andysagent.agentoc.core.protocol.AccountAsrTranscriptionDto
+import com.andysagent.agentoc.core.protocol.AccountAsrUsageDto
 import com.andysagent.agentoc.core.protocol.AccountSessionCredentialDto
 import com.andysagent.agentoc.core.protocol.CompleteAccountSessionRequest
 import com.andysagent.agentoc.core.protocol.CompleteAccountSessionResponse
@@ -851,6 +853,44 @@ class AccountSessionManager(
             usage.subscription.status in setOf("default", "active", "expired") &&
             runCatching { Instant.parse(usage.asOf) }.isSuccess
         if (!valid) throw AccountSessionException(502, "account_usage_invalid", "Accounts returned invalid usage information.")
+        return usage
+    }
+
+    suspend fun transcribeAccountAudio(audioWav: ByteArray, requestId: String): AccountAsrTranscriptionDto {
+        if (audioWav.size !in 44..(1024 * 1024) || !requestId.matches(Regex("^[A-Za-z0-9_-]{16,128}$"))) {
+            throw AccountSessionException(400, "asr_request_invalid", "The voice recording could not be submitted.")
+        }
+        ensureActiveCredential()
+        val result = decode<AccountAsrTranscriptionDto>(executeAuthenticated(ApiRequest(
+            method = "POST",
+            path = "/v1/owner-auth/account/asr/transcriptions",
+            requestId = requestId,
+            idempotencyKey = requestId,
+            bodyBytes = audioWav,
+            contentType = "audio/wav",
+        )))
+        val valid = result.contractVersion == 1 && result.requestId == requestId
+            && result.text.isNotBlank() && result.text.length <= 20_000
+            && result.durationMs in 500L..20_000L
+            && (result.languageCode?.matches(Regex("^[A-Za-z0-9-]{2,16}$")) != false)
+        if (!valid) throw AccountSessionException(502, "asr_response_invalid", "Accounts returned an invalid transcription.")
+        return result
+    }
+
+    suspend fun getAccountAsrUsage(period: String? = null): AccountAsrUsageDto {
+        if (period != null && !period.matches(Regex("^\\d{4}-(0[1-9]|1[0-2])$"))) {
+            throw AccountSessionException(400, "asr_usage_period_invalid", "Invalid speech recognition usage period.")
+        }
+        ensureActiveCredential()
+        val path = "/v1/owner-auth/account/asr/usage" + (period?.let { "?period=$it" } ?: "")
+        val usage = decode<AccountAsrUsageDto>(executeAuthenticated(ApiRequest(method = "GET", path = path)))
+        val valid = usage.contractVersion == 1 && usage.policyVersion == "account-asr-monthly-v1"
+            && usage.period.matches(Regex("^\\d{4}-(0[1-9]|1[0-2])$"))
+            && usage.plan in setOf("free", "plus", "pro")
+            && listOf(usage.limitMs, usage.usedMs, usage.reservedMs, usage.remainingMs,
+                usage.requestCount).all { it >= 0 }
+            && usage.remainingMs == (usage.limitMs - usage.usedMs - usage.reservedMs).coerceAtLeast(0)
+        if (!valid) throw AccountSessionException(502, "asr_usage_invalid", "Accounts returned invalid speech recognition usage.")
         return usage
     }
 

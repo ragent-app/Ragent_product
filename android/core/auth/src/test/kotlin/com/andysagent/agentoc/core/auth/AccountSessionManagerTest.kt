@@ -495,6 +495,32 @@ class AccountSessionManagerTest {
         }
     }
 
+    @Test fun `account ASR uploads raw WAV bytes and validates returned usage`() = runBlocking {
+        val requestId = "8e4f76e8-7727-4d75-949b-8e110526f813"
+        val audio = ByteArray(128) { (it % 127).toByte() }
+        val transcript = """{"contractVersion":1,"requestId":"$requestId","text":"hello world","languageCode":"en","durationMs":1200}"""
+        val usage = """{"contractVersion":1,"available":true,"policyVersion":"account-asr-monthly-v1","period":"2026-11","plan":"plus","limitMs":7200000,"usedMs":1200,"reservedMs":0,"remainingMs":7198800,"requestCount":1}"""
+        val transport = RecordingTransport { request ->
+            if (request.method == "POST") ApiResponse(200, transcript) else ApiResponse(200, usage)
+        }
+        val credentials = FakeAccountCredentialStore("rac_active")
+        val metadata = FakeAccountSessionMetadataStore("adev_test", AccountSessionMetadata(
+            "acct_1", "adev_test", "cred_1", "account-directory", "2099-01-01T00:00:00Z"))
+        val manager = manager(transport, transport, FakeDeviceIdentityStore(), credentials, metadata)
+
+        val result = manager.transcribeAccountAudio(audio, requestId)
+        assertEquals("hello world", result.text)
+        assertEquals("/v1/owner-auth/account/asr/transcriptions", transport.requests[0].path)
+        assertEquals("audio/wav", transport.requests[0].contentType)
+        assertEquals(requestId, transport.requests[0].idempotencyKey)
+        assertTrue(transport.requests[0].bodyBytes!!.contentEquals(audio))
+        assertEquals(null, transport.requests[0].body)
+
+        val accountUsage = manager.getAccountAsrUsage()
+        assertEquals(7_198_800L, accountUsage.remainingMs)
+        assertEquals("/v1/owner-auth/account/asr/usage", transport.requests[1].path)
+    }
+
     @Test
     fun `only advertised delivery recovery retries a frozen completion after transport loss`() = runBlocking {
         for ((window, status) in listOf(120_000L to 0, 0L to 0, 120_000L to 403, 120_000L to 429)) {

@@ -1310,6 +1310,8 @@ export function createPostgresStore({
   return {
     // Internal service assembly only: reuse this exact pool and tenant schema.
     accountDeletionContext() { return Object.freeze({ pool, schema }); },
+    // Account ASR has its own request/usage tables and never enters the global snapshot writer.
+    accountAsrContext() { return Object.freeze({ pool, schema }); },
     /** Fixed account/request view; never enters the snapshot writer queue. */
     async readAccountRendezvousSnapshot({ tokenHash, requestId }) {
       if (!/^[a-f0-9]{64}$/.test(tokenHash || '')
@@ -1345,6 +1347,41 @@ export function createPostgresStore({
                 [requestId, credential.accountId]);
               snapshot.accountJoinIntents = intents.rows.map(rowToAccountJoinIntent);
             }
+          }
+          await client.query('commit');
+          return snapshot;
+        } catch (error) {
+          await client.query('rollback').catch(() => {});
+          throw error;
+        }
+      });
+    },
+
+    /** Small, read-only credential snapshot for account-scoped cloud ASR. */
+    async readAccountAsrSnapshot({ tokenHash }) {
+      if (!/^[a-f0-9]{64}$/.test(tokenHash || '')) throw new TypeError('A fixed account credential hash is required');
+      return withClient(async (client) => {
+        await client.query('begin isolation level repeatable read read only');
+        try {
+          await scope(client);
+          await client.query('select set_config($1, $2, true)', ['statement_timeout', '3000ms']);
+          const credentials = await client.query('select * from account_credentials where token_hash=$1 limit 1', [tokenHash]);
+          const snapshot = { accounts: [], accountCredentials: [], accountDevices: [], accountDeviceKeys: [], accountEntitlements: [] };
+          const credential = credentials.rows[0] ? rowToAccountCredential(credentials.rows[0]) : null;
+          if (credential) {
+            snapshot.accountCredentials.push(credential);
+            const [accounts, devices, keys, entitlements] = await Promise.all([
+              client.query('select * from accounts where account_id=$1 limit 1', [credential.accountId]),
+              client.query('select * from account_devices where device_id=$1 and account_id=$2 limit 1',
+                [credential.deviceId, credential.accountId]),
+              client.query('select * from account_device_keys where key_id=$1 and device_id=$2 and account_id=$3 limit 1',
+                [credential.keyId, credential.deviceId, credential.accountId]),
+              client.query('select * from account_entitlements where account_id=$1 limit 1', [credential.accountId]),
+            ]);
+            snapshot.accounts = accounts.rows.map(rowToAccount);
+            snapshot.accountDevices = devices.rows.map(rowToAccountDevice);
+            snapshot.accountDeviceKeys = keys.rows.map(rowToAccountDeviceKey);
+            snapshot.accountEntitlements = entitlements.rows.map(rowToEntitlement);
           }
           await client.query('commit');
           return snapshot;

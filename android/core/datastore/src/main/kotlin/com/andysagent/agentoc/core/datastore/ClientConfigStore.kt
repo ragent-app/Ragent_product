@@ -497,7 +497,8 @@ class ClientConfigStore private constructor(private val context: Context, privat
 
     suspend fun setChatVoiceChoice(sessionId: String, choice: String) {
         require(sessionId.isNotBlank())
-        require(choice == "auto" || choice == "phone" || choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}")))
+        require(choice == "auto" || choice == "phone" || choice == "cloud"
+            || choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}")))
         val key = chatVoiceChoiceKey(sessionId)
         preferences.edit { prefs -> prefs[key] = choice }
     }

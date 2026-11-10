@@ -57,6 +57,26 @@ class OkHttpAgentoCTransportTest {
         assertFailsWith<java.io.IOException> { readBoundedHttpResponse(200, emptyMap(), body) }
     }
 
+    @Test fun accountAsrUsesAProviderSizedResponseTimeout() = runBlocking {
+        val server = MockWebServer().apply {
+            enqueue(MockResponse().setBodyDelay(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .setHeader("Content-Type", "application/json").setBody("{\"ok\":true}"))
+            start()
+        }
+        val shortReadClient = okhttp3.OkHttpClient.Builder()
+            .readTimeout(1, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+        val transport = OkHttpAgentoCTransport(
+            { server.url("/").toString().trimEnd('/') }, { null }, client = shortReadClient,
+        )
+        try {
+            val response = transport.execute(ApiRequest(
+                "POST", "/v1/owner-auth/account/asr/transcriptions", bodyBytes = byteArrayOf(1), contentType = "audio/wav",
+            ))
+            assertEquals(200, response.statusCode)
+        } finally { transport.close(); server.shutdown() }
+    }
+
     @Test fun approvalTimeoutDoesNotTearDownAnOpenCarrierOrReplayTheDecision() = runBlocking {
         for (turn in listOf(true)) {
             var calls = 0

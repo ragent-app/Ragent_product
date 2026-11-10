@@ -8,6 +8,16 @@
     <string name="voice_route_automatic">Automatique</string>
     <string name="voice_route_automatic_hint">Utiliser d’abord l’ordinateur de la session, puis ce téléphone</string>
     <string name="voice_route_phone">Ce téléphone</string>
+    <string name="voice_route_cloud">Reconnaissance dans le cloud</string>
+    <string name="voice_cloud_ready">Disponible · %1$d min restantes ce mois-ci</string>
+    <string name="voice_cloud_unavailable">La reconnaissance dans le cloud est indisponible</string>
+    <string name="voice_cloud_quota_exceeded">La limite mensuelle de reconnaissance dans le cloud est atteinte</string>
+    <string name="voice_cloud_recording_too_long">Limitez les enregistrements à 20 secondes</string>
+    <string name="voice_cloud_recording_invalid">L’enregistrement n’a pas pu être traité. Réessayez.</string>
+    <string name="voice_cloud_retry_new_recording">Cet enregistrement a déjà été traité. Faites un nouvel enregistrement si vous avez encore besoin d’une transcription.</string>
+    <string name="voice_cloud_outcome_uncertain">Résultat incertain. Cet enregistrement ne sera pas renvoyé et ses minutes peuvent rester réservées. Vérifiez l’utilisation avant de réessayer.</string>
+    <string name="voice_cloud_sign_in_required">Connectez-vous à votre compte Ragent pour utiliser la reconnaissance dans le cloud.</string>
+    <string name="voice_cloud_upload_disclosure">La reconnaissance dans le cloud envoie l’audio à Ragent Accounts et ElevenLabs selon la politique de données du fournisseur. Le texte est ajouté au brouillon et n’est jamais envoyé automatiquement.</string>
     <string name="voice_computers_section">Ordinateurs associés</string>
     <string name="voice_phone_unsupported">La reconnaissance vocale sur l’appareil est indisponible sur ce téléphone</string>
     <string name="voice_phone_ready">Reconnaissance sur l’appareil disponible</string>
@@ -28,7 +38,7 @@
     <string name="voice_no_computers">Associez un ordinateur pour gérer son service Whisper ici.</string>
     <string name="voice_install">Installer</string>
     <string name="voice_installing">Installation…</string>
-    <string name="voice_privacy_note">L’audio est traité localement sur l’appareil choisi. Whisper détecte automatiquement environ 100 langues ; les langues de la reconnaissance intégrée au téléphone dépendent de son fournisseur. Le texte reconnu est ajouté au brouillon sans être envoyé automatiquement.</string>
+    <string name="voice_privacy_note">Le mode automatique utilise l’ordinateur de la session, puis ce téléphone ; l’audio est traité localement. La reconnaissance dans le cloud envoie l’audio à Ragent Accounts et ElevenLabs. Le texte reconnu est ajouté au brouillon sans être envoyé automatiquement.</string>
     <string name="run_dock_stop">Arrêter</string>
     <string name="run_dock_stop_description">Arrêter la tâche</string>
     <string name="decision_select_one">Choisissez une option</string>

@@ -3286,6 +3286,23 @@ export function createOwnerAuthBroker({
     });
   }
 
+  async function authenticateAccountAsr({ credential: rawCredential = '' } = {}) {
+    const token = trimString(rawCredential);
+    if (typeof store.readAccountAsrSnapshot === 'function' && /^rac_[A-Za-z0-9_-]{32,}$/.test(token)) {
+      const draft = await store.readAccountAsrSnapshot({ tokenHash: hashSecret(token) });
+      const authenticated = authenticateAccountCredential(draft, token, 'account-directory', { touchActivity: false });
+      const entitlement = resolveEntitlement(draft, authenticated.credential.accountId, clock());
+      return { accountId: authenticated.credential.accountId, deviceId: authenticated.credential.deviceId,
+        plan: entitlement.plan };
+    }
+    return store.mutate((draft) => {
+      const authenticated = authenticateAccountCredential(draft, token, 'account-directory', { touchActivity: false });
+      const entitlement = resolveEntitlement(draft, authenticated.credential.accountId, clock());
+      return { accountId: authenticated.credential.accountId, deviceId: authenticated.credential.deviceId,
+        plan: entitlement.plan };
+    });
+  }
+
   async function reserveAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'reserve', clock);
     const result = await store.mutate(async (draft) => {
@@ -4120,6 +4137,7 @@ export function createOwnerAuthBroker({
     publishInstanceIdentity,
     listAccountDirectoryDevices,
     getAccountUsage,
+    authenticateAccountAsr,
     reserveAccountFileUpload,
     completeAccountFileUpload,
     releaseAccountFileUpload,

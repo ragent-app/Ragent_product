@@ -20,6 +20,9 @@ assert.match(buildScript, /Accounts Node runtime checksum mismatch/);
 assert.match(buildScript, /stage-runtime-payload\.mjs/);
 assert.match(buildScript, /--profile accounts/);
 assert.match(buildScript, /verify-runtime-payload\.mjs/);
+assert.match(buildScript, /mktemp -d "\$OUTPUT_DIR\/\.agentoc-accounts-release/);
+assert.doesNotMatch(buildScript, /mktemp -d \/tmp\//, 'release build work files must stay under its output directory');
+assert.match(buildScript, /npm_config_cache=.*WORK_DIR\/npm-cache/);
 assert.match(buildScript, /agentoc-accounts\.service/);
 assert.match(service, /^ExecStart=\/opt\/agentoc-accounts\/current\/runtime\/node /m);
 assert.match(service, /^WorkingDirectory=\/opt\/agentoc-accounts\/current\/app$/m);
@@ -51,9 +54,16 @@ const npmPack = process.platform === 'win32'
   })
   : execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' });
 const packed = JSON.parse(npmPack)[0];
+// These two policy modules are intentionally shared by the local API client;
+// the Accounts service implementation itself must remain out of that package.
+const sharedAccountPolicies = new Set([
+  'accounts/turn-handoff-policy.mjs',
+  'accounts/turn-lease-policy.mjs',
+]);
 const leaked = packed.files
   .map((entry) => entry.path)
-  .filter((file) => file.startsWith('accounts/') || file.startsWith('scripts/accounts-'));
+  .filter((file) => (file.startsWith('accounts/') && !sharedAccountPolicies.has(file))
+    || file.startsWith('scripts/accounts-'));
 assert.deepEqual(leaked, [], `Accounts files leaked into the local-control-plane package: ${leaked.join(', ')}`);
 
 console.log('accounts independent release packaging tests passed');

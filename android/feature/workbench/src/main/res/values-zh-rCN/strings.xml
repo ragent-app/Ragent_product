@@ -8,6 +8,16 @@
     <string name="voice_route_automatic">自动选择</string>
     <string name="voice_route_automatic_hint">优先使用会话所在电脑，其次使用本机</string>
     <string name="voice_route_phone">本机</string>
+    <string name="voice_route_cloud">云端识别</string>
+    <string name="voice_cloud_ready">可用 · 本月剩余 %1$d 分钟</string>
+    <string name="voice_cloud_unavailable">云端识别暂不可用</string>
+    <string name="voice_cloud_quota_exceeded">本月云端语音识别额度已用完</string>
+    <string name="voice_cloud_recording_too_long">录音请控制在 20 秒以内</string>
+    <string name="voice_cloud_recording_invalid">录音无法处理，请重试。</string>
+    <string name="voice_cloud_retry_new_recording">这段录音已处理。如仍需转写，请重新录音。</string>
+    <string name="voice_cloud_outcome_uncertain">无法确认识别结果。这段录音不会再次发送，用量可能仍处于预留状态；请先查看用量再重试。</string>
+    <string name="voice_cloud_sign_in_required">请登录 Ragent 账号后使用云端识别。</string>
+    <string name="voice_cloud_upload_disclosure">选择云端识别后，音频会按服务商的数据政策发送至 Ragent Accounts 和 ElevenLabs。识别文字只写入草稿，不会自动发送。</string>
     <string name="voice_computers_section">已配对电脑</string>
     <string name="voice_phone_unsupported">此手机不支持设备端语音识别</string>
     <string name="voice_phone_ready">设备端识别可用</string>
@@ -28,7 +38,7 @@
     <string name="voice_no_computers">配对电脑后，可在这里管理其 Whisper 服务。</string>
     <string name="voice_install">安装</string>
     <string name="voice_installing">正在安装…</string>
-    <string name="voice_privacy_note">音频只在选定设备上本地处理。Whisper 可自动识别约 100 种语言；手机系统识别器的语种由其提供方决定。识别文字只会写入草稿，不会自动发送。</string>
+    <string name="voice_privacy_note">自动模式优先使用会话所在电脑，其次使用本机，音频在设备本地处理。选择云端识别后，音频会发送至 Ragent Accounts 和 ElevenLabs；识别文字只写入草稿，不会自动发送。</string>
     <string name="settings_sharing_agents">分享与智能助手</string>
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">停止任务</string>
