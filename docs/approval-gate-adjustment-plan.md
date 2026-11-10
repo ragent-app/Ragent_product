@@ -82,6 +82,7 @@ Codex 的 `thread/start` 响应须成为启动时的能力检查点。Codex 未�
 - 将完整的 `additionalPermissions`、`networkApprovalContext` 与 sandbox escape 单独分类为权限授予请求。即使命令本身是 `git status`，也不得用命令分类覆盖额外文件系统或网络授权。
 - 对 Codex `fileChange` 以活动 item 的完整 diff 为依据；合并同一 item 的多文件决策。缺少对应 item、文件路径或变更类型时仍要求用户；删除和移动继续按高风险处理，后续仅在有完整目标、可恢复性及风险证明时再讨论放宽。
 - `item/permissions/requestApproval` 与未知 MCP elicitation 继续要求用户；只自动接受由当前 Run 创建并绑定的 Ragent 管理 MCP 工具请求。
+- Windows 将 ProgramData 作为系统路径保护时，若某个 Run 的已验证工作区本身位于 ProgramData 下，允许该工作区内的只读请求自动通过。例外绑定在执行范围摘要内的 ProgramData 根、workspace 根及实际解析路径；memory/config 等保护根、敏感路径、工作区外路径和所有写入/删除仍走原策略。
 
 Linux 继续复用 `classifyRisk` / `decideRiskGate` 的通用安全、谨慎、危险分级；Windows 保留独立的 PowerShell/路径实现。Linux 的 `sudo`、root 执行器与策略不应直接搬到 Windows；复用的是风险语义、审批聚合、审计字段与拒绝理由。
 

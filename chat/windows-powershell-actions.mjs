@@ -123,12 +123,26 @@ async function resolveCopyDestination(destination, source, context, fsApi) {
   return target;
 }
 
-function isProtected(target, context) {
-  const roots = [...systemPathRootsForPlatform('win32'), ...(context.systemPathRoots || []),
-    ...(context.protectedRoots || [])].map((root) => typeof root === 'string' ? root : root?.path).filter((root) => typeof root === 'string' && root);
-  return [target.lexical, target.actual].some((p) => roots.some((root) => inside(p, root))
-    || WINDOWS_PROFILE_SENSITIVE.test(win.normalize(p))
-    || p.split(/[\\/]+/).some((part) => SENSITIVE_COMPONENT.test(part)));
+function isProtected(target, context, { allowProgramDataWorkspaceRead = false } = {}) {
+  const protectedRoots = (context.protectedRoots || [])
+    .map((root) => typeof root === 'string' ? root : root?.path)
+    .filter((root) => typeof root === 'string' && root);
+  const systemRoots = [...systemPathRootsForPlatform('win32'), ...(context.systemPathRoots || [])]
+    .map((root) => typeof root === 'string' ? root : root?.path)
+    .filter((root) => typeof root === 'string' && root);
+  const workspaceRoot = typeof context.trustedWorkspaceRoot === 'string' ? context.trustedWorkspaceRoot : '';
+  const programDataRoot = context.platform === 'win32' && typeof context.programDataRoot === 'string'
+    ? context.programDataRoot : '';
+  const boundProgramDataWorkspaceRead = allowProgramDataWorkspaceRead && programDataRoot && workspaceRoot
+    && inside(target.lexical, programDataRoot) && inside(target.actual, programDataRoot)
+    && inside(target.lexical, workspaceRoot) && inside(target.actual, workspaceRoot);
+  return [target.lexical, target.actual].some((p) => {
+    if (protectedRoots.some((root) => inside(p, root))) return true;
+    if (systemRoots.some((root) => inside(p, root)
+      && !(boundProgramDataWorkspaceRead && win.resolve(root).toLowerCase() === win.resolve(programDataRoot).toLowerCase()))) return true;
+    return WINDOWS_PROFILE_SENSITIVE.test(win.normalize(p))
+      || p.split(/[\\/]+/).some((part) => SENSITIVE_COMPONENT.test(part));
+  });
 }
 
 export async function analyzeWindowsFileChanges(entries, context = {}, { fsApi = { lstat, realpath, readdir } } = {}) {
@@ -151,19 +165,29 @@ export async function analyzeWindowsFileChanges(entries, context = {}, { fsApi =
       regularFile = info.isFile() && !info.isSymbolicLink();
       linked = regularFile && info.nlink > 1;
     } catch (error) { if (error?.code !== 'ENOENT') return { complete: false, actions, reason: 'file change target cannot be inspected' }; }
-    const action = { kind, target, protected: isProtected(target, context),
+    const action = { kind, target, protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read' }),
       workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       regularFile, linked,
       recursive: directory && (kind === 'delete' || entry.recursive === true) };
     if (action.recursive) action.recursiveVerified = (kind !== 'delete' || action.workspace)
-      && await inspectRecursiveTarget(target, context, fsApi, { allowWorkspaceRoot: kind !== 'delete', requireWorkspace: kind === 'delete', checkHardLinks: kind !== 'delete' });
+      && await inspectRecursiveTarget(target, context, fsApi, {
+        allowWorkspaceRoot: kind !== 'delete',
+        requireWorkspace: kind === 'delete',
+        checkHardLinks: kind !== 'delete',
+        allowProgramDataWorkspaceRead: kind === 'read',
+      });
     actions.push(action);
   }
   return { complete: true, actions };
 }
 
-async function inspectRecursiveTarget(target, context, fsApi, { allowWorkspaceRoot = false, requireWorkspace = true, checkHardLinks = true } = {}) {
+async function inspectRecursiveTarget(target, context, fsApi, {
+  allowWorkspaceRoot = false,
+  requireWorkspace = true,
+  checkHardLinks = true,
+  allowProgramDataWorkspaceRead = false,
+} = {}) {
   if ((requireWorkspace && !context.trustedWorkspaceRoot) ||
       (!allowWorkspaceRoot && context.trustedWorkspaceRoot && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase())) return false;
   const stack = [target.actual]; let count = 0;
@@ -172,7 +196,8 @@ async function inspectRecursiveTarget(target, context, fsApi, { allowWorkspaceRo
     const current = stack.pop();
     let info;
     try { info = await fsApi.lstat(current); } catch (error) { return error?.code === 'ENOENT' && count === 1; }
-    if (info.isSymbolicLink() || (checkHardLinks && info.isFile() && info.nlink > 1) || isProtected({ lexical: current, actual: current }, context)) return false;
+    if (info.isSymbolicLink() || (checkHardLinks && info.isFile() && info.nlink > 1)
+        || isProtected({ lexical: current, actual: current }, context, { allowProgramDataWorkspaceRead })) return false;
     if (info.isDirectory()) {
       let entries;
       try { entries = await fsApi.readdir(current); } catch { return false; }
@@ -407,7 +432,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const sourceTarget = await resolveTarget(source, context.cwd, fsApi, context);
     if (!sourceTarget) return { complete: false, actions, reason: 'file target cannot be resolved' };
     const add = (action, target) => actions.push({ kind: action, program, target,
-      protected: isProtected(target, context), workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
+      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read' }), workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       recursive: args.named.has('recurse') || (program === 'get-childitem' && args.named.has('depth')) });
     if (kind === 'copy' || kind === 'move' || kind === 'rename') {
@@ -422,7 +447,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       // itself is ordinary. Copy also needs to inspect an existing destination.
       const recursiveActions = kind === 'copy' ? actions.slice(-2) : actions.slice(-1);
       for (const action of recursiveActions) action.recursiveVerified = await inspectRecursiveTarget(action.target, context, fsApi,
-        { allowWorkspaceRoot: true, requireWorkspace: false });
+        { allowWorkspaceRoot: true, requireWorkspace: false, allowProgramDataWorkspaceRead: action.kind === 'read' });
     }
     if (kind === 'delete' || kind === 'move' || kind === 'rename') {
       const action = actions[actions.length - (kind === 'move' || kind === 'rename' ? 2 : 1)];

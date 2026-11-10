@@ -128,6 +128,12 @@ export function buildRunRiskContext(executionScope, { protectedRoots = [], windo
     workspaceRoot,
     trustedWorkspaceRoot,
     cwd,
+    // The owner workspace can be below ProgramData. Bind that concrete OS
+    // root into the signed Run snapshot so reads inside the exact workspace
+    // can be distinguished from unrelated ProgramData contents.
+    ...(platform === 'win32' && typeof windowsOsPaths?.programData === 'string'
+      ? { programDataRoot: windowsOsPaths.programData }
+      : {}),
     protectedRoots: allProtectedRoots,
     // Add OS-derived roots when available; retain environment-derived roots
     // as additional restrictions for redirected or custom installations.

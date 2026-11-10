@@ -392,6 +392,11 @@ export function resolveRunRiskContext(manifest, { platform = process.platform, w
     if (context.platform !== 'win32' || !windowsOsPaths || !Array.isArray(context.systemPathRoots)) {
       return { riskContext: null, valid: false, reason: 'windows-system-paths-unavailable' };
     }
+    if (context.programDataRoot !== undefined
+      && (typeof context.programDataRoot !== 'string'
+        || win32.normalize(context.programDataRoot).toLowerCase() !== win32.normalize(windowsOsPaths.programData).toLowerCase())) {
+      return { riskContext: null, valid: false, reason: 'windows-program-data-root-mismatch' };
+    }
     const roots = new Set(context.systemPathRoots.filter((value) => typeof value === 'string')
       .map((value) => win32.normalize(value).toLowerCase()));
     if (![windowsOsPaths.windows, windowsOsPaths.programData, windowsOsPaths.programFiles, windowsOsPaths.programFilesX86]

@@ -32,7 +32,7 @@ await writeFile(path.join(workspace, 'build', 'nested', 'output.txt'), 'fixture'
 await writeFile(path.join(workspace, 'build-sensitive', '.ssh', 'fixture-key'), 'fixture');
 await link(path.join(workspace, 'sensitive-folder', '.ssh', 'fixture-key'), path.join(workspace, 'ordinary-link'));
 await link(path.join(workspace, 'sensitive-folder', '.ssh', 'fixture-key'), path.join(workspace, 'linked-dest', 'readme.txt'));
-const context = { cwd: workspace, trustedWorkspaceRoot: workspace, protectedRoots: [path.join(root, 'protected')] };
+const context = { platform: 'win32', cwd: workspace, trustedWorkspaceRoot: workspace, protectedRoots: [path.join(root, 'protected')] };
 async function inspect(command, options) {
   const result = await analyzeWindowsPowerShell(command, context, options);
   return { ...result, ...decideWindowsPowerShellActions(result) };
@@ -44,6 +44,44 @@ for (const target of [path.join(root, 'profile', 'NTUSER.DAT'), path.join(root, 
   }
 }
 assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ path: path.join(root, 'profile', 'AppData', 'Local', 'ordinary-app', 'fixture'), kind: 'write' }], context)).decision, 'allow');
+{
+  const previous = process.env.ProgramData;
+  const programDataRoot = path.join(root, 'relocated-workspace-data');
+  const programDataWorkspace = path.join(programDataRoot, 'owner-workspace');
+  const protectedMemory = path.join(programDataWorkspace, 'memory');
+  await mkdir(protectedMemory, { recursive: true });
+  await writeFile(path.join(programDataWorkspace, 'readme.txt'), 'fixture');
+  await writeFile(path.join(protectedMemory, 'private.txt'), 'fixture');
+  const programDataContext = {
+    ...context,
+    cwd: programDataWorkspace,
+    trustedWorkspaceRoot: programDataWorkspace,
+    programDataRoot,
+    protectedRoots: [protectedMemory],
+    systemPathRoots: [programDataRoot],
+  };
+  try {
+    process.env.ProgramData = programDataRoot;
+    const shellApproval = script => ({ kind: 'command', params: {
+      command: [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', script],
+    } });
+    const decide = (script, riskMode = 'recommended') => decideWindowsApproval(shellApproval(script), {
+      riskMode, cwd: programDataWorkspace, riskContext: programDataContext, riskContextValid: true,
+    });
+    const listing = await decide(`Get-ChildItem -LiteralPath '${programDataWorkspace}'`);
+    assert.equal(listing.decision, 'auto-allow', 'PowerShell may list a Run-bound workspace beneath ProgramData');
+    const content = await decide(`Get-Content -LiteralPath '${path.join(programDataWorkspace, 'readme.txt')}'`);
+    assert.equal(content.decision, 'auto-allow', 'PowerShell may read a file in that workspace');
+    const mutation = await decide(`Set-Content -LiteralPath '${path.join(programDataWorkspace, 'readme.txt')}' -Value changed`);
+    assert.equal(mutation.decision, 'prompt', 'ProgramData workspace writes remain owner-gated');
+    const memoryRead = await decide(`Get-Content -LiteralPath '${path.join(protectedMemory, 'private.txt')}'`);
+    assert.equal(memoryRead.decision, 'prompt', 'instance memory remains protected inside the workspace boundary');
+    const outsideRead = await decide(`Get-Content -LiteralPath '${path.join(programDataRoot, 'another-app', 'private.txt')}'`);
+    assert.equal(outsideRead.decision, 'prompt', 'unbound ProgramData files remain protected');
+  } finally {
+    if (previous === undefined) delete process.env.ProgramData; else process.env.ProgramData = previous;
+  }
+}
 {
   const previous = process.env.ProgramData;
   const shared = path.join(root, 'relocated-shared-data');
