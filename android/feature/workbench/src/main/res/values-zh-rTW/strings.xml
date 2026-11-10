@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">這段錄音已處理。如仍需要轉寫，請重新錄音。</string>
     <string name="voice_cloud_outcome_uncertain">無法確認辨識結果。這段錄音不會再次傳送，用量可能仍處於預留狀態；請先查看用量再重試。</string>
     <string name="voice_cloud_sign_in_required">請登入 Ragent 帳號後使用雲端辨識。</string>
-    <string name="voice_cloud_upload_disclosure">選擇雲端辨識後，音訊會依服務提供者的資料政策傳送至 Ragent Accounts 和 ElevenLabs。辨識文字只會寫入草稿，不會自動傳送。</string>
+    <string name="voice_cloud_upload_disclosure">雲端辨識會將本次錄音傳送至 Ragent Accounts 和 ElevenLabs 進行轉寫。Ragent 不會持久保存音訊或轉寫文字；ElevenLabs 可能依其資料政策保留這些內容。辨識文字只會寫入草稿，不會自動傳送。</string>
     <string name="voice_computers_section">已配對電腦</string>
     <string name="voice_phone_unsupported">此手機無法使用裝置端語音辨識</string>
     <string name="voice_phone_ready">裝置端辨識可用</string>
@@ -38,7 +38,7 @@
     <string name="voice_no_computers">配對電腦後，可在此管理其 Whisper 服務。</string>
     <string name="voice_install">安裝</string>
     <string name="voice_installing">正在安裝…</string>
-    <string name="voice_privacy_note">自動模式優先使用工作階段所在電腦，其次使用本機，音訊會在裝置本機處理。選擇雲端辨識後，音訊會傳送至 Ragent Accounts 和 ElevenLabs；辨識文字只會寫入草稿，不會自動傳送。</string>
+    <string name="voice_privacy_note">自動模式會在工作階段電腦或本機處理音訊。雲端辨識會將音訊傳送至 Ragent Accounts 和 ElevenLabs。Ragent 不會持久保存音訊或轉寫文字；ElevenLabs 可能依其資料政策保留這些內容。辨識結果只會寫入草稿。</string>
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">停止任務</string>
     <string name="decision_select_one">請選擇一項</string>

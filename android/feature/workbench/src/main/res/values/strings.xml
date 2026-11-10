@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">This recording was already processed. Start a new recording if you still need a transcript.</string>
     <string name="voice_cloud_outcome_uncertain">We could not confirm the result. This recording will not be sent again, and its minutes may stay reserved. Check usage before retrying.</string>
     <string name="voice_cloud_sign_in_required">Sign in to your Ragent account to use cloud recognition.</string>
-    <string name="voice_cloud_upload_disclosure">Cloud recognition sends audio to Ragent Accounts and ElevenLabs under the provider’s data policy. The transcript is added to your draft and is never sent automatically.</string>
+    <string name="voice_cloud_upload_disclosure">Cloud recognition sends this recording to Ragent Accounts and ElevenLabs for transcription. Ragent does not persist audio or transcripts; ElevenLabs may retain them under its data policy. The transcript is added to your draft only and is never sent automatically.</string>
     <string name="voice_computers_section">Paired computers</string>
     <string name="voice_phone_unsupported">On-device speech recognition is unavailable on this phone</string>
     <string name="voice_phone_ready">On-device recognition is available</string>
@@ -38,7 +38,7 @@
     <string name="voice_no_computers">Pair a computer to manage its Whisper service here.</string>
     <string name="voice_install">Install</string>
     <string name="voice_installing">Installing…</string>
-    <string name="voice_privacy_note">Automatic mode uses the session computer when available, then this phone. Audio stays on that device. Cloud recognition sends audio to Ragent Accounts and ElevenLabs; only the transcript is added to your draft, and it is never sent automatically.</string>
+    <string name="voice_privacy_note">Automatic mode processes audio on the session computer or this phone. Cloud recognition sends audio to Ragent Accounts and ElevenLabs. Ragent does not persist audio or transcripts; ElevenLabs may retain them under its data policy. Transcripts go to your draft only.</string>
     <string name="settings_sharing_agents">Sharing and agents</string>
     <string name="run_dock_stop">Stop</string>
     <string name="run_dock_stop_description">Stop run</string>

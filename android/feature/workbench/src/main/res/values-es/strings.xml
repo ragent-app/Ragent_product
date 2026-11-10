@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">Esta grabación ya se procesó. Si aún necesitas la transcripción, haz una nueva grabación.</string>
     <string name="voice_cloud_outcome_uncertain">No se pudo confirmar el resultado. Esta grabación no se volverá a enviar y sus minutos podrían seguir reservados. Consulta el uso antes de reintentarlo.</string>
     <string name="voice_cloud_sign_in_required">Inicia sesión en tu cuenta de Ragent para usar el reconocimiento en la nube.</string>
-    <string name="voice_cloud_upload_disclosure">El reconocimiento en la nube envía el audio a Ragent Accounts y ElevenLabs según la política de datos del proveedor. El texto se añade al borrador y nunca se envía automáticamente.</string>
+    <string name="voice_cloud_upload_disclosure">El reconocimiento en la nube envía esta grabación a Ragent Accounts y ElevenLabs para transcribirla. Ragent no conserva el audio ni el texto de forma persistente; ElevenLabs puede conservarlos según su política de datos. El texto solo se añade al borrador y nunca se envía automáticamente.</string>
     <string name="voice_computers_section">Ordenadores vinculados</string>
     <string name="voice_phone_unsupported">El reconocimiento en el dispositivo no está disponible en este teléfono</string>
     <string name="voice_phone_ready">Reconocimiento en el dispositivo disponible</string>
@@ -38,7 +38,7 @@
     <string name="voice_no_computers">Vincula un ordenador para administrar su servicio Whisper aquí.</string>
     <string name="voice_install">Instalar</string>
     <string name="voice_installing">Instalando…</string>
-    <string name="voice_privacy_note">El modo automático usa primero el ordenador de la sesión y después este teléfono; el audio se procesa localmente. El reconocimiento en la nube envía el audio a Ragent Accounts y ElevenLabs. El texto reconocido solo se añade al borrador y nunca se envía automáticamente.</string>
+    <string name="voice_privacy_note">El modo automático procesa el audio en el ordenador de la sesión o en este teléfono. El reconocimiento en la nube envía el audio a Ragent Accounts y ElevenLabs. Ragent no conserva el audio ni el texto de forma persistente; ElevenLabs puede conservarlos según su política de datos. El resultado solo se añade al borrador.</string>
     <string name="run_dock_stop">Detener</string>
     <string name="run_dock_stop_description">Detener la tarea</string>
     <string name="decision_select_one">Elige una opción</string>

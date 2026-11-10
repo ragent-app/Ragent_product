@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">Cet enregistrement a déjà été traité. Faites un nouvel enregistrement si vous avez encore besoin d’une transcription.</string>
     <string name="voice_cloud_outcome_uncertain">Résultat incertain. Cet enregistrement ne sera pas renvoyé et ses minutes peuvent rester réservées. Vérifiez l’utilisation avant de réessayer.</string>
     <string name="voice_cloud_sign_in_required">Connectez-vous à votre compte Ragent pour utiliser la reconnaissance dans le cloud.</string>
-    <string name="voice_cloud_upload_disclosure">La reconnaissance dans le cloud envoie l’audio à Ragent Accounts et ElevenLabs selon la politique de données du fournisseur. Le texte est ajouté au brouillon et n’est jamais envoyé automatiquement.</string>
+    <string name="voice_cloud_upload_disclosure">La reconnaissance dans le cloud envoie cet enregistrement à Ragent Accounts et ElevenLabs pour le transcrire. Ragent ne conserve pas durablement l’audio ni le texte, mais ElevenLabs peut les conserver selon sa politique de données. Le texte est ajouté uniquement au brouillon et n’est jamais envoyé automatiquement.</string>
     <string name="voice_computers_section">Ordinateurs associés</string>
     <string name="voice_phone_unsupported">La reconnaissance vocale sur l’appareil est indisponible sur ce téléphone</string>
     <string name="voice_phone_ready">Reconnaissance sur l’appareil disponible</string>
@@ -38,7 +38,7 @@
     <string name="voice_no_computers">Associez un ordinateur pour gérer son service Whisper ici.</string>
     <string name="voice_install">Installer</string>
     <string name="voice_installing">Installation…</string>
-    <string name="voice_privacy_note">Le mode automatique utilise l’ordinateur de la session, puis ce téléphone ; l’audio est traité localement. La reconnaissance dans le cloud envoie l’audio à Ragent Accounts et ElevenLabs. Le texte reconnu est ajouté au brouillon sans être envoyé automatiquement.</string>
+    <string name="voice_privacy_note">Le mode automatique traite l’audio sur l’ordinateur de la session ou ce téléphone. La reconnaissance dans le cloud envoie l’audio à Ragent Accounts et ElevenLabs. Ragent ne conserve pas durablement l’audio ni le texte, mais ElevenLabs peut les conserver selon sa politique de données. Le résultat est ajouté uniquement au brouillon.</string>
     <string name="run_dock_stop">Arrêter</string>
     <string name="run_dock_stop_description">Arrêter la tâche</string>
     <string name="decision_select_one">Choisissez une option</string>

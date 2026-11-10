@@ -320,4 +320,19 @@ try {
   rmSync(tempDir, { recursive: true, force: true });
 }
 
+const readinessTempDir = mkdtempSync(join(tmpdir(), 'agentoc-account-asr-readiness-'));
+const unavailableSchemaServer = await startAccountsServer({ host: '127.0.0.1', port: 0, logger: { level: 'silent' },
+  dataFile: join(readinessTempDir, 'accounts.json'), signingKeyFile: join(readinessTempDir, 'signing-key.json'),
+  turnBrokerSigningKeyFile: join(readinessTempDir, 'turn-key.json'), publicBaseUrl: 'http://127.0.0.1:0/accounts',
+  allowInsecurePublicBaseUrl: true, asrService: { enabled: true,
+    async checkReady() { throw Object.assign(new Error('missing ASR schema'), { code: 'asr_schema_unavailable' }); } } });
+try {
+  const readiness = await makeHttpRequest(unavailableSchemaServer.server.address().port, { method: 'GET', path: '/readyz' });
+  assert.equal(readiness.status, 503, 'readiness must fail closed when enabled ASR storage is unavailable');
+  assert.equal(JSON.parse(readiness.body).speechRecognition, 'unavailable');
+} finally {
+  await unavailableSchemaServer.close();
+  rmSync(readinessTempDir, { recursive: true, force: true });
+}
+
 console.log('account ASR tests passed');

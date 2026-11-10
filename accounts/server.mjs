@@ -485,6 +485,12 @@ export async function startAccountsServer(options = {}) {
   fastify.get('/readyz', async (request, reply) => {
     try {
       if (app.store && typeof app.store.ping === 'function') await app.store.ping();
+      if (app.asrStatus === 'unavailable') {
+        return reply.code(503).send({ status: 'unavailable', speechRecognition: 'unavailable' });
+      }
+      if (app.asrStatus === 'ready' && typeof app.asrService?.checkReady === 'function') {
+        await app.asrService.checkReady();
+      }
       return {
         status: 'ready',
         signingKey: Boolean(app.keyRecord),
