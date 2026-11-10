@@ -1,3 +1,6 @@
+import { ACCOUNT_ASR_MODEL, ACCOUNT_ASR_PRICE_VERSION, ACCOUNT_ASR_PROVIDER,
+  estimateAccountAsrCostMicroUsd } from './asr-policy.mjs';
+
 function asrError(code, statusCode, message = code) {
   return Object.assign(new Error(message), { code, statusCode });
 }
@@ -308,6 +311,171 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
     });
   }
 
+  function reconciliationInput(input = {}) {
+    const accountId = typeof input.accountId === 'string' ? input.accountId.trim() : '';
+    const requestId = typeof input.requestId === 'string' ? input.requestId.trim() : '';
+    const outcome = input.outcome;
+    if (!accountId || accountId.length > 160 || /[\u0000-\u001f\u007f]/.test(accountId)
+      || !/^[A-Za-z0-9_-]{16,128}$/.test(requestId)
+      || !['provider_not_processed', 'provider_processed_result_lost'].includes(outcome)) {
+      throw new TypeError('A valid account, request, and ASR reconciliation outcome are required');
+    }
+    return { accountId, requestId, outcome };
+  }
+
+  function operatorEvidence(input = {}) {
+    const operatorId = typeof input.operatorId === 'string' ? input.operatorId.trim() : '';
+    const evidenceRef = typeof input.evidenceRef === 'string' ? input.evidenceRef.trim() : '';
+    const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+    if (!operatorId || operatorId.length > 128 || /[\u0000-\u001f\u007f]/.test(operatorId)
+      || !evidenceRef || evidenceRef.length > 256 || /[\u0000-\u001f\u007f]/.test(evidenceRef)
+      || !reason || reason.length > 1_000 || /[\u0000-\u001f\u007f]/.test(reason)) {
+      throw new TypeError('A bounded operator ID, evidence reference, and reason are required');
+    }
+    return { operatorId, evidenceRef, reason };
+  }
+
+  function reconciliationCost(request, outcome) {
+    if (outcome === 'provider_not_processed') return null;
+    if (String(request.provider_name) !== ACCOUNT_ASR_PROVIDER
+      || String(request.model_id) !== ACCOUNT_ASR_MODEL
+      || String(request.price_version) !== ACCOUNT_ASR_PRICE_VERSION) {
+      throw asrError('asr_reconciliation_price_unknown', 409,
+        'The request price version has no approved cost estimator.');
+    }
+    return estimateAccountAsrCostMicroUsd(number(request.audio_duration_ms));
+  }
+
+  function reconciliationDto(row, outcome = null) {
+    if (!row) return null;
+    const resolvedOutcome = outcome || String(row.outcome || '');
+    return {
+      accountId: String(row.account_id),
+      requestId: String(row.request_id),
+      periodStart: String(row.period_start).slice(0, 10),
+      state: String(row.state),
+      audioDurationMs: number(row.audio_duration_ms),
+      reservedDurationMs: number(row.reserved_duration_ms),
+      providerName: String(row.provider_name),
+      modelId: String(row.model_id),
+      priceVersion: String(row.price_version),
+      errorCode: row.error_code ? String(row.error_code) : null,
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+      outcome: resolvedOutcome || null,
+      estimatedProviderCostMicroUsd: row.provider_cost_microusd == null
+        ? null : number(row.provider_cost_microusd),
+      releaseDurationMs: resolvedOutcome ? 0 : number(row.reserved_duration_ms),
+    };
+  }
+
+  async function listUnknownRequests({ limit = 100 } = {}) {
+    const count = Number(limit);
+    if (!Number.isSafeInteger(count) || count < 1 || count > 500) {
+      throw new TypeError('ASR reconciliation list limit must be between 1 and 500');
+    }
+    return withClient(async (client) => {
+      const result = await client.query(`select account_id, request_id, period_start::text as period_start,
+        state, audio_duration_ms, reserved_duration_ms, provider_name, model_id, price_version,
+        error_code, provider_cost_microusd, created_at, updated_at
+        from account_asr_requests where state='unknown'
+        order by updated_at asc, account_id asc, request_id asc limit $1`, [count]);
+      return result.rows.map((row) => reconciliationDto(row));
+    });
+  }
+
+  async function previewUnknownReconciliation(input) {
+    const { accountId, requestId, outcome } = reconciliationInput(input);
+    return withClient(async (client) => {
+      const result = await client.query(`select account_id, request_id, period_start::text as period_start,
+        state, audio_duration_ms, reserved_duration_ms, provider_name, model_id, price_version,
+        error_code, provider_cost_microusd, created_at, updated_at
+        from account_asr_requests where account_id=$1 and request_id=$2`, [accountId, requestId]);
+      const row = result.rows[0];
+      if (!row || row.state !== 'unknown') return { kind: row ? 'not_unknown' : 'not_found' };
+      const cost = reconciliationCost(row, outcome);
+      return { kind: 'preview', request: {
+        ...reconciliationDto(row, outcome),
+        estimatedProviderCostMicroUsd: cost,
+        releaseDurationMs: number(row.reserved_duration_ms),
+      } };
+    });
+  }
+
+  async function reconcileUnknown(input) {
+    const { accountId, requestId, outcome } = reconciliationInput(input);
+    const { operatorId, evidenceRef, reason } = operatorEvidence(input);
+    return transaction(async (client) => {
+      // Read the period before taking locks, then always lock the aggregate
+      // before the request, matching reserve/settle/fail and avoiding inversions.
+      const candidateResult = await client.query(`select period_start::text as period_start, state
+        from account_asr_requests where account_id=$1 and request_id=$2`, [accountId, requestId]);
+      const candidate = candidateResult.rows[0];
+      if (!candidate) return { kind: 'not_found' };
+      if (candidate.state !== 'unknown') {
+        const prior = await client.query(`select outcome, operator_id, evidence_ref,
+          provider_cost_microusd, created_at from account_asr_reconciliations
+          where account_id=$1 and request_id=$2`, [accountId, requestId]);
+        return prior.rows[0] ? { kind: 'already_reconciled', reconciliation: {
+          outcome: String(prior.rows[0].outcome), operatorId: String(prior.rows[0].operator_id),
+          evidenceRef: String(prior.rows[0].evidence_ref),
+          providerCostMicroUsd: prior.rows[0].provider_cost_microusd == null
+            ? null : number(prior.rows[0].provider_cost_microusd),
+          createdAt: prior.rows[0].created_at ? new Date(prior.rows[0].created_at).toISOString() : null,
+        } } : { kind: 'not_unknown' };
+      }
+
+      const periodStart = String(candidate.period_start).slice(0, 10);
+      const usageResult = await client.query(`select reserved_audio_ms from account_asr_usage
+        where account_id=$1 and period_start=$2::date for update`, [accountId, periodStart]);
+      if (!usageResult.rows.length) return { kind: 'usage_unavailable' };
+      const requestResult = await client.query(`select account_id, request_id, period_start::text as period_start,
+        state, audio_duration_ms, reserved_duration_ms, provider_name, model_id, price_version,
+        error_code, provider_cost_microusd, created_at, updated_at from account_asr_requests
+        where account_id=$1 and request_id=$2 for update`, [accountId, requestId]);
+      const row = requestResult.rows[0];
+      if (!row) return { kind: 'not_found' };
+      if (row.state !== 'unknown' || String(row.period_start).slice(0, 10) !== periodStart) {
+        const prior = await client.query(`select outcome, operator_id, evidence_ref,
+          provider_cost_microusd, created_at from account_asr_reconciliations
+          where account_id=$1 and request_id=$2`, [accountId, requestId]);
+        return prior.rows[0] ? { kind: 'already_reconciled', reconciliation: {
+          outcome: String(prior.rows[0].outcome), operatorId: String(prior.rows[0].operator_id),
+          evidenceRef: String(prior.rows[0].evidence_ref),
+          providerCostMicroUsd: prior.rows[0].provider_cost_microusd == null
+            ? null : number(prior.rows[0].provider_cost_microusd),
+          createdAt: prior.rows[0].created_at ? new Date(prior.rows[0].created_at).toISOString() : null,
+        } } : { kind: 'not_unknown' };
+      }
+
+      const reservedMs = number(row.reserved_duration_ms);
+      const aggregateReservedMs = number(usageResult.rows[0].reserved_audio_ms);
+      if (reservedMs < 1 || aggregateReservedMs < reservedMs) {
+        throw asrError('asr_reconciliation_usage_conflict', 409,
+          'The request reservation does not match the account usage aggregate.');
+      }
+      const costMicroUsd = reconciliationCost(row, outcome);
+      const errorCode = outcome === 'provider_not_processed'
+        ? 'asr_reconciled_provider_not_processed' : 'asr_reconciled_result_lost';
+      const updated = await client.query(`update account_asr_requests set state='failed',
+        reserved_duration_ms=0, provider_cost_microusd=$3, error_code=$4, updated_at=now()
+        where account_id=$1 and request_id=$2 and state='unknown' returning request_id`,
+      [accountId, requestId, costMicroUsd, errorCode]);
+      if (updated.rowCount !== 1) throw asrError('asr_reconciliation_state_conflict', 409);
+      await client.query(`update account_asr_usage set reserved_audio_ms=reserved_audio_ms-$3,
+        provider_cost_microusd=provider_cost_microusd+$4, updated_at=now()
+        where account_id=$1 and period_start=$2::date`, [accountId, periodStart, reservedMs, costMicroUsd || 0]);
+      await client.query(`insert into account_asr_reconciliations
+        (account_id, request_id, outcome, operator_id, evidence_ref, reason,
+         prior_error_code, provider_cost_microusd, provider_cost_source)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [accountId, requestId, outcome, operatorId, evidenceRef, reason,
+        row.error_code || null, costMicroUsd, costMicroUsd == null ? null : 'internal_estimate']);
+      return { kind: 'reconciled', outcome, accountId, requestId, releasedDurationMs: reservedMs,
+        providerCostMicroUsd: costMicroUsd, costSource: costMicroUsd == null ? null : 'internal_estimate' };
+    });
+  }
+
   async function purgeTerminalRequests({ olderThanMs = 90 * 24 * 60 * 60_000, batchSize = 1_000 } = {}) {
     const age = Number(olderThanMs);
     const limit = Number(batchSize);
@@ -340,5 +508,6 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
 
   return Object.freeze({ reserve, markProcessing, settle, fail, markUnknown, getUsage,
     getConsent, setConsent, purgeExpiredConsents,
-    expireStaleReservations, markStaleProcessingUnknown, purgeTerminalRequests, checkReady });
+    expireStaleReservations, markStaleProcessingUnknown, listUnknownRequests,
+    previewUnknownReconciliation, reconcileUnknown, purgeTerminalRequests, checkReady });
 }
