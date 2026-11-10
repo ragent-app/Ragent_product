@@ -7,11 +7,16 @@ import com.andysagent.agentoc.core.auth.AccountSessionException
 import com.andysagent.agentoc.core.model.RemoteTarget
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.network.ApiRequest
+import com.andysagent.agentoc.core.protocol.AccountAsrUsageDto
 import com.andysagent.agentoc.feature.workbench.VoiceComputerState
+import com.andysagent.agentoc.feature.workbench.CloudVoiceAccess
+import com.andysagent.agentoc.feature.workbench.CloudVoiceActionResult
 import com.andysagent.agentoc.feature.workbench.VoiceDestination
 import com.andysagent.agentoc.feature.workbench.VoiceUiState
 import com.andysagent.agentoc.feature.workbench.isMissingComputerVoiceEndpoint
+import com.andysagent.agentoc.feature.workbench.resolveCloudVoiceAccess
 import com.andysagent.agentoc.feature.workbench.resolveVoiceDestination
+import com.andysagent.agentoc.feature.workbench.runCloudVoiceActionIfAuthorized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -50,6 +55,7 @@ internal class LocalVoiceController(
     private var activeJob: Job? = null
     private var stopRequested: AtomicBoolean? = null
     private var cloudUsageJob: Job? = null
+    private var cloudAccessCheckJob: Job? = null
 
     init {
         refreshCloudUsage()
@@ -111,7 +117,13 @@ internal class LocalVoiceController(
 
     private fun persistChoice(choice: String) {
         val sessionId = activeSessionId ?: return
-        mutableState.update { it.copy(choice = choice, message = null) }
+        val cancelCloudCheck = choice != "cloud" && cloudAccessCheckJob?.isActive == true
+        if (cancelCloudCheck) {
+            cloudAccessCheckJob?.cancel()
+            cloudAccessCheckJob = null
+        }
+        mutableState.update { it.copy(choice = choice, message = null,
+            cloudAccessChecking = if (cancelCloudCheck) false else it.cloudAccessChecking) }
         scope.launch { runCatching { app.runtime.configStore.setChatVoiceChoice(sessionId, choice) } }
     }
 
@@ -166,23 +178,11 @@ internal class LocalVoiceController(
         scope.launch {
             runCatching { app.runtime.accountSessions.getAccountAsrUsage() }
                 .onSuccess { usage ->
-                    val consentGranted = usage.consent.granted
-                    mutableState.update { it.copy(
-                        cloudAvailable = usage.available && usage.remainingMs > 0,
-                        cloudLimitMs = usage.limitMs,
-                        cloudUsedMs = usage.usedMs,
-                        cloudReservedMs = usage.reservedMs,
-                        cloudRemainingMs = usage.remainingMs,
-                        cloudConsentKnown = true,
-                        cloudConsentGranted = consentGranted,
-                    ) }
-                    if (!usage.available || usage.remainingMs <= 0) {
-                        mutableState.update { it.copy(message = app.getString(
-                            com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_unavailable)) }
-                    } else if (consentGranted) {
-                        persistChoice("cloud")
-                    } else {
-                        mutableState.update { it.copy(cloudConsentPrompt = true, message = null) }
+                    when (updateCloudUsageState(usage)) {
+                        CloudVoiceAccess.Allowed -> persistChoice("cloud")
+                        else -> showCloudAccessResult(resolveCloudVoiceAccess(
+                            usage.available, usage.remainingMs, usage.consent.granted,
+                        ))
                     }
                 }
                 .onFailure { error -> mutableState.update { it.copy(
@@ -235,9 +235,9 @@ internal class LocalVoiceController(
             stopVoiceInput()
             return
         }
-        if (current.processing) return
-        if (current.choice == "cloud" && !current.cloudConsentGranted) {
-            requestCloudRoute()
+        if (current.processing || current.cloudAccessChecking) return
+        if (current.choice == "cloud") {
+            startCloudVoicePreflight(onText)
             return
         }
         val destination = resolveVoiceDestination(
@@ -264,6 +264,10 @@ internal class LocalVoiceController(
 
     fun stopVoiceInput() {
         val current = mutableState.value
+        if (current.cloudAccessChecking) {
+            cancelVoiceInput()
+            return
+        }
         when (voiceStopAction(
             recording = current.recording,
             processing = current.processing,
@@ -306,12 +310,15 @@ internal class LocalVoiceController(
             && current.operationTargetId == null && !current.bufferedCaptureActive) {
             localRecognizer.stop(destroy = true, cancel = true)
         }
+        cloudAccessCheckJob?.cancel()
+        cloudAccessCheckJob = null
         stopRequested?.set(true)
         activeJob?.cancel()
         activeJob = null
         stopRequested = null
         mutableState.update { it.copy(recording = false, processing = false, waveformLevel = 0f,
             operationTargetId = null, bufferedCaptureActive = false,
+            cloudAccessChecking = false,
             message = if (cloudRequestMayBeInFlight) {
                 app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_outcome_uncertain)
             } else it.message) }
@@ -403,10 +410,17 @@ internal class LocalVoiceController(
                 val audio = recordVoiceWav(stop) { level -> mutableState.update { it.copy(waveformLevel = level) } }
                 mutableState.update { it.copy(recording = false, processing = true, waveformLevel = 0f) }
                 val requestId = UUID.randomUUID().toString()
-                val result = app.runtime.accountSessions.transcribeAccountAudio(audio, requestId)
-                onText(result.text)
-                mutableState.update { it.copy(message = null) }
-                refreshCloudUsage()
+                when (val result = runCloudVoiceActionIfAuthorized(
+                    readCurrentAccess = { readCurrentCloudAccess() },
+                    action = { app.runtime.accountSessions.transcribeAccountAudio(audio, requestId) },
+                )) {
+                    is CloudVoiceActionResult.Allowed -> {
+                        onText(result.value.text)
+                        mutableState.update { it.copy(message = null) }
+                        refreshCloudUsage()
+                    }
+                    is CloudVoiceActionResult.Denied -> showCloudAccessResult(result.access)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
@@ -430,16 +444,72 @@ internal class LocalVoiceController(
         cloudUsageJob?.cancel()
         cloudUsageJob = scope.launch {
             val usage = runCatching { app.runtime.accountSessions.getAccountAsrUsage() }.getOrNull()
-            mutableState.update { current ->
-                current.copy(
-                    cloudAvailable = usage?.available == true && usage.remainingMs > 0,
-                    cloudLimitMs = usage?.limitMs ?: 0,
-                    cloudUsedMs = usage?.usedMs ?: 0,
-                    cloudReservedMs = usage?.reservedMs ?: 0,
-                    cloudRemainingMs = usage?.remainingMs ?: 0,
-                    cloudConsentKnown = usage != null,
-                    cloudConsentGranted = usage?.consent?.granted == true,
-                )
+            if (usage == null) mutableState.update { it.copy(
+                cloudAvailable = false,
+                cloudLimitMs = 0,
+                cloudUsedMs = 0,
+                cloudReservedMs = 0,
+                cloudRemainingMs = 0,
+                cloudConsentKnown = false,
+                cloudConsentGranted = false,
+            ) } else updateCloudUsageState(usage)
+        }
+    }
+
+    private fun startCloudVoicePreflight(onText: (String) -> Unit) {
+        if (cloudAccessCheckJob?.isActive == true) return
+        mutableState.update { it.copy(cloudAccessChecking = true, message = null) }
+        cloudAccessCheckJob = scope.launch {
+            try {
+                when (val result = runCloudVoiceActionIfAuthorized(
+                    readCurrentAccess = { readCurrentCloudAccess() },
+                    action = {
+                        if (mutableState.value.choice == "cloud") startCloudRecognition(onText)
+                    },
+                )) {
+                    is CloudVoiceActionResult.Allowed -> Unit
+                    is CloudVoiceActionResult.Denied -> showCloudAccessResult(result.access)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                mutableState.update { it.copy(cloudConsentKnown = false, cloudConsentGranted = false,
+                    cloudConsentPrompt = false, message = cloudErrorMessage(error)) }
+            } finally {
+                mutableState.update { it.copy(cloudAccessChecking = false) }
+                cloudAccessCheckJob = null
+            }
+        }
+    }
+
+    private suspend fun readCurrentCloudAccess(): CloudVoiceAccess {
+        val usage = app.runtime.accountSessions.getAccountAsrUsage()
+        return updateCloudUsageState(usage)
+    }
+
+    private fun updateCloudUsageState(usage: AccountAsrUsageDto): CloudVoiceAccess {
+        val access = resolveCloudVoiceAccess(usage.available, usage.remainingMs, usage.consent.granted)
+        mutableState.update { it.copy(
+            cloudAvailable = usage.available && usage.remainingMs > 0,
+            cloudLimitMs = usage.limitMs,
+            cloudUsedMs = usage.usedMs,
+            cloudReservedMs = usage.reservedMs,
+            cloudRemainingMs = usage.remainingMs,
+            cloudConsentKnown = true,
+            cloudConsentGranted = usage.consent.granted,
+        ) }
+        return access
+    }
+
+    private fun showCloudAccessResult(access: CloudVoiceAccess) {
+        mutableState.update { current ->
+            when (access) {
+                CloudVoiceAccess.Allowed -> current.copy(cloudConsentPrompt = false, message = null)
+                CloudVoiceAccess.ConsentRequired -> current.copy(cloudConsentPrompt = true, message = null)
+                CloudVoiceAccess.QuotaExceeded -> current.copy(cloudConsentPrompt = false,
+                    message = app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_quota_exceeded))
+                CloudVoiceAccess.Unavailable -> current.copy(cloudConsentPrompt = false,
+                    message = app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_unavailable))
             }
         }
     }

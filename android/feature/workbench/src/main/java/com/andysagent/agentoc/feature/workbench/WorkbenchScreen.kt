@@ -2650,9 +2650,9 @@ private fun ChatSurface(
                 backdropLayer = chatBackdropForControls,
                 backdropOrigin = chatBackdropOrigin,
                 onVoiceClick = { onEvent(WorkbenchEvent.ToggleVoiceInput) },
-                voiceActive = state.voice.recording || state.voice.processing,
+                voiceActive = state.voice.recording || state.voice.processing || state.voice.cloudAccessChecking,
                 voiceRecording = state.voice.recording,
-                voiceProcessing = state.voice.processing,
+                voiceProcessing = state.voice.processing || state.voice.cloudAccessChecking,
                 voiceLevel = state.voice.waveformLevel,
                 onVoiceCancelClick = { onEvent(WorkbenchEvent.CancelVoiceInput) },
                 modifier = Modifier
