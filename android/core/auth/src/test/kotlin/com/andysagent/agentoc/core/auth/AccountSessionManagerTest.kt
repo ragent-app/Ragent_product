@@ -504,9 +504,9 @@ class AccountSessionManagerTest {
             when {
                 request.path.endsWith("/transcriptions") -> ApiResponse(200, transcript)
                 request.path.endsWith("/asr/consent") && request.body?.contains("\"accept\"") == true ->
-                    ApiResponse(200, """{"contractVersion":1,"policyVersion":"account-asr-third-party-processing-v1","consent":{"granted":true,"policyVersion":"account-asr-third-party-processing-v1","recordedAt":"2026-11-10T00:00:00Z"}}""")
+                    ApiResponse(200, """{"contractVersion":1,"policyVersion":"account-asr-third-party-processing-v2","consent":{"granted":true,"policyVersion":"account-asr-third-party-processing-v2","recordedAt":"2026-11-10T00:00:00Z"}}""")
                 request.path.endsWith("/asr/consent") ->
-                    ApiResponse(200, """{"contractVersion":1,"policyVersion":"account-asr-third-party-processing-v1","consent":{"granted":false,"policyVersion":null,"recordedAt":"2026-11-10T00:00:00Z"}}""")
+                    ApiResponse(200, """{"contractVersion":1,"policyVersion":"account-asr-third-party-processing-v2","consent":{"granted":false,"policyVersion":null,"recordedAt":"2026-11-10T00:00:00Z"}}""")
                 else -> ApiResponse(200, usage)
             }
         }
@@ -530,7 +530,7 @@ class AccountSessionManagerTest {
         val granted = manager.setAccountAsrConsent(accepted = true)
         assertTrue(granted.granted)
         assertEquals("/v1/owner-auth/account/asr/consent", transport.requests[2].path)
-        assertTrue(transport.requests[2].body!!.contains("account-asr-third-party-processing-v1"))
+        assertTrue(transport.requests[2].body!!.contains("account-asr-third-party-processing-v2"))
         val revoked = manager.setAccountAsrConsent(accepted = false)
         assertEquals(false, revoked.granted)
         assertTrue(transport.requests[3].body!!.contains("\"revoke\""))

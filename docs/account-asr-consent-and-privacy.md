@@ -4,7 +4,7 @@ This addendum updates the canonical [central Accounts ASR plan](account-asr-serv
 
 **Updated:** 2026-11-10
 
-**State:** consent enforcement and Android disclosure are implemented and deployed to Oracle. The provider remains disabled because the owner has not obtained an ElevenLabs API key.
+**State:** consent enforcement is implemented. The expanded Android disclosure and matching Accounts policy version v2 are being validated before deployment; the provider remains disabled because the owner has not obtained an ElevenLabs API key.
 
 ## Product contract
 
@@ -34,7 +34,7 @@ sequenceDiagram
 
 The provider key stays in the central service environment. Android, Windows, per-user files, and the database never receive it. Accounts uses the existing account bearer/device identity and PostgreSQL database; it does not introduce another account system or database.
 
-The existing usage ledger is keyed by account and billing month. It records duration, request count, reservation and settlement state, provider/model and price version, audio hash, and provider cost. It does not persist the WAV or transcript as database columns. The server holds a successful response in process memory for up to five minutes to serve an idempotent retry; that brief cache is disclosed to the user.
+The existing usage ledger is keyed by account and billing month. It records duration, request count, reservation and settlement state, provider/model and price version, audio hash, and provider cost. It does not persist the WAV or transcript as database columns. The server holds a successful response in process memory for up to five minutes to serve an idempotent retry; that brief cache is disclosed to the user. Account-linked request metadata is normally deleted after 90 days; unresolved provider outcomes remain until reconciled or the account is deleted.
 
 ## API and persistence
 
@@ -44,7 +44,7 @@ The implemented contract is:
 - GET /v1/owner-auth/account/asr/usage reports the current account/month quota and the latest consent state. It remains useful while the provider is disabled.
 - POST /v1/owner-auth/account/asr/transcriptions accepts bounded audio/wav bytes and an idempotency key. A current accepted consent for the disclosure version is required before any provider call, including a cached-result replay.
 
-Migration 039_account_asr_consent creates an append-only consent event ledger. It stores only the random account/device identifiers, disclosure version, accepted/revoked action and timestamp, and retains each event for five years. It has no foreign key, so account deletion cannot silently erase evidence of the user's choice. The account-deletion receipt names this minimal retained evidence. A bounded maintenance job deletes events after their retention deadline.
+Migration 039_account_asr_consent creates an append-only consent event ledger. It stores only the random account/device identifiers, disclosure version, accepted/revoked action and timestamp, and retains each event for five years. It has no foreign key, so account deletion cannot silently erase evidence of the user's choice. Migration 040 permits both v1 and v2 evidence records; Accounts only treats an acceptance of the current v2 disclosure as valid, so a prior v1 acceptance requires fresh consent. The account-deletion receipt names this minimal retained evidence. A bounded maintenance job deletes events after their retention deadline.
 
 The exact disclosure version is part of the server and Android protocol. A changed recipient, purpose, retention promise, or material policy change must use a new version and require fresh consent.
 
@@ -52,21 +52,21 @@ The exact disclosure version is part of the server and Android protocol. A chang
 
 The voice-device picker can show cloud availability and remaining allowance. Choosing cloud fetches the latest account state. If there is no current acceptance, Android presents a localized prominent disclosure with Allow and continue and Not now; recording does not start until the server confirms acceptance. A revoke action is available from the voice-device picker. Declining or revoking returns a cloud-selected session to automatic/local routing. If the server state is unknown, stale, or unreachable, cloud recording fails closed.
 
-The disclosure is localized in English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It explains the audio recipient, processing purpose, vendor retention uncertainty, Ragent's brief in-memory retry cache, five-year consent evidence, and draft-only result handling.
+The v2 disclosure is localized in English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It explains the audio recipient, Ragent's brief in-memory retry cache, account-linked usage/request records retained up to 90 days (longer for unresolved provider outcomes), five-year consent evidence, the provider's potential retention and service-improvement use under its terms/settings, and draft-only result handling.
 
 ## Security, privacy, and store-review gates
 
-1. Keep AGENTOC_ACCOUNTS_ASR_ENABLED=0 and leave ELEVENLABS_API_KEY unset until the owner obtains a key and confirms the provider account's applicable data-retention settings.
+1. Keep AGENTOC_ACCOUNTS_ASR_ENABLED=0 and leave ELEVENLABS_API_KEY unset until the owner obtains a key and confirms the actual provider account's terms, data-use preference, and retention settings. The current adapter explicitly sends `enable_logging=true`; the owner must set and verify any training/data-use opt-out available for that account.
 2. Before provider traffic is enabled, publish a matching privacy-policy update. It must explain recording upload, Ragent Accounts and ElevenLabs roles, provider retention/settings, usage records, and the five-year minimal consent evidence retained after account deletion. A draft is kept at docs/account-asr-public-disclosure-draft.md; it has not been published.
-3. Reconcile the Play Console Data safety form and prominent disclosure with the final provider contract. The existing form marks voice recordings as collected and not shared. Keep that answer only if the final ElevenLabs arrangement qualifies as processing by a service provider on Ragent's behalf; otherwise correct it before release.
-4. Do not claim zero retention unless the provider account is entitled to it and the actual request is verified. The ElevenLabs API may retain content under its standard settings; the owner's key is currently absent, so there has been no live provider test.
+3. Reconcile the Play Console Data safety form and prominent disclosure with the final provider contract. Use [the Data Safety owner-review worksheet](account-asr-play-data-safety-review.md); do not carry forward a “not shared” answer unless the actual ElevenLabs agreement and account settings support it or another documented Play exception applies.
+4. Do not claim zero retention unless the provider account is eligible for it and the actual request is verified. The ElevenLabs API retains/logs content in standard mode and its applicable terms may allow service-improvement use; the owner's key is currently absent, so there has been no live provider test.
 5. Keep request logs free of audio, transcript, bearer credential, and API key. Preserve account-scoped quotas and provider-cost reporting in Accounts only.
 
 ## Release and acceptance sequence
 
 1. Run Accounts unit/HTTP tests for invalid consent version, no-consent denial, acceptance, revocation, cache replay after revocation, usage accounting, migration readiness, and retention pruning.
 2. Build Android debug and run core-auth tests plus the seven-locale disclosure test. Run the instrumented test on a physical device to verify the prompt, decline, accept, revoke, local routes, and cloud route behavior.
-3. Apply migration 039 to the Oracle Accounts database, then deploy the matching Accounts binary with provider disabled. Verify /healthz, /readyz, authenticated usage/consent, rejected unauthenticated requests, and that audio returns unavailable without any provider call.
+3. Apply migrations 039 and 040 to the Oracle Accounts database, then deploy the matching Accounts binary with provider disabled. Verify /healthz, /readyz, authenticated usage/consent policy version, rejected unauthenticated requests, and that audio returns unavailable without any provider call.
 4. Once an API key exists, store it only in Oracle /etc/agentoc/accounts.env; do not put it in source, chat, build artifacts, or the Android app. Keep ASR disabled until the owner explicitly enables it after reviewing provider retention and the updated public disclosures.
 5. With owner approval to enable it, make one short real transcription with explicit consent, verify auto language detection, verify account usage increments, verify revoke blocks the next request, and confirm the API key and transcript are absent from logs and durable database rows.
 

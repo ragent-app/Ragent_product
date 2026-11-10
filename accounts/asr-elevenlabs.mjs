@@ -50,8 +50,8 @@ export function createElevenLabsScribeTranscriber({
     form.set('tag_audio_events', 'false');
     const url = new URL('/v1/speech-to-text', baseUrl);
     // Omitting language_code intentionally enables Scribe's automatic language detection.
-    // Zero retention is enterprise-only; enable it only when the account is entitled to it.
-    if (zeroRetention) url.searchParams.set('enable_logging', 'false');
+    // Keep the provider retention mode explicit; Zero Retention is enterprise-only.
+    url.searchParams.set('enable_logging', zeroRetention ? 'false' : 'true');
 
     let response;
     try {

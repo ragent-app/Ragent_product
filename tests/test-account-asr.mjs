@@ -121,12 +121,12 @@ assert.equal(providerRequest.options.headers['xi-api-key'], 'server-key-for-test
 assert.equal(providerRequest.options.redirect, 'error', 'provider redirects must not receive the server key');
 assert.equal(providerRequest.options.body.get('model_id'), 'scribe_v2');
 assert.equal(providerRequest.options.body.get('language_code'), null, 'Scribe should auto-detect the language');
-assert.equal(providerRequest.url, 'https://provider.example/v1/speech-to-text');
+assert.equal(providerRequest.url, 'https://provider.example/v1/speech-to-text?enable_logging=true');
 assert.equal(providerRequest.options.body.get('file').type, 'audio/wav');
 assert.equal(providerRequest.options.signal instanceof AbortSignal, true, 'provider calls need a bounded cancellation signal');
 const zeroRetentionProvider = createElevenLabsScribeTranscriber({ apiKey: 'test', zeroRetention: true,
   baseUrl: 'https://provider.example', fetchImpl: async (url) => {
-    assert.equal(new URL(url).searchParams.get('enable_logging'), 'false');
+assert.equal(new URL(url).searchParams.get('enable_logging'), 'false');
     return { ok: true, status: 200, json: async () => ({ text: 'ok' }) };
   } });
 await zeroRetentionProvider(audio);
@@ -239,6 +239,21 @@ const repository = new MemoryRepository();
 const auditEvents = [];
 let providerCalls = 0;
 const credential = `rac_${'x'.repeat(40)}`;
+const priorConsentRepository = new MemoryRepository();
+await priorConsentRepository.setConsent({ accountId: 'acct_prior_consent', deviceId: 'adev_prior_consent',
+  action: 'accepted', policyVersion: 'account-asr-third-party-processing-v1' });
+let priorConsentProviderCalls = 0;
+const priorConsentService = createAccountAsrService({
+  authenticateAccount: async () => ({ accountId: 'acct_prior_consent', deviceId: 'adev_prior_consent', plan: 'free' }),
+  repository: priorConsentRepository,
+  transcribe: async () => { priorConsentProviderCalls += 1; return { text: 'must not run' }; },
+  enabled: true,
+  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  clock: () => Date.UTC(2026, 10, 10),
+});
+await assert.rejects(() => priorConsentService.transcribeAudio({ credential,
+  requestId: 'prior-consent-request-1234', audio }), { code: 'asr_consent_required', statusCode: 403 });
+assert.equal(priorConsentProviderCalls, 0, 'v1 acceptance cannot authorize the expanded v2 disclosure');
 const asrService = createAccountAsrService({
   authenticateAccount: async ({ credential: presented }) => {
     if (presented !== credential) throw Object.assign(new Error('auth'), { code: 'owner_auth_account_credential_invalid', statusCode: 401 });

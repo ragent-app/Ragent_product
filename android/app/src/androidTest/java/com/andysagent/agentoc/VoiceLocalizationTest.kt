@@ -29,13 +29,13 @@ class VoiceLocalizationTest {
     fun cloudVoiceDisclosureNamesRecipientRetentionAndDraftHandlingInEveryRagentUiLocale() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val expectedDisclosure = mapOf(
-            "en" to listOf("Ragent Accounts", "ElevenLabs", "does not store", "may retain", "five years", "draft only"),
-            "zh-CN" to listOf("Ragent Accounts", "ElevenLabs", "存入数据库", "可能", "五年", "草稿"),
-            "zh-TW" to listOf("Ragent Accounts", "ElevenLabs", "不會將", "可能", "五年", "草稿"),
-            "ja" to listOf("Ragent Accounts", "ElevenLabs", "データベースに保存しません", "保持する場合があります", "5年間", "下書き"),
-            "ko" to listOf("Ragent Accounts", "ElevenLabs", "데이터베이스에 저장하지 않지만", "보관할 수 있습니다", "5년간", "초안"),
-            "fr" to listOf("Ragent Accounts", "ElevenLabs", "ne stocke ni", "peut conserver", "cinq ans", "brouillon"),
-            "es" to listOf("Ragent Accounts", "ElevenLabs", "no guarda", "puede conservar", "cinco años", "borrador"),
+            "en" to listOf("Ragent Accounts", "ElevenLabs", "does not store", "90 days", "improve its services", "five years", "draft only"),
+            "zh-CN" to listOf("Ragent Accounts", "ElevenLabs", "存入数据库", "90 天", "改进服务", "五年", "草稿"),
+            "zh-TW" to listOf("Ragent Accounts", "ElevenLabs", "不會將", "90 天", "改善服務", "五年", "草稿"),
+            "ja" to listOf("Ragent Accounts", "ElevenLabs", "データベースに保存しません", "90日間", "サービス改善", "5年間", "下書き"),
+            "ko" to listOf("Ragent Accounts", "ElevenLabs", "데이터베이스에 저장하지 않지만", "90일간", "서비스 개선", "5년간", "초안"),
+            "fr" to listOf("Ragent Accounts", "ElevenLabs", "ne stocke ni", "90 jours", "améliorer ses services", "cinq ans", "brouillon"),
+            "es" to listOf("Ragent Accounts", "ElevenLabs", "no guarda", "90 días", "mejorar sus servicios", "cinco años", "borrador"),
         )
         expectedDisclosure.forEach { (tag, markers) ->
             val localized = base.createConfigurationContext(
