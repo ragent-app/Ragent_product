@@ -8,6 +8,7 @@ import { classifyRisk } from './risk-classifier.mjs';
 import { BoundedLruMap } from './cache-utils.mjs';
 import { cacheBudget } from '../lib/cache-budget.mjs';
 import { getRunSpoolCursor } from './runs.mjs';
+import { equivalentPendingApprovals } from './approval-equivalence.mjs';
 
 const APPROVAL_METHOD_KINDS = Object.freeze({
   execCommandApproval: 'command',
@@ -328,6 +329,9 @@ export function createRunProjectionService({
     let materializedRecords = 0;
     let parseFailures = 0;
     const autoApprovedIdsSeen = new Set();
+    // Only suppress a duplicate after this projection has actually seen its
+    // leader. A stale pending record must never hide the only visible card.
+    const visibleApprovalIds = new Set();
     const nativeProvider = String(run?.provider || runtimeInvocation?.provider || '').toLowerCase().includes('claude')
       ? 'claude'
       : String(run?.provider || runtimeInvocation?.provider || '').toLowerCase().includes('codex')
@@ -415,11 +419,10 @@ export function createRunProjectionService({
           if (oldest !== undefined) autoApprovedIdsSeen.delete(oldest);
         }
       }
-      let approvalRequestInfo = null;
+      let approvalRequestInfo = payload ? readApprovalRequestInfo(payload) : null;
       let approvalRisk = null;
       if (options.countApprovals === true && payload) {
         const runId = trimString(run?.id);
-        approvalRequestInfo = readApprovalRequestInfo(payload);
         if (approvalRequestInfo) {
           approvalRisk = approvalRiskForPayload(payload, run, approvalRequestInfo);
           const provider = approvalRequestInfo.provider;
@@ -459,11 +462,26 @@ export function createRunProjectionService({
           }
         }
       }
-      const parsedEvents = decorateSpoolRecordEvents(
+      let parsedEvents = decorateSpoolRecordEvents(
         record,
         adapter.parseLine(adapterLine),
         stableTimestamp,
       );
+      let normalized = normalizeRunEvents(projectionRun, parsedEvents);
+      if (approvalRequestInfo?.approvalId) {
+        const group = equivalentPendingApprovals(run, approvalRequestInfo.approvalId);
+        if (group.length > 1 && group[0].approvalId !== approvalRequestInfo.approvalId
+            && (visibleApprovalIds.has(group[0].approvalId) || group[0].approvalPresented === true)
+            && parsedEvents.length === 1 && parsedEvents[0]?.type === 'approval_request'
+            && normalized.length === 1 && normalized[0]?.type === 'approval_request') {
+          // Preserve the normalized cursor position even though no owner card
+          // is emitted. Terminal replay may see this request after it has
+          // been answered, when its grouping eligibility has changed.
+          normalizedEventCount += 1;
+          parsedEvents = [];
+          normalized = [];
+        }
+      }
       if (options.countApprovals === true) {
         let projectedApprovalCount = 0;
         for (const event of parsedEvents) {
@@ -482,7 +500,11 @@ export function createRunProjectionService({
           });
         }
       }
-      await emitNormalizedEvents(normalizeRunEvents(projectionRun, parsedEvents));
+      await emitNormalizedEvents(normalized);
+      if (approvalRequestInfo?.approvalId && normalized.some(event => event?.type === 'approval_request')) {
+        visibleApprovalIds.add(approvalRequestInfo.approvalId);
+        if (visibleApprovalIds.size > 2048) visibleApprovalIds.delete(visibleApprovalIds.values().next().value);
+      }
     }
 
     if (options.flush !== false) {

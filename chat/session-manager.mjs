@@ -1,5 +1,6 @@
 import { WORKBENCH_EXECUTION_POLICY, assertWorkbenchExecution } from '../lib/workbench-execution-policy.mjs';
 import { createHash, randomBytes } from 'crypto';
+import { equivalentPendingApprovals } from './approval-equivalence.mjs';
 import { findSessionCreationReplay, sessionCreationError } from './session-creation-contract.mjs';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
@@ -6195,7 +6196,12 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     ? projection.skippedLineCount
     : currentNormalizedLineCount;
   const nextNormalizedLineCount = archivedLineBase + projection.processedLineCount;
-  const nextNormalizedEventCount = currentNormalizedEventCount + normalizedEvents.length;
+  const nextNormalizedEventCount = currentNormalizedEventCount + (Number.isInteger(projection.normalizedEventCount)
+    ? projection.normalizedEventCount : normalizedEvents.length);
+  // Only durable history proves that the group leader can already be shown
+  // to the owner. A pending record alone may precede its spool/history write.
+  const newlyPresentedApprovalIds = new Set(deltaStoredEvents.filter(event => event?.type === 'approval_request'
+    && event?.runId === runId).map(event => normalizeRuntimeApprovalId(event?.approvalId)).filter(Boolean));
   const approvalSuppressionIds = [...new Set([
     ...(Array.isArray(run.approvalSuppressionIds) ? run.approvalSuppressionIds : []),
     ...(Array.isArray(projection.autoApprovedIds) ? projection.autoApprovedIds : []),
@@ -6227,6 +6233,10 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     }
     return {
       ...current,
+      ...(newlyPresentedApprovalIds.size && Array.isArray(current.appServerPendingApprovals) ? {
+        appServerPendingApprovals: current.appServerPendingApprovals.map(entry => newlyPresentedApprovalIds.has(normalizeRuntimeApprovalId(entry?.approvalId))
+          ? { ...entry, approvalPresented: true } : entry),
+      } : {}),
       normalizedLineCount: nextNormalizedLineCount,
       normalizedByteOffset: projection.nextOffset,
       normalizedEventCount: nextNormalizedEventCount,
@@ -15001,13 +15011,39 @@ export async function submitRuntimeApproval(runId, approvalId, options = {}) {
       temporaryControlGrantId: temporaryApproval.grantId } : {}),
   };
   assertApproval();
-  const updatedRun = await updateRun(normalizedRunId, (current) => { assertApproval(); return ({
-    ...current,
-    appServerApprovalResponseQueue: [
-      ...(Array.isArray(current?.appServerApprovalResponseQueue) ? current.appServerApprovalResponseQueue : []),
-      responseEntry,
-    ],
-  }); }, { beforeWrite: assertApproval, beforeCommit: assertApproval }) || run;
+  let enqueued = false;
+  const updatedRun = await updateRun(normalizedRunId, (current) => {
+    assertApproval();
+    if (isTerminalRunState(current?.state)) return current;
+    const existing = Array.isArray(current?.appServerApprovalResponseQueue) ? current.appServerApprovalResponseQueue : [];
+    if (existing.some(entry => normalizeRuntimeApprovalId(entry?.approvalId) === normalizedApprovalId)) return current;
+    const currentPending = findRunPendingApproval(current, normalizedApprovalId);
+    if (!currentPending || currentPending.state === 'responded') return current;
+    // Capture the group under the same run mutation lock as the queue write.
+    // A later matching request remains independent once the owner has decided.
+    const group = equivalentPendingApprovals(current, normalizedApprovalId);
+    const additional = group.filter(entry => entry.approvalId !== normalizedApprovalId).map(entry => ({
+      ...responseEntry, id: generateId(), approvalId: entry.approvalId,
+    }));
+    enqueued = true;
+    return { ...current, appServerApprovalResponseQueue: [...existing, responseEntry, ...additional] };
+  }, { beforeWrite: assertApproval, beforeCommit: assertApproval }) || run;
+  if (!enqueued) {
+    if (isTerminalRunState(updatedRun?.state)) {
+      const error = new Error('Run is no longer active');
+      error.code = 'RUN_TERMINAL';
+      throw error;
+    }
+    const existing = findRunQueuedApprovalResponse(updatedRun, normalizedApprovalId);
+    const currentPending = findRunPendingApproval(updatedRun, normalizedApprovalId);
+    if (!existing && !currentPending) {
+      const error = new Error('Approval request not found');
+      error.code = 'APPROVAL_NOT_FOUND';
+      throw error;
+    }
+    return { requestId: responseEntry.requestId || null, duplicate: true,
+      approval: existing || currentPending, run: updatedRun, session: await getSession(updatedRun.sessionId) };
+  }
   await resumeHarnessRunBudget(updatedRun);
   observeDetachedRun(updatedRun.sessionId, updatedRun.id);
   broadcastSessionInvalidation(updatedRun.sessionId);
