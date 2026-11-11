@@ -5475,6 +5475,12 @@ private fun SettingsDetailSurface(
                                         enabled = !state.voice.cloudConsentBusy,
                                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                                     ) { Text(stringResource(R.string.voice_cloud_consent_revoke)) }
+                                } else if (state.voice.cloudAvailable && state.voice.cloudConsentKnown) {
+                                    androidx.compose.material3.TextButton(
+                                        onClick = { onEvent(WorkbenchEvent.AcceptCloudVoiceConsent) },
+                                        enabled = !state.voice.cloudConsentBusy,
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                    ) { Text(stringResource(R.string.voice_cloud_consent_accept)) }
                                 }
                             }
                         }
