@@ -59,7 +59,6 @@ const fakeUpstreamPath = join(root, 'fake-upstream.mjs');
 const socketPath = codexAppServerBrokerSocketPath(home);
 const fakeUpstream = `
   let nextThread = 0;
-  let nextApproval = 10000;
   const approvals = new Map();
   let buffer = '';
   process.stdin.on('data', (chunk) => {
@@ -108,7 +107,8 @@ const fakeUpstream = `
         process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id } } }) + '\\n');
       } else if (message.method === 'turn/start') {
         if (message.params.input[0].text === 'approval') {
-          const approvalId = nextApproval++;
+          // Server request ids may collide with pending client request ids.
+          const approvalId = message.id;
           approvals.set(approvalId, message.params.threadId);
           process.stdout.write(JSON.stringify({ id: approvalId, method: 'item/commandExecution/requestApproval', params: { threadId: message.params.threadId } }) + '\\n');
           process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
