@@ -23,6 +23,7 @@ cp "$AGENTOC_CONFIG_DIR/owner-credentials.txt" "$test_dir/credentials-before"
 agentoc_first_run_bootstrap
 cmp "$test_dir/auth-before" "$AGENTOC_CONFIG_DIR/auth.json"
 cmp "$test_dir/credentials-before" "$AGENTOC_CONFIG_DIR/owner-credentials.txt"
+validate_credentials() {
 "$QA_REAL_NODE" - "$AGENTOC_CONFIG_DIR" "$QA_ARGS" <<'EOF'
 const assert = require('assert/strict');
 const { readFileSync, statSync } = require('fs');
@@ -42,4 +43,36 @@ assert.equal(auth.username, 'owner');
 assert.equal(kind, 'scrypt');
 assert.equal(scryptSync(password, Buffer.from(salt, 'hex'), 32, { N: +n, r: +r, p: +p }).toString('hex'), hash);
 EOF
+}
+validate_credentials
+
+# Finder and LaunchAgent may bootstrap the same new profile simultaneously.
+export AGENTOC_CONFIG_DIR="$test_dir/concurrent-config"
+pids=()
+for _ in $(seq 1 12); do
+  agentoc_first_run_bootstrap >/dev/null &
+  pids+=("$!")
+done
+for pid in "${pids[@]}"; do wait "$pid"; done
+validate_credentials
+cp "$AGENTOC_CONFIG_DIR/instance.env" "$test_dir/concurrent-env"
+cp "$AGENTOC_CONFIG_DIR/owner-credentials.txt" "$test_dir/concurrent-creds"
+
+# An interruption after the credentials were published must be recoverable
+# without changing the password or the already-established session secret.
+rm "$AGENTOC_CONFIG_DIR/auth.json"
+agentoc_first_run_bootstrap >/dev/null
+cmp "$test_dir/concurrent-env" "$AGENTOC_CONFIG_DIR/instance.env"
+cmp "$test_dir/concurrent-creds" "$AGENTOC_CONFIG_DIR/owner-credentials.txt"
+validate_credentials
+
+# Existing but empty configuration is not silently replaced.
+export AGENTOC_CONFIG_DIR="$test_dir/incomplete-config"
+mkdir -p "$AGENTOC_CONFIG_DIR"
+: > "$AGENTOC_CONFIG_DIR/instance.env"
+if agentoc_first_run_bootstrap >/dev/null 2>&1; then
+  echo 'empty existing configuration unexpectedly accepted' >&2
+  exit 1
+fi
+[ ! -s "$AGENTOC_CONFIG_DIR/instance.env" ]
 printf '%s\n' 'macOS first-run credential checks passed'

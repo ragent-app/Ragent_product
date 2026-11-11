@@ -59,70 +59,82 @@ agentoc_server_running() {
 # local-mode cookies, connectivity defaults). Both live in the instance
 # config dir so upgrades never overwrite user edits.
 agentoc_first_run_bootstrap() {
-  local config_dir auth_file env_file password salt hash secret
-  # Protect credentials from the instant each file is created, not only after
-  # a later chmod. The subshell contains the more restrictive umask.
-  (
-  umask 077
+  local config_dir result
   config_dir="$(agentoc_config_dir)"
-  auth_file="$config_dir/auth.json"
-  env_file="$config_dir/instance.env"
-  mkdir -p "$config_dir"
-
-  if [ ! -s "$env_file" ]; then
-    secret="$(openssl rand -hex 32 2>/dev/null || "$AGENTOC_NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex")+"\n")')"
-    {
-      printf '# AgentoC macOS instance environment (sourced by the app launcher).\n'
-      printf '# Edits survive app upgrades. Restart the app after changing values.\n'
-      printf 'AGENTOC_AUTH_SESSION_SECRET=%s\n' "$secret"
-      printf '# Local browser access is plain HTTP on 127.0.0.1.\n'
-      printf 'SECURE_COOKIES=0\n'
-      printf '# Central connectivity services (phone pairing: TURN-first + P2P upgrade).\n'
-      printf 'AGENTOC_ACCOUNTS_URL=https://agentoc.andyscodexagent.cyou/accounts\n'
-      printf 'AGENTOC_ACCOUNTS_JWKS_URL=https://agentoc.andyscodexagent.cyou/accounts/.well-known/jwks.json\n'
-      printf 'AGENTOC_ACCOUNTS_ISSUER=https://agentoc.andyscodexagent.cyou\n'
-      printf 'AGENTOC_TURN_BROKER_URL=https://agentoc.andyscodexagent.cyou/turn\n'
-      printf '# Central metadata-only P2P signaling (shared by all instances;\n'
-      printf '# both the Mac and the phone connect outbound). Override only when\n'
-      printf '# running a self-hosted central stack.\n'
-      printf 'AGENTOC_P2P_SIGNALING_URL=https://agentoc.andyscodexagent.cyou/signal\n'
-    } > "$env_file"
-    chmod 600 "$env_file"
-    agentoc_log "created $env_file"
+  # Publish complete files exclusively. Concurrent Finder and LaunchAgent
+  # starts must converge on the same secret and the same owner password.
+  result="$("$AGENTOC_NODE_BIN" - "$config_dir" <<'NODE'
+const { mkdirSync, writeFileSync, readFileSync, linkSync, unlinkSync, statSync, chmodSync } = require('fs');
+const { join } = require('path');
+const { randomBytes, scryptSync } = require('crypto');
+const dir = process.argv[2];
+mkdirSync(dir, { recursive: true, mode: 0o700 });
+const path = (name) => join(dir, name);
+function existing(file) {
+  try {
+    const st = statSync(file);
+    if (!st.isFile() || st.size === 0) throw new Error(`Existing ${file} is empty or not a file`);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+function publish(file, content) {
+  const tmp = path(`.bootstrap-${randomBytes(16).toString('hex')}`);
+  try {
+    writeFileSync(tmp, content, { flag: 'wx', mode: 0o600 });
+    try { linkSync(tmp, file); return true; }
+    catch (error) { if (error.code === 'EEXIST') return false; throw error; }
+  } finally { try { unlinkSync(tmp); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
+}
+const envFile = path('instance.env');
+if (!existing(envFile)) {
+  const secret = randomBytes(32).toString('hex');
+  const created = publish(envFile, [
+    '# AgentoC macOS instance environment (sourced by the app launcher).',
+    '# Edits survive app upgrades. Restart the app after changing values.',
+    `AGENTOC_AUTH_SESSION_SECRET=${secret}`,
+    'SECURE_COOKIES=0',
+    'AGENTOC_ACCOUNTS_URL=https://agentoc.andyscodexagent.cyou/accounts',
+    'AGENTOC_ACCOUNTS_JWKS_URL=https://agentoc.andyscodexagent.cyou/accounts/.well-known/jwks.json',
+    'AGENTOC_ACCOUNTS_ISSUER=https://agentoc.andyscodexagent.cyou',
+    'AGENTOC_TURN_BROKER_URL=https://agentoc.andyscodexagent.cyou/turn',
+    'AGENTOC_P2P_SIGNALING_URL=https://agentoc.andyscodexagent.cyou/signal',
+    '',
+  ].join('\n'));
+  if (!created && !existing(envFile)) throw new Error(`Cannot publish ${envFile}`);
+}
+const authFile = path('auth.json');
+const credsFile = path('owner-credentials.txt');
+if (!existing(authFile)) {
+  const candidate = randomBytes(12).toString('hex');
+  const creds = [
+    '# AgentoC owner login (generated on first run)',
+    `# Web: http://127.0.0.1:${process.env.CHAT_PORT || '7690'}/`,
+    'username: owner', `password: ${candidate}`,
+    '# Change it in Settings after first login, then delete this file.', '',
+  ].join('\n');
+  const createdCredentials = publish(credsFile, creds);
+  // Recovery after interruption reuses the already-published credentials;
+  // never silently overwrite an unrelated or incomplete existing file.
+  const current = readFileSync(credsFile, 'utf8');
+  const password = /^password: ([^\r\n]{1,1024})$/m.exec(current)?.[1];
+  if (!/^username: owner$/m.test(current) || !password) throw new Error(`Cannot recover credentials from ${credsFile}`);
+  chmodSync(credsFile, 0o600);
+  const salt = randomBytes(16);
+  const hash = scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 }).toString('hex');
+  const passwordHash = `scrypt$16384$8$1$${salt.toString('hex')}$${hash}`;
+  const createdAuth = publish(authFile, JSON.stringify({ username: 'owner', passwordHash }, null, 2) + '\n');
+  if (!createdAuth && !existing(authFile)) throw new Error(`Cannot publish ${authFile}`);
+  if (createdCredentials || createdAuth) process.stdout.write('credentials\n');
+}
+NODE
+)" || return 1
+  if [ "$result" = credentials ]; then
+    agentoc_log "generated owner credentials: $config_dir/owner-credentials.txt"
+    open -t "$config_dir/owner-credentials.txt" 2>/dev/null || true
   fi
-
-  if [ ! -s "$auth_file" ]; then
-    password="$(openssl rand -hex 12 2>/dev/null || "$AGENTOC_NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(12).toString("hex")+"\n")')"
-    salt="$(openssl rand -hex 16 2>/dev/null || "$AGENTOC_NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(16).toString("hex")+"\n")')"
-    hash="$(printf '%s' "$password" | "$AGENTOC_NODE_BIN" -e '
-      const { scryptSync } = require("crypto");
-      const { readFileSync } = require("fs");
-      const password = readFileSync(0, "utf8");
-      const [saltHex] = process.argv.slice(1);
-      const salt = Buffer.from(saltHex, "hex");
-      const hash = scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
-      process.stdout.write(hash.toString("hex"));
-    ' "$salt")"
-    "$AGENTOC_NODE_BIN" -e '
-      const { writeFileSync, chmodSync } = require("fs");
-      const [file, passwordHash] = process.argv.slice(1);
-      writeFileSync(file, JSON.stringify({ username: "owner", passwordHash }, null, 2) + "\n");
-      chmodSync(file, 0o600);
-    ' "$auth_file" "scrypt\$16384\$8\$1\$${salt}\$${hash}"
-    local creds_file
-    creds_file="$config_dir/owner-credentials.txt"
-    {
-      printf '# AgentoC owner login (generated on first run)\n'
-      printf '# Web: http://127.0.0.1:%s/\n' "${CHAT_PORT:-7690}"
-      printf 'username: owner\n'
-      printf 'password: %s\n' "$password"
-      printf '# Change it in Settings after first login, then delete this file.\n'
-    } > "$creds_file"
-    chmod 600 "$creds_file"
-    agentoc_log "generated owner credentials: $creds_file"
-    open -t "$creds_file" 2>/dev/null || true
-  fi
-  )
 }
 
 agentoc_source_instance_env() {
