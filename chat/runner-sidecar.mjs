@@ -112,7 +112,7 @@ import {
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
 import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
-import { buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
+import { buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
@@ -2880,6 +2880,20 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
       autoApproved: true, reason: 'ripgrep configuration disabled for verified read', ...riskAuditFields(ripgrepBridge.risk),
     } });
     const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, ripgrepBridge.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
+  }
+  const defaultFileBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
+    && gateDecision.reason === 'file targets are unavailable' ? await buildClaudeWindowsDefaultFileToolBridge({ approval, state }) : null;
+  if (defaultFileBridge) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: defaultFileBridge.updatedInput });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound file search response');
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'file search bound to session directory', ...riskAuditFields(defaultFileBridge.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, defaultFileBridge.risk));
     if (record) state.pendingApprovals.set(approval.approvalId, record);
     return record;
   }

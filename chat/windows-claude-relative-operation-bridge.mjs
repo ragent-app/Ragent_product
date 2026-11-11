@@ -2,6 +2,27 @@ import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { analyzeWindowsBash } from './windows-bash-actions.mjs';
 import { analyzeWindowsPowerShell, decideWindowsPowerShellActions } from './windows-powershell-actions.mjs';
+import { decideWindowsApproval } from './windows-approval-gate.mjs';
+
+// Supply the session directory explicitly to Claude's file-search tools when
+// their optional path was omitted, and classify the same input we return.
+export async function buildClaudeWindowsDefaultFileToolBridge({ approval, state } = {}) {
+  const params = approval?.params || {}; const input = params.input;
+  if (process.platform !== 'win32' || approval?.providerMethod !== 'can_use_tool'
+      || !['Glob', 'Grep', 'LS', 'List'].includes(params.tool_name)
+      || !input || typeof input !== 'object' || Array.isArray(input)
+      || input.path !== undefined || input.file_path !== undefined || input.notebook_path !== undefined
+      || input.cwd !== undefined || input.workdir !== undefined || input.working_directory !== undefined
+      || state?.turnActive !== true || state?.riskContextValid !== true
+      || !['recommended', 'full-auto'].includes(state?.riskMode)
+      || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
+      || params.networkApprovalContext || params.network_approval_context || params.additionalPermissions || params.additional_permissions
+      || !path.win32.isAbsolute(state.cwd || '')) return null;
+  const updatedInput = { ...input, path: path.win32.resolve(state.cwd) };
+  const decision = await decideWindowsApproval({ ...approval, params: { ...params, input: updatedInput } }, state);
+  if (decision.decision !== 'auto-allow') return null;
+  return { updatedInput, risk: decision.risk };
+}
 
 // Claude does not attest the shell's current directory. Bind a static
 // operation to the expected directory at execution time. Bash's [[ -ef ]]

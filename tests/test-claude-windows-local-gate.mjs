@@ -44,7 +44,7 @@ const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === '
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
 const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
-if (readCase && (!['numbered', 'relative', 'relative-write', 'curl', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+if (readCase && (!['numbered', 'relative', 'relative-write', 'curl', 'glob', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
 if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
 const safeDeleteHelper = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
@@ -108,7 +108,7 @@ const server = createServer((req, res) => {
       process.stderr.write(`[fixture] model request ${requests}: ${JSON.stringify({ url: req.url, lastRole: last?.role, lastContentTypes: Array.isArray(last?.content) ? last.content.map(item => item.type) : [], toolNames: (request.tools || []).map(item => item.name), toolChoice: request.tool_choice })}\n`);
     }
     const tool = requests === 1;
-    const toolName = nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
+    const toolName = readCase === 'glob' ? 'Glob' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
@@ -122,7 +122,7 @@ const server = createServer((req, res) => {
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
         : dotnetCase ? { command: dotnetCommand, description: 'Write isolated fixture' }
         : guidanceCase ? { command: guidanceCommand, description: 'Administrative fixture' }
-        : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
+        : readCase === 'glob' ? { pattern: 'fixture.md' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
       events.push({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: `toolu_fixture_${requests}`, name: toolName, input: {} } },
         { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: input } });
     } else events.push({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },

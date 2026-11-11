@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildClaudeWindowsRelativeOperationBridge } from '../chat/windows-claude-relative-operation-bridge.mjs';
+import { buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from '../chat/windows-claude-relative-operation-bridge.mjs';
 
 if (process.platform !== 'win32') { console.log('claude-relative-read-bridge: skipped (Windows only)'); process.exit(0); }
 const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-cwd-'));
@@ -63,6 +63,13 @@ for (const riskMode of ['recommended', 'full-auto']) {
   execFileSync(bash, ['--noprofile', '--norc', '-c', deletion.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
   assert.equal(await access(path.join(outside, destination)).then(() => true, () => false), false);
   const outsideCwd = { ...state, cwd: outside };
+  for (const tool of ['Glob', 'Grep', 'LS', 'List']) {
+    const search = { providerMethod: 'can_use_tool', kind: 'permissions', params: { tool_name: tool, input: { pattern: 'readme' } } };
+    const bound = await buildClaudeWindowsDefaultFileToolBridge({ approval: search, state: outsideCwd });
+    assert.ok(bound, `${riskMode}: ${tool} default directory outside workspace`);
+    assert.equal(bound.updatedInput.path, outside);
+    assert.equal(await buildClaudeWindowsDefaultFileToolBridge({ approval: search, state: { ...outsideCwd, riskContext: { ...state.riskContext, protectedRoots: [outside] } } }), null);
+  }
   const curl = await buildClaudeWindowsRelativeOperationBridge({ approval: approval('curl -fsSL https://example.org/docs'), state: outsideCwd });
   assert.ok(curl);
   assert.match(curl.updatedInput.command, /curl --disable --proto =http,https --proto-redir =http,https -fsSL/);
