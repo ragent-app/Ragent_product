@@ -34,6 +34,20 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
     const result = await checkPlatform("1.2.2", platformFetch, { platform, arch });
     assert.equal(result.downloadUrl, platformUrl);
     assert.equal(result.updateAvailable, true);
+    const digest = "c".repeat(64), commit = "b".repeat(40), oldCommit = "a".repeat(40);
+    const marker = `<!-- ragent-asset-build:${name}:1.2.3:${commit}:sha256:${digest} -->`;
+    const labeled = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker,
+      assets: [{ ...platformAsset, digest: `sha256:${digest}` }] }] });
+    assert.equal((await checkPlatform("1.2.3", labeled, { platform, arch, currentCommit: oldCommit })).buildChanged, true);
+    assert.equal((await checkPlatform("1.2.3", labeled, { platform, arch, currentCommit: commit })).updateAvailable, false);
+    const wrongDigest = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker,
+      assets: [{ ...platformAsset, digest: `sha256:${"d".repeat(64)}` }] }] });
+    assert.equal((await checkPlatform("1.2.3", wrongDigest, { platform, arch, currentCommit: oldCommit })).buildIdentityUnavailable, true);
+    const duplicate = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker + marker,
+      assets: [{ ...platformAsset, digest: `sha256:${digest}` }] }] });
+    assert.equal((await checkPlatform("1.2.3", duplicate, { platform, arch, currentCommit: oldCommit })).buildIdentityUnavailable, true);
+    const mismatchedTag = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.4", assets: [platformAsset] }] });
+    await assert.rejects(checkPlatform("1.2.2", mismatchedTag, { platform, arch }), /no-platform-release/);
   }
   const releases = [
     { tag_name: "v9.0.0", prerelease: true, assets: [asset] },

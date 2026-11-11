@@ -47,13 +47,18 @@ jobs:
           if [ "$PLATFORM" = linux ]; then
             node tests/test-deb-packaging.mjs
             bash scripts/build-deb.sh
-            (cd "$AGENTOC_DEB_OUTPUT_DIR" && sha256sum agentoc_*.deb > SHA256SUMS.txt)
+            asset="agentoc_${RELEASE_VERSION}_amd64.deb"
+            (cd "$AGENTOC_DEB_OUTPUT_DIR" && sha256sum "$asset" > SHA256SUMS.txt)
           else
             [ "$(uname -m)" = arm64 ]
             bash tests/test-macos-service-identity.sh
             bash scripts/build-dmg.sh
-            (cd "$AGENTOC_DMG_OUTPUT_DIR" && shasum -a 256 agentoc_*.dmg > SHA256SUMS.txt)
+            asset="agentoc_${RELEASE_VERSION}-darwin-arm64.dmg"
+            (cd "$AGENTOC_DMG_OUTPUT_DIR" && shasum -a 256 "$asset" > SHA256SUMS.txt)
           fi
+          digest="$(awk '{print $1}' "$AGENTOC_DEB_OUTPUT_DIR/SHA256SUMS.txt")"
+          commit="$(git rev-parse --verify HEAD)"
+          printf '<!-- ragent-asset-build:%s:%s:%s:sha256:%s -->\n' "$asset" "$RELEASE_VERSION" "$commit" "$digest" > "$AGENTOC_DEB_OUTPUT_DIR/BUILDINFO.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: ragent-${{ matrix.platform }}-candidate

@@ -39,3 +39,10 @@ separate Windows Installer upgrade number and must exceed the latest published
 MSI version, which is recorded in the release notes. The source update
 checker is included only in subsequently built installers; it does not retrofit
 an already installed package.
+
+Linux and macOS candidate builds also produce an asset-specific `BUILDINFO.txt`
+marker. A release can include each marker in its notes after verifying the
+asset's SHA-256 and source commit. The desktop checks the marker against the
+GitHub asset digest before using the source identity to detect a replacement
+under the same version. Without matching metadata, it reports that the build
+identity is unavailable rather than assuming that a replacement is newer.

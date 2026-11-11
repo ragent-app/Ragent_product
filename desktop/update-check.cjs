@@ -16,12 +16,25 @@ function sourceCommit(value) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(normalized) ? normalized : "";
 }
-function releaseBuildInfo(release, asset) {
-  const matches = [...String(release?.body || "").matchAll(/<!--\s*agentoc-build:(\d+\.\d+\.\d+):([a-f0-9]{40}|[a-f0-9]{64}):sha256:([a-f0-9]{64})\s*-->/g)];
+function releaseBuildInfo(release, asset, { allowLegacy = true } = {}) {
+  const body = String(release?.body || "");
+  const named = [...body.matchAll(/<!--\s*ragent-asset-build:([A-Za-z0-9._-]+):(\d+\.\d+\.\d+):([a-f0-9]{40}|[a-f0-9]{64}):sha256:([a-f0-9]{64})\s*-->/g)]
+    .filter((match) => match[1] === asset?.name);
+  if (named.length) {
+    if (named.length !== 1 || asset?.digest !== `sha256:${named[0][4]}`) return null;
+    const build = version(named[0][2]);
+    return build ? { build, commit: named[0][3] } : null;
+  }
+  if (!allowLegacy) return null;
+  const matches = [...body.matchAll(/<!--\s*agentoc-build:(\d+\.\d+\.\d+):([a-f0-9]{40}|[a-f0-9]{64}):sha256:([a-f0-9]{64})\s*-->/g)];
   if (matches.length !== 1 || asset?.digest !== `sha256:${matches[0][3]}`) return null;
   const match = matches[0];
   const build = match && version(match[1]);
   return build ? { build, commit: match[2] } : null;
+}
+function assetVersion(asset) {
+  const match = /^(?:Ragent-|AgentoC-|agentoc_)([0-9]+(?:\.[0-9]+){2,3})(?=[-_])/i.exec(String(asset?.name || ""));
+  return match ? version(match[1]) : null;
 }
 function releaseAsset(asset, platform = process.platform, arch = process.arch) {
   if (!asset || typeof asset.name !== "string") return false;
@@ -59,8 +72,11 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
     for (const release of releases) {
       if (!release || release.draft || release.prerelease) continue;
       const parsed = version(release.tag_name);
-      const asset = Array.isArray(release.assets) && release.assets.find((candidate) => releaseAsset(candidate, platform, arch));
-      if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, buildInfo: platform === "win32" ? releaseBuildInfo(release, asset) : null };
+      const asset = parsed && Array.isArray(release.assets) && release.assets.find((candidate) => {
+        const candidateVersion = assetVersion(candidate);
+        return candidateVersion && compare(parsed, candidateVersion) === 0 && releaseAsset(candidate, platform, arch);
+      });
+      if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, buildInfo: releaseBuildInfo(release, asset, { allowLegacy: platform === "win32" }) };
     }
     if (releases.length < 100) break;
     if (page === 10) throw new Error("release-list-too-long");
