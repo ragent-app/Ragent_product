@@ -251,6 +251,9 @@ assert.equal(gatedThreadFork.method, 'thread/fork');
 assert.equal(Object.hasOwn(gatedThreadFork.params, 'approvalPolicy'), false);
 assert.equal(gatedThreadFork.params.approvalsReviewer, 'user');
 assert.equal(gatedThreadFork.params.config.allow_login_shell, false);
+assert.deepEqual(gatedThreadFork.params.config.projects, {
+  'G:/QA/project': { trust_level: 'untrusted' },
+});
 
 const readOnlyThreadStart = buildCodexAppServerThreadMessage({
   permissionMode: 'read-only',

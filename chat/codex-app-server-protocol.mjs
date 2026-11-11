@@ -57,9 +57,8 @@ export function isCodexAppServerRagentApprovalGateEnabled({ riskMode, permission
 }
 
 function buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate) {
-  // Ragent-gated runs derive the stricter approval policy from the process-
-  // scoped untrusted project trust setting. The explicit approvalPolicy value
-  // "untrusted" was retired in Codex 0.149.
+  // Ragent-gated runs derive the stricter approval policy from project trust.
+  // The explicit approvalPolicy value "untrusted" was retired in Codex 0.149.
   if (permissionPolicy.approvalPolicy === 'untrusted' && agentocApprovalGate !== true) {
     throw new Error('Codex untrusted permission mode requires a Run-scoped project trust gate');
   }
@@ -116,13 +115,18 @@ export function buildCodexAppServerThreadOptions({
   agentocApprovalGate,
 } = {}) {
   const permissionPolicy = resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode });
+  const projectRoot = typeof cwd === 'string' ? cwd.trim() : '';
+  const scopedProjectTrust = agentocApprovalGate === true && projectRoot
+    && (isAbsolute(projectRoot) || win32.isAbsolute(projectRoot))
+    ? { projects: { [projectRoot]: { trust_level: 'untrusted' } } }
+    : {};
   return {
     ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
     ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
     ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
     ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
     sandbox: permissionPolicy.sandbox || 'danger-full-access',
-    config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}) },
+    config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust },
     ...(typeof developerInstructions === 'string' && developerInstructions.trim()
       ? { developerInstructions: developerInstructions.trim() }
       : {}),
