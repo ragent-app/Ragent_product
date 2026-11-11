@@ -727,6 +727,10 @@ export function classifyRisk(input = {}) {
   if (declaredCategory) markDanger('declared privileged op (sentinel)');
   if (pc.category === CATEGORY_DELETE) {
     analyzeDelete({ program, rest, tokens, cwd, projectRoot, home, riskContext, signals, markDanger, markCaution });
+    if ((facts?.deleteTargets || []).some(target => /(?:^|[\\/])(?:\.ssh|\.gnupg|\.aws|\.azure|\.kube)(?:[\\/]|$)/i.test(target))) {
+      markDanger('delete credential directory');
+      signals.reversible = false;
+    }
   }
   if (program === 'git' && verb === 'clean') {
     if (gitCleanForced(rest)) {

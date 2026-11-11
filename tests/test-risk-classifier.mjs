@@ -34,6 +34,9 @@ const WIN_CTX = {
 function bash(command, opts = {}) {
   return classifyRisk({ command, cwd: PROJ, projectRoot: PROJ, home: HOME, ...opts });
 }
+check('credential directory deletion is dangerous', bash('rm -rf .ssh').tier === RISK_TIER.DANGER);
+check('nested credential directory deletion is dangerous', bash('rm -rf project/.gnupg').tier === RISK_TIER.DANGER);
+check('similarly named ordinary directory is not a credential directory', bash('rm -rf .ssh-test').tier !== RISK_TIER.DANGER);
 function fileTool(toolName, file_path, opts = {}) {
   return classifyRisk({ toolName, toolInput: { file_path }, cwd: PROJ, projectRoot: PROJ, home: HOME, ...opts });
 }

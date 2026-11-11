@@ -163,7 +163,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - `build`、`dist`、`node_modules` 等常见生成目录即使位于工作区外，也可经非提权原生删除助手自动清理；助手核对实际目录并逐项固定和校验目标。真实 Windows fixture 验证了两种模式下的工作区外清理及工作目录不匹配时不删除，受保护子项仍触发审批。目录名只能作为生成目录的惯例，不能证明内容可重新生成。
 - 普通系统目录中的单个文件读取和搜索不再仅因位于系统目录而触发审批；明确配置的受保护目录、敏感凭据路径和 Windows 注册表数据文件所在目录仍保留风险判断。系统目录写入及递归搜索继续遵循对应操作的策略。
 - 本地手工选取的 29 个 Claude Bash 分类样例中，两种模式分类完全一致：25 个普通操作自动通过，普通推送、强制推送、删除根目录及读取 `.env` 进入后续人工审批或自动拒绝。此样例并非实际用户工作负载，不能推算真实自动通过率；生产数据和未覆盖的命令仍需验证。
-- Linux WSL QA 环境复用 G 盘现有 Node 运行时，以 G 盘目录保存测试数据：风险分类 152 项、审批门 128 项，以及 Claude 协议/工具策略、Codex adapter/请求幂等、跨刷新投影和审批分组测试通过。最初将分组测试文件名写错，改用实际文件后通过；分组测试日志含隔离实例的 AgY 凭据检查失败，该结果不能作为真实账号或服务验收。WSL 测试源码和临时目录位于 Windows 挂载盘，不等同于独立 Linux 文件系统或 macOS 验收。
+- Linux WSL QA 环境复用 G 盘现有 Node 运行时，以 G 盘目录保存测试数据：风险分类 155 项、审批门 128 项，以及 Claude 协议/工具策略、Codex adapter/请求幂等、跨刷新投影和审批分组测试通过。分类器现把明确删除 `.ssh`、`.gnupg` 等凭据目录列为危险操作；普通近似名称不受此规则影响。最初将分组测试文件名写错，改用实际文件后通过；分组测试日志含隔离实例的 AgY 凭据检查失败，该结果不能作为真实账号或服务验收。POSIX 风险测试直接在 Windows Node 运行时未通过系统路径断言，在 Linux 运行时通过。WSL 测试源码和临时目录位于 Windows 挂载盘，不等同于独立 Linux 文件系统或 macOS 验收。
 
 - 本机 Windows Codex CLI `0.147.0` 与隔离安装的 `0.167.0`：真实 App Server 启动时只设置当前 cwd 项目 trust，不发送已退役的审批枚举；返回有效 `approvalPolicy=untrusted`、reviewer=user、sandbox 和 workspace root。0.167.0 使用本机 fake Responses provider、隔离 `CODEX_HOME` 和测试 key，命令级 owner prompt、无害命令自动批准、full-auto 危险命令拒绝均通过；没有使用 Codex 账号或官方模型额度。
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
