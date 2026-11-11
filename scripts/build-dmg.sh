@@ -138,7 +138,7 @@ fi
 printf 'Building AgentoC %s (darwin/%s) with Codex %s and Claude Code %s\n' \
   "$VERSION" "$ARCH" "$CODEX_VERSION" "$CLAUDE_VERSION"
 
-WORK_DIR="$(mktemp -d /tmp/agentoc-dmg.XXXXXX)"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-dmg.XXXXXX")"
 STAGE="$WORK_DIR/stage"
 CONTENTS="$STAGE/AgentoC.app/Contents"
 APP_DIR="$CONTENTS/Resources/app"
@@ -257,6 +257,7 @@ install -m 0755 "$CLAUDE_EXTRACT_DIR/claude" "$APP_DIR/bin/claude"
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
 install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/AgentoC"
+install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/MacOS/agentoc-service"
 install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/MacOS/agentoc-stop"
 install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/MacOS/agentoc-cli"
 install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/MacOS/agentoc-env.sh"
@@ -292,7 +293,7 @@ BUNDLED_NODE_VERSION="$("$CONTENTS/Resources/runtime/node" --version)"
   echo "Bundled Node reports $BUNDLED_NODE_VERSION, expected $NODE_VERSION" >&2
   exit 1
 }
-for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/MacOS/agentoc-stop" "$CONTENTS/MacOS/agentoc-cli" "$CONTENTS/MacOS/agentoc-env.sh"; do
+for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/MacOS/agentoc-service" "$CONTENTS/MacOS/agentoc-stop" "$CONTENTS/MacOS/agentoc-cli" "$CONTENTS/MacOS/agentoc-env.sh"; do
   bash -n "$script" || { echo "Launcher syntax error: $script" >&2; exit 1; }
 done
 for required in \
