@@ -45,6 +45,7 @@ jobs:
           mkdir -p "$AGENTOC_NODE_CACHE_DIR" "$AGENTOC_DEB_OUTPUT_DIR" "$ELECTRON_CACHE"
           node tests/test-desktop-update.cjs
           node tests/test-runtime-payload-secret-scan.mjs
+          node tests/test-frozen-source-guards.mjs
           if [ "$PLATFORM" = linux ]; then
             node tests/test-deb-packaging.mjs
             sudo env "PATH=$PATH" "TMPDIR=$RUNNER_TEMP" node tests/test-linux-run-status-ownership.mjs
