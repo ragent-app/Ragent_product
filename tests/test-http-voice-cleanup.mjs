@@ -2,7 +2,7 @@
 import assert from 'assert/strict';
 import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { delimiter, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import { spawn } from 'child_process';
@@ -112,32 +112,44 @@ async function startServer({ home, localBin, port }) {
       AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
       AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
-      PATH: `${localBin}:${process.env.PATH || ''}`,
+      USERPROFILE: home,
+      APPDATA: join(home, 'AppData', 'Roaming'),
+      LOCALAPPDATA: join(home, 'AppData', 'Local'),
+      AGENTOC_CONFIG_DIR: join(home, '.config', 'agentoc'),
+      AGENTOC_AUTH_SESSION_SECRET: 'synthetic-http-voice-cleanup-test-secret',
+      PATH: `${localBin}${delimiter}${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  child.stdout.on('data', () => {});
-  child.stderr.on('data', () => {});
+  let output = '';
+  child.stdout.on('data', (data) => { output = (output + data).slice(-8000); });
+  child.stderr.on('data', (data) => { output = (output + data).slice(-8000); });
 
-  await waitFor(async () => {
-    try {
-      const res = await request(port, 'GET', '/api/auth/me');
-      return res.status === 200;
-    } catch {
-      return false;
-    }
-  }, 'server startup');
+  try {
+    await waitFor(async () => {
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Server exited (${child.exitCode ?? child.signalCode}): ${output}`);
+      try {
+        const res = await request(port, 'GET', '/api/auth/me');
+        return res.status === 200;
+      } catch {
+        return false;
+      }
+    }, 'server startup');
+  } catch (error) {
+    await stopServer(child);
+    throw new Error(`${error.message}\n${output}`);
+  }
 
   return child;
 }
 
 async function stopServer(child) {
-  if (!child || child.exitCode !== null) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
   child.kill('SIGTERM');
-  await waitFor(() => child.exitCode !== null, 'server shutdown');
+  await waitFor(() => child.exitCode !== null || child.signalCode !== null, 'server shutdown');
 }
 
 async function createSession(port, name = 'AgentoC retired voice cleanup session') {
@@ -172,7 +184,7 @@ try {
   console.log('test-http-voice-cleanup: ok');
 } catch (error) {
   console.error(error);
-  process.exit(1);
+  process.exitCode = 1;
 } finally {
   await stopServer(chatServer);
   if (home) {
