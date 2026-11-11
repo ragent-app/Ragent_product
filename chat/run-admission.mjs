@@ -61,7 +61,7 @@ import {
   systemPathRootsForPlatform,
 } from './risk-policy.mjs';
 
-export const PROJECT_BOUND_NEW_RUN_OPERATIONS = new Set(['regenerate', 'editResend']);
+export const PROJECT_BOUND_NEW_RUN_OPERATIONS = new Set(['regenerate', 'editResend', 'collaboration_task']);
 
 function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -213,18 +213,25 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     : checkRunnerCapacity;
 
   const sessionKey = trimString(sessionId) || trimString(session?.id);
+  const requiresReadOnly = options.readOnlyRequired === true;
+  const legacy = (reason) => {
+    if (requiresReadOnly) {
+      throw createAdmissionError('Read-only Run cannot use an unscoped legacy path', 'READ_ONLY_RUNTIME_UNAVAILABLE', 409, { reason });
+    }
+    return { manifest, legacy: true, reason };
+  };
   if (!sessionKey || !manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
-    return { manifest, legacy: true, reason: 'no-session-binding' };
+    return legacy('no-session-binding');
   }
   if (options.legacy === true) {
-    return { manifest, legacy: true, reason: 'explicit-legacy' };
+    return legacy('explicit-legacy');
   }
 
   const internalOperation = trimString(manifest.internalOperation) || trimString(options.internalOperation);
   if (isInternalLegacyRun({ session, internalOperation })) {
-    return { manifest, legacy: true, reason: internalOperation
+    return legacy(internalOperation
       ? `internal-operation-legacy:${internalOperation}`
-      : 'internal-session-legacy' };
+      : 'internal-session-legacy');
   }
 
   // Check capacity before persisting a Run or preparing a provider. A full
@@ -252,7 +259,7 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     project = await findProjectByFolder(session.folder);
   }
   if (!project) {
-    return { manifest, legacy: true, reason: 'no-project-binding' };
+    return legacy('no-project-binding');
   }
   const candidateProjectRevision = Number.isInteger(project.revision) && project.revision > 0 ? project.revision : 1;
 
@@ -277,7 +284,7 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
   });
 
   const scopeMode = project.scopeMode === 'subpath' ? 'subpath' : 'shared';
-  const requestedAccessMode = options.accessMode === 'read' ? 'read' : 'write';
+  const requestedAccessMode = options.accessMode === 'read' || requiresReadOnly ? 'read' : 'write';
   const executionIsolation = options.executionIsolation === 'worktree' || options.executionIsolation === 'container'
     ? options.executionIsolation
     : 'shared';

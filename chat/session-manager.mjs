@@ -13724,6 +13724,12 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ...(session?.folder ? { projectRoot: session.folder } : {}),
       ...(options.freshThread === true ? { freshThread: true } : {}),
       ...(options.skipSessionContinuation === true ? { skipSessionContinuation: true } : {}),
+      ...(options.accessMode === 'read' || options.readOnlyRequired === true ? {
+        accessMode: 'read',
+        readOnlyRequired: options.readOnlyRequired === true,
+        runnerId: trimString(options.runnerId) || undefined,
+        runnerUnitScope: trimString(options.runnerUnitScope) || undefined,
+      } : {}),
       ...(options.transientProviderContext === true ? { transientProviderContext: true } : {}),
       ...(options.browserMcpEnabled === true ? { browserMcpEnabled: true } : {}),
       ...(requestedPlanAction ? { planAction: requestedPlanAction } : {}),
@@ -13762,7 +13768,12 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       sessionId,
       session,
       manifest,
-      options: { internalOperation: options.internalOperation || null, runId: nextRunId },
+      options: {
+        internalOperation: options.internalOperation || null, runId: nextRunId,
+        accessMode: options.accessMode, readOnlyRequired: options.readOnlyRequired === true,
+        runnerId: options.runnerId, runnerUnitScope: options.runnerUnitScope,
+        executionIsolation: options.executionIsolation,
+      },
     }),
   );
   if (preparationRunId && preparationInputMetadata) {
@@ -14180,7 +14191,13 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
     sessionId,
     session,
     manifest: stagedManifest,
-    options: { internalOperation: 'regenerate', runId: nextRunId },
+    options: {
+      internalOperation: 'regenerate', runId: nextRunId,
+      ...(parentManifest.executionScope?.accessMode === 'read' ? {
+        accessMode: 'read', readOnlyRequired: true, runnerId: parentOptions.runnerId,
+        runnerUnitScope: parentOptions.runnerUnitScope,
+      } : {}),
+    },
   });
   const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest });
   await updateRunReplyPublication(run.id, () => buildInitialReplyPublication(run, [responseId]));
@@ -14508,7 +14525,13 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
     sessionId,
     session,
     manifest: stagedManifest,
-    options: { internalOperation: 'editResend', runId: nextRunId },
+    options: {
+      internalOperation: 'editResend', runId: nextRunId,
+      ...(parentManifest.executionScope?.accessMode === 'read' ? {
+        accessMode: 'read', readOnlyRequired: true, runnerId: parentOptions.runnerId,
+        runnerUnitScope: parentOptions.runnerUnitScope,
+      } : {}),
+    },
   });
   const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest });
   await updateRunReplyPublication(run.id, () => buildInitialReplyPublication(run, [responseId]));

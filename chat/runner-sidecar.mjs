@@ -3598,7 +3598,9 @@ async function main() {
   const fileChangeStatsTracker = createFileChangeStatsTracker({
     cwd: resolvedFolder.cwd,
     baselineRoots: [resolvedFolder.cwd, PROJECT_ROOT],
-    captureRunBaseline: true,
+    // A read-only run cannot change the project; scanning the entire source
+    // tree here adds substantial startup latency without a useful baseline.
+    captureRunBaseline: !readOnlyRequested,
   });
   const appServerManifest = isCodexAppServerFamily && permissionMode
     ? { ...manifest, options: { ...(manifest.options || {}), permissionMode } }

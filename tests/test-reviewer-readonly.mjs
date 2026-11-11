@@ -184,6 +184,18 @@ try {
   eq(admitted.executionScope.accessMode, 'read', 'the frozen snapshot freezes accessMode read');
   eq(admitted.runtimeCapability.supportsReadOnlyFilesystem, true, 'admission carries the certified capability proof');
   eq(admitted.readOnlyDowngrade, undefined, 'a certified reviewer is never downgraded to a write lease');
+  const collab = await prepareRunExecution({
+    sessionId: 's_rev', session, manifest,
+    options: { internalOperation: 'collaboration_task', accessMode: 'read', readOnlyRequired: true, runnerId: REVIEWER_RUNTIME_ID },
+  });
+  eq(collab.legacy, false, 'collaboration tasks receive a real scope');
+  eq(collab.executionScope.accessMode, 'read', 'collaboration scope remains read-only');
+  await rejects(() => prepareRunExecution({
+    sessionId: 's_missing', session: { id: 's_missing', folder: '/missing' }, manifest,
+    options: { internalOperation: 'collaboration_task', readOnlyRequired: true, runnerId: REVIEWER_RUNTIME_ID },
+    deps: { findProjectByFolder: async () => null, checkCapacity: async () => ({ accepted: true }) },
+  }), error => error.code === 'READ_ONLY_RUNTIME_UNAVAILABLE', 'read-only task cannot fall back to an unscoped legacy run');
+
 
   // readOnlyRequired without a certified runtime is the S4 regression: refused
   // with READ_ONLY_RUNTIME_UNAVAILABLE (409), never silently run as a writer.
