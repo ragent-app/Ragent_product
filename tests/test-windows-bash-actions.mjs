@@ -33,13 +33,16 @@ if (process.platform === 'win32') {
   assert.equal((await inspect('ls -L secret')).decision, 'review');
   assert.equal((await inspect('cat --number secret/.ssh/fixture-key')).decision, 'review');
   for (const command of ["head -n 2 '中文 文件.md'", "tail -c10 '中文 文件.md'", "wc -lw '中文 文件.md'",
-    "grep -in hello '中文 文件.md'", "grep -e hello -- '中文 文件.md'", "grep hello '中文 文件.md' > output.md", 'head ../outside.txt']) {
+    "grep -in hello '中文 文件.md'", "grep -e hello -- '中文 文件.md'", "grep hello '中文 文件.md' > output.md", 'head ../outside.txt',
+    "sed -n '1,100p' '中文 文件.md'", "sed --quiet 1p -- '中文 文件.md'"]) {
     assert.equal((await inspect(command)).decision, 'allow', command);
   }
   assert.equal((await inspect('head ../outside.txt', true)).decision, 'review');
   for (const command of ['tail -f ordinary', 'head -n $(whoami) ordinary', 'grep -f secret/.ssh/fixture-key ordinary',
     'grep hello secret/.ssh/fixture-key', 'wc -l secret/.ssh/fixture-key', 'grep hello ordinary > secret/.ssh/key',
-    'grep --exclude-from secret/.ssh/fixture-key hello ordinary', 'grep hello']) {
+    'grep --exclude-from secret/.ssh/fixture-key hello ordinary', 'grep hello',
+    "sed -n '1,100p' secret/.ssh/fixture-key", "sed -n '1,100p;1e touch owned' '中文 文件.md'",
+    "sed -i '1p' '中文 文件.md'", "sed -n '1r secret/.ssh/fixture-key' '中文 文件.md'"]) {
     assert.equal((await inspect(command)).decision, 'review', command);
   }
   assert.equal((await inspect('ls -la')).decision, 'allow');
@@ -52,6 +55,7 @@ if (process.platform === 'win32') {
   for (const command of [
     "cat '中文 文件.md' | head -n 1",
     "cat '中文 文件.md' | grep -i fixture | wc -l",
+    "cat '中文 文件.md' | sed -n '1,100p'",
     'git status --short && git branch --show-current',
     'git status --short; git branch --show-current',
   ]) assert.equal((await inspect(command)).decision, 'allow', `ordinary compound read: ${command}`);
@@ -107,6 +111,9 @@ if (process.platform === 'win32') {
     assert.equal((await decideWindowsApproval(request(`ls -lah '${secret}'`), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`ls -R '${secret}'`), state)).decision, 'prompt');
     assert.equal((await decideWindowsApproval(request(`cat '${file}' | head -n 1`), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request(`sed -n '1,100p' '${file}'`), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request(`cat '${file}' | sed -n '1,100p'`), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request(`cat '${file}' | sed -n '1w owned'`), state)).decision, 'prompt');
     assert.equal((await decideWindowsApproval(request(`cat '${file}' | bash -c 'rm -rf /'`), state)).decision, 'prompt');
   }
   if (process.env.AGENTOC_TEST_BASH_BINARY) {
@@ -117,6 +124,8 @@ if (process.platform === 'win32') {
     assert.ok(listing.includes('中文 文件.md'));
     const pipeline = execFileSync(bash, ['--noprofile', '--norc', '-c', `cat '${file}' | grep -i fixture | head -n 1`], { cwd: workspace, encoding: 'utf8', windowsHide: true });
     assert.equal(pipeline.trim(), 'fixture');
+    const sed = execFileSync(bash, ['--noprofile', '--norc', '-c', `sed -n '1,100p' '${file}'`], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.equal(sed.trim(), 'fixture');
   }
   await rm(root, { recursive: true, force: true });
 }

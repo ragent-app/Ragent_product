@@ -54,6 +54,13 @@ function splitOptions(args, supported, longOptions = {}) {
 // grammar literal and reject options that run commands, follow files, or
 // select extra files through an option.
 function readUtilityOperands(program, args) {
+  if (program === 'sed') {
+    // GNU sed's general language can read/write files or execute commands.
+    // Only the common line-range print form is a static read.
+    if (!['-n', '--quiet', '--silent'].includes(args[0]) || !/^\d+(?:,\d+)?p$/.test(args[1] || '')) return null;
+    const operands = args.slice(args[2] === '--' ? 3 : 2);
+    return operands.length && operands.every(operand => operand && operand !== '-' && !operand.startsWith('-')) ? operands : null;
+  }
   const operands = []; let options = true; let explicitPattern = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -142,6 +149,8 @@ function isReadOnlyStdinFilter(command) {
   const words = parseLiteralBashWords(command);
   if (!words?.length) return false;
   const [program, ...args] = words;
+  if (program === 'sed') return ['-n', '--quiet', '--silent'].includes(args[0])
+    && /^\d+(?:,\d+)?p$/.test(args[1] || '') && (args.length === 2 || (args.length === 3 && args[2] === '-'));
   if (['head', 'tail'].includes(program)) {
     for (let i = 0; i < args.length; i += 1) {
       const arg = args[i];
@@ -214,7 +223,7 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   if ((program === 'pwd' && words.length === 1) || program === 'echo') {
     return outputEntry.length ? analyzeFiles(outputEntry, context) : { complete: true, actions: [{ kind: 'read', program, target: null }] };
   }
-  if (['head', 'tail', 'wc', 'grep'].includes(program)) {
+  if (['head', 'tail', 'wc', 'grep', 'sed'].includes(program)) {
     const operands = readUtilityOperands(program, words.slice(1));
     if (!operands) return { complete: false, actions: [], reason: 'read utility has unsupported or ambiguous arguments' };
     const targets = operands.map(gitBashPath);
