@@ -36,8 +36,9 @@ upgrades still require acceptance using the final installed app.
 
 ## Approval limitation
 
-The semantic approval compiler and permission target validator currently model
-Linux and Windows, not macOS. Requests that depend on that authorization path
+The semantic approval compiler can recognize a small set of macOS commands
+for a non-authorizing preview, but the permission target validator and executor
+do not support macOS. Every such preview remains denied. Requests that depend on that authorization path
 cannot be advertised as having Windows-equivalent approval support on macOS.
 Complete a macOS-specific command and target resolver, executor integration and
 native security acceptance before claiming those capabilities. Do not treat

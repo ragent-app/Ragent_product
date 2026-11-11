@@ -20,6 +20,7 @@
 
 import { parseCommandFacts } from './command-parser.mjs';
 import { mapFactsToCandidates } from './semantic-parsers/linux-command.mjs';
+import { mapDarwinFactsToCandidates } from './semantic-parsers/darwin-command.mjs';
 import {
   mapPowerShellFactsToCandidates,
   parsePowerShellCommandFacts,
@@ -155,7 +156,9 @@ export function compileSemanticOperations({ request = {}, parserFacts, trustedCo
     ? mapFactsToCandidates(facts, { cwd, projectRoot, home })
     : platform === 'win32'
       ? mapPowerShellFactsToCandidates(facts, { cwd, projectRoot, home })
-      : {
+      : platform === 'darwin'
+        ? mapDarwinFactsToCandidates(facts)
+        : {
         candidates: [{
           primaryAction: 'unknown.host_effect',
           effects: [],

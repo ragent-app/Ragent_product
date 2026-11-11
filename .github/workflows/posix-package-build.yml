@@ -46,6 +46,7 @@ jobs:
           node tests/test-desktop-update.cjs
           node tests/test-runtime-payload-secret-scan.mjs
           node tests/test-frozen-source-guards.mjs
+          node tests/test-semantic-darwin-preview.mjs
           if [ "$PLATFORM" = linux ]; then
             node tests/test-semantic-operation.mjs
             node tests/test-semantic-compiler.mjs

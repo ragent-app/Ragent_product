@@ -347,7 +347,7 @@ for (const platform of [undefined, '', 'darwin']) {
   eq(`unsupported platform ${String(platform)} denies`, result.strictness, STRICTNESS.DENY);
   check(`unsupported platform ${String(platform)} refuses`, result.refusals.length === 1);
   eq(`unsupported platform ${String(platform)} has unknown effect`, result.operations[0].primaryAction, 'unknown.host_effect');
-  check(`unsupported platform ${String(platform)} records reason`, result.operations[0].analysis.unknowns.includes('platform:unsupported'));
+  check(`unsupported platform ${String(platform)} records reason`, result.operations[0].analysis.unknowns.includes(platform === 'darwin' ? 'platform:macos-authorization-unavailable' : 'platform:unsupported'));
 }
 
 // 环境注入适用于全部 executable，而非仅 package manager。
