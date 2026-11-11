@@ -341,9 +341,13 @@ try {
 "@ | Set-Content -LiteralPath $payloadWxs -Encoding UTF8
     if (-not (Test-Path $payloadWxs)) { throw 'WiX directory authoring failed.' }
     New-Item -ItemType Directory -Force (Split-Path -Parent $OutputPath) | Out-Null
+    $wixInstalled = @(& wix.exe --acceptEula wix7 extension list --global 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing WiX extension cache.' }
     foreach ($extension in @('WixToolset.UI.wixext/7.0.0', 'WixToolset.Util.wixext/7.0.0')) {
-        & wix.exe --acceptEula wix7 extension add --global $extension
-        if ($LASTEXITCODE -ne 0) { throw ('Required pinned WiX extension could not be installed: ' + $extension) }
+        $parts = $extension.Split('/')
+        if (-not ($wixInstalled | Where-Object { $_ -match ('^' + [regex]::Escape($parts[0]) + '\s+' + [regex]::Escape($parts[1]) + '$') })) {
+            throw ('Required pinned WiX extension must be installed before building: ' + $extension)
+        }
     }
     $serviceHostDir = Split-Path -Parent $hostSource
     if($ManagedOwnerPreparation -or $fullOwnerActivation){
