@@ -56,6 +56,7 @@ const SENSITIVE_COMPONENT = /^(?:\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agen
 // account running AgentoC. Match the Windows profile structure while leaving
 // unrelated AppData paths and ordinary files outside a workspace usable.
 const WINDOWS_PROFILE_SENSITIVE = /(?:^|\\)(?:ntuser\.dat(?:\.log\d*)?|appdata\\(?:local|roaming)\\microsoft\\(?:credentials|protect))(?:\\|$)/i;
+const WINDOWS_SYSTEM_SENSITIVE = /(?:^|\\)windows\\system32\\(?:config|microsoft\\protect)(?:\\|$)/i;
 const lacksAttestedAbsolutePath = (raw, context) => context.requireAbsolutePaths && typeof raw === 'string' && !/^[a-z]:[\\/]/i.test(raw);
 
 function inside(candidate, root) {
@@ -167,7 +168,7 @@ export async function analyzeWindowsRipgrep(args, context = {}, {
       return typeof path === 'string' && inside(path, target.actual);
     });
     const action = { kind: 'read', program: 'rg', target, protected: isProtected(target, context,
-      { allowProgramDataWorkspaceRead: true }), workspace, workspaceRoot: Boolean(context.trustedWorkspaceRoot)
+      { allowProgramDataWorkspaceRead: true, allowOrdinarySystemRead: target.file === true }), workspace, workspaceRoot: Boolean(context.trustedWorkspaceRoot)
         && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       recursive: target.directory === true };
     if (action.recursive && workspace && !protectedDescendant && !parsed.selectsFiles) {
@@ -287,6 +288,7 @@ async function resolveCopyDestination(destination, source, context, fsApi) {
 function isProtected(target, context, {
   allowProgramDataWorkspaceRead = false,
   allowShallowDirectoryListing = false,
+  allowOrdinarySystemRead = false,
 } = {}) {
   const protectedRoots = (context.protectedRoots || [])
     .map((root) => typeof root === 'string' ? root : root?.path)
@@ -304,8 +306,9 @@ function isProtected(target, context, {
     if (!allowShallowDirectoryListing && protectedRoots.some((root) => inside(p, root))) return true;
     if (systemRoots.some((root) => inside(p, root)
       && !(boundProgramDataWorkspaceRead && win.resolve(root).toLowerCase() === win.resolve(programDataRoot).toLowerCase())
-      && !allowShallowDirectoryListing)) return true;
+      && !allowShallowDirectoryListing && !allowOrdinarySystemRead)) return true;
     return !allowShallowDirectoryListing && (WINDOWS_PROFILE_SENSITIVE.test(win.normalize(p))
+      || WINDOWS_SYSTEM_SENSITIVE.test(win.normalize(p))
       || p.split(/[\\/]+/).some((part) => SENSITIVE_COMPONENT.test(part)));
   });
 }
@@ -330,7 +333,7 @@ export async function analyzeWindowsFileChanges(entries, context = {}, { fsApi =
       regularFile = info.isFile() && !info.isSymbolicLink();
       linked = regularFile && info.nlink > 1;
     } catch (error) { if (error?.code !== 'ENOENT') return { complete: false, actions, reason: 'file change target cannot be inspected' }; }
-    const action = { kind, target, directory, protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read' }),
+    const action = { kind, target, directory, protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read', allowOrdinarySystemRead: kind === 'read' && regularFile }),
       workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       regularFile, linked,
@@ -622,7 +625,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       // Get-ChildItem emits directory-entry metadata only. Allow one-level
       // enumeration even under protected roots; file contents, recursion,
       // writes, and deletes keep their regular path checks.
-      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read', allowShallowDirectoryListing }),
+      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read', allowShallowDirectoryListing, allowOrdinarySystemRead: kind === 'read' && target.file }),
       directory: sourceTarget.directory === true,
       workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),

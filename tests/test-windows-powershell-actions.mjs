@@ -3,7 +3,7 @@ import { access, link, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/p
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import { analyzeWindowsFileChanges, analyzeWindowsPowerShell, decideWindowsPowerShellActions } from '../chat/windows-powershell-actions.mjs';
+import { analyzeWindowsFileChanges, analyzeWindowsPowerShell, analyzeWindowsRipgrep, decideWindowsPowerShellActions } from '../chat/windows-powershell-actions.mjs';
 import { decideWindowsApproval } from '../chat/windows-approval-gate.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
 
@@ -52,6 +52,8 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
   await mkdir(protectedMemory, { recursive: true });
   await writeFile(path.join(programDataWorkspace, 'readme.txt'), 'fixture');
   await writeFile(path.join(protectedMemory, 'private.txt'), 'fixture');
+  await mkdir(path.join(programDataRoot, 'another-app'));
+  await writeFile(path.join(programDataRoot, 'another-app', 'private.txt'), 'fixture');
   const programDataContext = {
     ...context,
     cwd: programDataWorkspace,
@@ -77,10 +79,21 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
     const memoryRead = await decide(`Get-Content -LiteralPath '${path.join(protectedMemory, 'private.txt')}'`);
     assert.equal(memoryRead.decision, 'prompt', 'instance memory remains protected inside the workspace boundary');
     const outsideRead = await decide(`Get-Content -LiteralPath '${path.join(programDataRoot, 'another-app', 'private.txt')}'`);
-    assert.equal(outsideRead.decision, 'prompt', 'unbound ProgramData files remain protected');
+    assert.equal(outsideRead.decision, 'auto-allow', 'ordinary ProgramData files do not require workspace membership');
   } finally {
     if (previous === undefined) delete process.env.ProgramData; else process.env.ProgramData = previous;
   }
+}
+{
+  const windows = path.join(root, 'Windows');
+  await mkdir(path.join(windows, 'System32', 'config'), { recursive: true });
+  await writeFile(path.join(windows, 'win.ini'), 'fixture');
+  await writeFile(path.join(windows, 'System32', 'config', 'SAM'), 'fixture');
+  const systemContext = { ...context, systemPathRoots: [windows] };
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ path: path.join(windows, 'win.ini'), kind: 'read' }], systemContext)).decision, 'allow');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ path: path.join(windows, 'System32', 'config', 'SAM'), kind: 'read' }], systemContext)).decision, 'review');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsRipgrep(['--no-config', 'fixture', path.join(windows, 'win.ini')], systemContext)).decision, 'allow');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsRipgrep(['--no-config', 'fixture', path.join(windows, 'System32', 'config', 'SAM')], systemContext)).decision, 'review');
 }
 {
   const previous = process.env.ProgramData;

@@ -1,9 +1,11 @@
 # Ragent 审批链路调整方案：Claude Code 与 Codex
 
+> 本文保留了 11 月 10 日的原始方案和背景；后续实现、策略变化与尚未验收项目以前面的进展及“当前证据与未决项”为准。
+
 ## 2026-11-11 Windows 与三星补充进展
 
 - Windows 审批器已支持一部分静态 Bash 管道和常见 Git 只读参数，并区分上下文不足、配置不可信、额外权限等原因；`recommended` 与 `full-auto` 继续使用同一自动放行标准。
-- 本机发现 ripgrep 配置可以改变默认搜索范围或运行预处理器。对于受支持的绝对路径搜索，托管桥接会先禁用隐式配置，再重新通过风险门；真实 Windows Codex App Server 使用本地模拟模型服务验证了两种档位，未使用官方账号额度。相对路径搜索的运行时工作目录尚未得到可靠证明，仍可能产生审批或自动拒绝。
+- 本机发现 ripgrep 配置可以改变默认搜索范围或运行预处理器。对于受支持的绝对路径搜索，托管桥接会先禁用隐式配置，再重新通过风险门；真实 Windows Codex App Server 使用本地模拟模型服务验证了两种档位，未使用官方账号额度。Codex Hook 的相对路径搜索仍缺少可靠的实际工作目录；Claude 的受支持相对路径搜索现已使用运行时目录校验。
 - 三星 SM-S9060、Android 16 上，审批界面和事件重放合计 18 项全部通过。该测试使用设备上的合成数据，不能证明手机经真实服务提交审批的链路已经通过。
 - 使用 USB 反向端口、本机测试 HTTP 适配器和真实 Windows 审批分类及响应队列，三星点击拒绝后成功在 Windows 队列生成一条对应的 `deny`。首轮测试夹具误把内部决策名称写成 `decline` 导致断言失败，修正夹具后复测通过。该测试未覆盖正式服务的身份认证、配对、网络传输及 provider 收到响应；执行时共享工作区包含其他任务的未提交修改。
 - 同一 Codex 轮次内，工作目录、命令、其他请求字段和风险判定均一致的危险或未知命令请求，可以复用已写入历史的审批卡；用户决定在 Run 锁内分别排入每个原始请求的响应队列。不同轮次、目录、权限授予及决定后才到达的请求保持独立。三星通过本机测试通道点击一次拒绝，Windows 对两个实际 Codex 请求分别排入拒绝；本机测试还覆盖跨刷新、并发决定及终态回放。该范围不包括 Claude 请求或网络授权合并。
@@ -57,7 +59,7 @@ Codex 的 `approvalsReviewer="user"` 只表示把已产生的审批请求交给�
 1. **请求触发面不同。** `on-request` 只覆盖 Codex 要求升级权限的动作，不会保证普通命令进入 Ragent 分类器。Run 级项目 trust gate 会把需要审批的命令送进 Ragent；执行策略明确允许的命令仍可不发请求。0.147 的 `git status` 实测无 owner 卡，只能证明没有用户提示，不能证明是 Ragent 自动答复。新版官方语义仍是“不信任项目命令逐条审批，显式 exec-policy allow 除外”。
 2. **Windows 分类覆盖不足会制造误审批。** Codex App Server 的 Windows 请求使用规范 PowerShell 可执行文件和静态 `-Command`，但不带 `-NoProfile`；旧规则因此把每条这类命令都送去审批。Windows 也缺少常见 `rg` 搜索和工作区测试/构建任务的规则。当前调整允许该 Codex 协议形状进入 AST 分析，并将受限 `rg` 与常用工作区任务列为谨慎级；recommended/full-auto 对谨慎级自动放行，safe 仍可要求用户审批。非递归目录枚举只返回名称/元数据，也不再因命中系统或 Ragent 保护根而自动升级。未知 shell、路径/Run 上下文缺失、额外权限、敏感文件内容、递归敏感扫描、动态执行、危险写删和未知工具仍保留审批边界。
 3. **执行策略可能绕过 Ragent 入口。** 即使项目 trust 是 `untrusted`，Codex 执行策略允许的命令也不会触发审批事件。Ragent 必须区分“Codex 没有发事件”和“Ragent 自动答复”；不能仅凭零张 owner 卡判断自动审批器工作正常。对已允许命令应审计来源与规则，确保允许项来自经过审查的策略。
-4. **有些请求应保留人工确认。** `item/permissions/requestApproval`、MCP elicitation、额外文件系统/网络权限、信息不完整的文件变更、Codex 删除/移动请求目前不能只凭命令文本证明安全，不能为了降提示量而放宽。
+4. **有些请求应保留人工确认。** `item/permissions/requestApproval`、MCP elicitation、额外文件系统/网络权限及信息不完整的文件变更仍需单独判断。Codex 普通文件的删除和移动现按实际目标分析，敏感目标和危险删除仍需审批或自动拒绝。
 5. **受控安装 Hook 仍按命令本身分类。** App Server 缺少 `-NoProfile` 不再单独阻断其规范 PowerShell argv 的分析。Hook 改写后的安装命令仍不在自动放行的工作区任务范围内，继续要求用户审批。荣耀手机最近一次 Codex Official Account 只读运行在执行命令前报 refresh token 已使用，未到审批阶段。
 
 ## 调整目标
@@ -158,6 +160,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - Claude Bash 的静态 `cd 目录 && 后续命令` 会先解析目录，再逐段判断后续动作；执行时将切换目标固定为分析过的绝对路径，工作区外同样适用。动态目录和无法判断的后续动作继续交原策略处理。
 - Windows 本机真实 Claude CLI 使用隔离配置和本机模拟模型服务，分别以 recommended 和 full-auto 执行相对路径写入并读取结果；两次均实际触发审批回调、由 Ragent 自动批准并完成，未使用真实模型额度。重新编译当前源码的原生删除助手后，其受保护目标和响应测试通过。
 - `build`、`dist`、`node_modules` 等常见生成目录即使位于工作区外，也可经非提权原生删除助手自动清理；助手核对实际目录并逐项固定和校验目标。真实 Windows fixture 验证了两种模式下的工作区外清理及工作目录不匹配时不删除，受保护子项仍触发审批。目录名只能作为生成目录的惯例，不能证明内容可重新生成。
+- 普通系统目录中的单个文件读取和搜索不再仅因位于系统目录而触发审批；明确配置的受保护目录、敏感凭据路径和 Windows 注册表数据文件所在目录仍保留风险判断。系统目录写入及递归搜索继续遵循对应操作的策略。
 
 - 本机 Windows Codex CLI `0.147.0` 与隔离安装的 `0.167.0`：真实 App Server 启动时只设置当前 cwd 项目 trust，不发送已退役的审批枚举；返回有效 `approvalPolicy=untrusted`、reviewer=user、sandbox 和 workspace root。0.167.0 使用本机 fake Responses provider、隔离 `CODEX_HOME` 和测试 key，命令级 owner prompt、无害命令自动批准、full-auto 危险命令拒绝均通过；没有使用 Codex 账号或官方模型额度。
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
