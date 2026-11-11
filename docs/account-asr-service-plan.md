@@ -1,10 +1,12 @@
 # Central Accounts speech recognition
 
+> **Scope update (2026-11-11):** Android now uses central cloud recognition only; the local phone/computer routes and route picker described in earlier sections below are retired. The dated deployment and acceptance checkpoints in this document are historical snapshots, not live service status. See [current voice behavior](local-voice-setup.md) and check the management panel or readiness endpoint for the current service state.
+
 ## Decision and scope
 
 Run cloud speech recognition inside the existing central Ragent Accounts service. The Android app sends audio directly to Accounts over the account service's HTTPS endpoint; Accounts authenticates the Ragent account, applies its quota, calls the configured speech provider with a server-only key, records usage, and returns text to Android. This adds no client-side provider secret, local forwarding daemon, separate ASR database, or new server product.
 
-The existing Android and paired-computer routes remain local. Automatic voice routing continues to prefer the session computer's enabled Whisper service and then the phone's system recognizer. It never chooses cloud recognition by itself. Cloud recognition is a separate per-chat choice that requires the user to select it, accept the current upload disclosure, and receive an Accounts confirmation before microphone capture starts. Every successful route writes to the draft; it never sends the chat message.
+Android uses the central service after the user accepts the current disclosure and Accounts confirms consent. It no longer offers local phone or paired-computer recognition. Successful transcription writes to the draft; it never sends the chat message.
 
 ## Request path
 
@@ -28,19 +30,16 @@ Reservations are serialized by locking the account-period aggregate before locki
 
 ## Privacy and provider boundary
 
-Selecting the cloud route sends microphone audio to Ragent Accounts and OpenAI. Ragent does not store the recording or transcript in its database; a transcript can remain in server memory for up to five minutes for idempotent retries. OpenAI states that API data is not used to train or improve models unless the API customer explicitly opts in. Its data-control documentation lists endpoint-specific retention and Zero Data Retention eligibility; the actual API organization/project settings and applicable terms still govern. Before public enablement, make the provider transfer, brief server-memory cache, account/device usage records, five-year consent evidence, and provider data controls visible in the Android flow, privacy policy, and Google Play Data Safety declarations. Users who do not accept that transfer can keep using local phone/computer recognition.
+Using cloud voice sends microphone audio to Ragent Accounts and OpenAI. Ragent does not store the recording or transcript in its database; a transcript can remain in server memory for up to five minutes for idempotent retries. OpenAI states that API data is not used to train or improve models unless the API customer explicitly opts in. Its data-control documentation lists endpoint-specific retention and Zero Data Retention eligibility; the actual API organization/project settings and applicable terms still govern. The Android flow, privacy policy, and Google Play Data Safety declarations must describe the provider transfer, brief server-memory cache, account/device usage records, five-year consent evidence, and provider data controls. Users who decline consent cannot use voice recognition, but can use other app features.
 
 The endpoint rejects non-WAV or unsupported WAV input, limits audio size and duration, rate-limits requests, limits each account to two concurrent operations, reserves account minutes before provider work, uses a 30-second provider timeout, and gives Android a 60-second overall request budget so it can receive the provider result. It rejects provider redirects, bounds provider response size, and never writes audio or transcript into service logs. The API is disabled unless both `AGENTOC_ACCOUNTS_ASR_ENABLED=1` and `OPENAI_API_KEY` are present. Keep the key only in the protected Accounts host environment file; never put it in the Android or Windows package, source control, command line, or logs.
 
 ## User-visible behavior
 
-- **Automatic**: local routing only; session computer Whisper first, then phone-local recognition. No cloud fallback.
-- **This phone**: phone-local recognition only; no network fallback.
-- **Paired computer**: Whisper on the selected computer only.
-- **Accounts cloud**: explicitly uploads the current recording to central Accounts. The route shows availability and remaining monthly minutes. Quota exhaustion, account authentication errors, or service downtime do not switch routes silently.
+- **Accounts cloud**: after consent, uploads the current recording to central Accounts. Voice settings show availability and remaining monthly minutes. Quota exhaustion, account authentication errors, or service downtime do not switch to another route.
 - **Uncertain result**: do not automatically replay the recording. Tell the user the result is unknown and minutes may remain reserved; show current usage so the user can decide whether to make another recording.
 
-The client currently presents cloud availability and remaining minutes in the voice-device picker. Cloud selection is stored using the existing voice-choice preference. The result continues through the existing composer draft callback.
+The client presents cloud availability, remaining minutes, and consent controls in voice settings. The result continues through the composer draft callback.
 
 ## Deployment and rollout
 
@@ -59,10 +58,10 @@ The client currently presents cloud availability and remaining minutes in the vo
 - Invalid WAV, unsupported sample format, over 20-second audio, and over 1 MiB are rejected before the provider call.
 - Known rejection releases quota; a timeout/ambiguous provider response is marked unknown, keeps quota reserved, and cannot be replayed under the same request ID. The reconciliation CLI is read-only by default, requires a named operator and evidence reference for writes, checks the aggregate/request invariant transactionally, and is idempotent.
 - An explicit cloud transcription detects a non-phone UI language, returns a transcript, fills only the draft, and increments account usage once.
-- Local routes and automatic routing still work with the Accounts feature disabled or the provider unavailable.
+- When Accounts speech is disabled or unavailable, voice input is unavailable and the app must not switch silently to a local or other provider.
 - Account deletion removes request and aggregate rows. No server or provider key is present in client packages or source.
 
-## Current implementation status
+## Historical implementation checkpoints
 
 The core ASR service and settlement fix were first deployed from `05d444e80d450857907e750e854bce4dceb70c27`. The latest Oracle release and migration state are recorded in the current deployment follow-up below. Migrations 038–042 are applied in the central `agentoc_accounts_runtime` database.
 
@@ -76,7 +75,7 @@ Before cloud ASR can be enabled, the owner must obtain and securely provision an
 
 The dated deployment notes below are historical snapshots; the release, migration, and feature-gate state in this block is authoritative.
 
-Current Oracle OpenAI deployment (2026-11-11): release `agentoc-accounts-0.0.1+openai-transcription.20261111.93f1c54-arm64`, source revision `93f1c54a82f20a28356f588998389d2c8c3c4946`, archive SHA-256 `939ccb0fd575b5ac52ac1315c7f2a79af3441d17bcd152a0e89b5ee653c1eefe`. Migration 042 applied before the atomic release switch; the prior `d2cc946` release remains available for rollback. Runtime payload verification passed with 2,443 files and no findings. Public `/accounts/healthz` and `/accounts/readyz` returned 200; readiness reports `speechRecognition: unconfigured`. Invalid usage credentials return 401 and a disabled transcription request returns 503 `asr_unavailable`. The OpenAI key is absent/blank and the feature flag is off. No provider request was made.
+Oracle deployment checkpoint (2026-11-11, before provider enablement): release `agentoc-accounts-0.0.1+openai-transcription.20261111.93f1c54-arm64`, source revision `93f1c54a82f20a28356f588998389d2c8c3c4946`, archive SHA-256 `939ccb0fd575b5ac52ac1315c7f2a79af3441d17bcd152a0e89b5ee653c1eefe`. Migration 042 applied before the atomic release switch; the prior `d2cc946` release remains available for rollback. Runtime payload verification passed with 2,443 files and no findings. Public `/accounts/healthz` and `/accounts/readyz` returned 200; readiness at this checkpoint reported `speechRecognition: unconfigured`. Invalid usage credentials returned 401 and a disabled transcription request returned 503 `asr_unavailable`. The OpenAI key was absent/blank and the feature flag was off. No provider request had yet been made.
 
 The Oracle database was checked directly in `agentoc_accounts_runtime`: migration `038_account_asr_usage` is recorded as applied at `2026-11-10 08:53:43 UTC`, and both `public.account_asr_usage` and `public.account_asr_requests` exist. This confirms the ASR tables are in the RAC runtime database used for usage and request accounting. Accounts `/readyz` now also returns 503 when enabled speech recognition is unavailable because the schema is missing, and it rechecks the ASR store when that feature is ready; a regression test covers the missing-schema case.
 

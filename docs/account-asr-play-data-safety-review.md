@@ -13,7 +13,7 @@
 
 | Data type | Candidate collection answer | Purpose to assess | Important handling detail |
 | --- | --- | --- | --- |
-| Audio files → Voice or sound recordings | Collected; optional because users can keep using local recognition and choose whether to upload | App functionality: transcribe the user-selected recording | It leaves the phone and is forwarded from Accounts to OpenAI. The transfer is user-initiated and disclosed before capture. Evaluate the sharing answer independently. |
+| Audio files → Voice or sound recordings | Collected; optional because voice input is optional and requires consent | App functionality: transcribe the user-selected recording | It leaves the phone and is forwarded from Accounts to OpenAI. The transfer is user-initiated and disclosed before capture. Evaluate the sharing answer independently. |
 | Personal info → User IDs | Account IDs are present in persistent Accounts request and consent records; confirm whether already covered by the existing form | App functionality, account management, security/quota enforcement | Account IDs are account-linked identifiers even when pseudonymous. |
 | Device or other identifiers | Device ID is present in persistent request and consent records; confirm the current form taxonomy | App functionality and security/quota enforcement | The provider request does not receive the Ragent device ID. |
 | App activity → Other actions, or the closest applicable category | Assess for account-linked transcription request/usage metadata | App functionality and fraud prevention/security | Successful and failed request metadata is normally retained for 90 days; uncertain outcomes have no automatic expiry and can remain until account deletion. |
