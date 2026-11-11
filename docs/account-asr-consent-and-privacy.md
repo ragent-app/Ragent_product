@@ -74,14 +74,14 @@ The v3 disclosure is localized in English, Simplified Chinese, Traditional Chine
 
 | Area | Status |
 |---|---|
-| Central Accounts service and monthly account usage ledger | Deployed on Oracle at release `0.0.1+asr-reconciliation.20261110.d2cc946`; migrations 038–041 applied |
+| Central Accounts service and monthly account usage ledger | Deployed on Oracle at release `0.0.1+openai-transcription.20261111.93f1c54`; migrations 038–042 applied |
 | Provider secret and feature gate | Key absent and feature flag off by owner instruction |
-| Consent ledger and enforce-before-forward gate | Implemented; migration 040 applied and matching Accounts release active on Oracle |
+| Consent ledger and enforce-before-forward gate | Implemented; migration 042 is active and the OpenAI v3 consent policy is deployed on Oracle |
 | Android explicit consent, decline, revoke, and localized disclosure | Implemented; debug build, unit tests, and seven-locale device test passed |
 | Public privacy-policy and Play Console alignment | OpenAI privacy notice published; Play Console Data Safety still needs owner review against actual provider terms |
 | OpenAI transcription and cost measurement | Cannot be performed until an API key is configured securely |
 
-## Latest deployment and verification — 2026-11-10
+## Historical deployment and verification — 2026-11-10
 
 `npm run test:owner-auth`, the ASR unit test, and the Accounts independent release-packaging test passed on Windows. The Android debug/unit tests and the connected MTN-AN80 `VoiceLocalizationTest` passed earlier; the device test covered English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It verifies localized disclosure copy, not provider transcription.
 
@@ -98,3 +98,5 @@ At this historical 2026-11-10 checkpoint, the public notice still named ElevenLa
 The central adapter now calls `POST /v1/audio/transcriptions` with `gpt-transcribe`, sends no language hint, uses server-side `OPENAI_API_KEY`, and attaches the opaque Ragent idempotency request ID as `X-Client-Request-Id` for support correlation. The provider price estimate is versioned at $0.0045/minute. The Android disclosure and server consent policy both use v3, so an old ElevenLabs acceptance cannot authorize an OpenAI upload. Migration 042 preserves prior v1/v2 events while allowing the new version. The feature remains disabled because the API key has intentionally not been requested or provisioned.
 
 The public privacy notice was updated on 2026-11-11 in static release `ragent-asr-openai-privacy-20261111-88334c8`; the published page SHA-256 is `88334c8b94c43073dfedb41bbc797319f3abf2ca1a80a1100dcdd9b887ac430a`. Only `site/privacy/index.html` changed. The previous release `ragent-asr-privacy-20261110-7b9da59` and receipt backup `/var/www/agentoc-support/deployment.json.before-openai-asr-privacy-20261111` remain available for rollback. Public HTTPS verification returned 200 and confirmed the OpenAI recipient, disabled status, and removal of the old ElevenLabs wording; Caddy configuration and process were unchanged.
+
+Oracle now runs `agentoc-accounts-0.0.1+openai-transcription.20261111.93f1c54-arm64`, built from source revision `93f1c54a82f20a28356f588998389d2c8c3c4946`; archive SHA-256 is `939ccb0fd575b5ac52ac1315c7f2a79af3441d17bcd152a0e89b5ee653c1eefe`. Migration 042 was applied before the atomic switch. The previous `d2cc946` release is retained for rollback. Runtime payload verification passed (2,443 files, no findings). HTTPS health/readiness returned 200, readiness reports `speechRecognition: unconfigured`, invalid usage credentials return 401, and a disabled transcription request returns 503 `asr_unavailable`. The API key remains empty and `AGENTOC_ACCOUNTS_ASR_ENABLED` remains off. No OpenAI call was made. The Android unit tests and physical-device seven-locale disclosure test passed; Accounts ASR, reconciliation, release packaging, and server test suites passed on this source revision.

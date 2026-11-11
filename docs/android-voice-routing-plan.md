@@ -144,6 +144,6 @@ Windows Ragent 0.0.42 已在测试机升级；正式命名的 Windows x64 setup 
 
 Windows 本机识别也完成真实运行时验收：用仓库 pinned 的 whisper.cpp v1.9.5 x64 运行时和 SHA-256 已验证的 `ggml-base-q5_1.bin` 启动隔离的 loopback Whisper HTTP 服务，经服务的 `/inference` 以显式 `ko` 识别同一 WAV，返回完整句子“안녕하세요. 휴대폰에서 한국어 음성 인식을 시험합니다.”。测试未重启或改写正在运行的 Ragent 服务，临时运行目录已删除。Windows 安装器的运行时固定包校验通过；本轮 Android 电脑端远程配对到 Windows 服务的端到端传输尚未在真实配对会话里复验，Node 路由/鉴权与语种传递测试覆盖了该接口边界。正常产品路线不依赖 Windows 扬声器输出。Node 本地语音测试 19 项通过；Android Workbench/app 单测和 debug APK/AndroidTest 构建通过。
 
-中央 Accounts 云端识别是单独的显式路线，不改变上述本地自动路由。服务端代码和 Android 云端选项已加入主线实现；Accounts 新版本与迁移 042 部署后，可用 key 缺失状态验收关闭链路。公开隐私政策现已更新为 OpenAI Transcription API；真实供应商验收仍需安全配置 key，并按实际组织/项目设置完成 Google Play Data Safety 审核。未配置 key 时功能保持关闭。
+中央 Accounts 云端识别是单独的显式路线，不改变上述本地自动路由。服务端代码和 Android 云端选项已加入主线；Oracle 已运行 OpenAI Transcription 版本并应用迁移 042，验证 key 缺失时 readiness 为 `unconfigured`、转写返回 503。公开隐私政策现已更新为 OpenAI Transcription API；真实供应商验收仍需安全配置 key，并按实际组织/项目设置完成 Google Play Data Safety 审核。未配置 key 时功能保持关闭。
 
 补充的荣耀实机 QA 包验收（2026-11-08）：修正配对状态诊断测试的 JUnit 返回类型后，AndroidTest APK 构建成功；100 语种 native 目录一致性、7 种界面语言资源和 Honor 扬声器→麦克风→手机 Whisper→草稿回调测试再次通过（60.861 秒）。诊断测试只写汇总计数、不输出设备标识；独立 QA 包报告 `paired=0`，因此这轮无法用 QA 包验证手机到 Windows Ragent 的授权传输。本轮 ADB 安装目标仅为 `.opensource` QA 包，未对正式包执行安装命令。Windows 服务端语音识别与 Android 侧均已分别实测，但它们之间的真实配对链路仍未验收，不能据此宣称整条电脑识别路线已经通过。
