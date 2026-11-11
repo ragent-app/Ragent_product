@@ -73,6 +73,18 @@ printf '%s\n' 0.0.1 > "$contents/Resources/app/.agentoc-package-version"
 "$contents/Resources/agentoc-stop"
 server_pid=''
 
+# LaunchAgent-style starts need not have a PID file. The stop command must
+# wait for the actual listening service to exit before reporting success.
+"$contents/MacOS/AgentoC"
+server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
+rm "$AGENTOC_CONFIG_DIR/agentoc.pid"
+"$contents/Resources/agentoc-stop"
+if kill -0 "$server_pid" 2>/dev/null; then
+  echo 'stop returned while the service was still running' >&2
+  exit 1
+fi
+server_pid=''
+
 # A foreign process on the port must neither be treated as our service nor
 # be killed when launching or stopping Ragent.
 node -e 'require("http").createServer((q,s)=>s.end("other")).listen(+process.env.CHAT_PORT,"127.0.0.1")' &

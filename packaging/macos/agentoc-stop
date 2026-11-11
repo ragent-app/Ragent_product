@@ -7,19 +7,33 @@ source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
 
 agentoc_source_instance_env
 
-pid="$(agentoc_server_pid 2>/dev/null || true)"
-if [ -n "$pid" ]; then
-  kill "$pid" 2>/dev/null || true
+stop_server_pid() {
+  local pid="$1"
+  # Do not signal a process unless its current identity still matches the
+  # packaged service. A PID file or a listener alone is not enough.
+  agentoc_is_server_pid "$pid" || return 1
+  kill "$pid" 2>/dev/null || {
+    if agentoc_is_server_pid "$pid"; then
+      printf 'Could not stop AgentoC chat server (pid %s)\n' "$pid" >&2
+      return 1
+    fi
+    return 0
+  }
   for _ in $(seq 1 20); do
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.25
   done
   if agentoc_is_server_pid "$pid"; then
     printf 'AgentoC chat server did not stop (pid %s)\n' "$pid" >&2
-    exit 1
+    return 1
   fi
-  rm -f "$AGENTOC_PID_FILE"
   printf 'AgentoC chat server stopped (pid %s)\n' "$pid"
+}
+
+pid="$(agentoc_server_pid 2>/dev/null || true)"
+if [ -n "$pid" ]; then
+  stop_server_pid "$pid" || exit 1
+  rm -f "$AGENTOC_PID_FILE"
   exit 0
 fi
 
@@ -27,12 +41,14 @@ PORT="${CHAT_PORT:-7690}"
 pids="$(lsof -ti ":${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
 if [ -n "$pids" ]; then
   # Only kill processes whose command line is the packaged chat server.
+  stopped=0
   for pid in $pids; do
     if agentoc_is_server_pid "$pid"; then
-      kill "$pid" 2>/dev/null || true
-      printf 'AgentoC chat server stopped (pid %s)\n' "$pid"
+      stop_server_pid "$pid" || exit 1
+      stopped=1
     fi
   done
+  if [ "$stopped" = 0 ]; then printf 'AgentoC chat server is not running\n'; fi
   exit 0
 fi
 
