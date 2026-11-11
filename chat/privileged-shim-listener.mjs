@@ -2,7 +2,7 @@
 // (design docs/privileged-shim-channel-2026-09-03.md).
 //
 // The sidecar installs a per-Run launcher (`shim-bin/agentoc-privileged`) plus
-// a per-Run unix socket (`shim.sock`) inside the Run's results directory, then
+// a per-Run unix socket (`shim.sock`), then
 // prepends the launcher directory to the provider's PATH. A sentinel command
 // that reaches a shell (Codex danger-full-access, agy, a bypassed gate) now
 // executes the launcher instead of failing with "command not found".
@@ -16,9 +16,10 @@
 // pipeline; the resolve/install-auto paths write `privilegedShimResult` back
 // onto the Run record asynchronously after the client command has returned.
 
-import { chmod, mkdir, rm, writeFile } from 'fs/promises';
+import { chmod, mkdir, mkdtemp, rm, rmdir, writeFile } from 'fs/promises';
 import { delimiter, join } from 'path';
 import { createServer } from 'net';
+import { tmpdir } from 'os';
 
 import { classifyRisk } from './risk-classifier.mjs';
 import { buildPrivilegedBatch, buildPrivilegedOp } from './privileged-ops.mjs';
@@ -121,12 +122,22 @@ export async function startPrivilegedShimChannel({
   const baseDir = dir;
   const binDir = join(baseDir, 'shim-bin');
   const binPath = join(binDir, PRIVILEGED_SHIM_BIN_NAME);
-  const socketPath = join(baseDir, 'shim.sock');
-
-  await rm(socketPath, { force: true });
   await mkdir(binDir, { recursive: true });
   await writeFile(binPath, buildPrivilegedShimLauncherScript(node, entry), { mode: 0o755 });
   await chmod(binPath, 0o755);
+
+  let socketPath = join(baseDir, 'shim.sock');
+  let shortSocketDir = '';
+  // sockaddr_un is limited to 104 bytes on macOS and 108 on Linux. Instance
+  // paths may be arbitrarily long, so use a private temporary directory when
+  // the normal per-Run location cannot fit. mkdtemp creates it mode 0700.
+  if (process.platform !== 'win32' && Buffer.byteLength(socketPath) > 100) {
+    let prefix = join(tmpdir(), 'ragent-shim-');
+    if (Buffer.byteLength(`${prefix}XXXXXX/shim.sock`) > 100) prefix = '/tmp/ragent-shim-';
+    shortSocketDir = await mkdtemp(prefix);
+    socketPath = join(shortSocketDir, 'shim.sock');
+  }
+  await rm(socketPath, { force: true });
 
   const channel = {
     runId: normalizedRunId,
@@ -382,10 +393,15 @@ export async function startPrivilegedShimChannel({
     });
   });
 
-  await new Promise((resolveListen, rejectListen) => {
-    server.once('error', rejectListen);
-    server.listen(socketPath, () => resolveListen());
-  });
+  try {
+    await new Promise((resolveListen, rejectListen) => {
+      server.once('error', rejectListen);
+      server.listen(socketPath, () => resolveListen());
+    });
+  } catch (error) {
+    if (shortSocketDir) await rmdir(shortSocketDir).catch(() => {});
+    throw error;
+  }
   await chmod(socketPath, 0o600).catch(() => {});
 
   channel.stop = async () => {
@@ -393,6 +409,7 @@ export async function startPrivilegedShimChannel({
     channel.closed = true;
     await new Promise((resolveClose) => server.close(() => resolveClose()));
     await rm(socketPath, { force: true }).catch(() => {});
+    if (shortSocketDir) await rmdir(shortSocketDir).catch(() => {});
   };
 
   return channel;

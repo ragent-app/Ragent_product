@@ -6,7 +6,7 @@
 
 import assert from 'assert/strict';
 import { spawn } from 'child_process';
-import { chmodSync, existsSync, mkdtempSync, statSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -90,6 +90,31 @@ const sentinelArgs = [
   '--category', 'other',
   '--', 'systemctl', 'set-property', 'user-1000.slice', 'TasksMax=infinity',
 ];
+
+// Long home and instance paths must not exceed the OS unix-socket limit.
+if (process.platform !== 'win32') {
+  const root = mkdtempSync(join(tmpdir(), 'agentoc-shim-long-'));
+  const resultsDir = join(root, 'x'.repeat(110));
+  mkdirSync(resultsDir);
+  const store = createStore();
+  let channel;
+  let shortDir;
+  try {
+    channel = await startPrivilegedShimChannel({
+      runId: RUN_ID, nodePath: process.execPath, commandEntryPath: CLIENT_ENTRY,
+      resultsDir, ...store, classifyRiskImpl: dangerRiskClassifier,
+    });
+    shortDir = dirname(channel.socketPath);
+    check('long results path uses a short socket', Buffer.byteLength(channel.socketPath) <= 100);
+    check('short socket parent is private', (statSync(shortDir).mode & 0o077) === 0);
+    const client = await spawnClient(['--desc', 'listing', '--', 'ls', '-la'], channel.socketPath);
+    check('short socket accepts a real client', client.code === PRIVILEGED_SHIM_EXIT.REFUSED);
+  } finally {
+    if (channel) await channel.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+  check('short socket directory removed on stop', !existsSync(shortDir));
+}
 
 // --- happy path: danger op → accepted immediately → owner result is durable ---
 {
