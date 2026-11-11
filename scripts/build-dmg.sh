@@ -281,6 +281,11 @@ case "$CLAUDE_MACHO_MAGIC" in
   *) echo "Refusing to package non-Mach-O Claude Code binary (magic $CLAUDE_MACHO_MAGIC)" >&2; exit 1 ;;
 esac
 install -m 0755 "$CLAUDE_EXTRACT_DIR/claude" "$APP_DIR/bin/claude"
+[ -s "$CLAUDE_EXTRACT_DIR/LICENSE.md" ] || { echo 'Claude Code license is missing.' >&2; exit 1; }
+mkdir -p "$APP_DIR/third_party_licenses/claude-code"
+install -m 0644 "$CLAUDE_EXTRACT_DIR/LICENSE.md" "$APP_DIR/third_party_licenses/claude-code/LICENSE.md"
+CLAUDE_BINARY_SHA="$(shasum -a 256 "$APP_DIR/bin/claude" | awk '{print $1}')"
+printf 'claude_sha256=%s\n' "$CLAUDE_BINARY_SHA" >> "$CONTENTS/Resources/runtime/provider-versions"
 
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
@@ -314,6 +319,9 @@ if command -v codesign >/dev/null 2>&1; then
     echo "Ad-hoc codesign failed; continuing with an unsigned bundle" >&2
   }
 fi
+[ "$(shasum -a 256 "$APP_DIR/bin/claude" | awk '{print $1}')" = "$CLAUDE_BINARY_SHA" ] || {
+  echo 'Signing changed the bundled Claude Code binary; refusing this package.' >&2; exit 1;
+}
 
 # ── 9. Post-build verification ───────────────────────────────────────────────
 BUNDLED_NODE_VERSION="$("$CONTENTS/Resources/runtime/node" --version)"

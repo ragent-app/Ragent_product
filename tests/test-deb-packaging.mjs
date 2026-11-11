@@ -41,6 +41,9 @@ const packageJson = JSON.parse(read('package.json'));
 assert.match(buildScript, /Debian packaging requires a clean committed source tree/);
 assert.match(buildScript, /SOURCE_COMMIT.*agentoc-source-commit/s);
 assert.match(buildScript, /Source changed during packaging; refusing to publish the candidate/);
+assert.match(buildScript, /AGENTOC_CLAUDE_BINARY_SHA256/);
+assert.match(buildScript, /CLAUDE_LICENSE_SOURCE/);
+assert.match(buildScript, /vendor\/licenses\/claude-code\/LICENSE\.md/);
 
 const retiredPackagePaths = [
   'packaging/deb/agentoc-maintenance-admin',

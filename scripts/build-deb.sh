@@ -368,6 +368,7 @@ ln -s /opt/agentoc/runtime/codex "$STAGE/usr/bin/codex"
 # binary remains an escape hatch for offline rebuilds, but never silently
 # falls back to a stale version under ~/.local/share/claude.
 CLAUDE_BINARY_SOURCE="${AGENTOC_CLAUDE_BINARY_SOURCE:-}"
+CLAUDE_LICENSE_SOURCE="${AGENTOC_CLAUDE_LICENSE_SOURCE:-}"
 if [ -z "$CLAUDE_BINARY_SOURCE" ]; then
   CLAUDE_NATIVE_TARBALL="claude-code-${CLAUDE_VERSION}-linux-${NODE_ARCH}.tgz"
   CLAUDE_NATIVE_CACHE_PATH="$NODE_CACHE_DIR/$CLAUDE_NATIVE_TARBALL"
@@ -382,8 +383,16 @@ if [ -z "$CLAUDE_BINARY_SOURCE" ]; then
   mkdir -p "$CLAUDE_EXTRACT_DIR"
   tar -xzf "$CLAUDE_NATIVE_CACHE_PATH" -C "$CLAUDE_EXTRACT_DIR" --strip-components=1
   CLAUDE_BINARY_SOURCE="$CLAUDE_EXTRACT_DIR/claude"
+  CLAUDE_LICENSE_SOURCE="$CLAUDE_EXTRACT_DIR/LICENSE.md"
+else
+  # An offline override must be attributable and accompanied by its license.
+  CLAUDE_EXPECTED_SHA="${AGENTOC_CLAUDE_BINARY_SHA256:-}"
+  [[ "$CLAUDE_EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Offline Claude binary requires AGENTOC_CLAUDE_BINARY_SHA256.' >&2; exit 1; }
+  [ -f "$CLAUDE_BINARY_SOURCE" ] || { echo 'Offline Claude binary is missing.' >&2; exit 1; }
+  [ "$(sha256sum "$CLAUDE_BINARY_SOURCE" | awk '{print $1}')" = "$CLAUDE_EXPECTED_SHA" ] || { echo 'Offline Claude binary checksum mismatch.' >&2; exit 1; }
 fi
 
+[ -s "$CLAUDE_LICENSE_SOURCE" ] || { echo 'Claude Code license is missing.' >&2; exit 1; }
 [ -x "$CLAUDE_BINARY_SOURCE" ] || { echo "Missing Claude Code binary: $CLAUDE_BINARY_SOURCE" >&2; exit 1; }
 if [ "$(head -c 2 "$CLAUDE_BINARY_SOURCE" | od -An -tx1 | tr -d ' \n')" != "7f45" ]; then
   echo "Refusing to package non-ELF Claude Code binary (likely the runtime wrapper): $CLAUDE_BINARY_SOURCE" >&2
@@ -395,13 +404,16 @@ CLAUDE_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$CLAUDE_BINARY_SOURCE" | tr -d ' \n'
   exit 1
 }
 install -m 0755 "$CLAUDE_BINARY_SOURCE" "$STAGE/opt/agentoc/vendor/claude"
+mkdir -p "$STAGE/opt/agentoc/vendor/licenses/claude-code"
+install -m 0644 "$CLAUDE_LICENSE_SOURCE" "$STAGE/opt/agentoc/vendor/licenses/claude-code/LICENSE.md"
+CLAUDE_BINARY_SHA="$(sha256sum "$STAGE/opt/agentoc/vendor/claude" | awk '{print $1}')"
 cat > "$STAGE/opt/agentoc/runtime/claude" <<'EOF'
 #!/bin/sh
 exec /opt/agentoc/vendor/claude "$@"
 EOF
 chmod 0755 "$STAGE/opt/agentoc/runtime/claude"
 ln -s /opt/agentoc/runtime/claude "$STAGE/usr/bin/claude"
-printf 'codex=%s\nclaude=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" > "$STAGE/opt/agentoc/runtime/provider-versions"
+printf 'codex=%s\nclaude=%s\nclaude_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$CLAUDE_BINARY_SHA" > "$STAGE/opt/agentoc/runtime/provider-versions"
 
 P2P_BUILD_BINARY="$WORK_DIR/agentoc-p2p-host-$ARCH"
 command -v go >/dev/null 2>&1 || {
