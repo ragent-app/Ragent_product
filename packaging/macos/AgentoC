@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../Resources/agentoc-env.sh"
 
 open_manager() {
   if [ -d "$AGENTOC_RESOURCES_DIR/Manager.app" ]; then

@@ -1,6 +1,6 @@
 #!/bin/bash
 # AgentoC macOS app shared environment bootstrap.
-# Sourced by Contents/MacOS/{AgentoC,agentoc-stop,agentoc}. Not executed directly.
+# Sourced by the main launcher and the helper scripts in Contents/Resources.
 # shellcheck shell=bash
 
 agentoc_app_self_dir() {
@@ -8,8 +8,11 @@ agentoc_app_self_dir() {
 }
 
 AGENTOC_APP_SELF_DIR="$(agentoc_app_self_dir)"
-# Contents/MacOS → Contents/Resources
-AGENTOC_RESOURCES_DIR="$(cd "$AGENTOC_APP_SELF_DIR/.." && pwd)/Resources"
+if [ "$(basename "$AGENTOC_APP_SELF_DIR")" = Resources ]; then
+  AGENTOC_RESOURCES_DIR="$AGENTOC_APP_SELF_DIR"
+else
+  AGENTOC_RESOURCES_DIR="$(cd "$AGENTOC_APP_SELF_DIR/.." && pwd)/Resources"
+fi
 AGENTOC_APP_DIR="$AGENTOC_RESOURCES_DIR/app"
 AGENTOC_NODE_BIN="$AGENTOC_RESOURCES_DIR/runtime/node"
 AGENTOC_CONFIG_DIR_DEFAULT="$HOME/.config/agentoc"

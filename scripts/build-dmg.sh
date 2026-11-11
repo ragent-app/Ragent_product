@@ -340,10 +340,10 @@ printf 'claude_sha256=%s\n' "$CLAUDE_BINARY_SHA" >> "$CONTENTS/Resources/runtime
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
 install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/AgentoC"
-install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/MacOS/agentoc-service"
-install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/MacOS/agentoc-stop"
-install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/MacOS/agentoc-cli"
-install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/MacOS/agentoc-env.sh"
+install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/agentoc-service"
+install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/agentoc-stop"
+install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/Resources/agentoc-cli"
+install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/Resources/agentoc-env.sh"
 install -m 0644 "$ROOT/packaging/macos/com.agentoc.agentoc.plist" "$CONTENTS/Resources/com.agentoc.agentoc.plist"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$CONTENTS/Resources/README.txt"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$STAGE/README.txt"
@@ -367,21 +367,59 @@ fi
 # app's resources or executable bits after the signature has been verified.
 chmod -R u+rwX,go+rX "$STAGE/AgentoC.app"
 
-# ── 8. Sign the app; ad-hoc candidates are not trusted distribution builds ──
+# ── 8. Sign inside out; ad-hoc candidates are for controlled testing only ──
+command -v codesign >/dev/null 2>&1 || { echo 'codesign is required.' >&2; exit 1; }
 SIGNING_STATUS=ad-hoc
+EFFECTIVE_IDENTITY="${SIGN_IDENTITY:--}"
+# Electron needs per-helper entitlements; its maintained signer walks the
+# nested framework and helper apps rather than applying --deep at signing.
+node --input-type=module - "$DESKTOP_BUILD/node_modules/@electron/osx-sign/dist/sign.js" "$MANAGER" "$EFFECTIVE_IDENTITY" <<'NODE'
+import { pathToFileURL } from 'node:url';
+const [modulePath, app, identity] = process.argv.slice(2);
+const { sign } = await import(pathToFileURL(modulePath).href);
+const adhoc = identity === '-';
+await sign({ app, platform: 'darwin', identity, identityValidation: !adhoc,
+  preAutoEntitlements: false, preEmbedProvisioningProfile: false,
+  ...(adhoc ? { optionsForFile: () => ({ timestamp: 'none', hardenedRuntime: false }) } : {}) });
+NODE
 if [ -n "$SIGN_IDENTITY" ]; then
-  codesign --force --deep --options runtime --timestamp \
-    --entitlements "$ROOT/packaging/macos/entitlements.plist" \
+  # The upstream Node binary contains get-task-allow. Replace its signature
+  # with the app's narrow JIT entitlement before notarization.
+  codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
+    --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/node"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR/bin/agentoc-p2p-host"
+  codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
     --sign "$SIGN_IDENTITY" "$STAGE/AgentoC.app"
-  codesign --verify --deep --strict "$STAGE/AgentoC.app"
-  SIGNING_STATUS=developer-id
-elif command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "$STAGE/AgentoC.app" 2>/dev/null || {
-    echo 'Ad-hoc signing failed.' >&2; exit 1;
+  codesign --display --entitlements :- "$CONTENTS/Resources/runtime/node" > "$WORK_DIR/node-entitlements.plist" 2>/dev/null
+  [ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-jit' "$WORK_DIR/node-entitlements.plist")" = true ] || {
+    echo 'Signed Node runtime is missing its JIT entitlement.' >&2; exit 1;
   }
+  [ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.get-task-allow' "$WORK_DIR/node-entitlements.plist" 2>/dev/null || true)" != true ] || {
+    echo 'Signed Node runtime has a disallowed debugging entitlement.' >&2; exit 1;
+  }
+  codesign --display --verbose=4 "$CONTENTS/Resources/runtime/node" 2> "$WORK_DIR/node-signature.txt"
+  grep -q '^Authority=Developer ID Application:' "$WORK_DIR/node-signature.txt" &&
+    grep -Eq '^CodeDirectory .*flags=.*runtime' "$WORK_DIR/node-signature.txt" &&
+    grep -q '^Timestamp=' "$WORK_DIR/node-signature.txt" || {
+      echo 'The signing identity must produce a timestamped Developer ID signature with hardened runtime.' >&2; exit 1;
+    }
+  SIGNING_STATUS=developer-id
 else
-  echo 'codesign is required to build the macOS app.' >&2; exit 1
+  codesign --force --sign - --entitlements "$ROOT/packaging/macos/entitlements.plist" "$CONTENTS/Resources/runtime/node"
+  codesign --force --sign - "$APP_DIR/bin/agentoc-p2p-host"
+  codesign --force --sign - "$STAGE/AgentoC.app"
 fi
+codesign --verify --strict "$CONTENTS/Resources/runtime/node"
+codesign --verify --strict "$APP_DIR/bin/agentoc-p2p-host"
+codesign --verify --deep --strict "$MANAGER"
+codesign --verify --strict "$APP_DIR/bin/claude"
+while IFS= read -r -d '' native_file; do
+  if file -b "$native_file" | grep -q 'Mach-O'; then
+    codesign --verify --strict "$native_file" || {
+      echo "Invalid bundled Codex native signature: $native_file" >&2; exit 1;
+    }
+  fi
+done < <(find "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE" -type f -print0)
 [ "$(shasum -a 256 "$APP_DIR/bin/claude" | awk '{print $1}')" = "$CLAUDE_BINARY_SHA" ] || {
   echo 'Signing changed the bundled Claude Code binary; refusing this package.' >&2; exit 1;
 }
@@ -392,7 +430,7 @@ BUNDLED_NODE_VERSION="$("$CONTENTS/Resources/runtime/node" --version)"
   echo "Bundled Node reports $BUNDLED_NODE_VERSION, expected $NODE_VERSION" >&2
   exit 1
 }
-for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/MacOS/agentoc-service" "$CONTENTS/MacOS/agentoc-stop" "$CONTENTS/MacOS/agentoc-cli" "$CONTENTS/MacOS/agentoc-env.sh"; do
+for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/Resources/agentoc-service" "$CONTENTS/Resources/agentoc-stop" "$CONTENTS/Resources/agentoc-cli" "$CONTENTS/Resources/agentoc-env.sh"; do
   bash -n "$script" || { echo "Launcher syntax error: $script" >&2; exit 1; }
 done
 for required in \

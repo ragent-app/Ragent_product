@@ -12,9 +12,9 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 日常使用
 --------
 - 双击 AgentoC.app：启动服务并打开桌面管理器（服务已运行时仅打开管理器）。
-- 命令行：AgentoC.app/Contents/MacOS/agentoc-cli <command>
+- 命令行：AgentoC.app/Contents/Resources/agentoc-cli <command>
   （例如 agentoc-cli doctor、agentoc-cli set-password）
-- 停止服务：AgentoC.app/Contents/MacOS/agentoc-stop
+- 停止服务：AgentoC.app/Contents/Resources/agentoc-stop
 - 日志：~/.config/agentoc/chat-server.log
 - 实例配置（升级保留）：~/.config/agentoc/instance.env
 

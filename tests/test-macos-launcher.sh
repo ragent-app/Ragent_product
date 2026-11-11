@@ -12,8 +12,9 @@ cleanup() {
 trap cleanup EXIT
 contents="$test_dir/Ragent App.app/Contents"
 mkdir -p "$contents/MacOS" "$contents/Resources/runtime" "$contents/Resources/app" "$test_dir/bin" "$test_dir/home"
-cp "$root/packaging/macos/"{AgentoC,agentoc-env.sh,agentoc-stop} "$contents/MacOS/"
-chmod 0755 "$contents/MacOS/AgentoC" "$contents/MacOS/agentoc-stop"
+cp "$root/packaging/macos/AgentoC" "$contents/MacOS/"
+cp "$root/packaging/macos/"{agentoc-env.sh,agentoc-stop} "$contents/Resources/"
+chmod 0755 "$contents/MacOS/AgentoC" "$contents/Resources/agentoc-stop"
 ln -s "$(command -v node)" "$contents/Resources/runtime/node"
 printf '#!/bin/sh\nexit 0\n' > "$contents/Resources/runtime/codex"
 cp "$contents/Resources/runtime/codex" "$contents/Resources/runtime/claude"
@@ -44,7 +45,7 @@ curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
 node -e 'const fs=require("fs");if((fs.statSync(process.argv[1]).mode & 0o777)!==0o600)process.exit(1)' "$AGENTOC_CONFIG_DIR/chat-server.log"
 "$contents/MacOS/AgentoC"
 [ "$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")" = "$server_pid" ]
-"$contents/MacOS/agentoc-stop"
+"$contents/Resources/agentoc-stop"
 server_pid=''
 
 # A foreign process on the port must neither be treated as our service nor
@@ -60,7 +61,7 @@ if "$contents/MacOS/AgentoC"; then
   exit 1
 fi
 grep -Fq "端口 $port" "$QA_ALERT_ARGS"
-"$contents/MacOS/agentoc-stop"
+"$contents/Resources/agentoc-stop"
 kill -0 "$other_pid"
 
 export AGENTOC_CONFIG_DIR="$test_dir/incomplete-config"

@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 
-CLI = "/Applications/AgentoC.app/Contents/MacOS/agentoc-cli"
+CLI = "/Applications/AgentoC.app/Contents/Resources/agentoc-cli"
 API = "/api/device-pairing/temporary/invitations"
 TEST = (
     "com.andysagent.agentoc.TemporaryPairingLiveTicketTest"

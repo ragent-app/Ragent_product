@@ -5,6 +5,7 @@
   "description": "Windows desktop manager shell for Ragent",
   "main": "main.cjs",
   "devDependencies": {
+    "@electron/osx-sign": "2.7.2",
     "electron": "44.9.3",
     "rcedit": "5.0.2"
   }

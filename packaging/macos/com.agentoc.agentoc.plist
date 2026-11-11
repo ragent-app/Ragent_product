@@ -6,7 +6,7 @@
     <string>cloud.agenton.agentoc</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{APP_PATH}}/Contents/MacOS/agentoc-service</string>
+        <string>{{APP_PATH}}/Contents/Resources/agentoc-service</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
