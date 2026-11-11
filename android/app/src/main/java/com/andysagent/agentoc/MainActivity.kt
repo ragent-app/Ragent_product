@@ -435,7 +435,7 @@ class MainActivity : ComponentActivity() {
             }
             AgentocTheme(darkTheme = isDark, themeVariant = appTheme.value) {
                 val runtimeScope = rememberCoroutineScope()
-                val voiceController = remember(app) { LocalVoiceController(app, this@MainActivity, runtimeScope) }
+                val voiceController = remember(app) { LocalVoiceController(app, runtimeScope) }
                 LaunchedEffect(appLanguage, appLanguageLoaded) {
                     if (!appLanguageLoaded) return@LaunchedEffect
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -909,7 +909,7 @@ class MainActivity : ComponentActivity() {
                 ) { granted ->
                     voicePermissionPending = false
                     if (granted) {
-                        voiceController.startVoiceInput(tabletChatBinding.targetId.value, appendVoiceTranscript)
+                        voiceController.startVoiceInput(appendVoiceTranscript)
                     } else {
                         voiceController.setMessage(getString(WorkbenchR.string.voice_error_microphone_permission))
                     }
@@ -1294,7 +1294,7 @@ class MainActivity : ComponentActivity() {
                     state.remoteTargets.map { it.instanceId },
                     state.remoteTargetConnectionStates,
                 ) {
-                    voiceController.refreshComputers((state.accountComputers + state.remoteTargets).distinctBy { it.instanceId })
+                    voiceController.refreshCloudUsage()
                 }
                 // The session currently on screen never surfaces as a global
                 // attention popup; its approvals stay in the timeline card.
@@ -1492,7 +1492,7 @@ class MainActivity : ComponentActivity() {
                                     runtimeScope.launch { runCatching { refreshAccountDirectory(app) } }
                                 }
                                 if (event.page == SettingsPage.Voice) {
-                                    voiceController.refreshComputers((state.accountComputers + state.remoteTargets).distinctBy { it.instanceId })
+                                    voiceController.refreshCloudUsage()
                                 }
                             }
                             WorkbenchEvent.CloseSettingsPage -> shell.onEvent(AppShellEvent.CloseSettingsPage)
@@ -1504,21 +1504,17 @@ class MainActivity : ComponentActivity() {
                                         this@MainActivity,
                                         Manifest.permission.RECORD_AUDIO,
                                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                    voiceController.startVoiceInput(detailTargetId, appendVoiceTranscript)
+                                    voiceController.startVoiceInput(appendVoiceTranscript)
                                 } else if (!voicePermissionPending) {
                                     voicePermissionPending = true
                                     voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             }
                             WorkbenchEvent.CancelVoiceInput -> voiceController.cancelVoiceInput()
-                            is WorkbenchEvent.SelectVoiceChoice -> voiceController.selectChoice(event.choice)
                             WorkbenchEvent.AcceptCloudVoiceConsent -> voiceController.acceptCloudVoiceConsent()
                             WorkbenchEvent.DeclineCloudVoiceConsent -> voiceController.declineCloudVoiceConsent()
                             WorkbenchEvent.RevokeCloudVoiceConsent -> voiceController.revokeCloudVoiceConsent()
-                            is WorkbenchEvent.SetComputerVoiceEnabled -> voiceController.setComputerEnabled(event.targetId, event.enabled)
-                            is WorkbenchEvent.InstallComputerVoice -> voiceController.installComputer(event.targetId)
                             is WorkbenchEvent.VoiceTranscriptionReceived -> appendVoiceTranscript(event.text)
-                            WorkbenchEvent.RefreshVoiceDevices -> voiceController.refreshComputers((state.accountComputers + state.remoteTargets).distinctBy { it.instanceId })
                             is WorkbenchEvent.ReportAgentContent -> contentReports.open(event.text)
                             is WorkbenchEvent.SelectTheme -> {
                                 shell.onEvent(AppShellEvent.SelectTheme(event.theme))

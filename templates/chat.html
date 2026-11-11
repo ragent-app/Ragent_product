@@ -244,24 +244,6 @@
             </div>
           </div>
         </section>
-        <section class="settings-group" id="localVoiceSettingsSection" aria-labelledby="localVoiceSettingsTitle" hidden>
-          <div class="settings-group-heading">
-            <span class="settings-group-icon" data-icon="mic" aria-hidden="true"></span>
-            <h2 class="settings-group-title" id="localVoiceSettingsTitle">Computer voice recognition</h2>
-          </div>
-          <div class="settings-group-card">
-            <div class="settings-row settings-row-action">
-              <div class="settings-row-copy">
-                <div class="settings-row-title" id="localVoiceSettingsOptionTitle">Run voice recognition on this computer</div>
-                <div class="settings-row-note" id="localVoiceSettingsOptionNote">When enabled, Ragent starts Whisper and keeps the model loaded. Audio is sent here only when you choose computer recognition for voice input.</div>
-              </div>
-              <label class="settings-row-control" aria-label="Enable computer voice recognition">
-                <input class="settings-local-voice-toggle" id="localVoiceRecognitionEnabled" type="checkbox" aria-label="Enable computer voice recognition" disabled>
-              </label>
-            </div>
-            <div class="settings-row-status settings-row-status-wide" id="localVoiceSettingsStatus" role="status" aria-live="polite" hidden></div>
-          </div>
-        </section>
         <section class="settings-group desktop-manager-account-group" id="desktopManagerGoogleAccountGroup" aria-label="Google account" data-i18n-aria-label="crossDevice.account.title" hidden>
           <div class="cross-device-status desktop-manager-account-status" id="desktopManagerAccountStatus" role="status" aria-live="polite" hidden></div>
           <div id="desktopManagerGoogleAccountContent"></div>
@@ -483,10 +465,6 @@
                 <button class="composer-add-menu-item" id="composerAttachFilesBtn" type="button" role="menuitem">
                   <span class="composer-add-menu-main" data-i18n="compose.add.files">Files and folders</span>
                 </button>
-                <button class="composer-add-menu-item" id="composerComputerVoiceBtn" type="button" role="menuitem">
-                  <span class="composer-add-menu-main" data-i18n="compose.computerVoice.start">Computer voice input</span>
-                  <span class="composer-add-menu-note" data-i18n="compose.computerVoice.provider">Audio is sent to the connected computer for local transcription</span>
-                </button>
                 <button class="composer-add-menu-item" id="composerPlanMenuItem" type="button" role="menuitemcheckbox" aria-checked="false">
                   <span class="composer-add-menu-main" data-i18n="compose.add.plan">Plan mode</span>
                   <span class="composer-add-menu-note" id="composerPlanMenuNote" data-i18n="compose.add.planOn">Turn plan mode on</span>
@@ -506,11 +484,6 @@
                   <span class="composer-add-menu-main" data-i18n="compose.add.connectors">Connectors</span>
                   <span class="composer-add-menu-note" data-i18n="compose.add.connectorsNote">Calendar, mail, and integrations</span>
                 </button>
-              </div>
-              <div class="composer-voice-status" id="composerComputerVoiceStatus" role="status" aria-live="polite" hidden>
-                <span id="composerComputerVoiceMessage"></span>
-                <button id="composerComputerVoiceStop" type="button" data-i18n="compose.voice.finish">Finish</button>
-                <button id="composerComputerVoiceCancel" type="button" data-i18n="compose.voice.cancel">Cancel</button>
               </div>
               <div class="composer-add-panel" id="composerAgentPanel" role="dialog" aria-modal="false" aria-labelledby="composerAgentPanelTitle" tabindex="-1" hidden>
                 <div class="composer-add-panel-title" id="composerAgentPanelTitle" data-i18n="compose.agent.title">Agents &amp; apps</div>
@@ -951,7 +924,6 @@
 <script src="chat/harness-management.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/model-providers.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/settings-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
-<script src="chat/local-voice-settings.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/sidebar-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/agent-panel.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/connector-panel.js?v={{ASSET_VERSION}}-mail-state-v2" nonce="{{NONCE}}"></script>
@@ -965,7 +937,6 @@
 <script src="chat/markdown-composer-editor.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/compose.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/composer-fullscreen.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
-<script src="chat/composer-computer-voice.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/gestures.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/live-status-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/goal-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>

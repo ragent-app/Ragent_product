@@ -104,10 +104,6 @@ android {
     compileSdk = 37
     experimentalProperties["android.experimental.enableScreenshotTest"] = true
     sourceSets.getByName("main").assets.srcDir(rootProject.file("../shared"))
-    // The Whisper language catalog is consumed by the computer service, not the Android app.
-    androidResources {
-        ignoreAssetsPattern += ":whisper-languages.json"
-    }
 
     defaultConfig {
         applicationId = "com.agentoncloud.android"

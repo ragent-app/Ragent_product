@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_voice">音声認識</string>
-    <string name="settings_voice_summary">音声を認識する端末を選択</string>
+    <string name="settings_voice_summary">クラウド音声認識と使用量</string>
     <string name="voice_menu_device">音声処理 · %1$s</string>
     <string name="voice_picker_title">音声を処理する端末</string>
     <string name="voice_picker_done">完了</string>

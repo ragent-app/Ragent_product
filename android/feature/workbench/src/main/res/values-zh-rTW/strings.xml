@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_voice">語音辨識</string>
-    <string name="settings_voice_summary">選擇語音辨識裝置</string>
+    <string name="settings_voice_summary">雲端語音辨識與用量</string>
     <string name="voice_menu_device">語音處理裝置 · %1$s</string>
     <string name="voice_picker_title">語音處理裝置</string>
     <string name="voice_picker_done">完成</string>

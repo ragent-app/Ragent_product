@@ -14,8 +14,8 @@
         "lib/", "chat/", "shared/", "static/", "templates/", "automation/", "connectors/", "skills/",
         "scripts/", "p2p/", "native/", "local-helper/", "policy/", "tunnel/", "docs/", "packaging/", "third_party_licenses/"
       ],
-      "exclude": ["scripts/accounts-migrate.mjs", "scripts/accounts-rotate-key.mjs"],
-      "required": ["package.json", "package-lock.json", "chat-server.mjs", "cli.js", "shared/whisper-languages.json", "static/chat/ui.js", "templates/chat.html", "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs"],
+      "exclude": ["scripts/accounts-migrate.mjs", "scripts/accounts-rotate-key.mjs", "chat/local-voice-routes.mjs", "chat/local-voice-server.mjs", "chat/local-voice-transcriber.mjs", "chat/local-voice-languages.mjs", "chat/local-voice-installation.mjs", "lib/local-voice-settings.mjs", "static/chat/local-voice-settings.js", "static/chat/composer-computer-voice.js", "shared/whisper-languages.json", "packaging/windows/stage-whisper-runtime.ps1"],
+      "required": ["package.json", "package-lock.json", "chat-server.mjs", "cli.js", "static/chat/ui.js", "templates/chat.html", "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs"],
       "rename": {}
     },
     "accounts": {

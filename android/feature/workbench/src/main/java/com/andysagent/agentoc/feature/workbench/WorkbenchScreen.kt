@@ -1542,7 +1542,6 @@ private fun ChatSurface(
     var sessionEntryBottomPinActive by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var deleteDialogOpen by remember { mutableStateOf(false) }
-    var voiceDevicePickerOpen by remember { mutableStateOf(false) }
     var approvalCollapsed by rememberSaveable(state.sessionId) { mutableStateOf(false) }
     var renameText by remember(state.sessionId, state.sessionTitle) { mutableStateOf(state.sessionTitle) }
     var scrollMode by remember { mutableStateOf(ChatScrollMode.Following) }
@@ -3238,23 +3237,6 @@ private fun ChatSurface(
                 leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Info, contentDescription = null) },
             )
             AgentoDropdownMenuItem(
-                text = stringResource(
-                    R.string.voice_menu_device,
-                    state.voice.choiceLabel(
-                        state.chatTargetId,
-                        phoneLabel = stringResource(R.string.voice_route_phone),
-                        cloudLabel = stringResource(R.string.voice_route_cloud),
-                        computerFallbackLabel = stringResource(R.string.voice_computers_section),
-                    ),
-                ),
-                onClick = {
-                    onEvent(WorkbenchEvent.CloseSessionMenu)
-                    onEvent(WorkbenchEvent.RefreshVoiceDevices)
-                    voiceDevicePickerOpen = true
-                },
-                leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Microphone, contentDescription = null) },
-            )
-            AgentoDropdownMenuItem(
                 text = stringResource(R.string.workbench_session_rename),
                 onClick = {
                     renameText = state.sessionTitle
@@ -3303,84 +3285,6 @@ private fun ChatSurface(
         }
 
         }
-    }
-
-    if (voiceDevicePickerOpen) {
-        AgentoDialog(
-            title = stringResource(R.string.voice_picker_title),
-            confirmLabel = stringResource(R.string.voice_picker_done),
-            onConfirm = { voiceDevicePickerOpen = false },
-            onDismiss = { voiceDevicePickerOpen = false },
-            backdropLayer = chatModalBackdrop,
-            content = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SettingsChoiceRow(
-                        title = stringResource(R.string.voice_route_automatic),
-                        subtitle = stringResource(R.string.voice_route_automatic_hint),
-                        selected = state.voice.choice == "auto",
-                        onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("auto")) },
-                        modifier = Modifier.testTag("voice-route-auto"),
-                    )
-                    SettingsChoiceRow(
-                        title = stringResource(R.string.voice_route_phone),
-                        subtitle = stringResource(
-                            if (!state.voice.phoneSupported) R.string.voice_phone_unsupported
-                            else if (state.voice.phoneNativeLanguageSupported == false) R.string.voice_phone_native_language_unsupported
-                            else if (state.voice.phoneAvailable) R.string.voice_phone_ready
-                            else R.string.voice_phone_unsupported,
-                        ),
-                        selected = state.voice.choice == "phone",
-                        onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("phone")) },
-                        modifier = Modifier.testTag("voice-route-phone"),
-                    )
-                    val cloudRemainingMinutes = ((state.voice.cloudRemainingMs + 59_999L) / 60_000L)
-                        .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
-                    val cloudSubtitle = when {
-                        state.voice.cloudLimitMs > 0 && state.voice.cloudRemainingMs <= 0 ->
-                            stringResource(R.string.voice_cloud_quota_exceeded)
-                        state.voice.cloudAvailable -> stringResource(R.string.voice_cloud_ready, cloudRemainingMinutes)
-                        else -> stringResource(R.string.voice_cloud_unavailable)
-                    }
-                    SettingsChoiceRow(
-                        title = stringResource(R.string.voice_route_cloud),
-                        subtitle = cloudSubtitle,
-                        selected = state.voice.choice == "cloud",
-                        enabled = (state.voice.cloudAvailable && state.voice.cloudRemainingMs > 0)
-                            || state.voice.choice == "cloud",
-                        onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("cloud")) },
-                        modifier = Modifier.testTag("voice-route-cloud"),
-                    )
-                    if (state.voice.cloudConsentGranted) {
-                        androidx.compose.material3.TextButton(
-                            onClick = { onEvent(WorkbenchEvent.RevokeCloudVoiceConsent) },
-                            enabled = state.voice.cloudConsentGranted && !state.voice.cloudConsentBusy,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                contentColor = colors.secondaryContent,
-                            ),
-                        ) {
-                            Text(stringResource(R.string.voice_cloud_consent_revoke))
-                        }
-                    }
-                    state.voice.computers.forEach { computer ->
-                        SettingsChoiceRow(
-                            title = computer.label,
-                            subtitle = when {
-                                !computer.connected -> stringResource(R.string.voice_computer_offline)
-                                !computer.installed -> stringResource(R.string.voice_computer_not_installed)
-                                !computer.enabled -> stringResource(R.string.voice_computer_disabled)
-                                !computer.ready -> stringResource(R.string.voice_computer_starting)
-                                else -> stringResource(R.string.voice_computer_ready)
-                            },
-                            selected = state.voice.choice == "computer:${computer.targetId}",
-                            enabled = computer.canRouteVoice || state.voice.choice == "computer:${computer.targetId}",
-                            onClick = { onEvent(WorkbenchEvent.SelectVoiceChoice("computer:${computer.targetId}")) },
-                            modifier = Modifier.testTag("voice-route-computer-${computer.targetId}"),
-                        )
-                    }
-                }
-            },
-        )
     }
 
     if (state.voice.cloudConsentPrompt) {
@@ -5549,61 +5453,34 @@ private fun SettingsDetailSurface(
             ) {
                 when (page) {
                     SettingsPage.Voice -> {
-                        item(key = "voice-computer-settings") {
-                            SettingsGroup(
-                                title = stringResource(R.string.voice_computers_section),
-                                modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth),
-                            ) {
-                                if (state.voice.computers.isEmpty()) {
-                                    Text(
-                                        text = stringResource(R.string.voice_no_computers),
-                                        color = colors.secondaryContent,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.padding(16.dp),
-                                    )
-                                } else state.voice.computers.forEachIndexed { index, computer ->
-                                    val statusText = when {
-                                        computer.error != null -> computer.error
-                                        !computer.connected -> stringResource(R.string.voice_computer_offline)
-                                        !computer.installed && !computer.installable -> stringResource(R.string.voice_computer_install_unavailable)
-                                        !computer.installed -> stringResource(R.string.voice_computer_not_installed)
-                                        !computer.enabled -> stringResource(R.string.voice_computer_disabled)
-                                        !computer.ready -> stringResource(R.string.voice_computer_starting)
-                                        else -> stringResource(R.string.voice_computer_ready)
-                                    }
-                                    AgentoSettingRow(
-                                        leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Monitor) },
-                                        title = computer.label,
-                                        subtitle = statusText,
-                                        trailing = {
-                                            if (!computer.installed && computer.installable) {
-                                                AgentoButton(
-                                                    text = stringResource(if (computer.busy) R.string.voice_installing else R.string.voice_install),
-                                                    onClick = { onEvent(WorkbenchEvent.InstallComputerVoice(computer.targetId)) },
-                                                    enabled = computer.connected && !computer.busy,
-                                                    secondary = true,
-                                                    modifier = Modifier.testTag("voice-install-${computer.targetId}"),
-                                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
-                                                )
-                                            } else if (computer.installed) {
-                                                AgentoSwitch(
-                                                    checked = computer.enabled,
-                                                    onCheckedChange = { enabled ->
-                                                        onEvent(WorkbenchEvent.SetComputerVoiceEnabled(computer.targetId, enabled))
-                                                    },
-                                                    enabled = computer.connected && !computer.busy,
-                                                    modifier = Modifier.testTag("voice-computer-switch-${computer.targetId}"),
-                                                )
-                                            }
-                                        },
-                                        showDivider = index < state.voice.computers.lastIndex,
-                                    )
+                        item(key = "voice-cloud-settings") {
+                            val remainingMinutes = ((state.voice.cloudRemainingMs + 59_999L) / 60_000L)
+                                .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                            val cloudStatus = when {
+                                accountState?.hasVerifiedAccountSession != true -> stringResource(R.string.voice_cloud_sign_in_required)
+                                state.voice.cloudLimitMs > 0 && state.voice.cloudRemainingMs <= 0 -> stringResource(R.string.voice_cloud_quota_exceeded)
+                                state.voice.cloudAvailable -> stringResource(R.string.voice_cloud_ready, remainingMinutes)
+                                else -> stringResource(R.string.voice_cloud_unavailable)
+                            }
+                            SettingsGroup(modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth)) {
+                                AgentoSettingRow(
+                                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
+                                    title = stringResource(R.string.voice_route_cloud),
+                                    subtitle = cloudStatus,
+                                    showDivider = false,
+                                )
+                                if (state.voice.cloudConsentGranted) {
+                                    androidx.compose.material3.TextButton(
+                                        onClick = { onEvent(WorkbenchEvent.RevokeCloudVoiceConsent) },
+                                        enabled = !state.voice.cloudConsentBusy,
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                    ) { Text(stringResource(R.string.voice_cloud_consent_revoke)) }
                                 }
                             }
                         }
                         item(key = "voice-privacy-note") {
                             Text(
-                                text = stringResource(R.string.voice_privacy_note),
+                                text = stringResource(R.string.voice_cloud_upload_disclosure),
                                 color = colors.secondaryContent,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth).padding(horizontal = 8.dp),

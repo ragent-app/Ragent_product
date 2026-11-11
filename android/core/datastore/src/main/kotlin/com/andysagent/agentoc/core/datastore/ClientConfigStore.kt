@@ -3,6 +3,7 @@ package com.andysagent.agentoc.core.datastore
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -12,13 +13,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.security.MessageDigest
 import java.util.UUID
 
 import com.andysagent.agentoc.core.model.AppLanguage
 import com.andysagent.agentoc.core.model.AppTheme
 
 private val Context.agentocConfigDataStore by preferencesDataStore(name = "agentoc-client-config")
+
+internal fun removeRetiredVoicePreferences(prefs: MutablePreferences) {
+    prefs.remove(booleanPreferencesKey("phone_local_voice_enabled"))
+    prefs.remove(stringPreferencesKey("voice_recognition_language"))
+    prefs.asMap().keys.filter { it.name.startsWith("chat_voice_choice_") }.forEach { prefs.remove(it) }
+}
 
 data class StoredInstance(
     val endpoint: String,
@@ -213,14 +219,6 @@ class ClientConfigStore private constructor(private val context: Context, privat
     /** Configured app language preference. */
     val appLanguage: Flow<AppLanguage> = preferences.data.map { prefs ->
         AppLanguage.fromValue(prefs[Keys.appLanguage])
-    }
-
-    fun chatVoiceChoice(sessionId: String): Flow<String> {
-        require(sessionId.isNotBlank())
-        val key = chatVoiceChoiceKey(sessionId)
-        return preferences.data.map { prefs ->
-            prefs[key]?.takeIf { it in setOf("auto", "phone") || it.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}")) } ?: "auto"
-        }
     }
 
     /** Non-secret identity selected through Google on this phone. */
@@ -485,27 +483,10 @@ class ClientConfigStore private constructor(private val context: Context, privat
         }
     }
 
-    /** Remove phone voice preferences retired with the app-managed Whisper model and language selector. */
+    /** Remove settings for voice destinations retired by cloud-only transcription. */
     suspend fun clearRetiredPhoneVoicePreferences() {
-        val phoneVoiceEnabled = booleanPreferencesKey("phone_local_voice_enabled")
-        val voiceRecognitionLanguage = stringPreferencesKey("voice_recognition_language")
-        preferences.edit { prefs ->
-            prefs.remove(phoneVoiceEnabled)
-            prefs.remove(voiceRecognitionLanguage)
-        }
+        preferences.edit { prefs -> removeRetiredVoicePreferences(prefs) }
     }
-
-    suspend fun setChatVoiceChoice(sessionId: String, choice: String) {
-        require(sessionId.isNotBlank())
-        require(choice == "auto" || choice == "phone" || choice == "cloud"
-            || choice.matches(Regex("computer:[A-Za-z0-9._:-]{1,128}")))
-        val key = chatVoiceChoiceKey(sessionId)
-        preferences.edit { prefs -> prefs[key] = choice }
-    }
-
-    private fun chatVoiceChoiceKey(sessionId: String) = stringPreferencesKey(
-        "chat_voice_choice_${MessageDigest.getInstance("SHA-256").digest(sessionId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }}",
-    )
 
     suspend fun saveGoogleAccountProfile(profile: StoredGoogleAccountProfile) {
         preferences.edit { prefs ->

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_voice">Reconnaissance vocale</string>
-    <string name="settings_voice_summary">Choisir l’appareil de reconnaissance</string>
+    <string name="settings_voice_summary">Reconnaissance vocale cloud et utilisation</string>
     <string name="voice_menu_device">Traitement vocal · %1$s</string>
     <string name="voice_picker_title">Appareil de traitement vocal</string>
     <string name="voice_picker_done">Terminé</string>

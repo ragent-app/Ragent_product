@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_voice">음성 인식</string>
-    <string name="settings_voice_summary">음성을 인식할 기기 선택</string>
+    <string name="settings_voice_summary">클라우드 음성 인식 및 사용량</string>
     <string name="voice_menu_device">음성 처리 · %1$s</string>
     <string name="voice_picker_title">음성 처리 기기</string>
     <string name="voice_picker_done">완료</string>

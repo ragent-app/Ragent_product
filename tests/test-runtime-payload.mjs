@@ -67,6 +67,7 @@ try {
     const result = await stageRuntimePayload({ ...f, profile: 'desktop' });
     assert.equal(result.sourceRevision.length, 40);
     assert.equal(existsSync(join(f.destination, 'chat-server.mjs')), true);
+    assert.equal(existsSync(join(f.destination, 'shared/whisper-languages.json')), false);
     for (const name of ['tracked-development-key.json', 'firebase.local-secret.json', 'android', 'tests', 'accounts/server.mjs', 'accounts/internal-not-client.mjs']) {
       assert.equal(existsSync(join(f.destination, name)), false, name);
     }

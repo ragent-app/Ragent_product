@@ -9,7 +9,6 @@ import { loadUiRuntimeSelection, saveUiRuntimeSelection } from '../lib/runtime-s
 import { getPublicAvailableToolsAsync, saveSimpleToolAsync } from '../lib/tools.mjs';
 import { readBody } from '../lib/utils.mjs';
 import { handleWindowsPrivilegedBrokerRoutes } from './windows-privileged-broker.mjs';
-import { createConfiguredLocalVoiceRoutes } from './local-voice-routes.mjs';
 import { getRun, getRunManifest, isTerminalRunState } from './runs.mjs';
 import {
   createOwnerWebAuthnAssertionOptions,
@@ -143,9 +142,6 @@ import {
   updateSessionWorkflowClassification,
 } from './session-manager.mjs';
 
-const handleLocalVoiceRoutes = createConfiguredLocalVoiceRoutes();
-void handleLocalVoiceRoutes.initialize?.().catch(() => {});
-process.once('exit', () => { handleLocalVoiceRoutes.shutdownNow?.(); });
 
 const uploadedMediaMimeTypes = {
   csv: 'text/csv; charset=utf-8',
@@ -542,7 +538,11 @@ export async function handleControlRoutes({
     writeJson,
   })) return true;
 
-  if (await handleLocalVoiceRoutes({ req, res, pathname, authSession, requireSessionAccess, getSession, writeJson })) return true;
+  if (/^\/api\/(?:local-voice-(?:settings|install|recognition)(?:\/[^/]+)?|sessions\/[^/]+\/local-voice-recognition)$/.test(pathname)) {
+    req.resume?.();
+    writeJson(res, 410, { code: 'LOCAL_VOICE_RETIRED', error: 'Computer voice recognition has been removed. Update the Android app to use cloud voice recognition.' });
+    return true;
+  }
 
   if (pathname === '/api/target-runtime/context' && req.method === 'GET') {
     if (authSession?.role !== 'owner' || authSession?.principalKind === 'run_capability') {

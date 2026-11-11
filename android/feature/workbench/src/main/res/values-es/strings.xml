@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_voice">Reconocimiento de voz</string>
-    <string name="settings_voice_summary">Elige dónde se reconoce la voz</string>
+    <string name="settings_voice_summary">Reconocimiento de voz en la nube y uso</string>
     <string name="voice_menu_device">Procesamiento de voz · %1$s</string>
     <string name="voice_picker_title">Dispositivo de procesamiento de voz</string>
     <string name="voice_picker_done">Listo</string>

@@ -33,7 +33,6 @@
     "chat/session-list-ui.js",
     "chat/model-providers.js",
     "chat/settings-ui.js",
-    "chat/local-voice-settings.js",
     "chat/sidebar-ui.js",
     "chat/compose.js",
     "chat/gestures.js",
