@@ -4,12 +4,11 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertDoesNotExist
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.navigation.AgentoDestination
 import com.andysagent.agentoc.feature.workbench.SettingsPage
@@ -40,9 +39,12 @@ class VoiceConsentSettingsUiTest {
                 })
             }
         }
-        rule.onNodeWithTag("voice-consent-grant").assertExists().performScrollTo().performClick()
+        rule.onNodeWithTag("settings-detail-list").performScrollToNode(hasTestTag("voice-consent-grant"))
+        rule.onNodeWithTag("voice-consent-grant").assertExists().performClick()
         rule.onNodeWithTag("voice-consent-grant").assertDoesNotExist()
-        rule.onNodeWithTag("voice-consent-revoke").assertExists().performScrollTo().performClick()
+        rule.onNodeWithTag("settings-detail-list").performScrollToNode(hasTestTag("voice-consent-revoke"))
+        rule.onNodeWithTag("voice-consent-revoke").assertExists().performClick()
+        rule.onNodeWithTag("settings-detail-list").performScrollToNode(hasTestTag("voice-consent-grant"))
         rule.onNodeWithTag("voice-consent-grant").assertExists()
     }
 }

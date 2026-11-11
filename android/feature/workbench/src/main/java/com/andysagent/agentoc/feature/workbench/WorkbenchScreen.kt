@@ -5441,7 +5441,8 @@ private fun SettingsDetailSurface(
                 state = rememberDestinationListState("settings-${page.name}-scroll"),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .testTag("settings-detail-list"),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = 20.dp,
                     end = 20.dp,

@@ -3,6 +3,7 @@ package com.andysagent.agentoc
 import android.os.Bundle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.andysagent.agentoc.core.auth.AccountSessionException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -28,6 +29,20 @@ class CloudVoiceLiveProbeTest {
             putLong("remainingMs", usage.remainingMs)
         })
         assertTrue("Cloud speech service is unavailable", usage.available)
+        if (args.getString("liveCloudVoiceDeniedProbe") == "true") {
+            assumeTrue("This check requires consent to remain ungranted", !usage.consent.granted)
+            val audio = File(app.cacheDir, "qa-cloud-voice-synthetic.wav")
+            try {
+                assertTrue("Synthetic test audio has not been staged", audio.isFile)
+                val failure = runCatching {
+                    runtime.accountSessions.transcribeAccountAudio(audio.readBytes(), UUID.randomUUID().toString())
+                }.exceptionOrNull()
+                assertTrue("The server did not reject transcription without consent",
+                    failure is AccountSessionException && failure.code == "asr_consent_required")
+                instrumentation.sendStatus(1, Bundle().apply { putBoolean("consentEnforced", true) })
+            } finally { audio.delete() }
+            return@runBlocking
+        }
         if (args.getString("liveCloudVoiceTranscribe") != "true") return@runBlocking
         assumeTrue("The account holder must grant cloud speech consent in the app first", usage.consent.granted)
         assertTrue("No cloud speech allowance remains", usage.remainingMs > 0)
