@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { createAccountAsrPostgresStore } from '../accounts/asr-postgres-store.mjs';
 import { createAccountAsrService } from '../accounts/asr-service.mjs';
+import { createOpenAiTranscriber } from '../accounts/asr-openai.mjs';
+import { inspectAccountAsrWav } from '../accounts/asr-audio.mjs';
 import { ACCOUNT_ASR_CONSENT_POLICY_VERSION, ACCOUNT_ASR_PRICE_VERSION, estimateAccountAsrCostMicroUsd } from '../accounts/asr-policy.mjs';
 
 function syntheticWav() {
@@ -147,6 +149,29 @@ try {
   await service.setConsent({ credential: accountIds[0], action: 'revoke' });
   await assert.rejects(() => service.transcribeAudio(input), { code: 'asr_consent_required' });
   await service.close();
+  if (process.env.AGENTOC_ACCOUNTS_ASR_LIVE_QA === '1') {
+    // Opt in only with synthetic speech and a disposable database. This makes
+    // one billable provider request, without persisting the text or API key.
+    const audioPath = process.env.AGENTOC_ACCOUNTS_ASR_LIVE_QA_AUDIO || '';
+    assert(audioPath && process.env.OPENAI_API_KEY, 'Live QA requires synthetic audio and provider credentials');
+    const spokenAudio = await readFile(audioPath);
+    const liveService = createAccountAsrService({
+      authenticateAccount: async () => ({ accountId: accountIds[1], deviceId: 'adev_asr_service_pg', plan: 'free' }),
+      repository: store,
+      transcribe: createOpenAiTranscriber({ apiKey: process.env.OPENAI_API_KEY }),
+      clock: () => Date.UTC(2026, 10, 11),
+      env: {},
+    });
+    await liveService.setConsent({ action: 'accept', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+    const liveResult = await liveService.transcribeAudio({ requestId: `asr-live-pg-${randomBytes(16).toString('hex')}`, audio: spokenAudio });
+    assert.match(liveResult.text.toLowerCase(), /speech recognition test/);
+    const liveUsage = await liveService.getUsage();
+    assert.equal(liveUsage.usedMs, inspectAccountAsrWav(spokenAudio).durationMs);
+    assert.equal(liveUsage.reservedMs, 0);
+    assert.equal(liveUsage.requestCount, 1);
+    await liveService.close();
+    console.log('account ASR live provider and PostgreSQL integration passed');
+  }
   console.log('account ASR PostgreSQL reconciliation and account isolation passed');
 } finally {
   await pool.end();
