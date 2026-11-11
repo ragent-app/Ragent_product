@@ -4,6 +4,7 @@ using System.Collections.Generic;using System.Diagnostics;using System.Managemen
 using System.Reflection;using System.Runtime.InteropServices;using System.Security.AccessControl;
 using System.Security.Principal;using System.Security.Cryptography;using System.Text.RegularExpressions;using System.Web.Script.Serialization;
 using Microsoft.Win32.SafeHandles;using AgentoC.ServiceHost;
+using Microsoft.Win32;
 static class ManagedOwnerMsiBridge {
  static string Product=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"AgentoC");
  static readonly string Data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AgentoC");
@@ -16,6 +17,23 @@ static class ManagedOwnerMsiBridge {
  [DllImport("msi.dll",CharSet=CharSet.Unicode,EntryPoint="MsiGetProductInfoW",ExactSpelling=true)]
  static extern uint MsiGetProductInfo(string productCode,string property,StringBuilder value,ref uint valueLength);
  static readonly string[] Names={"AgentoC-ControlPlane","AgentoC-RunnerSupervisor"};
+ static string LegacyVoicePath(){
+  string value=null;using(var settings=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\AgentoC\LocalVoiceSettings",false))
+   if(settings!=null)value=settings.GetValue("RuntimeDirectory",null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+  if(String.IsNullOrWhiteSpace(value))value=Path.Combine(Data,@"instances\owner\config\voice-runtime");
+  if(!Regex.IsMatch(value,@"\A[A-Za-z]:\\")||value.StartsWith(@"\\",StringComparison.Ordinal))return null;
+  string full;try{full=Path.GetFullPath(value).TrimEnd('\\');}catch{return null;}
+  if(!String.Equals(Path.GetFileName(full),"voice-runtime",StringComparison.OrdinalIgnoreCase))return null;
+  if(!full.StartsWith(Product.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase)&&!full.StartsWith(Data.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase))return null;
+  return full;
+ }
+ static int RetireLegacyVoice(string action){
+  Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","VOICE_RETIRE_SYSTEM_REQUIRED");
+  string runtime=LegacyVoicePath();if(runtime==null){Console.WriteLine("VOICE_RETIRE_UNMANAGED_PATH_PRESERVED");return 0;}
+  if(action=="prepare")LegacyVoiceRetirement.Prepare(Product,Data,runtime);
+  else LegacyVoiceRetirement.Finish(Product,Data,runtime,action=="rollback");
+  Console.WriteLine("VOICE_RETIRE_"+action.ToUpperInvariant());return 0;
+ }
  static readonly HashSet<string> Admins=new HashSet<string>(new[]{"S-1-5-18","S-1-5-32-544","S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"});
  [StructLayout(LayoutKind.Sequential)]struct Attributes{public int size;public IntPtr sd;[MarshalAs(UnmanagedType.Bool)]public bool inherit;}
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool CreateDirectory(string path,ref Attributes attributes);
@@ -671,6 +689,9 @@ static class ManagedOwnerMsiBridge {
    if(args.Length==1&&args[0]=="upgrade-activate"){return Run("UpgradeActivate",null);}
    if(args.Length==1&&args[0]=="upgrade-rollback"){return Run("UpgradeRollback",null);}
    if(args.Length==1&&args[0]=="upgrade-commit"){return Run("UpgradeCommit",null);}
+   if(args.Length==1&&args[0]=="voice-retire-prepare")return RetireLegacyVoice("prepare");
+   if(args.Length==1&&args[0]=="voice-retire-rollback")return RetireLegacyVoice("rollback");
+   if(args.Length==1&&args[0]=="voice-retire-commit")return RetireLegacyVoice("commit");
    if(args.Length==3&&args[0]=="prevalidate-stop")return PrevalidationStop(args[1],args[2]);
    if(args.Length==3&&args[0]=="prevalidate-rollback")return PrevalidationRollback(args[1],args[2]);
    if(args.Length==1&&args[0]=="prevalidate-commit")return PrevalidationCommit();

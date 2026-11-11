@@ -109,6 +109,9 @@
     <CustomAction Id="ManagedUpgradeActivationCheck" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activation-check &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedUpgradeActivate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activate &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedUpgradeCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedVoiceRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedVoicePrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-prepare &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedVoiceCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="ignore" />
     <CustomAction Id="ManagedMaintenanceRefused" Error="Ragent maintenance is unavailable in this installer; use a Ragent update package." />
     <CustomAction Id="ManagedMajorUpgradeRefused" Error="This MSI major upgrade is disabled until its rollback path is validated." />
 
@@ -175,6 +178,9 @@
       <?endif?>
       <Custom Action="ManagedCloseDesktop" Before="ManagedRemoveRollback" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="ManagedRemoveRollback" Before="ManagedBrokerOwnerReset" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="ManagedVoiceRollback" After="StopServices" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
+      <Custom Action="ManagedVoicePrepare" After="ManagedVoiceRollback" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
+      <Custom Action="ManagedVoiceCommit" After="ManagedUpgradeCommit" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
       <Custom Action="ManagedBrokerOwnerReset" Before="StopServices" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
 
       <?if $(var.MsiUpgradeLane) = "minor" ?>

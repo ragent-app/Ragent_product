@@ -9,6 +9,12 @@ const missingRoot=join(tmpdir(),`agentoc-owner-msi-bridge-missing-${process.pid}
 const wix=await readFile(resolve('packaging/windows/AgentoC.ManagedOwner.wxs'),'utf8');
 const bridge=await readFile(resolve('packaging/windows/managed-owner-msi-bridge.cs'),'utf8');
 const activatedWix=await readFile(resolve('packaging/windows/AgentoC.ActivatedOwner.wxs'),'utf8');
+assert.match(activatedWix, /Id="ManagedVoiceRollback"[^\n]+Execute="rollback"[^\n]+Impersonate="no"/, 'voice retirement has an elevated rollback action');
+assert.match(activatedWix, /Id="ManagedVoicePrepare"[^\n]+Execute="deferred"[^\n]+Impersonate="no"/, 'voice retirement is performed inside the installer transaction');
+assert.match(activatedWix, /Id="ManagedVoiceCommit"[^\n]+Execute="commit"[^\n]+Impersonate="no"/, 'voice retirement cleanup waits for installer commit');
+assert.match(activatedWix, /Action="ManagedVoiceRollback" After="StopServices"/);
+assert.match(activatedWix, /Action="ManagedVoicePrepare" After="ManagedVoiceRollback"/);
+assert.match(activatedWix, /Action="ManagedVoiceCommit" After="ManagedUpgradeCommit"/);
 assert.match(activatedWix, /<EmbeddedUI Id="AgentoCMsiEmbeddedUI"/, 'the released owner MSI must include the custom installer UI');
 assert.match(activatedWix, /SetSelectedInstallFolder[^\n]*AGENTOC_INSTALLFOLDER/, 'the custom installer must pass its chosen directory to MSI');
 assert.match(activatedWix, /Property Id="AGENTOC_RECOVERY_SOURCE" Secure="yes"/, 'the recovery source survives elevation');
