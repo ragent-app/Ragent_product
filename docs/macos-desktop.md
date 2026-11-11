@@ -47,6 +47,12 @@ and records a signing status and, when applicable, the notary result beside the
 DMG. It fails if signing changes the bundled Claude Code binary. These paths
 still require native build, launch, upgrade, Gatekeeper and device-connection
 acceptance with the actual certificate before they can be treated as a release.
+The current candidate signer uses `codesign --deep`; Apple recommends signing
+nested code individually for complex bundles because deep signing does not
+cover every code location and applies the same options to each item. Replace
+and validate that signing strategy on macOS, including the embedded Electron,
+Node, P2P and provider executables, before claiming notarized distribution.
+See Apple's [distribution signing guidance](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac/).
 Use the [desktop release validation checklist](desktop-release-validation.md)
 to record the candidate's evidence and remaining limitations.
 
