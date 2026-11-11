@@ -182,6 +182,21 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   const compound = splitLiteralCompound(command);
   if (!compound) return { complete: false, actions: [], reason: 'Bash command requires expansion or parsing' };
   if (compound.operators.length) {
+    const first = parseLiteralBashWords(compound.segments[0]);
+    if (first?.[0] === 'cd') {
+      if (!context.allowCwdRewrite || context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
+      if (first.length !== 2 || compound.operators[0] !== '&&') return { complete: false, actions: [], reason: 'directory change needs review' };
+      const destination = gitBashPath(first[1]);
+      if (!destination) return { complete: false, actions: [], reason: 'directory change target cannot be resolved' };
+      const directory = await analyzeFiles([{ path: destination, kind: 'read' }], context);
+      const action = directory.actions?.[0];
+      if (!directory.complete || directory.actions.length !== 1 || !action?.directory || action.protected || !action.target?.actual) return { complete: false, actions: directory.actions || [], reason: directory.reason || 'directory change target needs review' };
+      const tail = compound.segments.slice(1).map((segment, index) => index ? `${compound.operators[index]} ${segment}` : segment).join(' ');
+      const next = await analyzeWindowsBash(tail, { ...context, cwd: action.target.actual }, { analyzeFiles });
+      if (!next.complete || !next.actions.length) return { ...next, actions: [...directory.actions, ...(next.actions || [])] };
+      const absolute = action.target.lexical.replaceAll('\\', '/').replaceAll("'", "'\\''");
+      return { complete: true, actions: [...directory.actions, ...next.actions], rewrittenCommand: `builtin cd -- '${absolute}' && ${next.rewrittenCommand || tail}` };
+    }
     const actions = []; let pipeInput = false;
     for (let i = 0; i < compound.segments.length; i += 1) {
       const segment = compound.segments[i];

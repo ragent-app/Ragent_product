@@ -63,6 +63,11 @@ for (const riskMode of ['recommended', 'full-auto']) {
   execFileSync(bash, ['--noprofile', '--norc', '-c', deletion.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
   assert.equal(await access(path.join(outside, destination)).then(() => true, () => false), false);
   const outsideCwd = { ...state, cwd: outside };
+  const changeDir = await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && cat readme.txt'), state });
+  assert.ok(changeDir, `${riskMode}: ordinary directory change and read outside the workspace`);
+  assert.match(execFileSync(bash, ['--noprofile', '--norc', '-c', changeDir.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true }), /PRIVATE_OUTSIDE/);
+  assert.notEqual(spawnSync(bash, ['--noprofile', '--norc', '-c', changeDir.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true }).status, 0);
+  assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && rm -rf /'), state }), null);
   for (const tool of ['Glob', 'Grep', 'LS', 'List']) {
     const search = { providerMethod: 'can_use_tool', kind: 'permissions', params: { tool_name: tool, input: { pattern: 'readme' } } };
     const bound = await buildClaudeWindowsDefaultFileToolBridge({ approval: search, state: outsideCwd });

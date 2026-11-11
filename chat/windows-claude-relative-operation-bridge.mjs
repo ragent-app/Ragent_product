@@ -55,7 +55,7 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
       ? original.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
     : /^\s*git(?:\.exe)?\s+diff(?:\s+(?:--cached|--staged))?\s*$/i.test(original)
       ? original.replace(/^(\s*git(?:\.exe)?\s+diff)(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : original;
-  const context = { ...state.riskContext, cwd, trustedWorkspaceRoot: root, requireAbsolutePaths: false };
+  const context = { ...state.riskContext, cwd, trustedWorkspaceRoot: root, requireAbsolutePaths: false, allowCwdRewrite: true };
   let result;
   try { result = await (params.tool_name === 'Bash' ? analyzeWindowsBash(command, context) : analyzeWindowsPowerShell(command, context)); } catch { return null; }
   const decision = decideWindowsPowerShellActions(result);
@@ -65,7 +65,7 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
   const quoted = `'${expected.replaceAll("'", "'\\''")}'`;
   const psExpected = path.win32.resolve(state.cwd).replaceAll("'", "''");
   const updatedCommand = params.tool_name === 'Bash'
-    ? `if [[ /proc/self/cwd -ef ${quoted} ]]; then ${command}; else [[ 1 == 0 ]]; fi`
+    ? `if [[ /proc/self/cwd -ef ${quoted} ]]; then ${result.rewrittenCommand || command}; else [[ 1 == 0 ]]; fi`
     : `if (($ExecutionContext.SessionState.Path.CurrentLocation.Provider.Name -eq 'FileSystem') -and ([System.IO.Path]::GetFullPath([string]$ExecutionContext.SessionState.Path.CurrentLocation.ProviderPath) -ieq '${psExpected}')) {\n${command}\n} else { throw 'Working directory changed; retry with absolute paths.' }`;
   const outside = result.actions.some(action => action.target && !action.workspace);
   return { updatedInput: { ...input, command: updatedCommand }, risk: { tier: decision.tier || 'safe', platform: params.tool_name === 'Bash' ? 'bash' : 'powershell',

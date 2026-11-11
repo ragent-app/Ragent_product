@@ -145,6 +145,13 @@ for (const mode of ['recommended', 'full-auto']) {
     request: { subtype: 'can_use_tool', tool_name: 'Glob', input: { pattern: '*.txt' } } }, proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   assert.equal(sent.at(-1)?.response?.response?.updatedInput?.path, workspace);
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`cd-outside-${mode}`, 'cd .. && cat outside-visible.txt'), proc);
+  assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
+  assert.match(sent.at(-1)?.response?.response?.updatedInput?.command || '', /builtin cd --/);
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent.at(-1).response.response.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.match(output, /ordinary outside fixture/);
+  }
 }
 for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
