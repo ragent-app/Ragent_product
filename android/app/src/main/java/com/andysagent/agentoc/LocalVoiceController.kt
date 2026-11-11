@@ -225,7 +225,13 @@ internal class LocalVoiceController(
         }
     }
 
-    private fun cloudErrorMessage(error: Throwable): String = when ((error as? AccountSessionException)?.code) {
+    private fun cloudErrorMessage(error: Throwable): String = when {
+        error is VoiceRecordingTooShortException ->
+            app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_recording_invalid)
+        else -> cloudAccountErrorMessage(error)
+    }
+
+    private fun cloudAccountErrorMessage(error: Throwable): String = when ((error as? AccountSessionException)?.code) {
         "asr_monthly_quota_exceeded" -> app.getString(com.andysagent.agentoc.feature.workbench.R.string.voice_cloud_quota_exceeded)
         "owner_auth_account_credential_invalid", "owner_auth_account_credential_expired",
         "owner_auth_account_device_revoked", "account_session_reauthorization_required" ->

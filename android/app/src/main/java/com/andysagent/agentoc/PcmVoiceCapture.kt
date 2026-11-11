@@ -8,6 +8,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+internal class VoiceRecordingTooShortException : IllegalStateException("Recording was too short")
+
 internal suspend fun recordVoiceWav(
     stopRequested: AtomicBoolean,
     maxSeconds: Int = 20,
@@ -34,14 +36,16 @@ internal suspend fun recordVoiceWav(
             recorder.release()
             "Phone microphone could not be initialized"
         }
-        val pcm = ByteArrayOutputStream(sampleRate * 2 * maxSeconds)
+        val maxPcmBytes = sampleRate * 2 * maxSeconds
+        val pcm = ByteArrayOutputStream(maxPcmBytes)
         val buffer = ByteArray(bufferSize)
         try {
             recorder.startRecording()
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Phone microphone did not start" }
             val deadline = System.nanoTime() + maxSeconds * 1_000_000_000L
-            while (!stopRequested.get() && System.nanoTime() < deadline) {
-                val read = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+            while (!stopRequested.get() && System.nanoTime() < deadline && pcm.size() < maxPcmBytes) {
+                val remaining = maxPcmBytes - pcm.size()
+                val read = recorder.read(buffer, 0, minOf(buffer.size, remaining), AudioRecord.READ_BLOCKING)
                 if (read < 0) error("Phone microphone read failed ($read)")
                 if (read > 0) {
                     pcm.write(buffer, 0, read)
@@ -53,7 +57,7 @@ internal suspend fun recordVoiceWav(
             recorder.release()
         }
         val data = pcm.toByteArray()
-        check(data.size >= sampleRate / 2) { "Recording was too short" }
+        if (data.size < sampleRate) throw VoiceRecordingTooShortException()
         encodePcm16Wav(data, sampleRate)
     }
 
