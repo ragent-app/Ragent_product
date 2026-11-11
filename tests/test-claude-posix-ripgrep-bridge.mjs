@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,7 +19,7 @@ process.env.AGENTOC_WORK_ROOT_DIR = workspace;
 process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
 process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
 process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
-const { buildClaudePosixRipgrepBridge } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
+const { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 try {
@@ -28,6 +28,23 @@ try {
       riskContext: { platform: 'linux', trustedWorkspaceRoot: workspace, protectedRoots: [protectedRoot] },
       pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
     const approval = command => ({ approvalId: 'claude:fixture', providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'Bash', input: { command } } });
+    const cdApproval = command => ({ ...approval(command), params: { tool_name: 'Bash', tool_use_id: 'cd-id', input: { command } } });
+    const transition = await buildClaudePosixCwdTransition({ approval: cdApproval('cd ../outside && cat readme.txt'), state });
+    assert.ok(transition && !transition.review);
+    const tracking = { ...state, cwdTransitions: new Map([['cd-id', { from: transition.from, to: transition.to }]]) };
+    await observeClaudePosixCwdResult(tracking, { type: 'user', tool_use_result: { interrupted: false }, message: { content: [{ type: 'tool_result', tool_use_id: 'wrong-id', is_error: false }] } });
+    assert.equal(tracking.cwd, workspace);
+    await observeClaudePosixCwdResult(tracking, { type: 'user', tool_use_result: { interrupted: false }, message: { content: [{ type: 'tool_result', tool_use_id: 'cd-id', is_error: true }] } });
+    assert.equal(tracking.cwd, workspace);
+    assert.equal(tracking.cwdTransitions.size, 0);
+    tracking.cwdTransitions.set('cd-id', { from: transition.from, to: transition.to });
+    await observeClaudePosixCwdResult(tracking, { type: 'user', tool_use_result: { interrupted: true }, message: { content: [{ type: 'tool_result', tool_use_id: 'cd-id', is_error: false }] } });
+    assert.equal(tracking.cwd, workspace);
+    assert.equal(tracking.cwdTransitions.size, 0);
+    tracking.cwdTransitions.set('cd-id', { from: transition.from, to: transition.to });
+    await observeClaudePosixCwdResult(tracking, { type: 'user', tool_use_result: { interrupted: false }, message: { content: [{ type: 'tool_result', tool_use_id: 'cd-id', is_error: false }] } });
+    assert.equal(tracking.cwd, await realpath(outside));
+    assert.equal((await buildClaudePosixCwdTransition({ approval: cdApproval('cd ../outside && cat .env'), state }))?.review, true);
     for (const command of ['rg -n SEARCH_TOKEN ../outside', "rg -g '*' -n SEARCH_TOKEN ../outside", 'rg -n -- SEARCH_TOKEN ../outside']) {
       const bridge = await buildClaudePosixRipgrepBridge({ approval: approval(command), state });
       assert.ok(bridge && !bridge.review, `${riskMode}: ${command}`);

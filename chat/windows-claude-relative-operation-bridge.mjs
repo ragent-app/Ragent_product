@@ -1,8 +1,69 @@
 import path from 'node:path';
-import { realpath } from 'node:fs/promises';
-import { analyzeWindowsBash, parseLiteralBashWords } from './windows-bash-actions.mjs';
+import { realpath, stat } from 'node:fs/promises';
+import { analyzeWindowsBash, parseLiteralBashWords, splitLiteralCompound } from './windows-bash-actions.mjs';
 import { analyzeWindowsPowerShell, decideWindowsPowerShellActions, readOnlyRipgrepArgs, RIPGREP_SENSITIVE_EXCLUSIONS, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
+
+export async function buildClaudePosixCwdTransition({ approval, state } = {}) {
+  const params = approval?.params || {}; const input = params.input;
+  if (process.platform === 'win32' || approval?.providerMethod !== 'can_use_tool' || approval?.kind !== 'command'
+      || params.tool_name !== 'Bash' || typeof params.tool_use_id !== 'string' || !params.tool_use_id
+      || !input || typeof input !== 'object' || Array.isArray(input) || state?.turnActive !== true || state?.riskContextValid !== true
+      || !['recommended', 'full-auto'].includes(state?.riskMode) || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
+      || !path.posix.isAbsolute(state.cwd || '')) return null;
+  const parsed = splitLiteralCompound(input.command);
+  if (!parsed || parsed.segments.length > 2 || (parsed.operators.length && parsed.operators[0] !== '&&')) return null;
+  const first = parseLiteralBashWords(parsed.segments[0]);
+  if (!first || first.length !== 2 || first[0] !== 'cd' || first[1].startsWith('~')) return null;
+  const tail = parsed.segments[1] || ''; const words = tail ? parseLiteralBashWords(tail) : [];
+  if (tail && (!words?.length || ['cd', 'pushd', 'popd', 'source', '.', 'eval', 'exec', 'bash', 'sh'].includes(words[0]))) return null;
+  let from; let to;
+  try { from = await realpath(state.cwd); to = await realpath(path.posix.resolve(from, first[1])); if (!(await stat(to)).isDirectory()) return null; } catch { return null; }
+  const review = { review: true, reason: 'directory change target requires owner review' };
+  if (Object.keys(input).some(key => !['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
+      || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false)) return review;
+  const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc)(?:\/|$)/i;
+  if (sensitive.test(to) || words.some(word => sensitive.test(word))) return review;
+  const roots = state.riskContext?.protectedRoots;
+  if (!Array.isArray(roots)) return review;
+  for (const root of roots) {
+    const value = typeof root === 'string' ? root : root?.path;
+    if (!value || !path.posix.isAbsolute(value)) continue;
+    let actual = value; try { actual = await realpath(value); } catch {}
+    const relative = path.posix.relative(actual, to);
+    if (!relative || (relative !== '..' && !relative.startsWith('../') && !path.posix.isAbsolute(relative))) return review;
+    for (const word of words.slice(1)) {
+      if (word.startsWith('-')) continue;
+      const lexical = path.posix.resolve(to, word); let resolved = lexical;
+      try { resolved = await realpath(lexical); } catch {}
+      if ([lexical, resolved].some(target => { const rel = path.posix.relative(actual, target); return !rel || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel)); })) return review;
+    }
+  }
+  let safeTail = tail;
+  if (words[0] === 'rg') {
+    const rg = await buildClaudePosixRipgrepBridge({ approval: { ...approval, params: { ...params, input: { ...input, command: tail } } }, state: { ...state, cwd: to } });
+    if (!rg || rg.review) return review;
+    safeTail = rg.updatedInput.command;
+  }
+  const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const command = `builtin cd -- ${quote(to)}${safeTail ? ` && ${safeTail}` : ''}`;
+  return { updatedInput: { ...input, command: `if [[ . -ef ${quote(from)} ]]; then ${command}; else [[ 1 == 0 ]]; fi` },
+    toolUseId: params.tool_use_id, from, to };
+}
+
+export async function observeClaudePosixCwdResult(state, event) {
+  if (process.platform === 'win32' || event?.type !== 'user' || !(state?.cwdTransitions instanceof Map)
+      || !Array.isArray(event?.message?.content)) return;
+  for (const block of event.message.content) {
+    if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+    const transition = state.cwdTransitions.get(block.tool_use_id);
+    if (!transition) continue;
+    state.cwdTransitions.delete(block.tool_use_id);
+    if (block.is_error !== false || event?.tool_use_result?.interrupted === true) continue;
+    let current; try { current = await realpath(state.cwd); } catch { continue; }
+    if (current === transition.from) state.cwd = transition.to;
+  }
+}
 
 // On POSIX, inspect literal ripgrep targets and append case-insensitive
 // exclusions after the caller's selectors so those selectors cannot override

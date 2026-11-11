@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, readFile, writeFile, access, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, access, realpath, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +27,7 @@ const { buildPlatformSpawnSpec } = await import('../lib/executable-resolution.mj
 const { buildClaudeBidiApprovalResponseMessage, buildClaudeBidiInitializeMessage, buildClaudeBidiUserMessage, readClaudeBidiApprovalRequest, serializeClaudeBidiMessage } = await import('../chat/claude-bidi-protocol.mjs');
 const { createRun, getRun, readRunSpoolRecords } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
+const { observeClaudePosixCwdResult } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
 const protectedCase = process.env.AGENTOC_QA_CLAUDE_PROTECTED === '1';
 const installCase = process.env.AGENTOC_QA_CLAUDE_INSTALL === '1';
 const uninstallCase = process.env.AGENTOC_QA_CLAUDE_UNINSTALL === '1';
@@ -47,7 +48,8 @@ const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === '
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
 const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
-if (readCase && (!['numbered', 'relative', 'relative-cd', 'cwd-change', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+if (readCase && (!['numbered', 'relative', 'relative-cd', 'cwd-change', 'cwd-change-rg', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+const cwdChangeCase = ['cwd-change', 'cwd-change-rg'].includes(readCase);
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
 if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
 const safeDeleteHelper = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
@@ -77,7 +79,8 @@ const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
 if (readCase) await writeFile(artifact, readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
 if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); }
 if (readCase === 'npm-task') await writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { 'qa-fixture': 'echo safe-task-fixture' } }));
-if (readCase === 'cwd-change') { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
+if (cwdChangeCase) { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
+if (readCase === 'cwd-change-rg') { await writeFile(path.join(root, 'child', '.env'), 'CHILD_MARKER_PRIVATE\n'); await writeFile(path.join(root, 'child', '.ignore'), '!.env\n'); }
 if (readCase === 'git-status') execFileSync('git', ['init', '-q'], { cwd: root, windowsHide: true });
 const bashArtifact = artifact.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
@@ -112,20 +115,22 @@ const server = createServer((req, res) => {
     if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
       const last = request.messages?.at(-1);
       process.stderr.write(`[fixture] model request ${requests}: ${JSON.stringify({ url: req.url, lastRole: last?.role, lastContentTypes: Array.isArray(last?.content) ? last.content.map(item => item.type) : [], toolNames: (request.tools || []).map(item => item.name), toolChoice: request.tool_choice })}\n`);
+      if (readCase === 'cwd-change') process.stderr.write(`[fixture] tool results: ${JSON.stringify((request.messages || []).flatMap(message => Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_result').map(block => block.content) : []))}\n`);
     }
-    const tool = requests === 1 || (readCase === 'cwd-change' && requests === 2);
+    const tool = requests === 1 || (cwdChangeCase && requests === 2);
     const toolName = readCase === 'glob' ? 'Glob' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
-    if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(readCase === 'cwd-change' ? 'CHILD_MARKER' : readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : readCase === 'rg-text' ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-cd', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
-    if (!tool && readCase === 'cwd-change') {
+    if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(cwdChangeCase ? 'CHILD_MARKER' : readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : readCase === 'rg-text' ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-cd', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
+    if (!tool && cwdChangeCase) {
       const messages = JSON.stringify(request.messages || []);
       cwdMarkerCount = (messages.match(/CHILD_MARKER/g) || []).length;
       rootMarkerCount = (messages.match(/local read fixture/g) || []).length;
     }
     if (!tool && readCase === 'rg-text') privateSearchObserved ||= JSON.stringify(request.messages || []).includes('SEARCH_TOKEN=private');
+    if (!tool && readCase === 'cwd-change-rg') privateSearchObserved ||= JSON.stringify(request.messages || []).includes('CHILD_MARKER_PRIVATE');
     const message = { id: `msg_fixture_${requests}`, type: 'message', role: 'assistant', content: [], model: 'claude-sonnet-4-5', stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
     const events = [{ type: 'message_start', message }];
     if (tool) {
@@ -134,7 +139,7 @@ const server = createServer((req, res) => {
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
         : dotnetCase ? { command: dotnetCommand, description: 'Write isolated fixture' }
         : guidanceCase ? { command: guidanceCommand, description: 'Administrative fixture' }
-        : readCase === 'glob' ? { pattern: 'fixture.md' } : readCase === 'cwd-change' ? { command: requests === 1 ? 'cd child && cat fixture.md' : 'cat fixture.md', description: 'Read isolated fixture' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
+        : readCase === 'glob' ? { pattern: 'fixture.md' } : cwdChangeCase ? { command: requests === 1 ? 'cd child && cat fixture.md' : readCase === 'cwd-change-rg' ? 'rg -n CHILD_MARKER .' : 'cat fixture.md', description: 'Read isolated fixture' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
       events.push({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: `toolu_fixture_${requests}`, name: toolName, input: {} } },
         { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: input } });
     } else events.push({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
@@ -175,7 +180,7 @@ if (installCase) {
   gateState.windowsManagedActionChannel = true;
   gateState.windowsManagedActionBinding = { endpoint, token: 'fixture-token', sessionId: 'claude-local-fixture', runId: run.id, turnId: 'fixture-turn' };
 }
-const spawnSpec = buildPlatformSpawnSpec(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: readCase === 'cwd-change' ? 3 : 2, forceClaudeCommandGate: askAll }), { cwd: root, env });
+const spawnSpec = buildPlatformSpawnSpec(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: cwdChangeCase ? 3 : 2, forceClaudeCommandGate: askAll }), { cwd: root, env });
 const child = spawn(spawnSpec.file, spawnSpec.args, {
   cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
   ...(spawnSpec.windowsVerbatimArguments === undefined ? {} : { windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments }),
@@ -191,11 +196,14 @@ const completed = new Promise((resolve, reject) => {
 output.on('line', (line) => {
   void (async () => {
     let event; try { event = JSON.parse(line); } catch { return; }
+    await observeClaudePosixCwdResult(gateState, event);
     if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
       process.stderr.write(`[fixture] CLI event: ${JSON.stringify({ type: event.type, subtype: event.subtype || event.request?.subtype, toolName: event.request?.tool_name || event.name, toolUseName: event.message?.content?.find?.(item => item.type === 'tool_use')?.name })}\n`);
+      if (readCase === 'cwd-change' && event.type === 'user') process.stderr.write(`[fixture] tool result metadata: ${JSON.stringify({ keys: Object.keys(event), content: event.message?.content, toolUseResult: event.tool_use_result, meta: event.tool_result_meta })}\n`);
     }
     const approval = readClaudeBidiApprovalRequest(event);
     if (approval) {
+      if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1' && readCase === 'cwd-change') process.stderr.write(`[fixture] gate metadata: ${JSON.stringify({ requestId: approval.providerRequestId, toolUseId: approval.params?.tool_use_id })}\n`);
       approvals++;
       // Never let a regression execute the uninstall, even for the nonexistent
       // package: only a deny response can reach the real CLI in this fixture.
@@ -226,7 +234,7 @@ try {
   const code = await completed;
   if (handlerFailure) throw handlerFailure;
   assert.equal(code, 0, `Claude exited unexpectedly: ${errors}`);
-  if (readCase) assert.ok(approvals <= (readCase === 'cwd-change' ? 2 : 1), 'read fixture must not emit unnecessary approvals');
+  if (readCase) assert.ok(approvals <= (cwdChangeCase ? 2 : 1), 'read fixture must not emit unnecessary approvals');
   else assert.equal(approvals, 1, 'real Claude must emit the expected approval requests');
   assert.ok(terminal && !terminal.is_error, 'Claude must finish the turn');
   if (installCase) {
@@ -248,7 +256,10 @@ try {
     if (readCase === 'relative-write') assert.equal(approvals, 1, 'real Claude must exercise the relative-operation approval callback');
     if (readCase === 'rg-text' && askAll) assert.equal(approvals, 1, 'ask rule must route the search through Ragent');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
-    if (readCase === 'cwd-change') assert.ok(cwdMarkerCount >= 1 && rootMarkerCount >= 1, 'the changed-directory command and subsequent session-directory command must both succeed');
+    if (cwdChangeCase) assert.ok(process.platform === 'win32' ? cwdMarkerCount >= 1 && rootMarkerCount >= 1 : cwdMarkerCount >= 2,
+      'both commands must succeed with the provider working-directory behavior');
+    if (cwdChangeCase && process.platform !== 'win32') assert.equal(gateState.cwd, await realpath(path.join(root, 'child')));
+    if (readCase === 'cwd-change-rg') assert.equal(privateSearchObserved, false, 'subsequent search must not return sensitive file contents');
     if (readCase === 'git-status') assert.equal(approvals, 0, 'Claude Code should not emit an approval request for read-only git status');
   } else if (protectedCase || conservativeOutside || uninstallCase) await assert.rejects(access(artifact), { code: 'ENOENT' });
   else assert.equal((await readFile(artifact, 'utf8')).replace(/^\uFEFF/, ''), dotnetCase ? 'dotnet fixture' : 'local fixture\n');

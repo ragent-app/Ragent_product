@@ -112,7 +112,7 @@ import {
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
 import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
-import { buildClaudePosixRipgrepBridge, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
+import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
@@ -2866,6 +2866,26 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     ? { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'MCP tool requires explicit server binding or user approval' }
     : await decideRunGate(approval, state);
 
+  const cwdTransition = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+    ? await buildClaudePosixCwdTransition({ approval, state }) : null;
+  if (cwdTransition?.review) {
+    gateDecision = { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: cwdTransition.reason,
+      risk: { ...gateDecision.risk, tier: 'danger', reasons: [{ code: 'posix_cwd_sensitive_target', message: cwdTransition.reason }] } };
+  } else if (cwdTransition) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: cwdTransition.updatedInput });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound directory change response');
+    state.cwdTransitions ||= new Map();
+    state.cwdTransitions.set(cwdTransition.toolUseId, { from: cwdTransition.from, to: cwdTransition.to });
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'directory change bound to verified execution context', ...riskAuditFields(gateDecision.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, gateDecision.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
+  }
+
   const posixRipgrep = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
     ? await buildClaudePosixRipgrepBridge({ approval, state }) : null;
   if (posixRipgrep?.review) {
@@ -5121,6 +5141,7 @@ async function main() {
       }
     }
     if (claudeBidiState && parsed) {
+      await observeClaudePosixCwdResult(claudeBidiState, parsed);
       const handledControlResponse = handleClaudeBidiControlResponse(proc, claudeBidiState, parsed);
       if (handledControlResponse && claudeBidiState.terminalSeen) {
         try {

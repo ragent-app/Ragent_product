@@ -116,7 +116,7 @@ function splitLiteralOutput(command) {
 // Split only literal shell operators, without executing or expanding the text.
 // Each segment is classified separately; a pipe may contain only a verified
 // read followed by filters that consume stdin and cannot open additional files.
-function splitLiteralCompound(command) {
+export function splitLiteralCompound(command) {
   if (typeof command !== 'string' || !command.trim() || command.length > 128 * 1024 || /[\r\n\0]/.test(command)) return null;
   const segments = []; const operators = []; let quote = ''; let start = 0;
   for (let i = 0; i < command.length; i += 1) {
