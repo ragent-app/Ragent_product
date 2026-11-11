@@ -75,6 +75,13 @@ if [ "${1:-}" = upgrade ] \
   service_user="$(resolve_restart_check_user)"
   service_group="$(id -gn "$service_user")"
   repair_provider_runtime_access "$service_user" "$service_group"
+  # Restore the files affected by older root lifecycle brokers before the
+  # unprivileged upgrade safety check attempts to read them.
+  if [ -d /var/lib/agentoc-run/results ]; then
+    find /var/lib/agentoc-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
+      -path '/var/lib/agentoc-run/results/run_*/status.json' \
+      -exec chown -h "$service_user:$service_group" {} +
+  fi
   service_home="$(getent passwd "$service_user" | awk -F: '{ print $6 }' || true)"
   [ -n "$service_home" ] || service_home=/var/lib/agentoc
   run_spool_dir=""
