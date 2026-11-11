@@ -1,4 +1,4 @@
-import { cp, mkdir, realpath, rename, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readdir, realpath, rename, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electronPath from 'electron';
@@ -29,15 +29,23 @@ if (process.argv[6] === '--move-staged-electron') {
       || resolve(targetParent, 'Desktop') !== destination) {
     throw new Error('Electron move must stay inside the installer staging directory.');
   }
-  try {
-    await rename(source, destination);
-  } catch (error) {
-    // Windows can temporarily deny moving a freshly extracted Electron tree
-    // while another process has a file open. Keep the staging boundary and
-    // require a new destination before falling back to a copy.
-    if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) throw error;
-    await mkdir(destination);
+  const destinationInfo = await lstat(destination).catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (destinationInfo) {
+    // Windows treats the committed "desktop" source directory and the
+    // generated "Desktop" runtime as the same directory. Merge only into
+    // the exact source files the payload stager is allowed to create.
+    const allowed = new Set(['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html']);
+    if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) throw new Error('Invalid desktop staging directory.');
+    for (const name of await readdir(destination)) {
+      const item = await lstat(join(destination, name));
+      if (!allowed.has(name) || !item.isFile() || item.isSymbolicLink()) throw new Error('Unexpected desktop staging content.');
+    }
     await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+  } else {
+    await rename(source, destination);
   }
 } else {
   await mkdir(destination, { recursive: true });
