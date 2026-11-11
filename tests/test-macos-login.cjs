@@ -30,6 +30,8 @@ try {
   fs.mkdirSync(resources, { recursive: true });
   fs.writeFileSync(path.join(resources, "agentoc-service"), "fixture");
   assert.match(buildPlist(args), /app &amp; test/);
+  assert.match(buildPlist(args), /<key>CHAT_PORT<\/key><string>47681<\/string>/);
+  assert.doesNotMatch(buildPlist({ ...args, port: "7690" }), /<key>CHAT_PORT<\/key>/);
   assert.equal(invoke("status"), "disabled");
   occupied = true;
   assert.throws(() => invoke("enable"), /Port 47681 is in use/);
@@ -51,6 +53,16 @@ try {
   assert.equal(invoke("disable"), "disabled; configuration and logs retained");
   assert.equal(fs.existsSync(plist), false);
   assert.equal(fs.existsSync(path.join(config, "launch-agent.stdout.log")), true);
+  // A definition written by the old version remains removable, but cannot be
+  // silently accepted as correctly configured for a non-default port.
+  fs.writeFileSync(plist, buildPlist({ ...args, legacyPort: true }));
+  loaded = true;
+  assert.match(invoke("status"), /re-enable to retain the configured port/);
+  assert.throws(() => invoke("enable"), /disable it and enable it again/);
+  assert.equal(invoke("disable"), "disabled; configuration and logs retained");
+  assert.equal(invoke("enable"), "enabled");
+  assert.match(fs.readFileSync(plist, "utf8"), /<key>CHAT_PORT<\/key><string>47681<\/string>/);
+  assert.equal(invoke("disable"), "disabled; configuration and logs retained");
   fs.writeFileSync(plist, "user-owned definition");
   assert.throws(() => invoke("enable"), /not the expected Ragent definition/);
   assert.throws(() => invoke("disable"), /not the expected Ragent definition/);

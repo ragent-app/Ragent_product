@@ -12,17 +12,21 @@ function xml(value) {
   if (/[\u0000-\u001f\u007f]/u.test(text)) throw new Error("Paths may not contain control characters");
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
 }
-function buildPlist({ home, resources, config }) {
+function buildPlist({ home, resources, config, port = "7690", legacyPort = false }) {
   for (const value of [home, resources, config]) {
     if (!path.isAbsolute(value)) throw new Error("Home, application and configuration paths must be absolute");
   }
   const string = (value) => `<string>${xml(value)}</string>`;
+  if (!/^[0-9]{1,5}$/.test(port) || +port < 1 || +port > 65535) throw new Error("Invalid service port");
+  // Keep the original default-port definition byte-for-byte compatible with
+  // existing installations. Non-default ports must survive a fresh login.
+  const portEntry = !legacyPort && Number(port) !== 7690 ? `<key>CHAT_PORT</key>${string(port)}` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key>${string(LABEL)}
 <key>ProgramArguments</key><array>${string(path.join(resources, "agentoc-service"))}</array>
-<key>EnvironmentVariables</key><dict><key>HOME</key>${string(home)}<key>AGENTOC_CONFIG_DIR</key>${string(config)}</dict>
+<key>EnvironmentVariables</key><dict><key>HOME</key>${string(home)}<key>AGENTOC_CONFIG_DIR</key>${string(config)}${portEntry}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>Umask</key><integer>63</integer>
 <key>WorkingDirectory</key>${string(home)}
 <key>StandardOutPath</key>${string(path.join(config, "launch-agent.stdout.log"))}
@@ -30,13 +34,14 @@ function buildPlist({ home, resources, config }) {
 </dict></plist>
 `;
 }
-function readOwnedFile(file, expected, uid) {
+function readOwnedFile(file, expected, uid, legacyExpected = expected) {
   let st;
   try { st = fs.lstatSync(file); } catch (error) { if (error.code === "ENOENT") return false; throw error; }
-  if (!st.isFile() || st.isSymbolicLink() || st.uid !== uid || fs.readFileSync(file, "utf8") !== expected) {
+  const content = st.isFile() && !st.isSymbolicLink() && st.uid === uid ? fs.readFileSync(file, "utf8") : "";
+  if (content !== expected && content !== legacyExpected) {
     throw new Error(`Existing login item is not the expected Ragent definition: ${file}`);
   }
-  return true;
+  return content === expected ? "current" : "legacy";
 }
 function ensurePrivateLog(file, uid) {
   let fd;
@@ -61,12 +66,13 @@ function manage(action, { home, resources, config, port, uid, run = runCommand }
   if (!["enable", "disable", "status"].includes(action)) throw new Error("Usage: agentoc-login enable|disable|status");
   if (!Number.isInteger(uid) || uid < 1) throw new Error("Run this as the desktop user, not root");
   if (!/^[0-9]{1,5}$/.test(port) || +port < 1 || +port > 65535) throw new Error("Invalid service port");
-  const expected = buildPlist({ home, resources, config });
+  const expected = buildPlist({ home, resources, config, port });
+  const legacyExpected = buildPlist({ home, resources, config, port, legacyPort: true });
   const dir = path.join(home, "Library", "LaunchAgents");
   const file = path.join(dir, `${LABEL}.plist`);
   const domain = `gui/${uid}`;
   const target = `${domain}/${LABEL}`;
-  let owned = readOwnedFile(file, expected, uid);
+  let owned = readOwnedFile(file, expected, uid, legacyExpected);
   const probe = run("/bin/launchctl", ["print", target]);
   const loaded = probe.ok;
   if (!loaded) {
@@ -77,15 +83,21 @@ function manage(action, { home, resources, config, port, uid, run = runCommand }
   if (loaded && (!owned || reportedPlist(probe.stdout) !== file)) {
     throw new Error("Another login item uses the Ragent service label; it was left unchanged");
   }
-  if (action === "status") return loaded ? "enabled" : owned ? "installed but not loaded" : "disabled";
+  if (action === "status") {
+    if (owned === "legacy") return loaded
+      ? "enabled; disable and re-enable to retain the configured port"
+      : "installed but not loaded; disable and re-enable to retain the configured port";
+    return loaded ? "enabled" : owned ? "installed but not loaded" : "disabled";
+  }
   if (action === "disable") {
     if (loaded) {
       const result = run("/bin/launchctl", ["bootout", domain, file]);
       if (!result.ok) throw new Error(`Could not stop login service: ${result.stderr.trim()}`);
     }
-    if (owned && readOwnedFile(file, expected, uid)) fs.unlinkSync(file);
+    if (owned && readOwnedFile(file, expected, uid, legacyExpected)) fs.unlinkSync(file);
     return "disabled; configuration and logs retained";
   }
+  if (owned === "legacy") throw new Error("Existing login item does not retain the configured port; disable it and enable it again");
   if (loaded) return "already enabled";
   if (!fs.existsSync(path.join(resources, "agentoc-service"))) throw new Error("Application service is missing");
   const listener = run("/usr/sbin/lsof", ["-nP", "-ti", `TCP:${port}`, "-sTCP:LISTEN"]);
@@ -103,7 +115,7 @@ function manage(action, { home, resources, config, port, uid, run = runCommand }
       fs.writeFileSync(tmp, expected, { flag: "wx", mode: 0o600 });
       fs.linkSync(tmp, file);
       created = true;
-      owned = true;
+      owned = "current";
     } finally { try { fs.unlinkSync(tmp); } catch (error) { if (error.code !== "ENOENT") throw error; } }
   }
   const result = run("/bin/launchctl", ["bootstrap", domain, file]);
