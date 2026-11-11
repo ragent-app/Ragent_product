@@ -228,9 +228,9 @@ def _run_with_input_file(args, input_file, *, timeout=240, check=True):
 
 
 def _systemd_status(unit):
-    result = _run(["systemctl", "show", unit, "--no-page", "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp"], check=False)
+    result = _run(["systemctl", "show", unit, "--no-page", "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp,FragmentPath"], check=False)
     if result.returncode != 0:
-        return {"active": False, "state": "unknown", "substate": "unknown", "pid": None, "since": None}
+        return {"active": False, "state": "unknown", "substate": "unknown", "pid": None, "since": None, "fragmentPath": None}
     values = {}
     for line in result.stdout.decode("utf-8", "replace").splitlines():
         if "=" in line:
@@ -242,6 +242,7 @@ def _systemd_status(unit):
         "substate": values.get("SubState", "unknown"),
         "pid": int(values["MainPID"]) if values.get("MainPID", "0").isdigit() and values.get("MainPID") != "0" else None,
         "since": values.get("ActiveEnterTimestamp") or None,
+        "fragmentPath": values.get("FragmentPath") or None,
     }
 
 
@@ -404,10 +405,15 @@ def _overview():
     return {
         "updatedAt": utc_now(),
         "services": services,
+        "platform": {
+            "caddy": _systemd_status("caddy.service"),
+            "legacyConnectivityGateway": _systemd_status("agentoc-connectivity-gateway.service"),
+        },
         "database": database,
         "databaseAvailable": database_available,
         "migrations": {"appliedCount": len(migration["applied"]), "pendingCount": len(migration["pending"]), "latest": migration["available"][-1]["version"] if migration["available"] else None},
         "asrEnabled": asr["asrEnabled"],
+        "asrKeyConfigured": any(item["id"] == "openai-api-key" and item["configured"] for item in asr["items"]),
         "fcmConfigured": next(item["configured"] for item in asr["items"] if item["id"] == "fcm-service-account"),
     }
 

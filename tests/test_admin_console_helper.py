@@ -1,6 +1,8 @@
 import importlib.util
 import pathlib
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 HELPER_PATH = pathlib.Path(__file__).resolve().parents[1] / "infrastructure" / "admin-console" / "helper.py"
@@ -38,6 +40,20 @@ class AdminHelperValidationTests(unittest.TestCase):
             "private_key": "-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----",
         }))
         self.assertFalse(HELPER.validate_fcm_document({"type": "authorized_user"}))
+
+    def test_systemd_status_reports_missing_unit_file_for_orphan_detection(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                b"ActiveState=active\nSubState=running\nMainPID=1234\n"
+                b"ActiveEnterTimestamp=Tue 2026-11-10 12:00:00 UTC\nFragmentPath=\n"
+            ),
+        )
+        with patch.object(HELPER, "_run", return_value=result):
+            status = HELPER._systemd_status("agentoc-connectivity-gateway.service")
+        self.assertTrue(status["active"])
+        self.assertEqual(status["pid"], 1234)
+        self.assertIsNone(status["fragmentPath"])
 
     def test_backup_ids_are_confined_to_expected_names(self):
         self.assertTrue(HELPER.validate_backup_id("accounts-20261111T120000Z-a1b2c3d4.dump"))

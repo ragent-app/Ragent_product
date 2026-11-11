@@ -3,7 +3,7 @@
 
   const viewTitles = {
     overview: ['总览', '查看中心服务、数据库与用量的健康状态。'],
-    services: ['中心服务', '监控 Accounts、TURN、推送与连接服务，并执行受限重启。'],
+    services: ['中心服务', '查看 Ragent 服务、数据库、入口和 Accounts 内的集成能力。'],
     database: ['数据库', '查看结构和迁移状态，创建备份并在需要时恢复。'],
     secrets: ['密钥与凭据', '安全替换正在使用的服务凭据，并按需启用云端语音识别。'],
     audit: ['操作记录', '查看密钥轮换、数据库维护和服务操作的审计记录。'],
@@ -188,18 +188,44 @@
 
   function renderServices() {
     const services = state.overview?.services || {};
+    const platform = state.overview?.platform || {};
+    const database = state.overview?.database || {};
+    const fcmRows = database.fcm || [];
+    const asrRows = database.asr || [];
+    const fcmTotal = sumRows(fcmRows, 'events');
+    const asrTotal = sumRows(asrRows, 'requests');
     const detail = {
       'agentoc-accounts': '账号和设备配对 API、用量汇总、服务端语音识别与推送队列。',
       'turn-credential-broker': '根据 Accounts 签发的短期能力凭据为设备提供 TURN 配置。',
       'agentoc-signaling': '转发手机和电脑之间建立 P2P 连接所需的信令。',
       'agentoc-tunnel-server': '提供 Ragent 远程连接通道，保持现有设备接入。',
     };
-    return `<div class="service-grid">${Object.entries(serviceLabels).map(([id, [label]]) => {
+    const managedServices = Object.entries(serviceLabels).map(([id, [label]]) => {
       const service = services[id] || {};
       const healthy = service.health === undefined ? true : service.health;
       return `<article class="service-card"><div class="service-card-head"><h3>${esc(label)}</h3>${statusPill(service.active, healthy)}</div><p>${esc(detail[id])}</p><div class="service-card-foot"><small>${service.active ? `运行中${service.pid ? ` · PID ${service.pid}` : ''}` : `状态：${esc(service.state || 'unknown')}`}</small><button class="service-action" data-action="restart" data-service="${esc(id)}">重启</button></div></article>`;
-    }).join('')}</div>
-    <div class="security-callout mt-3"><span>i</span><div><strong>受限服务操作</strong>面板只开放固定服务清单中的重启操作，不提供 shell、systemd 任意命令或数据库任意 SQL。</div></div>`;
+    }).join('');
+    const caddy = platform.caddy || {};
+    const caddyStatus = caddy.active ? '运行中' : '未运行';
+    const databaseStatus = state.overview?.databaseAvailable ? '数据库可用' : '数据库不可用';
+    const fcmStatus = state.overview?.fcmConfigured ? '凭据格式有效' : '凭据未配置或无效';
+    const asrStatus = state.overview?.asrEnabled ? '已启用' : state.overview?.asrKeyConfigured ? '已配置，当前关闭' : '未配置 API key';
+    const readonlyCard = (title, badge, tone, description, foot) => `<article class="service-card"><div class="service-card-head"><h3>${esc(title)}</h3><span class="state-pill" data-state="${tone}">${esc(badge)}</span></div><p>${esc(description)}</p><div class="service-card-foot"><small>${esc(foot)}</small></div></article>`;
+    const legacyGateway = platform.legacyConnectivityGateway || {};
+    const orphanWarning = legacyGateway.active && !legacyGateway.fragmentPath
+      ? `<div class="security-callout mt-3"><span>!</span><div><strong>发现未纳管的遗留进程</strong>旧版 connectivity-gateway 仍在运行${legacyGateway.pid ? `（PID ${legacyGateway.pid}）` : ''}，但对应 systemd 服务文件已不存在。它不会提供重启按钮；请先确认是否仍有设备依赖，再决定清理方式。</div></div>`
+      : '';
+    return `<div class="section-stack">
+      <section><div class="panel-title-row"><div><h2>Ragent 应用服务</h2><p>仅对固定清单中的服务开放重启操作。</p></div></div><div class="service-grid">${managedServices}</div></section>
+      <section><div class="panel-title-row"><div><h2>集成能力与平台依赖</h2><p>FCM 和云端语音由 Accounts 承载；这里显示配置与用量，不把它们伪装成独立守护进程。</p></div></div><div class="service-grid">
+        ${readonlyCard('FCM 推送', fcmStatus, state.overview?.fcmConfigured ? 'good' : 'warn', '由 Accounts 调用 Google FCM，不存在独立的本地 FCM service。服务账号文件通过格式校验；此状态不代表 Google 端到端投递测试。', `数据库队列记录 ${Number(fcmTotal).toLocaleString('zh-CN')} 条`)}
+        ${readonlyCard('云端语音识别', asrStatus, state.overview?.asrEnabled ? 'good' : 'warn', 'Accounts 将获授权的音频转发到 OpenAI Transcription API；状态依据 API key 配置和开关，不会为检查而发送音频。', `${Number(asrTotal).toLocaleString('zh-CN')} 条转写请求记录`)}
+        ${readonlyCard('PostgreSQL 数据库', databaseStatus, state.overview?.databaseAvailable ? 'good' : 'bad', '账号、TURN、FCM 和语音识别用量数据存放在此数据库中；面板只显示汇总和表结构。', state.overview?.databaseAvailable ? `PostgreSQL ${database.databaseVersion || ''} · ${bytes(database.databaseSizeBytes)}` : '当前无法完成数据库查询')}
+        ${readonlyCard('Caddy HTTPS 入口', caddyStatus, caddy.active ? 'good' : 'bad', '负责 Oracle 上 Ragent 域名的 HTTPS 入口和反向代理；面板仅监控，不提供重启按钮。', caddy.active ? `运行中${caddy.pid ? ` · PID ${caddy.pid}` : ''}` : `状态：${caddy.state || 'unknown'}`)}
+      </div></section>
+      ${orphanWarning}
+      <div class="security-callout"><span>i</span><div><strong>受限服务操作</strong>面板只开放固定 Ragent 服务清单中的重启操作，不提供 shell、任意 systemd 命令或数据库任意 SQL。</div></div>
+    </div>`;
   }
 
   function renderMigrations(migrations) {
