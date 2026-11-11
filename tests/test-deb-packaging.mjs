@@ -114,6 +114,7 @@ assert.match(postinst, /systemd-run --on-active=15/,
 
 assert.doesNotMatch(prerm, /agentoc-maintenance|maintenance-control/);
 assert.match(prerm, /stop_unit agentoc-privileged-executor\.service/);
+assert.match(prerm, /stop_unit agentoc-storage-gc\.timer[\s\S]*stop_unit agentoc-storage-gc\.service/);
 // Exercise the real removal guard with simulated systemd outcomes, without
 // stopping the system services on the machine running the test.
 if (process.platform !== 'win32') {

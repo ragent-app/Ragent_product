@@ -59,7 +59,8 @@ acceptance.
   state and logs. State for a separately deployed Accounts service under
   `/var/lib/agentoc/accounts` is retained.
 
-Removal stops the service, activation sockets, brokers and detached Runs. If
+Removal stops scheduled and already-running storage cleanup, the service,
+activation sockets, brokers and detached Runs. If
 systemd cannot confirm that a component has stopped, package removal fails;
 inspect the relevant unit with `systemctl status` and its journal, resolve the
 failure, then retry the removal.

@@ -17,6 +17,9 @@ if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
   if [ -d /run/systemd/system ]; then
     stop_unit agentoc-storage-gc.timer
     systemctl disable agentoc-storage-gc.timer >/dev/null 2>&1 || true
+    # Stopping a timer does not stop its already-running oneshot service.
+    # Wait for that service before removing its executable and package files.
+    stop_unit agentoc-storage-gc.service
     stop_unit agentoc.service
     # Stop socket activation before stopping the brokers, otherwise a request
     # can bring either service back while the package is being removed.
