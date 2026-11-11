@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
-import { createReadStream, readFile, realpathSync } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';

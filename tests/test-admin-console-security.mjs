@@ -65,6 +65,14 @@ async function main() {
     const denied = await fetch(`${base}/api/secrets`);
     assert.equal(denied.status, 401, 'requests without an Access JWT are denied');
 
+    const page = await fetch(`${base}/`, { headers: { 'cf-access-jwt-assertion': token() } });
+    assert.equal(page.status, 200, 'authorized owners can load the admin console page');
+    assert.match(await page.text(), /Ragent/);
+
+    const asset = await fetch(`${base}/assets/admin.css`, { headers: { 'cf-access-jwt-assertion': token() } });
+    assert.equal(asset.status, 200, 'authorized owners can load the console assets');
+    assert.match(asset.headers.get('content-type'), /text\/css/);
+
     const authorized = await fetch(`${base}/api/secrets`, { headers: { 'cf-access-jwt-assertion': token() } });
     assert.equal(authorized.status, 200);
     const authorizedBody = await authorized.text();
