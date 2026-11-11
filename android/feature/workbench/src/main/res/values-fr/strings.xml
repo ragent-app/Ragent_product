@@ -2,12 +2,7 @@
 <resources>
     <string name="settings_voice">Reconnaissance vocale</string>
     <string name="settings_voice_summary">Reconnaissance vocale cloud et utilisation</string>
-    <string name="voice_menu_device">Traitement vocal · %1$s</string>
-    <string name="voice_picker_title">Appareil de traitement vocal</string>
-    <string name="voice_picker_done">Terminé</string>
-    <string name="voice_route_automatic">Automatique</string>
-    <string name="voice_route_automatic_hint">Utiliser d’abord l’ordinateur de la session, puis ce téléphone</string>
-    <string name="voice_route_phone">Ce téléphone</string>
+
     <string name="voice_route_cloud">Reconnaissance dans le cloud</string>
     <string name="voice_cloud_ready">Disponible · %1$d min restantes ce mois-ci</string>
     <string name="voice_cloud_unavailable">La reconnaissance dans le cloud est indisponible</string>
@@ -22,27 +17,9 @@
     <string name="voice_cloud_consent_accept">Autoriser et continuer</string>
     <string name="voice_cloud_consent_decline">Pas maintenant</string>
     <string name="voice_cloud_consent_revoke">Retirer le consentement vocal cloud</string>
-    <string name="voice_computers_section">Ordinateurs associés</string>
-    <string name="voice_phone_unsupported">La reconnaissance vocale sur l’appareil est indisponible sur ce téléphone</string>
-    <string name="voice_phone_ready">Reconnaissance sur l’appareil disponible</string>
-    <string name="voice_phone_native_language_unsupported">Le moteur vocal du téléphone ne prend pas en charge la langue du système. Choisissez la reconnaissance sur ordinateur ou installez le pack de langue dans les paramètres Android.</string>
-    <string name="voice_error_language_unsupported">Le moteur vocal du téléphone ne prend pas en charge la langue du système. Choisissez la reconnaissance sur ordinateur ou installez le pack de langue dans les paramètres Android.</string>
-    <string name="voice_error_language_pack_missing">Le pack de langue hors ligne requis n\'est pas installé. Ajoutez-le dans les paramètres Android ou choisissez la reconnaissance sur ordinateur.</string>
-    <string name="voice_error_no_speech">Aucune parole reconnue. Réessayez.</string>
+
     <string name="voice_error_microphone_permission">Autorisez l’accès au microphone pour utiliser la reconnaissance vocale.</string>
-    <string name="voice_error_support_check_failed">Le service vocal Android n\'a pas pu confirmer la prise en charge de la langue du système. Choisissez un ordinateur connecté ou réessayez.</string>
-    <string name="voice_error_recognition_failed">Échec de la reconnaissance vocale du téléphone (%1$d).</string>
-    <string name="voice_computer_offline">Ordinateur déconnecté</string>
-    <string name="voice_computer_update_required">Mettez à jour Ragent sur cet ordinateur pour activer la reconnaissance vocale.</string>
-    <string name="voice_computer_not_installed">Whisper n’est pas installé</string>
-    <string name="voice_computer_install_unavailable">L’installation de Whisper est disponible avec Ragent pour Windows</string>
-    <string name="voice_computer_disabled">Whisper est arrêté</string>
-    <string name="voice_computer_starting">Démarrage de Whisper</string>
-    <string name="voice_computer_ready">Prêt pour la reconnaissance vocale</string>
-    <string name="voice_no_computers">Associez un ordinateur pour gérer son service Whisper ici.</string>
-    <string name="voice_install">Installer</string>
-    <string name="voice_installing">Installation…</string>
-    <string name="voice_privacy_note">Le mode automatique traite l’audio sur l’ordinateur de la session ou ce téléphone. La reconnaissance dans le cloud envoie l’audio à Ragent Accounts et OpenAI. OpenAI indique que les données de l’API ne sont pas utilisées pour entraîner ses modèles sauf si le client choisit de les partager. Ragent ne conserve pas durablement l’audio ni le texte. Le résultat est ajouté uniquement au brouillon.</string>
+
     <string name="run_dock_stop">Arrêter</string>
     <string name="run_dock_stop_description">Arrêter la tâche</string>
     <string name="decision_select_one">Choisissez une option</string>

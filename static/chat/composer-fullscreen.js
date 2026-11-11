@@ -27,7 +27,6 @@
   const actionsLeft = document.getElementById("composerFullscreenActionsLeft");
   const imgBtn = document.getElementById("imgBtn");
   const runtimeBtn = document.getElementById("composerRuntimeBtn");
-  const computerVoiceStatus = document.getElementById("composerComputerVoiceStatus");
   if (
     !expandBtn || !fullscreenEl || !fullscreenInput
     || !fullscreenSendBtn || !fullscreenCloseBtn || !msgInput
@@ -51,7 +50,7 @@
   function adoptControls() {
     if (movedControls || !actionsLeft) return;
     const adopted = [];
-    [imgBtn, runtimeBtn, computerVoiceStatus].forEach((btn) => {
+    [imgBtn, runtimeBtn].forEach((btn) => {
       if (!btn || !btn.parentNode || btn.parentNode === actionsLeft) return;
       adopted.push({ el: btn, parent: btn.parentNode, next: btn.nextElementSibling });
       actionsLeft.appendChild(btn);

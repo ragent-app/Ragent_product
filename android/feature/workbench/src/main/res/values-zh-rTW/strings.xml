@@ -2,12 +2,7 @@
 <resources>
     <string name="settings_voice">語音辨識</string>
     <string name="settings_voice_summary">雲端語音辨識與用量</string>
-    <string name="voice_menu_device">語音處理裝置 · %1$s</string>
-    <string name="voice_picker_title">語音處理裝置</string>
-    <string name="voice_picker_done">完成</string>
-    <string name="voice_route_automatic">自動選擇</string>
-    <string name="voice_route_automatic_hint">優先使用工作階段所在電腦，其次使用本機</string>
-    <string name="voice_route_phone">本機</string>
+
     <string name="voice_route_cloud">雲端辨識</string>
     <string name="voice_cloud_ready">可用 · 本月剩餘 %1$d 分鐘</string>
     <string name="voice_cloud_unavailable">雲端辨識目前無法使用</string>
@@ -22,27 +17,9 @@
     <string name="voice_cloud_consent_accept">允許並繼續</string>
     <string name="voice_cloud_consent_decline">暫不允許</string>
     <string name="voice_cloud_consent_revoke">撤回雲端語音同意</string>
-    <string name="voice_computers_section">已配對電腦</string>
-    <string name="voice_phone_unsupported">此手機無法使用裝置端語音辨識</string>
-    <string name="voice_phone_ready">裝置端辨識可用</string>
-    <string name="voice_phone_native_language_unsupported">手機系統辨識器不支援目前的系統語言。請選擇電腦辨識，或在 Android 設定中安裝對應語言套件。</string>
-    <string name="voice_error_language_unsupported">手機系統辨識器不支援目前的系統語言。請選擇電腦辨識，或在 Android 設定中安裝對應語言套件。</string>
-    <string name="voice_error_language_pack_missing">手機尚未安裝所需的離線語言套件。請在 Android 設定中安裝，或選擇電腦辨識。</string>
-    <string name="voice_error_no_speech">沒有辨識到語音，請再試一次。</string>
+
     <string name="voice_error_microphone_permission">請允許使用麥克風以進行語音辨識。</string>
-    <string name="voice_error_support_check_failed">Android 語音服務無法確認是否支援目前的系統語言。請選擇已連線的電腦，或重試。</string>
-    <string name="voice_error_recognition_failed">手機語音辨識失敗（%1$d）。</string>
-    <string name="voice_computer_offline">電腦未連線</string>
-    <string name="voice_computer_update_required">請更新這台電腦上的 Ragent，以啟用語音辨識。</string>
-    <string name="voice_computer_not_installed">尚未安裝 Whisper</string>
-    <string name="voice_computer_install_unavailable">Whisper 安裝僅支援 Windows 版 Ragent</string>
-    <string name="voice_computer_disabled">Whisper 已停止</string>
-    <string name="voice_computer_starting">Whisper 正在啟動</string>
-    <string name="voice_computer_ready">語音辨識已就緒</string>
-    <string name="voice_no_computers">配對電腦後，可在此管理其 Whisper 服務。</string>
-    <string name="voice_install">安裝</string>
-    <string name="voice_installing">正在安裝…</string>
-    <string name="voice_privacy_note">自動模式會在工作階段電腦或本機處理音訊。雲端辨識會將音訊傳送至 Ragent Accounts 和 OpenAI 進行轉寫。OpenAI 說明，除非 API 客戶選擇加入，否則 API 資料不會用於訓練模型。Ragent 不會持久保存音訊或轉寫文字；辨識結果只會寫入草稿。</string>
+
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">停止任務</string>
     <string name="decision_select_one">請選擇一項</string>

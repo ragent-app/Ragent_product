@@ -2,12 +2,7 @@
 <resources>
     <string name="settings_voice">Reconocimiento de voz</string>
     <string name="settings_voice_summary">Reconocimiento de voz en la nube y uso</string>
-    <string name="voice_menu_device">Procesamiento de voz · %1$s</string>
-    <string name="voice_picker_title">Dispositivo de procesamiento de voz</string>
-    <string name="voice_picker_done">Listo</string>
-    <string name="voice_route_automatic">Automático</string>
-    <string name="voice_route_automatic_hint">Usa primero el ordenador de la sesión y después este teléfono</string>
-    <string name="voice_route_phone">Este teléfono</string>
+
     <string name="voice_route_cloud">Reconocimiento en la nube</string>
     <string name="voice_cloud_ready">Disponible · quedan %1$d min este mes</string>
     <string name="voice_cloud_unavailable">El reconocimiento en la nube no está disponible</string>
@@ -22,27 +17,9 @@
     <string name="voice_cloud_consent_accept">Permitir y continuar</string>
     <string name="voice_cloud_consent_decline">Ahora no</string>
     <string name="voice_cloud_consent_revoke">Revocar el consentimiento de voz en la nube</string>
-    <string name="voice_computers_section">Ordenadores vinculados</string>
-    <string name="voice_phone_unsupported">El reconocimiento en el dispositivo no está disponible en este teléfono</string>
-    <string name="voice_phone_ready">Reconocimiento en el dispositivo disponible</string>
-    <string name="voice_phone_native_language_unsupported">El reconocedor del teléfono no admite el idioma del sistema. Elige el reconocimiento en el ordenador o instala el paquete de idioma en los ajustes de Android.</string>
-    <string name="voice_error_language_unsupported">El reconocedor del teléfono no admite el idioma del sistema. Elige el reconocimiento en el ordenador o instala el paquete de idioma en los ajustes de Android.</string>
-    <string name="voice_error_language_pack_missing">No está instalado el paquete de idioma sin conexión necesario. Instálalo en los ajustes de Android o elige el reconocimiento en el ordenador.</string>
-    <string name="voice_error_no_speech">No se reconoció ninguna voz. Inténtalo de nuevo.</string>
+
     <string name="voice_error_microphone_permission">Permite el acceso al micrófono para usar el reconocimiento de voz.</string>
-    <string name="voice_error_support_check_failed">El servicio de voz de Android no pudo confirmar la compatibilidad con el idioma del sistema. Elige un ordenador conectado o inténtalo de nuevo.</string>
-    <string name="voice_error_recognition_failed">Falló el reconocimiento de voz del teléfono (%1$d).</string>
-    <string name="voice_computer_offline">Ordenador desconectado</string>
-    <string name="voice_computer_update_required">Actualiza Ragent en este ordenador para habilitar el reconocimiento de voz.</string>
-    <string name="voice_computer_not_installed">Whisper no está instalado</string>
-    <string name="voice_computer_install_unavailable">La instalación de Whisper está disponible en Ragent para Windows</string>
-    <string name="voice_computer_disabled">Whisper está detenido</string>
-    <string name="voice_computer_starting">Iniciando Whisper</string>
-    <string name="voice_computer_ready">Listo para reconocer voz</string>
-    <string name="voice_no_computers">Vincula un ordenador para administrar su servicio Whisper aquí.</string>
-    <string name="voice_install">Instalar</string>
-    <string name="voice_installing">Instalando…</string>
-    <string name="voice_privacy_note">El modo automático procesa el audio en el ordenador de la sesión o en este teléfono. El reconocimiento en la nube envía el audio a Ragent Accounts y OpenAI para transcribirlo. OpenAI indica que los datos de la API no se utilizan para entrenar sus modelos salvo que el cliente acepte compartirlos. Ragent no conserva el audio ni el texto de forma persistente. El resultado solo se añade al borrador.</string>
+
     <string name="run_dock_stop">Detener</string>
     <string name="run_dock_stop_description">Detener la tarea</string>
     <string name="decision_select_one">Elige una opción</string>

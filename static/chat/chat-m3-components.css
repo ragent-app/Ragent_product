@@ -1023,41 +1023,6 @@
   align-items: center;
 }
 
-#settingsPanel .settings-local-voice-toggle {
-  appearance: none;
-  position: relative;
-  width: 42px;
-  height: 24px;
-  margin: 0;
-  border: 1px solid var(--outline, #aeb4c0);
-  border-radius: 999px;
-  background: var(--surface-container-high, #e4e7ed);
-  cursor: pointer;
-  transition: background-color .16s ease, border-color .16s ease;
-}
-
-#settingsPanel .settings-local-voice-toggle::before {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--surface, #fff);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 24%);
-  transition: transform .16s ease;
-}
-
-#settingsPanel .settings-local-voice-toggle:checked {
-  border-color: var(--primary, #3568d4);
-  background: var(--primary, #3568d4);
-}
-
-#settingsPanel .settings-local-voice-toggle:checked::before { transform: translateX(18px); }
-#settingsPanel .settings-local-voice-toggle:focus-visible { outline: 2px solid var(--primary, #3568d4); outline-offset: 3px; }
-#settingsPanel .settings-local-voice-toggle:disabled { cursor: not-allowed; opacity: .55; }
-
 #settingsPanel .settings-row-button,
 #settingsPanel .custom-select-wrap.cs-settings-row .cs-trigger {
   min-height: 44px;

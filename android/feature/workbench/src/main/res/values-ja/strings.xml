@@ -2,12 +2,7 @@
 <resources>
     <string name="settings_voice">音声認識</string>
     <string name="settings_voice_summary">クラウド音声認識と使用量</string>
-    <string name="voice_menu_device">音声処理 · %1$s</string>
-    <string name="voice_picker_title">音声を処理する端末</string>
-    <string name="voice_picker_done">完了</string>
-    <string name="voice_route_automatic">自動</string>
-    <string name="voice_route_automatic_hint">セッションの PC を優先し、次にこの端末を使用</string>
-    <string name="voice_route_phone">この端末</string>
+
     <string name="voice_route_cloud">クラウド音声認識</string>
     <string name="voice_cloud_ready">利用可能 · 今月あと %1$d 分</string>
     <string name="voice_cloud_unavailable">クラウド音声認識は利用できません</string>
@@ -22,27 +17,9 @@
     <string name="voice_cloud_consent_accept">許可して続行</string>
     <string name="voice_cloud_consent_decline">今は許可しない</string>
     <string name="voice_cloud_consent_revoke">クラウド音声認識の同意を撤回</string>
-    <string name="voice_computers_section">ペア設定済み PC</string>
-    <string name="voice_phone_unsupported">この端末ではオンデバイス音声認識を利用できません</string>
-    <string name="voice_phone_ready">オンデバイス認識を利用できます</string>
-    <string name="voice_phone_native_language_unsupported">端末の認識サービスはシステム言語に対応していません。パソコンでの認識を選ぶか、Android の設定で言語パックをインストールしてください。</string>
-    <string name="voice_error_language_unsupported">端末の認識サービスはシステム言語に対応していません。パソコンでの認識を選ぶか、Android の設定で言語パックをインストールしてください。</string>
-    <string name="voice_error_language_pack_missing">必要なオフライン音声パックがありません。Android の設定で追加するか、パソコンでの認識を選んでください。</string>
-    <string name="voice_error_no_speech">音声を認識できませんでした。もう一度お試しください。</string>
+
     <string name="voice_error_microphone_permission">音声認識にはマイクの使用を許可してください。</string>
-    <string name="voice_error_support_check_failed">Android の音声サービスでシステム言語の対応を確認できませんでした。接続済みのパソコンを選ぶか、もう一度お試しください。</string>
-    <string name="voice_error_recognition_failed">端末の音声認識に失敗しました（%1$d）。</string>
-    <string name="voice_computer_offline">PC に接続されていません</string>
-    <string name="voice_computer_update_required">音声認識を使うには、この PC の Ragent を更新してください。</string>
-    <string name="voice_computer_not_installed">Whisper が未インストールです</string>
-    <string name="voice_computer_install_unavailable">Whisper のインストールは Windows 版 Ragent で利用できます</string>
-    <string name="voice_computer_disabled">Whisper は停止中です</string>
-    <string name="voice_computer_starting">Whisper を起動しています</string>
-    <string name="voice_computer_ready">音声認識を利用できます</string>
-    <string name="voice_no_computers">PC をペア設定すると、ここで Whisper を管理できます。</string>
-    <string name="voice_install">インストール</string>
-    <string name="voice_installing">インストール中…</string>
-    <string name="voice_privacy_note">自動モードではセッションの PC またはこの端末で音声を処理します。クラウド音声認識は音声を Ragent Accounts と OpenAI に送信します。OpenAI は、API 利用者がオプトインしない限り、API データをモデルのトレーニングに使用しないと説明しています。Ragent は音声や文字起こしを永続保存せず、結果は下書きにのみ追加されます。</string>
+
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">タスクを停止</string>
     <string name="decision_select_one">1つ選択</string>

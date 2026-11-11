@@ -2,12 +2,7 @@
 <resources>
     <string name="settings_voice">Voice recognition</string>
     <string name="settings_voice_summary">Cloud speech recognition and usage</string>
-    <string name="voice_menu_device">Voice processing · %1$s</string>
-    <string name="voice_picker_title">Voice processing device</string>
-    <string name="voice_picker_done">Done</string>
-    <string name="voice_route_automatic">Automatic</string>
-    <string name="voice_route_automatic_hint">Use this session’s enabled computer, then this phone</string>
-    <string name="voice_route_phone">This phone</string>
+
     <string name="voice_route_cloud">Cloud recognition</string>
     <string name="voice_cloud_ready">Available · %1$d min left this month</string>
     <string name="voice_cloud_unavailable">Cloud recognition is unavailable</string>
@@ -22,27 +17,9 @@
     <string name="voice_cloud_consent_accept">Allow and continue</string>
     <string name="voice_cloud_consent_decline">Not now</string>
     <string name="voice_cloud_consent_revoke">Revoke cloud voice consent</string>
-    <string name="voice_computers_section">Paired computers</string>
-    <string name="voice_phone_unsupported">On-device speech recognition is unavailable on this phone</string>
-    <string name="voice_phone_ready">On-device recognition is available</string>
-    <string name="voice_phone_native_language_unsupported">The phone recognizer does not support the phone\'s system language. Choose computer recognition or install the language pack in Android settings.</string>
-    <string name="voice_error_language_unsupported">The phone recognizer does not support the phone\'s system language. Choose computer recognition or install the language pack in Android settings.</string>
-    <string name="voice_error_language_pack_missing">The required offline language pack is not installed. Install it in Android settings or choose computer recognition.</string>
-    <string name="voice_error_no_speech">No speech was recognized. Try again.</string>
+
     <string name="voice_error_microphone_permission">Allow microphone access to use speech recognition.</string>
-    <string name="voice_error_support_check_failed">Android speech service could not confirm support for the phone\'s system language. Choose a connected computer or try again.</string>
-    <string name="voice_error_recognition_failed">Phone speech recognition failed (%1$d).</string>
-    <string name="voice_computer_offline">Computer disconnected</string>
-    <string name="voice_computer_update_required">Update Ragent on this computer to enable voice recognition.</string>
-    <string name="voice_computer_not_installed">Whisper not installed</string>
-    <string name="voice_computer_install_unavailable">Whisper installation is available on Windows Ragent</string>
-    <string name="voice_computer_disabled">Whisper is stopped</string>
-    <string name="voice_computer_starting">Whisper is starting</string>
-    <string name="voice_computer_ready">Ready for voice recognition</string>
-    <string name="voice_no_computers">Pair a computer to manage its Whisper service here.</string>
-    <string name="voice_install">Install</string>
-    <string name="voice_installing">Installing…</string>
-    <string name="voice_privacy_note">Automatic mode processes audio on the session computer or this phone. Cloud recognition sends audio to Ragent Accounts and OpenAI for transcription. OpenAI states that API data is not used to train its models unless the API customer opts in. Ragent does not persist audio or transcripts. Transcripts go to your draft only.</string>
+
     <string name="settings_sharing_agents">Sharing and agents</string>
     <string name="run_dock_stop">Stop</string>
     <string name="run_dock_stop_description">Stop run</string>
