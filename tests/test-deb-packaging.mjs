@@ -74,6 +74,8 @@ assert.match(runnerSupervisorService, /^After=agentoc-runner-lifecycle\.service$
 assert.match(runnerSupervisorService, /^Requires=agentoc-runner-lifecycle\.service$/m);
 assert.match(runnerSupervisorService, /^InaccessiblePaths=\/etc\/agentoc \/var\/log\/agentoc \/run\/agentoc -\/run\/agentoc-privileged-executor$/m);
 assert.match(runnerLifecycleService, /runner-lifecycle-broker\.mjs/);
+assert.match(runnerLifecycleService, /^RuntimeDirectory=agentoc$/m,
+  'the lifecycle service must create the protected /run/agentoc directory before the supervisor starts');
 assert.match(privilegedExecutorService, /privileged-executor\.mjs serve/);
 assert.match(buildScript, /agentoc-storage-gc\.service/);
 assert.match(buildScript, /agentoc-storage-gc\.timer/);

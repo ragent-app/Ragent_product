@@ -12,6 +12,11 @@ Type=simple
 Sockets=agentoc-runner-lifecycle.socket
 User=root
 Group=root
+# The supervisor and transient runners mask this control-plane path. systemd
+# requires it to exist before it can set up their mount namespaces on a clean
+# installation and after every reboot.
+RuntimeDirectory=agentoc
+RuntimeDirectoryMode=0755
 WorkingDirectory=/opt/agentoc/app
 EnvironmentFile=/etc/agentoc/agentoc.env
 ExecStart=/opt/agentoc/runtime/node /opt/agentoc/app/scripts/runner-lifecycle-broker.mjs
