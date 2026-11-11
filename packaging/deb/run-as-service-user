@@ -32,6 +32,14 @@ resolve_service_user() {
       exit 1
     fi ;;
   esac
+  user_gid="$(printf '%s\n' "$user_entry" | awk -F: '{ print $4 }')"
+  case "$user_gid" in
+    ''|*[!0-9]*) echo "Cannot verify AgentoC service user group: $user" >&2; exit 1 ;;
+    *) if ! [ "$user_gid" -gt 0 ] 2>/dev/null; then
+      echo "AgentoC service user must not use the root group." >&2
+      exit 1
+    fi ;;
+  esac
   printf '%s\n' "$user"
 }
 

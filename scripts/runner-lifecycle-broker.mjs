@@ -510,8 +510,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
   const resolvedServiceUser = serviceUser || await resolveRunnerUser();
   const resolvedServiceGroup = serviceGroup || await resolveRunnerGroup(resolvedServiceUser);
   const runnerOwnership = await resolveRunnerOwnershipImpl(resolvedServiceUser, resolvedServiceGroup);
-  if (!Number.isSafeInteger(runnerOwnership?.uid) || runnerOwnership.uid <= 0) {
-    const error = new Error('Cannot launch or reuse a Run without a verified non-root runner identity');
+  if (!Number.isSafeInteger(runnerOwnership?.uid) || runnerOwnership.uid <= 0
+      || !Number.isSafeInteger(runnerOwnership?.gid) || runnerOwnership.gid <= 0) {
+    const error = new Error('Cannot launch or reuse a Run without a verified non-root runner identity and group');
     error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
   }

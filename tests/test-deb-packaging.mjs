@@ -138,6 +138,8 @@ if (process.platform !== 'win32') {
       ['service:x:1001:1001::/home/service:/bin/sh', 0],
       ['service:x:0:0::/root:/bin/sh', 1],
       ['service:x:0000:0::/root:/bin/sh', 1],
+      ['service:x:1001:0::/home/service:/bin/sh', 1],
+      ['service:x:1001:not-a-gid::/home/service:/bin/sh', 1],
       ['service:x:not-a-uid:0::/root:/bin/sh', 1],
       ['', 1],
     ]) {

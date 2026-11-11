@@ -259,11 +259,11 @@ try {
     execFileImpl: async () => { throw new Error('runner must not launch'); },
   }), error => error.code === 'RUNNER_UNIT_STATUS_UNAVAILABLE');
 
-  for (const uid of [0, null]) {
+  for (const [uid, gid] of [[0, 1234], [null, 1234], [1234, 0], [1234, null]]) {
     await assert.rejects(() => launchLifecycleRunner('run_badidentity', {
       serviceUser: 'svc', serviceGroup: 'svc',
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
-      resolveRunnerOwnershipImpl: async () => ({ uid, gid: 1234 }),
+      resolveRunnerOwnershipImpl: async () => ({ uid, gid }),
       execFileImpl: async () => { throw new Error('runner must not launch'); },
     }), error => error.code === 'RUNNER_IDENTITY_INVALID');
   }
