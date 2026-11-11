@@ -1,5 +1,5 @@
 import { constants } from 'fs';
-import { access, mkdir, open, readFile, rm, stat, writeFile } from 'fs/promises';
+import { access, lstat, mkdir, open, readFile, rm, stat, writeFile } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import { renameWithWindowsRetry } from '../lib/windows-file-replace.mjs';
 
@@ -83,18 +83,27 @@ function atomicTempPath(path) {
   return `${path}.tmp-${process.pid}-${Date.now()}-${atomicWriteSeq++}`;
 }
 
-export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable = false, signal, beforeReplace } = {}) {
+export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable = false, signal, beforeReplace, preserveOwner = false } = {}) {
   await ensureDir(dirname(path));
   const tempPath = atomicTempPath(path);
   const data = JSON.stringify(value, null, spaces);
-  if (durable) {
+  // A root lifecycle broker can update a Run owned by the unprivileged
+  // control service. Atomic rename otherwise replaces its 0600 file with a
+  // root-owned one, making the Run invisible to the control plane.
+  let owner = null;
+  if (preserveOwner && process.platform !== 'win32' && process.getuid?.() === 0) {
+    owner = await lstat(path);
+    if (!owner.isFile()) throw new Error('Cannot preserve ownership of a non-regular file');
+  }
+  if (durable || owner) {
     let handle;
     let ownsTemp = false;
     try {
       handle = await open(tempPath, 'wx', mode ?? 0o600);
       ownsTemp = true;
       await handle.writeFile(data, 'utf8');
-      await handle.sync();
+      if (owner) await handle.chown(owner.uid, owner.gid);
+      if (durable) await handle.sync();
       await handle.close();
       handle = null;
       await replaceAtomically(tempPath, path, signal, beforeReplace);

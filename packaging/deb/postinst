@@ -525,6 +525,12 @@ converge_external_accounts_state
 install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/agentoc-run
 install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/agentoc-run/results
 install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/agentoc-run/provider-homes
+# Older lifecycle brokers could replace a Run's private status.json as root.
+# Restore only those known status files so existing Runs become readable after
+# upgrade; leave all other runner and provider data untouched.
+find /var/lib/agentoc-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
+  -path '/var/lib/agentoc-run/results/run_*/status.json' \
+  -exec chown -h "$service_user:$service_group" {} +
 # The control plane creates Run directories and provider files while detached
 # runners update them, so default ACLs must survive recursive creation.
 if command -v setfacl >/dev/null 2>&1; then

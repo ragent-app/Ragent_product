@@ -46,6 +46,7 @@ jobs:
           node tests/test-desktop-update.cjs
           if [ "$PLATFORM" = linux ]; then
             node tests/test-deb-packaging.mjs
+            sudo env "PATH=$PATH" "TMPDIR=$RUNNER_TEMP" node tests/test-linux-run-status-ownership.mjs
             bash scripts/build-deb.sh
             asset="agentoc_${RELEASE_VERSION}_amd64.deb"
             (cd "$AGENTOC_DEB_OUTPUT_DIR" && sha256sum "$asset" > SHA256SUMS.txt)

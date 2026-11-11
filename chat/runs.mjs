@@ -1775,7 +1775,7 @@ async function recordCacheMeta(runId, path, metaMap) {
   else metaMap.delete(runId);
 }
 
-export async function updateRun(runId, updater, { beforeWrite = null, beforeCommit = null, authorizeWrite = null } = {}) {
+export async function updateRun(runId, updater, { beforeWrite = null, beforeCommit = null, authorizeWrite = null, preserveOwner = false } = {}) {
   return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     const current = await getRunUnlocked(runId);
     if (!current) return null;
@@ -1810,6 +1810,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
       ...COMPACT_JSON_OPTIONS,
       durable: Boolean(next.runPublication),
       beforeReplace: beforeCommit,
+      preserveOwner,
     });
     runStatusCache.set(runId, next);
     await recordCacheMeta(runId, runStatusPath(runId), runStatusCacheMeta);

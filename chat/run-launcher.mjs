@@ -138,7 +138,7 @@ export async function persistProviderPreparation(runId, preparation) {
   await updateRun(runId, (current) => ({
     ...current,
     providerPreparation: preparation,
-  })).catch(() => null);
+  }), { preserveOwner: true }).catch(() => null);
 }
 
 export function createProviderPreparationError(message, {
