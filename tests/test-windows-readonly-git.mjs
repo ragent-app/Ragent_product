@@ -39,5 +39,5 @@ for (const argv of [
 }
 
 console.log('windows-readonly-git: literal read-only allowlist checks passed');
-for (const argv of [['git', 'add', '.'], ['git', 'add', '-A'], ['git', 'commit', '-m', 'message']]) assert.equal(analyzeWindowsLocalGit(argv)?.complete, true);
+for (const argv of [['git', 'diff'], ['git', 'diff', '--cached'], ['git', 'add', '.'], ['git', 'add', '-A'], ['git', 'commit', '-m', 'message']]) assert.equal(analyzeWindowsLocalGit(argv)?.complete, true);
 for (const argv of [['git', 'push'], ['git', 'push', '--force'], ['git', 'reset', '--hard'], ['git', 'commit', '--amend', '-m', 'x']]) assert.equal(analyzeWindowsLocalGit(argv), null);

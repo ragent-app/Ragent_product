@@ -253,9 +253,10 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     return withOutput({ complete: true, actions: [workspaceTask] });
   }
   if (['git', 'git.exe'].includes(String(program).toLowerCase())) {
-    const local = analyzeWindowsLocalGit(words);
+    const readonly = analyzeWindowsReadOnlyGit(words);
+    const local = readonly ? null : analyzeWindowsLocalGit(words);
     if (local && context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
-    const analyzed = local || analyzeWindowsReadOnlyGit(words);
+    const analyzed = readonly || local;
     return analyzed
       ? withOutput(analyzed)
       : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };

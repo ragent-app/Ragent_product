@@ -54,7 +54,7 @@ if (managedRipgrep) {
   await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(rgConfig, '--hidden\n');
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
-if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
+if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'git-diff', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
@@ -62,11 +62,12 @@ if (outsideWrite && fileCommand !== 'dotnet') throw new Error('outside-write fix
 const outsideWriteRoot = outsideWrite ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
 const fileFixture = path.join(outsideWriteRoot || home, 'ordinary-fixture.txt');
 if (fileCommand) await writeFile(fileFixture, 'fixture content');
-if (fileCommand === 'git-status') execFileSync('git', ['init', '-q'], { cwd: home, windowsHide: true });
+if (['git-status', 'git-diff'].includes(fileCommand)) execFileSync('git', ['init', '-q'], { cwd: home, windowsHide: true });
 const safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
   : fileCommand === 'uninstall' ? 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact'
   : fileCommand === 'git-status' ? 'git status --short'
+  : fileCommand === 'git-diff' ? 'git diff'
   : fileCommand === 'dotnet'
     ? `[System.IO.File]::WriteAllText('${fileFixture.replace(/'/g, "''")}', 'dotnet fixture'${process.env.AGENTOC_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`
     : `Clear-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}'`;
@@ -401,7 +402,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
   } else if (stage === 2 && msg.method === 'item/completed' && msg.params?.item?.type === 'commandExecution') {
     if (managedElevation) { fixtureError('direct elevation unexpectedly executed'); return; }
     if (managedDeleteRelative && msg.params.item.id === 'call_fixture') return;
-    if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION === 'auto-allow') {
+    if (['git-status', 'git-diff'].includes(fileCommand) && process.env.AGENTOC_QA_EXPECT_DECISION === 'auto-allow') {
       if (msg.params.item.exitCode !== 0 || !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) {
         fixtureError('read-only Git status did not return the isolated fixture entry'); return;
       }

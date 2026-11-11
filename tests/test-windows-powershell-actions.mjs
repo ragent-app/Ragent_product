@@ -116,9 +116,9 @@ assert.equal(result.actions.length, 2);
 for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline']) {
   assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
 }
-for (const command of ['git add .', 'git commit -m test']) assert.equal((await inspect(command)).decision, 'allow');
+for (const command of ['git diff', 'git add .', 'git commit -m test']) assert.equal((await inspect(command)).decision, 'allow');
 for (const command of ['python --version', 'node --version', 'go version', 'java -version']) assert.equal((await inspect(command)).decision, 'allow');
-for (const command of ['git diff', 'git status --ignored=bogus']) {
+for (const command of ['git status --ignored=bogus']) {
   assert.equal((await inspect(command)).decision, 'review', `${command} is not on the read-only Git allowlist`);
 }
 result = await inspect(`Set-Content -LiteralPath '${path.join(workspace, 'chain.txt')}' -Value PASS && Get-Content -LiteralPath '${path.join(workspace, 'chain.txt')}' 2>&1 | Out-String`);

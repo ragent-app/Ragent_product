@@ -63,12 +63,14 @@ export function analyzeWindowsReadOnlyGit(argv) {
 // Local staging and commits are ordinary development work. Git hooks may
 // execute project code, just as an approved project build or test can.
 export function analyzeWindowsLocalGit(argv) {
-  if (!Array.isArray(argv) || argv.length < 3 || !['git', 'git.exe'].includes(String(argv[0]).toLowerCase())
+  if (!Array.isArray(argv) || argv.length < 2 || !['git', 'git.exe'].includes(String(argv[0]).toLowerCase())
       || argv.some(value => typeof value !== 'string' || value.includes('\0'))) return null;
   const subcommand = argv[1].toLowerCase();
   const args = argv.slice(2);
   let allowed = false;
-  if (subcommand === 'add') {
+  if (subcommand === 'diff') {
+    allowed = args.every(arg => DIFF_SUMMARY_FLAGS.has(arg) || DIFF_SAFE_COMMON_FLAGS.has(arg) || ['--cached', '--staged'].includes(arg));
+  } else if (subcommand === 'add') {
     allowed = args.length > 0 && args.every(arg => !arg.startsWith('-') || ['-A', '--all', '-u', '--update', '--'].includes(arg));
   } else if (subcommand === 'commit') {
     let message = false;
@@ -80,5 +82,5 @@ export function analyzeWindowsLocalGit(argv) {
     }
     allowed &&= message;
   }
-  return allowed ? { complete: true, actions: [{ kind: 'write', program: `git ${subcommand}`, target: null, caution: true }] } : null;
+  return allowed ? { complete: true, actions: [{ kind: subcommand === 'diff' ? 'read' : 'write', program: `git ${subcommand}`, target: null, caution: true }] } : null;
 }

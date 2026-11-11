@@ -523,9 +523,10 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
         return { complete: false, actions, reason: 'Git arguments are dynamic or come from pipeline input' };
       }
       const args = staticExternalArguments(entry.elements);
-      const local = args && analyzeWindowsLocalGit([entry.name, ...args]);
+      const readonly = args && analyzeWindowsReadOnlyGit([entry.name, ...args]);
+      const local = !readonly && args && analyzeWindowsLocalGit([entry.name, ...args]);
       if (local && context.requireAbsolutePaths) return { complete: false, actions, reason: 'working directory is not attested' };
-      const git = local || (args && analyzeWindowsReadOnlyGit([entry.name, ...args]));
+      const git = readonly || local;
       if (!git) return { complete: false, actions, reason: 'Git command is not on the read-only allowlist' };
       actions.push(...git.actions);
       continue;
