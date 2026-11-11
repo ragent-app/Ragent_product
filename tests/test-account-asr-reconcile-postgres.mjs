@@ -5,7 +5,19 @@ import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { createAccountAsrPostgresStore } from '../accounts/asr-postgres-store.mjs';
-import { ACCOUNT_ASR_PRICE_VERSION, estimateAccountAsrCostMicroUsd } from '../accounts/asr-policy.mjs';
+import { createAccountAsrService } from '../accounts/asr-service.mjs';
+import { ACCOUNT_ASR_CONSENT_POLICY_VERSION, ACCOUNT_ASR_PRICE_VERSION, estimateAccountAsrCostMicroUsd } from '../accounts/asr-policy.mjs';
+
+function syntheticWav() {
+  const pcm = Buffer.alloc(32_000);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0); header.writeUInt32LE(36 + pcm.length, 4); header.write('WAVE', 8);
+  header.write('fmt ', 12); header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22); header.writeUInt32LE(16_000, 24); header.writeUInt32LE(32_000, 28);
+  header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34); header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
 
 const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL || '';
 assert(databaseUrl, 'Set AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL to an isolated scratch database URL');
@@ -96,7 +108,46 @@ try {
   await pool.query('delete from accounts where account_id=$1', [base.accountId]);
   assert.equal((await pool.query('select count(*)::int as count from account_asr_reconciliations')).rows[0].count, 0,
     'account deletion cascades the reconciliation evidence with the request');
-  console.log('account ASR reconciliation PostgreSQL integration passed');
+
+  // Exercise the actual service against PostgreSQL with two isolated fixture
+  // accounts. The provider is synthetic, so this never sends audio externally.
+  const accountIds = ['acct_asr_service_pg_a', 'acct_asr_service_pg_b'];
+  for (const accountId of accountIds) {
+    await pool.query('insert into accounts (account_id, provider, provider_subject) values ($1,$2,$3)',
+      [accountId, 'qa', `${accountId}-fixture`]);
+  }
+  let providerCalls = 0;
+  const service = createAccountAsrService({
+    authenticateAccount: async ({ credential }) => {
+      assert(accountIds.includes(credential));
+      return { accountId: credential, deviceId: 'adev_asr_service_pg', plan: 'free' };
+    },
+    repository: store,
+    transcribe: async () => { providerCalls += 1; return { text: 'fixture transcript' }; },
+    clock: () => Date.UTC(2026, 10, 11),
+    env: {},
+  });
+  const audio = syntheticWav();
+  const input = { credential: accountIds[0], requestId: 'asr-service-pg-fixture-a', audio };
+  await assert.rejects(() => service.transcribeAudio(input), { code: 'asr_consent_required' });
+  await service.setConsent({ credential: accountIds[0], action: 'accept', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+  const firstResult = await service.transcribeAudio(input);
+  assert.equal(firstResult.text, 'fixture transcript');
+  assert.deepEqual(await service.transcribeAudio(input), firstResult);
+  assert.equal(providerCalls, 1, 'a repeated request must not call the provider twice');
+  const firstUsage = await service.getUsage({ credential: accountIds[0] });
+  assert.equal(firstUsage.usedMs, 1000);
+  assert.equal(firstUsage.reservedMs, 0);
+  assert.equal(firstUsage.requestCount, 1);
+  const otherUsage = await service.getUsage({ credential: accountIds[1] });
+  assert.equal(otherUsage.usedMs, 0, 'usage must remain isolated by account');
+  assert.equal(otherUsage.consent.granted, false, 'consent must remain isolated by account');
+  await assert.rejects(() => service.transcribeAudio({ ...input, credential: accountIds[1] }),
+    { code: 'asr_consent_required' });
+  await service.setConsent({ credential: accountIds[0], action: 'revoke' });
+  await assert.rejects(() => service.transcribeAudio(input), { code: 'asr_consent_required' });
+  await service.close();
+  console.log('account ASR PostgreSQL reconciliation and account isolation passed');
 } finally {
   await pool.end();
   if (created) await bootstrap.query(`drop schema "${schema}" cascade`);
