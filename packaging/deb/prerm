@@ -11,6 +11,9 @@ if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
     systemctl disable --now agentoc-runner-lifecycle.socket agentoc-runner-supervisor.socket >/dev/null 2>&1 || true
     systemctl stop agentoc-runner-lifecycle.service >/dev/null 2>&1 || true
     systemctl stop agentoc-runner-supervisor.service >/dev/null 2>&1 || true
+    # Runs are detached transient units in this dedicated slice, so stopping
+    # the brokers alone does not terminate active provider processes.
+    systemctl stop agentoc-runners.slice >/dev/null 2>&1 || true
     systemctl stop agentoc-privileged-executor.service >/dev/null 2>&1 || true
   fi
   if [ -x /usr/lib/agentoc/retire-legacy-cc-switch ]; then
