@@ -24,13 +24,13 @@ assert.ok(bash, 'real Git Bash path is required');
 for (const riskMode of ['recommended', 'full-auto']) {
   const state = { riskMode, turnActive: true, riskContextValid: true, cwd: workspace, riskContext: { trustedWorkspaceRoot: workspace, protectedRoots: [] } };
   for (const command of ['cat readme.txt', "sed -n '1,10p' readme.txt", 'cat readme.txt | head -n 1',
-    'ls -la', 'rg --files', 'rg --files .', 'rg -n SAFE_WORKSPACE .']) {
+    'ls -la', 'find . -name readme.txt', 'rg --files', 'rg --files .', 'rg -n SAFE_WORKSPACE .']) {
     const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state });
     assert.ok(bridge, `${riskMode}: ${command}`);
     assert.equal(bridge.updatedInput.description, 'read fixture');
     const options = { cwd: workspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: config } };
     const output = execFileSync(bash, ['--noprofile', '--norc', '-c', bridge.updatedInput.command], options);
-    assert.match(output, command.startsWith('rg ') || command.startsWith('ls ') ? /readme\.txt/ : /SAFE_WORKSPACE/);
+    assert.match(output, command.startsWith('rg ') || command.startsWith('ls ') || command.startsWith('find ') ? /readme\.txt/ : /SAFE_WORKSPACE/);
     assert.doesNotMatch(output, /PRIVATE_WORKSPACE/);
     if (command.startsWith('rg ')) assert.doesNotMatch(output, /\.env/);
     const mismatch = spawnSync(bash, ['--noprofile', '--norc', '-c', bridge.updatedInput.command], { ...options, cwd: outside });
@@ -99,7 +99,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   }
   assert.equal((await readFile(path.join(outside, `ps-${riskMode}.txt`), 'utf8')).trim(), 'safe');
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: psApproval('Get-Content .env'), state }), null);
-  for (const command of ['cat .env', 'echo danger > .env', 'npm run dev > .env', 'git status > .env', "rg --files -g '*' .", 'rm -rf .', 'cat "$(whoami)"']) {
+  for (const command of ['cat .env', 'echo danger > .env', 'npm run dev > .env', 'git status > .env', 'find . -delete', "rg --files -g '*' .", 'rm -rf .', 'cat "$(whoami)"']) {
     assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state }), null, command);
   }
   const elevated = approval('cat readme.txt'); elevated.params.input.dangerouslyDisableSandbox = true;

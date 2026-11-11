@@ -255,6 +255,20 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     if (targets.some(target => !target)) return { complete: false, actions: [], reason: 'Bash path cannot be resolved' };
     return analyzeFiles([...targets.map(target => ({ path: target, kind: 'read' })), ...outputEntry], context);
   }
+  if (program === 'find') {
+    const args = words.slice(1); const source = args[0] && !args[0].startsWith('-') ? args.shift() : '.';
+    for (let i = 0; i < args.length; i += 1) {
+      const arg = args[i];
+      if (arg === '-print') continue;
+      if (['-name', '-iname'].includes(arg) && args[i + 1] && !args[i + 1].startsWith('-')) { i += 1; continue; }
+      if (arg === '-type' && /^[fdl]$/.test(args[i + 1] || '')) { i += 1; continue; }
+      if (['-maxdepth', '-mindepth'].includes(arg) && /^\d{1,4}$/.test(args[i + 1] || '')) { i += 1; continue; }
+      return { complete: false, actions: [], reason: 'find arguments need review' };
+    }
+    const target = gitBashPath(source);
+    return target ? analyzeFiles([{ path: target, kind: 'read' }, ...outputEntry], context)
+      : { complete: false, actions: [], reason: 'Bash path cannot be resolved' };
+  }
   const spec = {
     cat: ['read', 'AbEensTtuv'], ls: ['read', 'aAlh1tSrdFisR'], mkdir: ['write', 'p'], touch: ['write', ''],
     rm: ['delete', 'rRf'], rmdir: ['delete', ''], cp: ['copy', 'rR'], mv: ['move', ''],
