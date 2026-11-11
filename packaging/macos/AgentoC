@@ -23,9 +23,31 @@ open_manager() {
   fi
 }
 
+report_start_failure() {
+  local message="$1" log_path=''
+  [ ! -f "$AGENTOC_RUN_LOG" ] || log_path="$AGENTOC_RUN_LOG"
+  agentoc_log "$message${log_path:+; inspect $log_path}" >&2
+  # Finder-launched shell scripts have no visible terminal. Pass text as
+  # arguments rather than embedding paths in AppleScript source.
+  if command -v osascript >/dev/null 2>&1; then
+    osascript - "$message" "$log_path" <<'APPLESCRIPT' >/dev/null 2>&1 || true
+on run argv
+  set detail to item 1 of argv
+  if item 2 of argv is not "" then set detail to detail & return & return & "日志：" & item 2 of argv
+  display alert "Ragent 无法启动" message detail as warning
+end run
+APPLESCRIPT
+  fi
+}
+
 if agentoc_server_running; then
   open_manager
   exit 0
+fi
+
+if lsof -ti ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  report_start_failure "端口 ${PORT} 已被其他程序占用。请关闭占用该端口的程序或调整 Ragent 的端口设置。"
+  exit 1
 fi
 
 nohup "$AGENTOC_NODE_BIN" "$AGENTOC_APP_DIR/chat-server.mjs" >>"$AGENTOC_RUN_LOG" 2>&1 &
@@ -44,7 +66,7 @@ for _ in $(seq 1 60); do
 done
 
 if [ "$ready" -ne 1 ]; then
-  agentoc_log "Service did not start; inspect $AGENTOC_RUN_LOG"
+  report_start_failure '本地服务未能启动，请查看日志了解原因。'
   exit 1
 fi
 open_manager

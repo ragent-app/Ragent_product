@@ -27,8 +27,14 @@ cat > "$test_dir/bin/open" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
+cat > "$test_dir/bin/osascript" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@" > "$QA_ALERT_ARGS"
+cat >/dev/null
+EOF
 chmod 0755 "$test_dir/bin/open"
-export HOME="$test_dir/home" AGENTOC_CONFIG_DIR="$test_dir/config" PATH="$test_dir/bin:$PATH"
+chmod 0755 "$test_dir/bin/osascript"
+export HOME="$test_dir/home" AGENTOC_CONFIG_DIR="$test_dir/config" PATH="$test_dir/bin:$PATH" QA_ALERT_ARGS="$test_dir/alert"
 port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
 export CHAT_PORT="$port"
 "$contents/MacOS/AgentoC"
@@ -52,6 +58,7 @@ if "$contents/MacOS/AgentoC"; then
   echo 'launcher accepted an unrelated service on its port' >&2
   exit 1
 fi
+grep -Fq "端口 $port" "$QA_ALERT_ARGS"
 "$contents/MacOS/agentoc-stop"
 kill -0 "$other_pid"
 printf '%s\n' 'macOS launcher lifecycle checks passed'
