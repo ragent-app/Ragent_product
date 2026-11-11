@@ -181,6 +181,14 @@ for (const mode of ['recommended', 'full-auto']) {
     request: { subtype: 'can_use_tool', tool_name: 'Glob', input: { pattern: '*.txt' } } }, proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   assert.equal(sent.at(-1)?.response?.response?.updatedInput?.path, workspace);
+  await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: `read-relative-${mode}`,
+    request: { subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: '../outside-visible.txt' } } }, proc);
+  assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
+  assert.equal(sent.at(-1)?.response?.response?.updatedInput?.file_path, path.resolve(workspace, '../outside-visible.txt'));
+  await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: `read-relative-secret-${mode}`,
+    request: { subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: '../outside-search/.env' } } }, proc);
+  if (mode === 'recommended') assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:read-relative-secret-${mode}`));
+  else assert.equal(sent.at(-1)?.response?.response?.behavior, 'deny');
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-outside-${mode}`, 'rg --files ../outside-search'), proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   if (process.env.AGENTOC_TEST_BASH_BINARY) {

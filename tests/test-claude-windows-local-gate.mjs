@@ -48,7 +48,7 @@ const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === '
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
 const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
-if (readCase && (!['numbered', 'relative', 'relative-cd', 'fallback', 'cd-rg', 'cwd-change', 'cwd-change-rg', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-diff-file', 'git-c-outside', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+if (readCase && (!['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'cd-rg', 'cwd-change', 'cwd-change-rg', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-diff-file', 'git-c-outside', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 const cwdChangeCase = ['cwd-change', 'cwd-change-rg'].includes(readCase);
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
 if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
@@ -63,6 +63,8 @@ const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-
 const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-file-')) : '';
 const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-git-')) : '';
 if (outsideGitRoot) { execFileSync('git', ['init', '-q'], { cwd: outsideGitRoot, windowsHide: true }); await writeFile(path.join(outsideGitRoot, 'fixture.md'), 'outside git fixture\n'); }
+const outsideReadRoot = readCase === 'relative-file-tool' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
+if (outsideReadRoot) await writeFile(path.join(outsideReadRoot, 'fixture.md'), 'local read fixture\n');
 const deleteTarget = path.join(outsideCase ? outsideRoot : protectedCase ? protectedRoot : root, unicodeFixture ? '构建 输出' : 'delete-fixture');
 const keepFile = path.join(root, 'keep-fixture.txt');
 const extraFile = path.join(root, 'delete-extra.txt');
@@ -130,12 +132,12 @@ const server = createServer((req, res) => {
       if (readCase === 'cwd-change') process.stderr.write(`[fixture] tool results: ${JSON.stringify((request.messages || []).flatMap(message => Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_result').map(block => block.content) : []))}\n`);
     }
     const tool = requests === 1 || (cwdChangeCase && requests === 2);
-    const toolName = readCase === 'glob' ? 'Glob' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
+    const toolName = readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
-    if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(cwdChangeCase ? 'CHILD_MARKER' : readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : ['rg-text', 'cd-rg'].includes(readCase) ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-cd', 'fallback', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
+    if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(cwdChangeCase ? 'CHILD_MARKER' : readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : ['rg-text', 'cd-rg'].includes(readCase) ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
     if (!tool && cwdChangeCase) {
       const messages = JSON.stringify(request.messages || []);
       cwdMarkerCount = (messages.match(/CHILD_MARKER/g) || []).length;
@@ -151,7 +153,7 @@ const server = createServer((req, res) => {
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
         : dotnetCase ? { command: dotnetCommand, description: 'Write isolated fixture' }
         : guidanceCase ? { command: guidanceCommand, description: 'Administrative fixture' }
-        : readCase === 'glob' ? { pattern: 'fixture.md' } : cwdChangeCase ? { command: requests === 1 ? 'cd child && cat fixture.md' : readCase === 'cwd-change-rg' ? 'rg -n CHILD_MARKER .' : 'cat fixture.md', description: 'Read isolated fixture' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
+        : readCase === 'glob' ? { pattern: 'fixture.md' } : readCase === 'relative-file-tool' ? { file_path: path.relative(root, path.join(outsideReadRoot, 'fixture.md')) } : cwdChangeCase ? { command: requests === 1 ? 'cd child && cat fixture.md' : readCase === 'cwd-change-rg' ? 'rg -n CHILD_MARKER .' : 'cat fixture.md', description: 'Read isolated fixture' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
       events.push({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: `toolu_fixture_${requests}`, name: toolName, input: {} } },
         { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: input } });
     } else events.push({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
@@ -192,7 +194,13 @@ if (installCase) {
   gateState.windowsManagedActionChannel = true;
   gateState.windowsManagedActionBinding = { endpoint, token: 'fixture-token', sessionId: 'claude-local-fixture', runId: run.id, turnId: 'fixture-turn' };
 }
-const spawnSpec = buildPlatformSpawnSpec(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: cwdChangeCase ? 3 : 2, forceClaudeCommandGate: askAll }), { cwd: root, env });
+const cliArgs = buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: cwdChangeCase ? 3 : 2, forceClaudeCommandGate: askAll });
+if (readCase === 'relative-file-tool') {
+  const index = cliArgs.indexOf('--settings');
+  if (index < 0) throw new Error('relative file tool fixture requires the gate settings');
+  const settings = JSON.parse(cliArgs[index + 1]); settings.permissions.ask.push('Read'); cliArgs[index + 1] = JSON.stringify(settings);
+}
+const spawnSpec = buildPlatformSpawnSpec(binary, cliArgs, { cwd: root, env });
 const child = spawn(spawnSpec.file, spawnSpec.args, {
   cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
   ...(spawnSpec.windowsVerbatimArguments === undefined ? {} : { windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments }),
@@ -271,6 +279,7 @@ try {
     if (readCase === 'fallback' && askAll) assert.equal(approvals, 1, 'ask rule must route the fallback command through Ragent');
     if (readCase === 'cd-rg' && askAll) assert.equal(approvals, 1, 'ask rule must route the directory search through Ragent');
     if (readCase === 'git-c-outside' && askAll) assert.equal(approvals, 1, 'ask rule must route the outside Git query through Ragent');
+    if (readCase === 'relative-file-tool') assert.equal(approvals, 1, 'fixture must exercise the file-tool approval callback');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
     if (cwdChangeCase) assert.ok(process.platform === 'win32' ? cwdMarkerCount >= 1 && rootMarkerCount >= 1 : cwdMarkerCount >= 2,
       'both commands must succeed with the provider working-directory behavior');
@@ -290,7 +299,7 @@ try {
 } finally {
   child.kill(); output.close(); await new Promise((resolve) => server.close(resolve));
   const parent = path.resolve(os.tmpdir()).toLowerCase();
-  for (const [target, prefix] of [[root, 'agentoc-claude-local-gate-'], [outsideRoot, 'agentoc-claude-outside-'], [outsideFileRoot, 'agentoc-claude-outside-file-'], [outsideGitRoot, 'agentoc-claude-outside-git-']]) {
+  for (const [target, prefix] of [[root, 'agentoc-claude-local-gate-'], [outsideRoot, 'agentoc-claude-outside-'], [outsideFileRoot, 'agentoc-claude-outside-file-'], [outsideGitRoot, 'agentoc-claude-outside-git-'], [outsideReadRoot, 'agentoc-claude-outside-read-']]) {
     if (!target) continue;
     const resolved = path.resolve(target);
     if (path.dirname(resolved).toLowerCase() !== parent || !path.basename(resolved).startsWith(prefix)) throw new Error('unsafe fixture cleanup target');

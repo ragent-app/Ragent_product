@@ -104,6 +104,20 @@ for (const riskMode of ['recommended', 'full-auto']) {
     assert.equal(bound.updatedInput.path, outside);
     assert.equal(await buildClaudeWindowsDefaultFileToolBridge({ approval: search, state: { ...outsideCwd, riskContext: { ...state.riskContext, protectedRoots: [outside] } } }), null);
   }
+  for (const [tool, input, key] of [
+    ['Read', { file_path: '../outside/readme.txt' }, 'file_path'],
+    ['Write', { file_path: '../outside/new.txt', content: 'fixture' }, 'file_path'],
+    ['Glob', { path: '../outside', pattern: '*.txt' }, 'path'],
+  ]) {
+    const request = { providerMethod: 'can_use_tool', kind: 'permissions', params: { tool_name: tool, input } };
+    const bound = await buildClaudeWindowsDefaultFileToolBridge({ approval: request, state });
+    assert.ok(bound, `${riskMode}: ${tool} relative target outside workspace`);
+    assert.equal(bound.updatedInput[key], path.resolve(workspace, input[key]));
+  }
+  for (const file of ['../outside/.env', 'C:relative.txt', '~/.ssh/key']) {
+    const request = { providerMethod: 'can_use_tool', kind: 'permissions', params: { tool_name: 'Read', input: { file_path: file } } };
+    assert.equal(await buildClaudeWindowsDefaultFileToolBridge({ approval: request, state }), null, `${riskMode}: ${file}`);
+  }
   const curl = await buildClaudeWindowsRelativeOperationBridge({ approval: approval('curl -fsSL https://example.org/docs'), state: outsideCwd });
   assert.ok(curl);
   assert.match(curl.updatedInput.command, /curl --disable --proto =http,https --proto-redir =http,https -fsSL/);

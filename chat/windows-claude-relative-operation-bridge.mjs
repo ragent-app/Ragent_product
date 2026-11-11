@@ -120,21 +120,30 @@ export async function buildClaudePosixRipgrepBridge({ approval, state } = {}) {
   return { updatedInput: { ...input, command: bound } };
 }
 
-// Supply the session directory explicitly to Claude's file-search tools when
-// their optional path was omitted, and classify the same input we return.
+// Bind omitted search directories and literal relative file-tool paths to the
+// session directory, then classify exactly the absolute input sent to Claude.
 export async function buildClaudeWindowsDefaultFileToolBridge({ approval, state } = {}) {
   const params = approval?.params || {}; const input = params.input;
   if (process.platform !== 'win32' || approval?.providerMethod !== 'can_use_tool'
-      || !['Glob', 'Grep', 'LS', 'List'].includes(params.tool_name)
+      || !['Read', 'Glob', 'Grep', 'LS', 'List', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(params.tool_name)
       || !input || typeof input !== 'object' || Array.isArray(input)
-      || input.path !== undefined || input.file_path !== undefined || input.notebook_path !== undefined
       || input.cwd !== undefined || input.workdir !== undefined || input.working_directory !== undefined
       || state?.turnActive !== true || state?.riskContextValid !== true
       || !['recommended', 'full-auto'].includes(state?.riskMode)
       || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
       || params.networkApprovalContext || params.network_approval_context || params.additionalPermissions || params.additional_permissions
       || !path.win32.isAbsolute(state.cwd || '')) return null;
-  const updatedInput = { ...input, path: path.win32.resolve(state.cwd) };
+  const supplied = ['path', 'file_path', 'notebook_path'].filter(key => input[key] !== undefined);
+  let key; let target;
+  if (supplied.length === 0 && ['Glob', 'Grep', 'LS', 'List'].includes(params.tool_name)) {
+    key = 'path'; target = state.cwd;
+  } else if (supplied.length === 1) {
+    key = supplied[0]; const raw = input[key];
+    if (typeof raw !== 'string' || !raw || raw.length > 32768 || /[\0\r\n]/.test(raw)
+        || raw.startsWith('~') || path.win32.isAbsolute(raw) || /^[a-z]:/i.test(raw)) return null;
+    target = path.win32.resolve(state.cwd, raw);
+  } else return null;
+  const updatedInput = { ...input, [key]: target };
   const decision = await decideWindowsApproval({ ...approval, params: { ...params, input: updatedInput } }, state);
   if (decision.decision !== 'auto-allow') return null;
   return { updatedInput, risk: decision.risk };
