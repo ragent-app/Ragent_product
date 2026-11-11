@@ -19,7 +19,9 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert(!windowsAsset({ ...asset, name: "agentoc-arm64.msi" }));
   for (const [platform, arch, name] of [
     ["linux", "x64", "Ragent-1.2.3-linux-x64.deb"],
+    ["linux", "x64", "agentoc_1.2.3_amd64.deb"],
     ["darwin", "arm64", "Ragent-1.2.3-macos-arm64.dmg"],
+    ["darwin", "arm64", "agentoc_1.2.3-darwin-arm64.dmg"],
   ]) {
     const platformUrl = `https://github.com/ragent-app/Ragent_product/releases/download/v1.2.3/${name}`;
     const platformAsset = { name, browser_download_url: platformUrl };
