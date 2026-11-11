@@ -394,12 +394,13 @@ if [ ! -f /var/lib/agentoc/config/auth.json ]; then
   # owner 凭据来源（按优先级）：
   #  1) 安装命令环境变量 AGENTOC_INITIAL_USERNAME / AGENTOC_INITIAL_PASSWORD（无人值守传参）
   #  2) 交互式终端输入（不回显，两次确认）
-  #  3) 随机密码（容器/CI 兜底，打印到安装输出）
+  #  3) 随机密码（非交互安装时保存在 root 专用文件中）
   # 注意：不从 /etc/agentoc/agentoc.env 读密码（该文件 0644，本机任何用户可读）
   RANDOM_PASSWORD=""
   INITIAL_USERNAME="$(env_file_value AGENTOC_INITIAL_USERNAME)"
   [ -n "$INITIAL_USERNAME" ] || INITIAL_USERNAME="${AGENTOC_INITIAL_USERNAME:-}"
   INITIAL_PASSWORD="${AGENTOC_INITIAL_PASSWORD:-}"
+  unset AGENTOC_INITIAL_PASSWORD
 
   if [ -z "$INITIAL_PASSWORD" ] && [ -t 0 ] && [ "${DEBIAN_FRONTEND:-}" != "noninteractive" ]; then
     echo "设置 AgentoC owner 账号（输入不会回显）" >&2
@@ -443,22 +444,21 @@ if [ ! -f /var/lib/agentoc/config/auth.json ]; then
   esac
 
   if [ -z "$INITIAL_PASSWORD" ]; then
-    INITIAL_PASSWORD="$( { openssl rand -base64 24 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(18).toString('base64url'))"; } | tr -d '\n' )"
+    INITIAL_PASSWORD="$( { openssl rand -base64 24 2>/dev/null || /opt/agentoc/runtime/node -e "process.stdout.write(require('crypto').randomBytes(18).toString('base64url'))"; } | tr -d '\n' )"
     RANDOM_PASSWORD="1"
   fi
 
-  runuser -u "$service_user" -- env \
+  printf '%s\n' "$INITIAL_PASSWORD" | runuser -u "$service_user" -- env \
     HOME="$service_home" \
     AGENTOC_CONFIG_DIR=/var/lib/agentoc/config \
     AGENTOC_WORK_ROOT_DIR=/var/lib/agentoc/workspace \
     AGENTOC_MEMORY_DIR=/var/lib/agentoc/memory \
     AGENTOC_INITIAL_USERNAME="$INITIAL_USERNAME" \
-    AGENTOC_INITIAL_PASSWORD="$INITIAL_PASSWORD" \
     /opt/agentoc/runtime/node -e '
       const { randomBytes, scryptSync } = require("crypto");
-      const { mkdirSync, writeFileSync, chmodSync } = require("fs");
+      const { mkdirSync, readFileSync, writeFileSync, chmodSync } = require("fs");
       const username = process.env.AGENTOC_INITIAL_USERNAME || "owner";
-      const password = process.env.AGENTOC_INITIAL_PASSWORD;
+      const password = readFileSync(0, "utf8").slice(0, -1);
       const salt = randomBytes(16);
       const hash = scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
       mkdirSync("/var/lib/agentoc/config", { recursive: true });
@@ -469,8 +469,15 @@ if [ ! -f /var/lib/agentoc/config/auth.json ]; then
       chmodSync("/var/lib/agentoc/config/auth.json", 0o600);
     '
   if [ "$RANDOM_PASSWORD" = "1" ]; then
-    echo "初始登录密码：$INITIAL_PASSWORD（username: $INITIAL_USERNAME，静态 access token 已下线）" >&2
+    # Package-manager logs may be retained or readable to other users. Keep the
+    # generated secret in a root-owned directory instead of printing it there.
+    credentials_tmp="$(mktemp /etc/agentoc/.initial-credentials.XXXXXX)"
+    chmod 0600 "$credentials_tmp"
+    printf 'username: %s\npassword: %s\n' "$INITIAL_USERNAME" "$INITIAL_PASSWORD" > "$credentials_tmp"
+    mv -f "$credentials_tmp" /etc/agentoc/initial-credentials
+    echo 'Initial credentials are in /etc/agentoc/initial-credentials (root only). Remove the file after recording them.' >&2
   fi
+  unset INITIAL_PASSWORD typed_p1 typed_p2
 fi
 
 # 静态 access token 已下线（2026-08-05）：升级时清理 auth.json 的 token 字段

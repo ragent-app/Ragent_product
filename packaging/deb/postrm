@@ -7,7 +7,7 @@ fi
 
 if [ "${1:-}" = purge ]; then
   rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d
-  rm -f /etc/agentoc/service-user /etc/agentoc/auth-secret
+  rm -f /etc/agentoc/service-user /etc/agentoc/auth-secret /etc/agentoc/initial-credentials
   rmdir /etc/agentoc >/dev/null 2>&1 || true
   rm -rf /var/lib/agentoc /var/log/agentoc /run/agentoc-privileged-executor /var/log/agentoc-privileged
   deluser --system agentoc >/dev/null 2>&1 || true

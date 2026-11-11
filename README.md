@@ -65,6 +65,8 @@ and supported service configurations still need release verification.
 See the [architecture overview](docs/architecture.md) for code entry points.
 See [source and release boundaries](docs/source-and-release.md) for what is
 included and what remains to be verified.
+Linux candidate installation and build details are documented in
+[the Linux desktop guide](docs/linux-desktop.md).
 
 The current Windows host defaults to the project's hosted account and TURN
 endpoints outside isolated test mode. Publishing their implementation does not
