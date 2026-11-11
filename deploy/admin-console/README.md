@@ -18,6 +18,7 @@ Owner-only operational console for the central Oracle services. The UI is built 
 - On-demand functionality checks for Accounts, TURN, signaling, tunnel health endpoints, Accounts/TURN public-key discovery, a fixed `SELECT 1`, Caddy configuration validation, and local FCM/ASR configuration status. These checks do not send real FCM notifications or simulate an online phone/computer session.
 - A separate, explicitly confirmed, billable ASR provider probe accepts a short WAV and reports the returned transcript. The helper forwards it only to the fixed OpenAI transcription endpoint, does not write audio or text to disk, and audits only the outcome. This probe is not charged to an end-user quota and does not verify the account or mobile end-to-end path.
 - OpenAI Transcription API key and cloud ASR enable/disable. Enabling requires the applied OpenAI consent migration and an explicit in-page acknowledgement of provider data controls/privacy disclosure.
+- Monthly free, plus and pro ASR minute limits and the provider request timeout. Changes atomically update the fixed Accounts settings, restart the service and restore the previous configuration if restart fails.
 - Active FCM service account JSON.
 - Cloudflare TURN shared secret and TURN broker token.
 - Accounts database application-role password rotation, schema/migration status, approximate table sizes, PostgreSQL backups, and confirmed restore with an automatic safety backup.
