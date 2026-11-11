@@ -4058,7 +4058,10 @@ async function main() {
         cwd: resolvedFolder.cwd,
         runnerHome: process.env.HOME,
         hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
-        bindReadOnlyPaths: buildRunnerGuiBindPaths(guiEnvironment),
+        bindReadOnlyPaths: [
+          ...buildRunnerGuiBindPaths(guiEnvironment),
+          ...(privilegedShimChannel?.socketBindDir ? [privilegedShimChannel.socketBindDir] : []),
+        ],
         exposeHostDevices: Boolean(guiEnvironment.DISPLAY),
       });
       spawnCommand = sandbox.command;

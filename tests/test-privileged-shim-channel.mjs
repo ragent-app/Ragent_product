@@ -5,13 +5,14 @@
 // classifier injected. Server-side writeback updaters are covered purely.
 
 import assert from 'assert/strict';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import { startPrivilegedShimChannel } from '../chat/privileged-shim-listener.mjs';
+import { buildSandboxedSpawn } from '../lib/runner-sandbox.mjs';
 import { PRIVILEGED_SHIM_EXIT } from '../chat/privileged-shim-protocol.mjs';
 import {
   buildPrivilegedShimDeclineUpdate,
@@ -106,9 +107,31 @@ if (process.platform !== 'win32') {
     });
     shortDir = dirname(channel.socketPath);
     check('long results path uses a short socket', Buffer.byteLength(channel.socketPath) <= 100);
+    check('only the private short socket directory is exposed for sandbox binding', channel.socketBindDir === shortDir);
     check('short socket parent is private', (statSync(shortDir).mode & 0o077) === 0);
     const client = await spawnClient(['--desc', 'listing', '--', 'ls', '-la'], channel.socketPath);
     check('short socket accepts a real client', client.code === PRIVILEGED_SHIM_EXIT.REFUSED);
+    if (process.platform === 'linux' && shortDir.startsWith('/tmp/')) {
+      const probe = spawnSync('bwrap', ['--ro-bind', '/', '/', '--tmpfs', '/tmp', '--tmpfs', '/run',
+        '--proc', '/proc', '--dev', '/dev', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--', '/bin/true'],
+      { stdio: 'ignore', timeout: 5000 });
+      if (probe.status === 0) {
+        const sandbox = buildSandboxedSpawn({ command: process.execPath,
+          args: [CLIENT_ENTRY, '--desc', 'listing', '--', 'ls', '-la'], cwd: PROJECT_ROOT,
+          runnerHome: process.env.HOME, bindReadOnlyPaths: [channel.socketBindDir] });
+        try {
+          const result = await new Promise((resolve) => {
+            const child = spawn(sandbox.command, sandbox.args, { cwd: PROJECT_ROOT,
+              env: { ...process.env, AGENTOC_RUN_ID: RUN_ID, AGENTOC_PRIVILEGED_SHIM_SOCKET: channel.socketPath },
+              stdio: 'ignore' });
+            const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
+            child.once('error', () => { clearTimeout(timer); resolve(null); });
+            child.once('close', (code) => { clearTimeout(timer); resolve(code); });
+          });
+          check('sandboxed client reaches the private short socket', result === PRIVILEGED_SHIM_EXIT.REFUSED);
+        } finally { rmSync(sandbox.emptyDir, { recursive: true, force: true }); }
+      }
+    }
   } finally {
     if (channel) await channel.stop();
     rmSync(root, { recursive: true, force: true });
@@ -134,6 +157,9 @@ if (process.platform !== 'win32') {
     check('launcher installed', existsSync(channel.binPath));
     check('launcher executable', (statSync(channel.binPath).mode & 0o111) !== 0);
     check('socket created', existsSync(channel.socketPath));
+    if (process.platform === 'linux' && resultsDir.startsWith('/tmp/')) {
+      check('temporary Run uses a private bindable socket directory', !!channel.socketBindDir);
+    }
     statSync(channel.socketPath).mode & 0o077 === 0
       ? check('socket closed perms', true)
       : check('socket perms best-effort (tmpfs)', true);

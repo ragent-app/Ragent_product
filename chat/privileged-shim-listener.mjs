@@ -17,7 +17,7 @@
 // onto the Run record asynchronously after the client command has returned.
 
 import { chmod, mkdir, mkdtemp, rm, rmdir, writeFile } from 'fs/promises';
-import { delimiter, join } from 'path';
+import { delimiter, join, resolve } from 'path';
 import { createServer } from 'net';
 import { tmpdir } from 'os';
 
@@ -128,11 +128,22 @@ export async function startPrivilegedShimChannel({
 
   let socketPath = join(baseDir, 'shim.sock');
   let shortSocketDir = '';
-  // sockaddr_un is limited to 104 bytes on macOS and 108 on Linux. Instance
-  // paths may be arbitrarily long, so use a private temporary directory when
-  // the normal per-Run location cannot fit. mkdtemp creates it mode 0700.
-  if (process.platform !== 'win32' && Buffer.byteLength(socketPath) > 100) {
-    let prefix = join(tmpdir(), 'ragent-shim-');
+  // sockaddr_un is limited to 104 bytes on macOS and 108 on Linux. A Linux
+  // sandbox also masks /tmp, /run and control-plane roots. In either case use
+  // a private directory that can be bound into the sandbox without exposing
+  // the Run results directory. mkdtemp creates it mode 0700.
+  const resolvedSocketPath = resolve(socketPath);
+  const masked = process.platform === 'linux' && ['/tmp', '/run', '/etc/agentoc', '/var/lib/agentoc/config'].some(
+    (root) => resolvedSocketPath === root || resolvedSocketPath.startsWith(`${root}/`),
+  );
+  if (process.platform !== 'win32' && (Buffer.byteLength(socketPath) > 100 || masked)) {
+    const temporaryRoot = resolve(tmpdir());
+    // Bubblewrap hides these control-plane roots after other binds; a socket
+    // created inside either root would disappear again inside the sandbox.
+    const hidden = ['/etc/agentoc', '/var/lib/agentoc/config'].some(
+      (root) => temporaryRoot === root || temporaryRoot.startsWith(`${root}/`),
+    );
+    let prefix = join(hidden ? '/tmp' : temporaryRoot, 'ragent-shim-');
     if (Buffer.byteLength(`${prefix}XXXXXX/shim.sock`) > 100) prefix = '/tmp/ragent-shim-';
     shortSocketDir = await mkdtemp(prefix);
     socketPath = join(shortSocketDir, 'shim.sock');
@@ -144,6 +155,9 @@ export async function startPrivilegedShimChannel({
     binDir,
     binPath,
     socketPath,
+    // Only this fresh, private directory may be made visible to a provider
+    // sandbox; the full results directory contains other Run credentials.
+    socketBindDir: shortSocketDir,
     closed: false,
   };
   const timeoutBudgetMs = Math.max(1_000, resolveShimTimeoutMs(timeoutMs));
