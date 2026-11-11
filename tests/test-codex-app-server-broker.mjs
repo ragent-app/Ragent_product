@@ -59,6 +59,8 @@ const fakeUpstreamPath = join(root, 'fake-upstream.mjs');
 const socketPath = codexAppServerBrokerSocketPath(home);
 const fakeUpstream = `
   let nextThread = 0;
+  let nextApproval = 10000;
+  const approvals = new Map();
   let buffer = '';
   process.stdin.on('data', (chunk) => {
     buffer += chunk.toString();
@@ -66,6 +68,11 @@ const fakeUpstream = `
     while ((index = buffer.indexOf('\\n')) >= 0) {
       const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
       let message; try { message = JSON.parse(line); } catch { continue; }
+      if (!message.method && approvals.has(message.id)) {
+        const threadId = approvals.get(message.id); approvals.delete(message.id);
+        process.stdout.write(JSON.stringify({ method: 'approval/result', params: { threadId, decision: message.result.decision } }) + '\\n');
+        continue;
+      }
       if (message.method === 'initialize') {
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
       } else if (message.method === 'model/list') {
@@ -100,6 +107,13 @@ const fakeUpstream = `
         process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
         process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id } } }) + '\\n');
       } else if (message.method === 'turn/start') {
+        if (message.params.input[0].text === 'approval') {
+          const approvalId = nextApproval++;
+          approvals.set(approvalId, message.params.threadId);
+          process.stdout.write(JSON.stringify({ id: approvalId, method: 'item/commandExecution/requestApproval', params: { threadId: message.params.threadId } }) + '\\n');
+          process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+          continue;
+        }
         process.stdout.write(JSON.stringify({ method: 'turn/started', params: { threadId: message.params.threadId } }) + '\\n');
         process.stdout.write(JSON.stringify({ method: 'item/agentMessage/delta', params: { threadId: message.params.threadId, delta: message.params.input[0].text } }) + '\\n');
         process.stdout.write(JSON.stringify({ method: 'turn/completed', params: { threadId: message.params.threadId, turn: { status: 'completed' } } }) + '\\n');
@@ -221,6 +235,36 @@ async function runProxy(text) {
 }
 
 await Promise.all([runProxy('one'), runProxy('two')]);
+
+async function startApprovalProxy() {
+  const proxy = startProxy();
+  proxy.send({ method: 'initialize', id: 0, params: {} });
+  await proxy.next();
+  proxy.send({ method: 'thread/start', id: 1, params: { cwd: root } });
+  const messages = [await proxy.next(), await proxy.next()];
+  const threadId = messages.find((message) => message.method === 'thread/started').params.thread.id;
+  return { proxy, threadId };
+}
+
+const [left, right] = await Promise.all([startApprovalProxy(), startApprovalProxy()]);
+for (const item of [left, right]) item.proxy.send({ method: 'turn/start', id: 2, params: { threadId: item.threadId, input: [{ type: 'text', text: 'approval' }] } });
+const [leftMessages, rightMessages] = await Promise.all([
+  Promise.all([left.proxy.next(), left.proxy.next()]),
+  Promise.all([right.proxy.next(), right.proxy.next()]),
+]);
+const leftRequest = leftMessages.find((message) => message.method === 'item/commandExecution/requestApproval');
+const rightRequest = rightMessages.find((message) => message.method === 'item/commandExecution/requestApproval');
+assert.equal(leftRequest.params.threadId, left.threadId);
+assert.equal(rightRequest.params.threadId, right.threadId);
+// A response from another client must not answer this thread's request.
+right.proxy.send({ id: leftRequest.id, result: { decision: 'wrong-client' } });
+left.proxy.send({ id: leftRequest.id, result: { decision: 'left' } });
+right.proxy.send({ id: rightRequest.id, result: { decision: 'right' } });
+const [leftResult, rightResult] = await Promise.all([left.proxy.next(), right.proxy.next()]);
+assert.equal(leftResult.params.decision, 'left');
+assert.equal(rightResult.params.decision, 'right');
+left.proxy.child.kill('SIGTERM');
+right.proxy.child.kill('SIGTERM');
 
 // The broker is intentionally persistent across Runs; this test owns it and
 // removes it explicitly so the detached child cannot outlive the test.

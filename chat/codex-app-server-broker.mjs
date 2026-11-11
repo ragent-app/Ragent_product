@@ -302,6 +302,9 @@ function runBroker() {
   const clients = new Set();
   const threadOwners = new Map();
   const pending = new Map();
+  // Server-initiated requests use a separate id namespace from client
+  // requests. Keep the original upstream id for the eventual response.
+  const pendingServerRequests = new Map();
   const pendingThreadClients = [];
   let nextRequestId = 10_000;
   let upstreamReady = false;
@@ -347,11 +350,26 @@ function runBroker() {
 
   const handleUpstreamMessage = (message) => {
     if (!message || typeof message !== 'object') return;
-    if (message.id === BROKER_INTERNAL_INITIALIZE_ID) {
+    const serverRequest = typeof message.method === 'string' && isRequest(message);
+    if (!serverRequest && message.id === BROKER_INTERNAL_INITIALIZE_ID) {
       upstreamReady = !message.error;
       return;
     }
-    if (isRequest(message) && pending.has(message.id)) {
+    if (serverRequest) {
+      const client = threadOwners.get(readThreadId(message));
+      if (!client || client.destroyed) {
+        try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32000, message: 'No connected owner for this thread' } })}\n`); } catch {}
+        return;
+      }
+      const clientRequestId = `agentoc-server-${nextRequestId++}`;
+      pendingServerRequests.set(clientRequestId, { client, upstreamId: message.id });
+      if (!sendClient(client, { ...message, id: clientRequestId })) {
+        pendingServerRequests.delete(clientRequestId);
+        try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32000, message: 'Thread owner disconnected' } })}\n`); } catch {}
+      }
+      return;
+    }
+    if (!message.method && isRequest(message) && pending.has(message.id)) {
       const request = pending.get(message.id);
       pending.delete(message.id);
       const threadId = readResultThreadId(message);
@@ -435,6 +453,13 @@ function runBroker() {
       return;
     }
     if (message.method === 'initialized') return;
+    if (!message.method && isRequest(message)) {
+      const request = pendingServerRequests.get(message.id);
+      if (!request || request.client !== client) return;
+      pendingServerRequests.delete(message.id);
+      try { upstream?.stdin?.write(`${JSON.stringify({ ...message, id: request.upstreamId })}\n`); } catch {}
+      return;
+    }
     if (!upstreamReady || !upstream?.stdin?.writable) {
       if (isRequest(message)) sendClient(client, { id: message.id, error: { code: -32000, message: 'Codex broker upstream is not ready' } });
       return;
@@ -481,6 +506,11 @@ function runBroker() {
       }
       for (const [id, request] of pending) {
         if (request.client === client) pending.delete(id);
+      }
+      for (const [id, request] of pendingServerRequests) {
+        if (request.client !== client) continue;
+        pendingServerRequests.delete(id);
+        try { upstream?.stdin?.write(`${JSON.stringify({ id: request.upstreamId, error: { code: -32000, message: 'Thread owner disconnected' } })}\n`); } catch {}
       }
     });
   };
