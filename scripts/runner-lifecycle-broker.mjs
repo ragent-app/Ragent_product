@@ -443,6 +443,7 @@ export async function readLifecycleSystemdUnitState(unitName, { execFileImpl = e
       '--property=LoadState',
       '--property=ActiveState',
       '--property=MainPID',
+      '--property=User',
       unitName,
     ], { timeout: 2_000, maxBuffer: 64 * 1024 });
     const values = Object.fromEntries(String(stdout || '')
@@ -454,6 +455,7 @@ export async function readLifecycleSystemdUnitState(unitName, { execFileImpl = e
       loadState: values.LoadState || 'unknown',
       activeState: values.ActiveState || 'unknown',
       pid: Number.isInteger(pid) && pid > 0 ? pid : null,
+      user: values.User || '',
     };
   } catch {
     return { loadState: 'not-found', activeState: 'inactive', pid: null };
@@ -502,8 +504,21 @@ async function launchLifecycleRunnerUnlocked(runId, {
   const normalizedAttempt = normalizeLaunchAttempt(launchAttempt);
   const resolvedUnitName = trimString(unitName)
     || buildDetachedRunnerUnitName(normalized, { launchAttempt: normalizedAttempt });
+  const resolvedServiceUser = serviceUser || await resolveRunnerUser();
+  const resolvedServiceGroup = serviceGroup || await resolveRunnerGroup(resolvedServiceUser);
+  const runnerOwnership = await resolveRunnerOwnershipImpl(resolvedServiceUser, resolvedServiceGroup);
+  if (!Number.isSafeInteger(runnerOwnership?.uid) || runnerOwnership.uid <= 0) {
+    const error = new Error('Cannot launch or reuse a Run without a verified non-root runner identity');
+    error.code = 'RUNNER_IDENTITY_INVALID';
+    throw error;
+  }
   const existingUnit = await readUnitStateImpl(resolvedUnitName, { execFileImpl });
   if (['active', 'activating', 'reloading'].includes(existingUnit.activeState)) {
+    if (trimString(existingUnit.user) !== resolvedServiceUser) {
+      const error = new Error('Cannot reuse a Run owned by a different or unknown systemd user');
+      error.code = 'RUNNER_IDENTITY_INVALID';
+      throw error;
+    }
     return {
       pid: existingUnit.pid,
       unitName: resolvedUnitName,
@@ -523,14 +538,6 @@ async function launchLifecycleRunnerUnlocked(runId, {
       && ['inactive', 'failed'].includes(existingUnit.activeState)) {
     const error = new Error(`Runner unit ${resolvedUnitName} is still loaded after exit`);
     error.code = 'RUNNER_UNIT_DRAINING';
-    throw error;
-  }
-  const resolvedServiceUser = serviceUser || await resolveRunnerUser();
-  const resolvedServiceGroup = serviceGroup || await resolveRunnerGroup(resolvedServiceUser);
-  const runnerOwnership = await resolveRunnerOwnershipImpl(resolvedServiceUser, resolvedServiceGroup);
-  if (!Number.isSafeInteger(runnerOwnership?.uid) || runnerOwnership.uid <= 0) {
-    const error = new Error('Cannot launch a Run without a verified non-root runner identity');
-    error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
   }
   const resolvedServiceHome = serviceHome || await resolveServiceHome(resolvedServiceUser);

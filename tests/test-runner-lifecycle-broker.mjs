@@ -460,8 +460,9 @@ try {
     serviceUser: 'svc',
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
     launchAttempt: 1,
-    readUnitStateImpl: async () => ({ loadState: 'loaded', activeState: 'active', pid: 45678 }),
+    readUnitStateImpl: async () => ({ loadState: 'loaded', activeState: 'active', pid: 45678, user: 'svc' }),
     grantWorkspaceAccessImpl: async () => {
       throw new Error('active unit must be returned before creating another access grant');
     },
@@ -473,6 +474,13 @@ try {
   assert.equal(reused.pid, 45678);
   assert.equal(reused.unitName, 'agentoc-runner-run_reuse12345-a1');
   assert.equal(reused.launchAttempt, 1);
+  for (const user of ['root', '']) {
+    await assert.rejects(() => launchLifecycleRunner('run_reusebad', {
+      serviceUser: 'svc', serviceGroup: 'svc',
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      readUnitStateImpl: async () => ({ loadState: 'loaded', activeState: 'active', pid: 45678, user }),
+    }), error => error.code === 'RUNNER_IDENTITY_INVALID');
+  }
 
   let concurrentPreflightCount = 0;
   let concurrentSystemdRunCount = 0;
