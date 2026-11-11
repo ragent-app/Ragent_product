@@ -271,6 +271,8 @@ DESKTOP_ROOT="$STAGE/opt/agentoc/Desktop"
 mkdir -p "$DESKTOP_BUILD" "$DESKTOP_ROOT"
 install -m 0644 "$ROOT/desktop/package.json" "$ROOT/desktop/package-lock.json" "$DESKTOP_BUILD/"
 (cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" npm ci --no-audit --no-fund)
+# Electron 44 exposes an explicit installer rather than an npm lifecycle hook.
+(cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" node node_modules/electron/install.js)
 cp -a "$DESKTOP_BUILD/node_modules/electron/dist/." "$DESKTOP_ROOT/"
 mv "$DESKTOP_ROOT/electron" "$DESKTOP_ROOT/ragent"
 DESKTOP_MACHINE="$(od -An -tx1 -j18 -N2 "$DESKTOP_ROOT/ragent" | tr -d ' \n')"
