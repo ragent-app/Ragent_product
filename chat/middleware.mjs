@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import { isAuthenticated, issueSession, setCookie, hasValidLocalWebCookie } from '../lib/auth.mjs';
+import { isAuthenticated, issueSession, setCookie, hasValidOwnerSessionCookie } from '../lib/auth.mjs';
 import { FILE_ASSET_ALLOWED_ORIGINS, LOCAL_WEB_AUTH_ENABLED } from '../lib/config.mjs';
 import { shouldUseLocalWebAuth, isTunneledRequest } from '../lib/windows-local-runtime.mjs';
 
@@ -114,7 +114,7 @@ export async function requireAuth(req, res) {
     accept: req?.headers?.accept,
     viaTunnel: isTunneledRequest(req),
   })) {
-    if (hasValidLocalWebCookie(req)) return true;
+    if (hasValidOwnerSessionCookie(req)) return true;
     const sessionToken = await issueSession({ role: 'owner', authMethod: 'local_web' });
     if (sessionToken) {
       if (!res.headersSent) res.setHeader('Set-Cookie', setCookie(sessionToken));
