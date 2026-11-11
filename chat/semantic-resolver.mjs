@@ -29,6 +29,7 @@ import {
   sha256Hex,
 } from './semantic-operation.mjs';
 import { resolveWindowsSemanticContext } from './semantic-resolver-windows.mjs';
+import { inspectMacosPackagePreview } from './macos-package-preview.mjs';
 import { computeSelfProtectionFacts, deriveAgentoCSelfProtectionRoots } from './self-protection.mjs';
 
 export const RESOLVER_PLATFORM = 'linux';
@@ -993,10 +994,18 @@ export async function resolveSemanticContext({ operation, target, caller = {}, o
   }
   if (nonEmptyString(t.platform) && !RESOLVER_SUPPORTED_PLATFORMS.includes(t.platform)) {
     const provider = options.fsProvider || createDefaultFsProvider();
-    return {
-      ...resolveUnresolvableTarget(t, 'platform:unsupported', options, provider),
-      evidence: callerEvidence(caller),
-    };
+    const unresolved = resolveUnresolvableTarget(t, 'platform:unsupported', options, provider);
+    // Diagnostic only: the platform stays unsupported and scope uncomputed.
+    // Never let a caller's platform claim run a macOS inspection on another OS.
+    if (process.platform === 'darwin' && t.platform === 'darwin'
+        && t.kind === 'package_artifact' && t.manager === 'installer') {
+      const preview = await inspectMacosPackagePreview({
+        file: t.root,
+        projectRoot: trustedContext(options).projectRoot,
+      });
+      unresolved.resourceSnapshot.macosPackagePreview = preview;
+    }
+    return { ...unresolved, evidence: callerEvidence(caller) };
   }
   if (t.platform === 'win32') {
     return resolveWindowsSemanticContext({ operation, target: t, caller, options });
