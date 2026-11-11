@@ -663,4 +663,27 @@ fi
 # apply the private native-runtime modes once more after all package actions.
 converge_provider_runtime_access
 
+# Complete the legacy global-command migration after dpkg has finished
+# retiring the old package's files. Do not alter unrelated diversions or a
+# nonempty diversion target, including after an interrupted upgrade.
+for tool in codex claude; do
+  command_path="/usr/bin/$tool"
+  diverted_path="/usr/lib/agentoc/legacy-global-$tool"
+  marker="/etc/agentoc/.legacy-global-$tool-diversion"
+  [ -f "$marker" ] || continue
+  [ "$(cat "$marker")" = "$diverted_path" ] || continue
+  current_diversion="$(dpkg-divert --truename "$command_path")"
+  if [ "$current_diversion" = "$diverted_path" ] \
+      && [ "$(dpkg-divert --listpackage "$command_path")" = LOCAL ]; then
+    if [ -e "$diverted_path" ] || [ -L "$diverted_path" ]; then
+      echo "Leaving $command_path diversion in place: $diverted_path exists" >&2
+    else
+      dpkg-divert --local --no-rename --remove --divert "$diverted_path" "$command_path"
+      rm -f "$marker"
+    fi
+  elif [ "$current_diversion" = "$command_path" ]; then
+    rm -f "$marker"
+  fi
+done
+
 exit 0

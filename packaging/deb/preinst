@@ -247,4 +247,29 @@ NODE
   fi
 fi
 
+# Older packages owned generic /usr/bin links. If an owner replaced one with a
+# different file, dpkg would otherwise remove that file during this upgrade.
+# A temporary no-rename diversion makes dpkg retire only its old package path,
+# without moving or modifying the owner's command.
+if [ "${1:-}" = upgrade ]; then
+  for tool in codex claude; do
+    command_path="/usr/bin/$tool"
+    diverted_path="/usr/lib/agentoc/legacy-global-$tool"
+    if [ ! -e "$command_path" ] && [ ! -L "$command_path" ]; then continue; fi
+    if [ -L "$command_path" ] && [ "$(readlink "$command_path")" = "/opt/agentoc/runtime/$tool" ]; then continue; fi
+    current_diversion="$(dpkg-divert --truename "$command_path")"
+    # A pre-existing diversion already protects the original path. Never
+    # change a diversion owned by another package or administrator.
+    if [ "$current_diversion" != "$command_path" ]; then continue; fi
+    if [ -e "$diverted_path" ] || [ -L "$diverted_path" ]; then
+      echo "Cannot safely preserve $command_path: $diverted_path already exists" >&2
+      exit 1
+    fi
+    # Root-owned marker lets postinst distinguish our temporary diversion
+    # from an administrator's independent one, including after interruption.
+    ( umask 077; printf '%s\n' "$diverted_path" > "/etc/agentoc/.legacy-global-$tool-diversion" )
+    dpkg-divert --local --no-rename --add --divert "$diverted_path" "$command_path"
+  done
+fi
+
 exit 0

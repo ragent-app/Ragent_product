@@ -6,6 +6,24 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "${1:-}" = purge ]; then
+  # Finish an interrupted global-command diversion only when our marker and
+  # exact empty target match; keep unrelated administrator diversions intact.
+  for tool in codex claude; do
+    command_path="/usr/bin/$tool"
+    diverted_path="/usr/lib/agentoc/legacy-global-$tool"
+    marker="/etc/agentoc/.legacy-global-$tool-diversion"
+    [ -f "$marker" ] || continue
+    [ "$(cat "$marker")" = "$diverted_path" ] || continue
+    current_diversion="$(dpkg-divert --truename "$command_path")"
+    if [ "$current_diversion" = "$diverted_path" ] \
+        && [ "$(dpkg-divert --listpackage "$command_path")" = LOCAL ] \
+        && [ ! -e "$diverted_path" ] && [ ! -L "$diverted_path" ]; then
+      dpkg-divert --local --no-rename --remove --divert "$diverted_path" "$command_path"
+      rm -f "$marker"
+    elif [ "$current_diversion" = "$command_path" ]; then
+      rm -f "$marker"
+    fi
+  done
   rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d /etc/systemd/system/agentoc-runner-supervisor.socket.d
   rm -f /etc/agentoc/service-user /etc/agentoc/auth-secret /etc/agentoc/initial-credentials
   rmdir /etc/agentoc >/dev/null 2>&1 || true
