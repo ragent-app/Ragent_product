@@ -89,6 +89,13 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.match(searchAfterCd, /SEARCH_TOKEN=public/);
   assert.doesNotMatch(searchAfterCd, /SEARCH_TOKEN=private|\.env|\.ssh/i);
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && rg SEARCH_TOKEN .env'), state }), null);
+  for (const command of ['git -C ../outside status --short', 'git -C ../outside diff HEAD -- readme.txt']) {
+    const git = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state });
+    assert.ok(git, `${riskMode}: ${command}`);
+    if (command.includes(' diff ')) assert.match(git.updatedInput.command, /diff --no-ext-diff --no-textconv/);
+  }
+  assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('git -C ../outside diff HEAD -- .env'), state }), null);
+  assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('git -C ../outside push --force'), state }), null);
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && rm -rf /'), state }), null);
   for (const tool of ['Glob', 'Grep', 'LS', 'List']) {
     const search = { providerMethod: 'can_use_tool', kind: 'permissions', params: { tool_name: tool, input: { pattern: 'readme' } } };
@@ -117,6 +124,8 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.ok(outsideCurrent, `${riskMode}: cwd outside workspace must not be categorically rejected`);
   assert.match(execFileSync(bash, ['--noprofile', '--norc', '-c', outsideCurrent.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true }), /PRIVATE_OUTSIDE/);
   const psApproval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'PowerShell', input: { command } } });
+  const psGit = await buildClaudeWindowsRelativeOperationBridge({ approval: psApproval('git -C ../outside status --short'), state });
+  assert.ok(psGit, `${riskMode}: PowerShell Git outside workspace`);
   for (const tool of ['Bash', 'PowerShell']) {
     const make = tool === 'Bash' ? approval : psApproval;
     for (const command of ['npm install', 'npm install react', 'pip install requests', 'python -m pip install requests', 'npm ci', 'npm run dev', 'npm run custom-task -- --fix', 'python -m pytest -q', 'node script.js --help', 'go test ./...', 'cargo check', 'dotnet build', 'gradle test', 'mvn verify', 'npx tsc --noEmit', 'git add .', "git commit -m 'message'"]) {

@@ -544,18 +544,26 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
             && (element.kind !== 'parameter' || element.argumentType || element.value != null))) {
         return { complete: false, actions, reason: 'Git arguments are dynamic or come from pipeline input' };
       }
-      const args = staticExternalArguments(entry.elements);
+      let args = staticExternalArguments(entry.elements); let gitContext = context; let directoryActions = [];
+      if (args?.[0] === '-C' && args.length >= 3) {
+        const checked = await analyzeWindowsFileChanges([{ path: args[1], kind: 'read' }], context, { fsApi });
+        const target = checked.actions?.[0];
+        if (!checked.complete || checked.actions.length !== 1 || !target?.directory || target.protected || !target.target?.actual)
+          return { complete: false, actions: [...actions, ...(checked.actions || [])], reason: 'Git working directory needs review' };
+        gitContext = { ...context, cwd: target.target.actual };
+        directoryActions = checked.actions; args = args.slice(2);
+      }
       const readonly = args && analyzeWindowsReadOnlyGit([entry.name, ...args]);
       const local = !readonly && args && analyzeWindowsLocalGit([entry.name, ...args]);
       if (local && context.requireAbsolutePaths) return { complete: false, actions, reason: 'working directory is not attested' };
       const git = readonly || local;
       if (!git) return { complete: false, actions, reason: 'Git command is not on the read-only allowlist' };
       if (git.pathspecs) {
-        const files = await analyzeWindowsFileChanges(git.pathspecs.map(value => ({ path: value, kind: 'read', recursive: true })), context, { fsApi });
+        const files = await analyzeWindowsFileChanges(git.pathspecs.map(value => ({ path: value, kind: 'read', recursive: true })), gitContext, { fsApi });
         if (!files.complete) return { ...files, actions: [...actions, ...git.actions, ...files.actions] };
         git.actions.push(...files.actions);
       }
-      actions.push(...git.actions);
+      actions.push(...directoryActions, ...git.actions);
       continue;
     }
     if (FILTERS.has(program)) {

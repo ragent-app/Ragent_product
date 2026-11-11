@@ -169,6 +169,8 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
     ? segment.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`)
     : params.tool_name === 'Bash' && /^\s*curl(?:\.exe)?(?=\s|$)/i.test(segment)
       ? segment.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
+    : /^\s*git(?:\.exe)?\s+-C\s+(?:'[^']*'|"[^"]*"|[^\s]+)\s+(?:diff|show)(?=\s|$)/i.test(segment)
+      ? segment.replace(/^(\s*git(?:\.exe)?\s+-C\s+(?:'[^']*'|"[^"]*"|[^\s]+)\s+(?:diff|show))(?=\s|$)/i, '$1 --no-ext-diff --no-textconv')
     : /^\s*git(?:\.exe)?\s+(?:diff|show)(?=\s|$)/i.test(segment)
       ? segment.replace(/^(\s*git(?:\.exe)?\s+(?:diff|show))(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : segment;
   const compound = params.tool_name === 'Bash' ? splitLiteralCompound(original) : null;

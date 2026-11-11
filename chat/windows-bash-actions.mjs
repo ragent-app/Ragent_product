@@ -292,19 +292,30 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     return withOutput({ complete: true, actions: [workspaceTask] });
   }
   if (['git', 'git.exe'].includes(String(program).toLowerCase())) {
-    const readonly = analyzeWindowsReadOnlyGit(words);
-    const local = readonly ? null : analyzeWindowsLocalGit(words);
+    let gitWords = words; let gitContext = context; let directoryActions = [];
+    if (words[1] === '-C' && words.length >= 4) {
+      const directory = gitBashPath(words[2]);
+      if (!directory) return { complete: false, actions: [], reason: 'Git working directory cannot be resolved' };
+      const checked = await analyzeFiles([{ path: directory, kind: 'read' }], context);
+      const target = checked.actions?.[0];
+      if (!checked.complete || checked.actions.length !== 1 || !target?.directory || target.protected || !target.target?.actual)
+        return { complete: false, actions: checked.actions || [], reason: 'Git working directory needs review' };
+      gitContext = { ...context, cwd: target.target.actual };
+      directoryActions = checked.actions; gitWords = [words[0], ...words.slice(3)];
+    }
+    const readonly = analyzeWindowsReadOnlyGit(gitWords);
+    const local = readonly ? null : analyzeWindowsLocalGit(gitWords);
     if (local && context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
     const analyzed = readonly || local;
     if (analyzed?.pathspecs) {
       const paths = analyzed.pathspecs.map(gitBashPath);
       if (paths.some(value => !value)) return { complete: false, actions: [], reason: 'Git path cannot be resolved' };
-      const files = await analyzeFiles(paths.map(value => ({ path: value, kind: 'read', recursive: true })), context);
+      const files = await analyzeFiles(paths.map(value => ({ path: value, kind: 'read', recursive: true })), gitContext);
       if (!files.complete) return files;
       analyzed.actions.push(...files.actions);
     }
     return analyzed
-      ? withOutput(analyzed)
+      ? withOutput({ ...analyzed, actions: [...directoryActions, ...analyzed.actions] })
       : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };
   }
   if ((['pwd', 'true', 'false', ':'].includes(program) && words.length === 1) || program === 'echo') {
