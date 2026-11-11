@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">この録音は処理済みです。文字起こしが必要な場合は新しく録音してください。</string>
     <string name="voice_cloud_outcome_uncertain">結果を確認できません。この録音は再送信されず、利用時間が予約状態のまま残る場合があります。再試行前に使用量を確認してください。</string>
     <string name="voice_cloud_sign_in_required">クラウド音声認識を使うには Ragent アカウントにログインしてください。</string>
-    <string name="voice_cloud_upload_disclosure">音声を文字起こしするため、この録音はスマートフォンから Ragent Accounts 経由で ElevenLabs に送信されます。Ragent は録音や文字起こしをデータベースに保存しませんが、再試行のため文字起こしをサーバーメモリに短時間保持する場合があります。Ragent はアカウントに関連付けられた使用量とリクエスト記録を通常最長90日間保持し、未確定のプロバイダー処理は確認が終わるまでより長く保持する場合があります。選択の最小限の記録は最長5年間（アカウント削除後も）保持します。ElevenLabs は適用される規約やアカウント設定に基づき、これらの内容を保持したりサービス改善に使用したりする場合があります。認識テキストは下書きにのみ追加され、自動送信されません。</string>
+    <string name="voice_cloud_upload_disclosure">音声を文字起こしするため、この録音はスマートフォンから Ragent Accounts 経由で OpenAI 音声文字起こし API に送信されます。Ragent は録音や文字起こしをデータベースに保存しませんが、再試行のため文字起こしをサーバーメモリに短時間保持する場合があります。Ragent はアカウントに関連付けられた使用量とリクエスト記録を通常最長90日間保持し、未確定のプロバイダー処理は確認が終わるまでより長く保持する場合があります。選択の最小限の記録は最長5年間（アカウント削除後も）保持します。OpenAI は、API 利用者が明示的にオプトインしない限り、API データをモデルのトレーニングや改善に使用しないと説明しています。録音は OpenAI の API 規約とデータ管理方針に基づいて処理されます。認識テキストは下書きにのみ追加され、自動送信されません。</string>
     <string name="voice_cloud_consent_title">クラウド音声認識を許可しますか？</string>
     <string name="voice_cloud_consent_accept">許可して続行</string>
     <string name="voice_cloud_consent_decline">今は許可しない</string>
@@ -42,7 +42,7 @@
     <string name="voice_no_computers">PC をペア設定すると、ここで Whisper を管理できます。</string>
     <string name="voice_install">インストール</string>
     <string name="voice_installing">インストール中…</string>
-    <string name="voice_privacy_note">自動モードではセッションの PC またはこの端末で音声を処理します。クラウド音声認識は音声を Ragent Accounts と ElevenLabs に送信します。Ragent は音声や文字起こしを永続保存しませんが、ElevenLabs はデータポリシーに基づいて保持する場合があります。結果は下書きにのみ追加されます。</string>
+    <string name="voice_privacy_note">自動モードではセッションの PC またはこの端末で音声を処理します。クラウド音声認識は音声を Ragent Accounts と OpenAI に送信します。OpenAI は、API 利用者がオプトインしない限り、API データをモデルのトレーニングに使用しないと説明しています。Ragent は音声や文字起こしを永続保存せず、結果は下書きにのみ追加されます。</string>
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">タスクを停止</string>
     <string name="decision_select_one">1つ選択</string>

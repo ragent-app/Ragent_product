@@ -31,33 +31,35 @@ async function readProviderJson(response) {
   throw Error('Provider response body is unavailable');
 }
 
-export function createElevenLabsScribeTranscriber({
+export function createOpenAiTranscriber({
   apiKey,
   fetchImpl = globalThis.fetch,
-  modelId = 'scribe_v2',
-  baseUrl = 'https://api.elevenlabs.io',
-  zeroRetention = false,
+  modelId = 'gpt-transcribe',
+  baseUrl = 'https://api.openai.com',
   timeoutMs = 30_000,
 } = {}) {
   const key = typeof apiKey === 'string' ? apiKey.trim() : '';
-  if (!key || typeof fetchImpl !== 'function') throw new TypeError('ElevenLabs credentials and fetch are required');
+  if (!key || typeof fetchImpl !== 'function') throw new TypeError('OpenAI credentials and fetch are required');
 
-  return async function transcribe(audio, { signal: requestSignal } = {}) {
+  return async function transcribe(audio, { signal: requestSignal, requestId = '' } = {}) {
     const form = new FormData();
     form.set('file', new Blob([audio], { type: 'audio/wav' }), 'recording.wav');
-    form.set('model_id', modelId);
-    form.set('timestamps_granularity', 'none');
-    form.set('tag_audio_events', 'false');
-    const url = new URL('/v1/speech-to-text', baseUrl);
-    // Omitting language_code intentionally enables Scribe's automatic language detection.
-    // Keep the provider retention mode explicit; Zero Retention is enterprise-only.
-    url.searchParams.set('enable_logging', zeroRetention ? 'false' : 'true');
+    form.set('model', modelId);
+    // Deliberately omit a language hint so the model detects the spoken language.
+    const url = new URL('/v1/audio/transcriptions', baseUrl);
+
+    const headers = { Authorization: `Bearer ${key}` };
+    if (typeof requestId === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(requestId)) {
+      // This opaque Ragent request ID contains no account/device information and
+      // lets OpenAI support locate a request if the response is lost.
+      headers['X-Client-Request-Id'] = requestId;
+    }
 
     let response;
     try {
       response = await fetchImpl(url, {
         method: 'POST',
-        headers: { 'xi-api-key': key },
+        headers,
         body: form,
         redirect: 'error',
         signal: requestSignal
@@ -88,8 +90,9 @@ export function createElevenLabsScribeTranscriber({
     }
     const text = typeof body?.text === 'string' ? body.text.trim() : '';
     if (!text || text.length > 20_000) throw providerError('asr_provider_invalid_response', 502);
-    const languageCode = typeof body.language_code === 'string'
-      && /^[A-Za-z0-9-]{2,16}$/.test(body.language_code) ? body.language_code : null;
+    const rawLanguage = body?.language ?? body?.language_code;
+    const languageCode = typeof rawLanguage === 'string' && /^[A-Za-z0-9-]{2,16}$/.test(rawLanguage)
+      ? rawLanguage : null;
     return { text, languageCode };
   };
 }

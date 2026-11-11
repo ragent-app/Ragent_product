@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">这段录音已处理。如仍需转写，请重新录音。</string>
     <string name="voice_cloud_outcome_uncertain">无法确认识别结果。这段录音不会再次发送，用量可能仍处于预留状态；请先查看用量再重试。</string>
     <string name="voice_cloud_sign_in_required">请登录 Ragent 账号后使用云端识别。</string>
-    <string name="voice_cloud_upload_disclosure">为了转写语音，本次录音会从手机经由 Ragent Accounts 发送给 ElevenLabs。Ragent 不会将录音或转写文本存入数据库；为支持重试，转写文本可能在服务器内存中短暂保留。Ragent 会将与你账号关联的用量和请求记录通常保留最多 90 天；尚未确认的服务商请求可能保留更久。你的选择记录最多保留五年，即使删除账号也会保留。ElevenLabs 可能按适用条款和账号设置保留这些内容，或将其用于改进服务。识别文字只写入草稿，不会自动发送。</string>
+    <string name="voice_cloud_upload_disclosure">为了转写语音，本次录音会从手机经由 Ragent Accounts 发送至 OpenAI 音频转写 API。Ragent 不会将录音或转写文本存入数据库；为支持重试，转写文本可能在服务器内存中短暂保留。Ragent 通常会将与你账号关联的用量和请求记录保留最多 90 天；尚未确认的服务商请求可能保留更久。你的选择记录最多保留五年，即使删除账号也会保留。OpenAI 说明，除非 API 客户明确选择加入，否则 API 数据不会用于训练或改进其模型；OpenAI 会依据其 API 条款和数据控制政策处理录音。识别文字只写入草稿，不会自动发送。</string>
     <string name="voice_cloud_consent_title">允许使用云端语音识别？</string>
     <string name="voice_cloud_consent_accept">允许并继续</string>
     <string name="voice_cloud_consent_decline">暂不允许</string>
@@ -42,7 +42,7 @@
     <string name="voice_no_computers">配对电脑后，可在这里管理其 Whisper 服务。</string>
     <string name="voice_install">安装</string>
     <string name="voice_installing">正在安装…</string>
-    <string name="voice_privacy_note">自动模式会在会话电脑或本机处理音频。云端识别会将音频发送至 Ragent Accounts 和 ElevenLabs。Ragent 不会持久保存音频或转写文本；ElevenLabs 可能按其数据政策保留这些内容。识别结果只写入草稿。</string>
+    <string name="voice_privacy_note">自动模式会在会话电脑或本机处理音频。云端识别会将音频发送至 Ragent Accounts 和 OpenAI 进行转写。OpenAI 说明，除非 API 客户选择加入，否则 API 数据不会用于训练模型。Ragent 不会持久保存音频或转写文本；识别结果只写入草稿。</string>
     <string name="settings_sharing_agents">分享与智能助手</string>
     <string name="run_dock_stop">停止</string>
     <string name="run_dock_stop_description">停止任务</string>

@@ -31,7 +31,7 @@ import { ACCOUNT_ASR_MAX_AUDIO_BYTES } from './asr-audio.mjs';
 import { ACCOUNT_ASR_MODEL } from './asr-policy.mjs';
 import { createAccountAsrPostgresStore } from './asr-postgres-store.mjs';
 import { createAccountAsrService } from './asr-service.mjs';
-import { createElevenLabsScribeTranscriber } from './asr-elevenlabs.mjs';
+import { createOpenAiTranscriber } from './asr-openai.mjs';
 import { buildHarnessPolicyDocument } from '../lib/harness-policy.mjs';
 import {
   createGoogleIdTokenVerifier as createNativeGoogleIdTokenVerifier,
@@ -194,8 +194,7 @@ export async function createAccountsServer({
   asrRepository,
   asrTranscribe,
   asrEnabled: asrEnabledOverride,
-  elevenLabsApiKey,
-  asrZeroRetention,
+  openAiApiKey,
   asrTimeoutMs,
   accountDeletionEnabled = false,
   googleNativeClientIds = resolveGoogleNativeServerClientIds(),
@@ -263,17 +262,16 @@ export async function createAccountsServer({
     audit,
     clock,
   });
-  const asrKey = text(elevenLabsApiKey ?? process.env.ELEVENLABS_API_KEY);
+  const asrKey = text(openAiApiKey ?? process.env.OPENAI_API_KEY);
   const asrEnabled = (asrEnabledOverride ?? process.env.AGENTOC_ACCOUNTS_ASR_ENABLED === '1') && Boolean(asrKey);
   let asrService = injectedAsrService || null;
   let asrStatus = asrService ? (asrService.enabled ? 'ready' : 'disabled') : 'unconfigured';
   if (!asrService && typeof stateStore.accountAsrContext === 'function') {
     const repository = asrRepository || createAccountAsrPostgresStore({ ...stateStore.accountAsrContext(), clock });
-    const transcribe = asrTranscribe || (asrKey ? createElevenLabsScribeTranscriber({
+    const transcribe = asrTranscribe || (asrKey ? createOpenAiTranscriber({
       apiKey: asrKey,
       fetchImpl,
       modelId: ACCOUNT_ASR_MODEL,
-      zeroRetention: (asrZeroRetention ?? process.env.AGENTOC_ACCOUNTS_ASR_ZERO_RETENTION) === '1',
       timeoutMs: Number(asrTimeoutMs ?? process.env.AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS) || 30_000,
     }) : undefined);
     asrService = createAccountAsrService({ authenticateAccount: broker.authenticateAccountAsr,

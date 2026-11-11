@@ -4,7 +4,7 @@ This addendum updates the canonical [central Accounts ASR plan](account-asr-serv
 
 **Updated:** 2026-11-10
 
-**State:** consent enforcement and the expanded v2 Android disclosure are deployed with Accounts migration 040. The provider key remains blank and cloud ASR stays disabled at the owner's direction. The public privacy notice was published on 2026-11-10. Oracle health/readiness and synthetic PostgreSQL quota/settlement verification passed; a real vendor call and signed-in account transcription remain pending.
+**State (2026-11-11):** provider selection is OpenAI `gpt-transcribe`; consent now uses `account-asr-openai-transcription-v3` and requires fresh acceptance after the recipient change. Accounts migration 042 allows the new policy version. The public privacy notice now names OpenAI (static release `ragent-asr-openai-privacy-20261111-88334c8`, page SHA-256 `88334c8b94c43073dfedb41bbc797319f3abf2ca1a80a1100dcdd9b887ac430a`). The API key remains absent and cloud ASR stays disabled.
 
 ## Product contract
 
@@ -19,13 +19,13 @@ sequenceDiagram
     participant Phone as Android app
     participant Accounts as Central Ragent Accounts
     participant DB as Accounts PostgreSQL
-    participant ASR as ElevenLabs Scribe
+    participant ASR as OpenAI GPT-Transcribe
     Phone->>Accounts: POST consent (account bearer, disclosure version)
     Accounts->>DB: append accepted/revoked event
     Phone->>Phone: record WAV only after acceptance
     Phone->>Accounts: POST WAV + idempotency key
     Accounts->>DB: verify current consent and reserve monthly usage
-    Accounts->>ASR: forward audio; omit language to auto-detect
+Accounts->>ASR: POST completed WAV; omit language hint for auto-detection
     ASR-->>Accounts: transcript and detected language
     Accounts->>DB: settle account usage and provider cost
     Accounts-->>Phone: text, detected language, duration
@@ -44,7 +44,7 @@ The implemented contract is:
 - GET /v1/owner-auth/account/asr/usage reports the current account/month quota and the latest consent state. It remains useful while the provider is disabled.
 - POST /v1/owner-auth/account/asr/transcriptions accepts bounded audio/wav bytes and an idempotency key. A current accepted consent for the disclosure version is required before any provider call, including a cached-result replay.
 
-Migration 039_account_asr_consent creates an append-only consent event ledger. It stores only account and device identifiers, disclosure version, accepted/revoked action and timestamp, and retains each event for five years. It has no foreign key, so account deletion cannot silently erase evidence of the user's choice. Migration 040 permits both v1 and v2 evidence records; Accounts only treats an acceptance of the current v2 disclosure as valid, so a prior v1 acceptance requires fresh consent. The account-deletion receipt names this minimal retained evidence. A bounded maintenance job deletes events after their retention deadline.
+Migration 039_account_asr_consent creates an append-only consent event ledger. It stores only account and device identifiers, disclosure version, accepted/revoked action and timestamp, and retains each event for five years. It has no foreign key, so account deletion cannot silently erase evidence of the user's choice. Migration 042 permits v1, v2, and OpenAI v3 evidence records; Accounts only treats an acceptance of the current v3 disclosure as valid, so every prior acceptance requires fresh consent. The account-deletion receipt names this minimal retained evidence. A bounded maintenance job deletes events after their retention deadline.
 
 The exact disclosure version is part of the server and Android protocol. A changed recipient, purpose, retention promise, or material policy change must use a new version and require fresh consent.
 
@@ -52,14 +52,14 @@ The exact disclosure version is part of the server and Android protocol. A chang
 
 The voice-device picker can show cloud availability and remaining allowance. Choosing cloud fetches the latest account state. If there is no current acceptance, Android presents a localized prominent disclosure with Allow and continue and Not now; recording does not start until the server confirms acceptance. A revoke action is available from the voice-device picker. Declining or revoking returns a cloud-selected session to automatic/local routing. If the server state is unknown, stale, or unreachable, cloud recording fails closed.
 
-The v2 disclosure is localized in English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It explains the audio recipient, Ragent's brief in-memory retry cache, account-linked usage/request records retained up to 90 days (longer for unresolved provider outcomes), five-year consent evidence, the provider's potential retention and service-improvement use under its terms/settings, and draft-only result handling.
+The v3 disclosure is localized in English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, and Spanish. It explains the OpenAI audio-transcription recipient, Ragent's brief in-memory retry cache, account-linked usage/request records retained up to 90 days (longer for unresolved provider outcomes), five-year consent evidence, OpenAI's API data-use statement and applicable account controls, and draft-only result handling.
 
 ## Security, privacy, and store-review gates
 
-1. Keep AGENTOC_ACCOUNTS_ASR_ENABLED=0 and leave ELEVENLABS_API_KEY unset until the owner obtains a key and confirms the actual provider account's terms, data-use preference, and retention settings. The current adapter explicitly sends `enable_logging=true`; the owner must set and verify any training/data-use opt-out available for that account.
-2. Before provider traffic is enabled, recheck that the published privacy notice matches the final provider account terms and settings. It must explain recording upload, Ragent Accounts and ElevenLabs roles, provider retention/settings, usage records, and the five-year minimal consent evidence retained after account deletion. The notice was published on 2026-11-10; its release evidence and wording are recorded in [the publication record](account-asr-public-disclosure-draft.md). Update and republish it if the actual provider account terms require different wording.
-3. Reconcile the Play Console Data safety form and prominent disclosure with the final provider contract. Use [the Data Safety owner-review worksheet](account-asr-play-data-safety-review.md); do not carry forward a “not shared” answer unless the actual ElevenLabs agreement and account settings support it or another documented Play exception applies.
-4. Do not claim zero retention unless the provider account is eligible for it and the actual request is verified. The ElevenLabs API retains/logs content in standard mode and its applicable terms may allow service-improvement use; the owner's key is currently absent, so there has been no live provider test.
+1. Keep `AGENTOC_ACCOUNTS_ASR_ENABLED=0` and leave `OPENAI_API_KEY` unset until the owner obtains a key and confirms the actual API organization's data controls and terms. OpenAI states API data is not used to train or improve models unless the API customer explicitly opts in; confirm that the intended API project has not opted in.
+2. The updated privacy notice is published at <https://support.agentoncloud.com/privacy/>. Verify it remains accurate before enabling provider traffic, especially the actual OpenAI API project settings and the disclosed Ragent retention periods. See [the published notice record](account-asr-public-disclosure-draft.md).
+3. Reconcile the Play Console Data safety form with the OpenAI data flow. Use [the Data Safety owner-review worksheet](account-asr-play-data-safety-review.md); do not submit unreviewed sharing/collection answers.
+4. Do not claim a retention configuration beyond what the actual OpenAI API project and applicable terms establish. The owner's key is absent, so no live provider test or account-setting verification has occurred.
 5. Keep request logs free of audio, transcript, bearer credential, and API key. Preserve account-scoped quotas and provider-cost reporting in Accounts only.
 
 ## Release and acceptance sequence
@@ -78,8 +78,8 @@ The v2 disclosure is localized in English, Simplified Chinese, Traditional Chine
 | Provider secret and feature gate | Key absent and feature flag off by owner instruction |
 | Consent ledger and enforce-before-forward gate | Implemented; migration 040 applied and matching Accounts release active on Oracle |
 | Android explicit consent, decline, revoke, and localized disclosure | Implemented; debug build, unit tests, and seven-locale device test passed |
-| Public privacy-policy and Play Console alignment | Privacy notice published; Play Console Data Safety still needs owner review against actual provider terms |
-| Real ElevenLabs transcription and cost measurement | Cannot be performed until a key is configured securely |
+| Public privacy-policy and Play Console alignment | OpenAI privacy notice published; Play Console Data Safety still needs owner review against actual provider terms |
+| OpenAI transcription and cost measurement | Cannot be performed until an API key is configured securely |
 
 ## Latest deployment and verification — 2026-11-10
 
@@ -91,4 +91,10 @@ From the real Windows 11 Pro host (Build 22631), public readiness returned 200 w
 
 An isolated PostgreSQL scratch-database test verified v1/v2 consent storage, shared cross-device monthly quota under concurrent reservations, the two-operation cap, and successful settlement from reserved to used time. A separate disposable-schema test exercised migration 041, both reconciliation outcomes, idempotent repeat resolution, quota/cost accounting, and account-deletion cascade; it dropped the schema afterward. These tests do not claim a valid signed-in Ragent account or provider call.
 
-The public privacy notice is published. The Play Console Data Safety form still needs owner review/update against the actual provider account terms before enablement. The real ElevenLabs transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.
+At this historical 2026-11-10 checkpoint, the public notice still named ElevenLabs. It was replaced on 2026-11-11; see the deployment record below. The Play Console Data Safety form still needs owner review/update against the actual API project settings. The real OpenAI transcription, provider cost measurement, and signed-in Android round trip remain pending until a key is available and securely provisioned.
+
+## OpenAI provider switch — 2026-11-11
+
+The central adapter now calls `POST /v1/audio/transcriptions` with `gpt-transcribe`, sends no language hint, uses server-side `OPENAI_API_KEY`, and attaches the opaque Ragent idempotency request ID as `X-Client-Request-Id` for support correlation. The provider price estimate is versioned at $0.0045/minute. The Android disclosure and server consent policy both use v3, so an old ElevenLabs acceptance cannot authorize an OpenAI upload. Migration 042 preserves prior v1/v2 events while allowing the new version. The feature remains disabled because the API key has intentionally not been requested or provisioned.
+
+The public privacy notice was updated on 2026-11-11 in static release `ragent-asr-openai-privacy-20261111-88334c8`; the published page SHA-256 is `88334c8b94c43073dfedb41bbc797319f3abf2ca1a80a1100dcdd9b887ac430a`. Only `site/privacy/index.html` changed. The previous release `ragent-asr-privacy-20261110-7b9da59` and receipt backup `/var/www/agentoc-support/deployment.json.before-openai-asr-privacy-20261111` remain available for rollback. Public HTTPS verification returned 200 and confirmed the OpenAI recipient, disabled status, and removal of the old ElevenLabs wording; Caddy configuration and process were unchanged.

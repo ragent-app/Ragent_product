@@ -2,7 +2,7 @@ package com.andysagent.agentoc.core.protocol
 
 import kotlinx.serialization.Serializable
 
-const val ACCOUNT_ASR_CONSENT_POLICY_VERSION = "account-asr-third-party-processing-v2"
+const val ACCOUNT_ASR_CONSENT_POLICY_VERSION = "account-asr-openai-transcription-v3"
 
 @Serializable
 data class AccountAsrTranscriptionDto(

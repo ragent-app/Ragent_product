@@ -6,7 +6,7 @@
 
 Android 可以查看和管理每台已配对电脑的 Whisper。Windows 电脑尚未安装 Whisper 时，用户可以直接从 Android 发起安装。远程安装成功后，该电脑的 Whisper 默认启用并启动，所以这台电脑上的聊天会自动改由电脑处理。Windows Ragent 安装器首次安装时默认选择 Whisper；保留选项就安装并启用服务，用户可以取消。
 
-识别结果只填入聊天输入框草稿。用户检查后自行发送；语音流程不自动发送消息。自动模式只使用本机或已配对电脑，不会把音频静默上传到云端。用户可以在语音处理设备中明确选择中央 Accounts 云端识别；该路线会把音频发送给 Ragent Accounts 和 ElevenLabs，并在选择前说明第三方数据处理政策。
+识别结果只填入聊天输入框草稿。用户检查后自行发送；语音流程不自动发送消息。自动模式只使用本机或已配对电脑，不会把音频静默上传到云端。用户可以在语音处理设备中明确选择中央 Accounts 云端识别；该路线会把音频发送给 Ragent Accounts 和 OpenAI Transcription API，并在选择前说明第三方数据处理政策。
 
 ## 控制项与默认值
 
@@ -36,7 +36,7 @@ Android 语音设置提供手机本机识别开关，并逐台显示已配对电
 - **自动（默认）**：优先使用当前聊天所属电脑的已启用 Whisper；不可用时使用已开启且可用的 Android 本机识别。
 - **此手机**：固定使用 Android 本机识别。若本机识别关闭或不可用，说明原因，不转交电脑或网络识别。
 - **某台电脑**：固定使用所选配对电脑的 Whisper，可选择会话所属电脑或其他已配对电脑。电脑必须连接、已安装并启用 Whisper；不可用时提示用户，不暗中切换设备。
-- **Accounts 云端识别**：固定把本次录音发给中央 Ragent Accounts，由 Accounts 持有的服务端供应商密钥调用 ElevenLabs Scribe v2。选择后在录音前展示上传及供应商数据政策说明；额度不足、未登录或服务关闭时提示原因，不回退到其他设备。识别完成后只写入草稿。
+- **Accounts 云端识别**：固定把本次录音发给中央 Ragent Accounts，由 Accounts 持有的服务端 OpenAI API 密钥调用 `gpt-transcribe`。选择后在录音前展示上传及供应商数据政策说明；额度不足、未登录或服务关闭时提示原因，不回退到其他设备。识别完成后只写入草稿。
 
 菜单、录音按钮和录音状态应标明实际路线，例如“自动 · 工作电脑”“工作电脑 · 正在启动”“此手机 · 不可用”。未安装 Whisper 的电脑不能作为识别目标；用户可从语音设置发起安装。
 
@@ -102,7 +102,7 @@ Windows 语音路由接收 Android 录好的 WAV 并直接交给 Whisper；Windo
 
 电脑路线：Android 采集单声道 16 kHz WAV，限制音频时长和大小，通过现有认证连接发送到所选 Ragent；Ragent 将音频交给只监听 `127.0.0.1` 的 Whisper，再将文字返回 Android。选择另一台电脑时，必须使用那台电脑自己的已认证连接。
 
-手机路线：音频交给 Android 本机识别器，并禁用网络回退。云端路线：Android 将 0.5–20 秒的单声道 16 kHz PCM16 WAV 直接通过 Accounts API 上传到中央 Accounts 服务；服务核验 RAC 账号设备凭据和 entitlement 后调用 ElevenLabs，再把转写返回 Android。API 密钥只在中央服务受保护的环境文件中。云端路线只在用户主动选择时使用。三种路线都只把转写写入草稿，不自动发送。
+手机路线：音频交给 Android 本机识别器，并禁用网络回退。云端路线：Android 将 0.5–20 秒的单声道 16 kHz PCM16 WAV 直接通过 Accounts API 上传到中央 Accounts 服务；服务核验 RAC 账号设备凭据和 entitlement 后调用 OpenAI Transcription API，再把转写返回 Android。API 密钥只在中央服务受保护的环境文件中。云端路线只在用户主动选择时使用。三种路线都只把转写写入草稿，不自动发送。
 
 Ragent 接口保持窄范围：
 
@@ -144,6 +144,6 @@ Windows Ragent 0.0.42 已在测试机升级；正式命名的 Windows x64 setup 
 
 Windows 本机识别也完成真实运行时验收：用仓库 pinned 的 whisper.cpp v1.9.5 x64 运行时和 SHA-256 已验证的 `ggml-base-q5_1.bin` 启动隔离的 loopback Whisper HTTP 服务，经服务的 `/inference` 以显式 `ko` 识别同一 WAV，返回完整句子“안녕하세요. 휴대폰에서 한국어 음성 인식을 시험합니다.”。测试未重启或改写正在运行的 Ragent 服务，临时运行目录已删除。Windows 安装器的运行时固定包校验通过；本轮 Android 电脑端远程配对到 Windows 服务的端到端传输尚未在真实配对会话里复验，Node 路由/鉴权与语种传递测试覆盖了该接口边界。正常产品路线不依赖 Windows 扬声器输出。Node 本地语音测试 19 项通过；Android Workbench/app 单测和 debug APK/AndroidTest 构建通过。
 
-中央 Accounts 云端识别是单独的显式路线，不改变上述本地自动路由。服务端代码和 Android 云端选项已加入主线实现；需要将 Accounts 版本部署、应用迁移 038，并在服务端安全配置 ElevenLabs API key 后才能完成真实供应商验收。未配置 key 时功能保持关闭。云端供应商默认数据保留方式受其隐私政策约束；仅在供应商账号符合资格时才可开启零保留模式。
+中央 Accounts 云端识别是单独的显式路线，不改变上述本地自动路由。服务端代码和 Android 云端选项已加入主线实现；Accounts 新版本与迁移 042 部署后，可用 key 缺失状态验收关闭链路。公开隐私政策现已更新为 OpenAI Transcription API；真实供应商验收仍需安全配置 key，并按实际组织/项目设置完成 Google Play Data Safety 审核。未配置 key 时功能保持关闭。
 
 补充的荣耀实机 QA 包验收（2026-11-08）：修正配对状态诊断测试的 JUnit 返回类型后，AndroidTest APK 构建成功；100 语种 native 目录一致性、7 种界面语言资源和 Honor 扬声器→麦克风→手机 Whisper→草稿回调测试再次通过（60.861 秒）。诊断测试只写汇总计数、不输出设备标识；独立 QA 包报告 `paired=0`，因此这轮无法用 QA 包验证手机到 Windows Ragent 的授权传输。本轮 ADB 安装目标仅为 `.opensource` QA 包，未对正式包执行安装命令。Windows 服务端语音识别与 Android 侧均已分别实测，但它们之间的真实配对链路仍未验收，不能据此宣称整条电脑识别路线已经通过。

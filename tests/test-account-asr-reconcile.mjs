@@ -9,7 +9,7 @@ let usageReservedMs = 1000;
 const requestRow = {
   account_id: 'acct_reconcile_test', request_id: 'request-1234567890', period_start: '2026-11-01',
   state: 'unknown', audio_duration_ms: 1000, reserved_duration_ms: 1000,
-  provider_name: 'elevenlabs', model_id: 'scribe_v2', price_version: ACCOUNT_ASR_PRICE_VERSION,
+  provider_name: 'openai', model_id: 'gpt-transcribe', price_version: ACCOUNT_ASR_PRICE_VERSION,
   error_code: 'asr_provider_outcome_unknown', provider_cost_microusd: null,
   created_at: new Date('2026-11-10T00:00:00.000Z'), updated_at: new Date('2026-11-10T00:01:00.000Z'),
 };

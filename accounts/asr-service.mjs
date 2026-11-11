@@ -211,7 +211,7 @@ export function createAccountAsrService({
       }
       try {
         if (signal?.aborted) throw Object.assign(asrError('asr_request_cancelled', 499), { definitelyNotProcessed: true });
-        const result = await transcribe(audio, { signal });
+        const result = await transcribe(audio, { signal, requestId });
         const text = typeof result?.text === 'string' ? result.text.trim() : '';
         if (!text || text.length > 20_000) throw asrError('asr_provider_invalid_response', 502);
         const languageCode = safeLanguageCode(result.languageCode);

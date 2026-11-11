@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { createElevenLabsScribeTranscriber } from '../accounts/asr-elevenlabs.mjs';
+import { createOpenAiTranscriber } from '../accounts/asr-openai.mjs';
 import { ACCOUNT_ASR_MAX_AUDIO_BYTES, inspectAccountAsrWav } from '../accounts/asr-audio.mjs';
 import { accountAsrPeriodStart, estimateAccountAsrCostMicroUsd, resolveAccountAsrLimits,
   ACCOUNT_ASR_CONSENT_POLICY_VERSION } from '../accounts/asr-policy.mjs';
@@ -104,37 +104,36 @@ const wrongRate = wav(); wrongRate.writeUInt32LE(8_000, 24);
 assert.throws(() => inspectAccountAsrWav(wrongRate), { code: 'asr_audio_format_unsupported' });
 assert.equal(ACCOUNT_ASR_MAX_AUDIO_BYTES, 1024 * 1024);
 assert.equal(resolveAccountAsrLimits('free', { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '2' }).monthlyLimitMs, 120_000);
-assert.equal(estimateAccountAsrCostMicroUsd(1000), 62);
+assert.equal(estimateAccountAsrCostMicroUsd(1000), 75);
 assert.equal(accountAsrPeriodStart(Date.UTC(2026, 10, 10)), '2026-11-01');
 
 let providerRequest;
-const transcriber = createElevenLabsScribeTranscriber({
-  apiKey: 'server-key-for-test', modelId: 'scribe_v2', baseUrl: 'https://provider.example',
+const transcriber = createOpenAiTranscriber({
+  apiKey: 'server-key-for-test', modelId: 'gpt-transcribe', baseUrl: 'https://provider.example',
   fetchImpl: async (url, options) => {
     providerRequest = { url: String(url), options };
-    return { ok: true, status: 200, json: async () => ({ text: ' 안녕하세요 ', language_code: 'ko' }) };
+    return { ok: true, status: 200, json: async () => ({ text: ' 안녕하세요 ', language: 'ko' }) };
   },
 });
-const providerResult = await transcriber(audio);
+const providerResult = await transcriber(audio, { requestId: 'openai-request-test-1234' });
 assert.deepEqual(providerResult, { text: '안녕하세요', languageCode: 'ko' });
-assert.equal(providerRequest.options.headers['xi-api-key'], 'server-key-for-test');
+assert.equal(providerRequest.options.headers.Authorization, 'Bearer server-key-for-test');
+assert.equal(providerRequest.options.headers['X-Client-Request-Id'], 'openai-request-test-1234');
 assert.equal(providerRequest.options.redirect, 'error', 'provider redirects must not receive the server key');
-assert.equal(providerRequest.options.body.get('model_id'), 'scribe_v2');
-assert.equal(providerRequest.options.body.get('language_code'), null, 'Scribe should auto-detect the language');
-assert.equal(providerRequest.url, 'https://provider.example/v1/speech-to-text?enable_logging=true');
+assert.equal(providerRequest.options.body.get('model'), 'gpt-transcribe');
+assert.equal(providerRequest.options.body.get('language'), null, 'OpenAI should auto-detect the language');
+assert.equal(providerRequest.url, 'https://provider.example/v1/audio/transcriptions');
 assert.equal(providerRequest.options.body.get('file').type, 'audio/wav');
 assert.equal(providerRequest.options.signal instanceof AbortSignal, true, 'provider calls need a bounded cancellation signal');
-const zeroRetentionProvider = createElevenLabsScribeTranscriber({ apiKey: 'test', zeroRetention: true,
-  baseUrl: 'https://provider.example', fetchImpl: async (url) => {
-assert.equal(new URL(url).searchParams.get('enable_logging'), 'false');
-    return { ok: true, status: 200, json: async () => ({ text: 'ok' }) };
-  } });
-await zeroRetentionProvider(audio);
-const rejectedProvider = createElevenLabsScribeTranscriber({ apiKey: 'test', baseUrl: 'https://provider.example',
+const rejectedProvider = createOpenAiTranscriber({ apiKey: 'test', baseUrl: 'https://provider.example',
   fetchImpl: async () => ({ ok: false, status: 503, body: { cancel: async () => {} } }) });
 await assert.rejects(() => rejectedProvider(audio), { code: 'asr_provider_outcome_unknown', statusCode: 503,
   definitelyNotProcessed: false });
-const oversizedProviderResponse = createElevenLabsScribeTranscriber({ apiKey: 'test', baseUrl: 'https://provider.example',
+const rejectedAudioProvider = createOpenAiTranscriber({ apiKey: 'test', baseUrl: 'https://provider.example',
+  fetchImpl: async () => ({ ok: false, status: 422, body: { cancel: async () => {} } }) });
+await assert.rejects(() => rejectedAudioProvider(audio), { code: 'asr_provider_rejected_audio', statusCode: 502,
+  definitelyNotProcessed: true });
+const oversizedProviderResponse = createOpenAiTranscriber({ apiKey: 'test', baseUrl: 'https://provider.example',
   fetchImpl: async () => ({ ok: true, status: 200,
     body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(256 * 1024 + 1)); controller.close(); } }) }) });
 await assert.rejects(() => oversizedProviderResponse(audio), { code: 'asr_provider_invalid_response', statusCode: 502 });
@@ -197,7 +196,7 @@ assert.ok(reserveUsageLock >= 0 && reserveUsageLock < reserveRequestLock,
 
 postgresCalls.length = 0;
 await pgStore.settle({ accountId: 'acct_pg_test', requestId: 'pg-request-1234567890', periodStart: '2026-11-01',
-  billableDurationMs: 1000, costMicroUsd: 62, latencyMs: 120, languageCode: 'en' });
+  billableDurationMs: 1000, costMicroUsd: 75, latencyMs: 120, languageCode: 'en' });
 const settleUsageLock = postgresCalls.findIndex((call) => call.sql.includes('select account_id from account_asr_usage') && call.sql.includes('for update'));
 const settleRequestLock = postgresCalls.findIndex((call) => call.sql.includes('select reserved_duration_ms, period_start::text as period_start from account_asr_requests'));
 assert.ok(settleUsageLock >= 0 && settleUsageLock < settleRequestLock,
@@ -240,6 +239,7 @@ assert.ok(postgresCalls.some((call) => call.sql.includes("to_regclass('account_a
 const repository = new MemoryRepository();
 const auditEvents = [];
 let providerCalls = 0;
+let providerRequestId;
 const credential = `rac_${'x'.repeat(40)}`;
 const priorConsentRepository = new MemoryRepository();
 await priorConsentRepository.setConsent({ accountId: 'acct_prior_consent', deviceId: 'adev_prior_consent',
@@ -255,14 +255,31 @@ const priorConsentService = createAccountAsrService({
 });
 await assert.rejects(() => priorConsentService.transcribeAudio({ credential,
   requestId: 'prior-consent-request-1234', audio }), { code: 'asr_consent_required', statusCode: 403 });
-assert.equal(priorConsentProviderCalls, 0, 'v1 acceptance cannot authorize the expanded v2 disclosure');
+assert.equal(priorConsentProviderCalls, 0, 'v1 acceptance cannot authorize the current v3 disclosure');
+const elevenLabsConsentRepository = new MemoryRepository();
+await elevenLabsConsentRepository.setConsent({ accountId: 'acct_elevenlabs_consent', deviceId: 'adev_old_provider',
+  action: 'accepted', policyVersion: 'account-asr-third-party-processing-v2' });
+let elevenLabsConsentProviderCalls = 0;
+const elevenLabsConsentService = createAccountAsrService({
+  authenticateAccount: async () => ({ accountId: 'acct_elevenlabs_consent', deviceId: 'adev_old_provider', plan: 'free' }),
+  repository: elevenLabsConsentRepository,
+  transcribe: async () => { elevenLabsConsentProviderCalls += 1; return { text: 'must not run' }; },
+  enabled: true,
+  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  clock: () => Date.UTC(2026, 10, 10),
+});
+await assert.rejects(() => elevenLabsConsentService.transcribeAudio({ credential,
+  requestId: 'old-provider-consent-1234', audio }), { code: 'asr_consent_required', statusCode: 403 });
+assert.equal(elevenLabsConsentProviderCalls, 0, 'the old ElevenLabs acceptance cannot authorize an OpenAI upload');
 const asrService = createAccountAsrService({
   authenticateAccount: async ({ credential: presented }) => {
     if (presented !== credential) throw Object.assign(new Error('auth'), { code: 'owner_auth_account_credential_invalid', statusCode: 401 });
     return { accountId: 'acct_asr_test', deviceId: 'adev_asr_test', plan: 'free' };
   },
   repository,
-  transcribe: async () => { providerCalls += 1; return { text: '测试语音', languageCode: 'zh' }; },
+  transcribe: async (_audio, { requestId: suppliedRequestId } = {}) => {
+    providerCalls += 1; providerRequestId = suppliedRequestId; return { text: '测试语音', languageCode: 'zh' };
+  },
   enabled: true,
   env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
   clock: () => Date.UTC(2026, 10, 10),
@@ -280,10 +297,11 @@ assert.equal(acceptedConsent.policyVersion, ACCOUNT_ASR_CONSENT_POLICY_VERSION);
 const result = await asrService.transcribeAudio({ credential, requestId, audio });
 assert.equal(result.text, '测试语音');
 assert.equal(providerCalls, 1);
+assert.equal(providerRequestId, requestId, 'the opaque idempotency ID must reach the provider adapter for support correlation');
 const pricedRequest = repository.requests.get(`acct_asr_test:${requestId}`);
-assert.equal(pricedRequest.providerName, 'elevenlabs');
-assert.equal(pricedRequest.modelId, 'scribe_v2');
-assert.equal(pricedRequest.priceVersion, 'elevenlabs-scribe-v2-2026-11');
+assert.equal(pricedRequest.providerName, 'openai');
+assert.equal(pricedRequest.modelId, 'gpt-transcribe');
+assert.equal(pricedRequest.priceVersion, 'openai-gpt-transcribe-2026-11');
 assert.equal(pricedRequest.policyVersion, 'account-asr-monthly-v1');
 assert.deepEqual(await asrService.transcribeAudio({ credential, requestId, audio }), result);
 assert.equal(providerCalls, 1, 'idempotent replay must not call the provider twice');
@@ -303,7 +321,7 @@ assert.equal(usage.remainingMs, 59_000);
 assert.equal(usage.consent.granted, true);
 assert.equal(Object.hasOwn(usage, 'providerCostMicroUsd'), false,
   'customer usage must not expose Ragent provider cost');
-assert.equal(repository.usage.get('acct_asr_test:2026-11-01').providerCostMicroUsd, 62,
+assert.equal(repository.usage.get('acct_asr_test:2026-11-01').providerCostMicroUsd, 75,
   'estimated provider cost remains available to Accounts operations but is not returned to clients');
 assert.deepEqual(await asrService.runMaintenance(), { unknownOutcomes: 0, expiredReservations: 0,
   purgedRequests: 0, purgedConsentEvents: 0 });

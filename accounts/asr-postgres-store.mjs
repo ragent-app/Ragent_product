@@ -61,7 +61,7 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
   }
 
   async function reserve({ accountId, deviceId, requestId, periodStart, audioSha256,
-    audioBytes, audioDurationMs, monthlyLimitMs, providerName = 'elevenlabs', modelId = 'scribe_v2',
+    audioBytes, audioDurationMs, monthlyLimitMs, providerName = ACCOUNT_ASR_PROVIDER, modelId = ACCOUNT_ASR_MODEL,
     priceVersion, policyVersion, maxConcurrent = 2 }) {
     return transaction(async (client) => {
       await client.query(`insert into account_asr_usage (account_id, period_start)

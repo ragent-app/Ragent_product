@@ -17,7 +17,7 @@
     <string name="voice_cloud_retry_new_recording">이 녹음은 이미 처리되었습니다. 전사 결과가 더 필요하면 새로 녹음해 주세요.</string>
     <string name="voice_cloud_outcome_uncertain">결과를 확인할 수 없습니다. 이 녹음은 다시 전송하지 않으며 사용 시간이 예약 상태로 남을 수 있습니다. 다시 시도하기 전에 사용량을 확인하세요.</string>
     <string name="voice_cloud_sign_in_required">클라우드 인식을 사용하려면 Ragent 계정에 로그인하세요.</string>
-    <string name="voice_cloud_upload_disclosure">음성을 텍스트로 변환하기 위해 이 녹음은 휴대전화에서 Ragent Accounts를 거쳐 ElevenLabs로 전송됩니다. Ragent는 녹음이나 전사 내용을 데이터베이스에 저장하지 않지만 재시도를 위해 전사 내용을 서버 메모리에 잠시 보관할 수 있습니다. Ragent는 계정과 연결된 사용량 및 요청 기록을 일반적으로 최대 90일간 보관하며, 확인되지 않은 제공업체 요청 기록은 더 오래 보관될 수 있습니다. 선택 기록은 계정 삭제 후에도 최대 5년간 보관합니다. ElevenLabs는 적용되는 약관 및 계정 설정에 따라 이 콘텐츠를 보관하거나 서비스 개선에 사용할 수 있습니다. 인식된 텍스트는 초안에만 추가되며 자동 전송되지 않습니다.</string>
+    <string name="voice_cloud_upload_disclosure">음성을 텍스트로 변환하기 위해 이 녹음은 휴대전화에서 Ragent Accounts를 거쳐 OpenAI 오디오 전사 API로 전송됩니다. Ragent는 녹음이나 전사 내용을 데이터베이스에 저장하지 않지만 재시도를 위해 전사 내용을 서버 메모리에 잠시 보관할 수 있습니다. Ragent는 계정과 연결된 사용량 및 요청 기록을 일반적으로 최대 90일간 보관하며, 확인되지 않은 제공업체 요청 기록은 더 오래 보관될 수 있습니다. 선택 기록은 계정 삭제 후에도 최대 5년간 보관합니다. OpenAI는 API 고객이 명시적으로 동의하지 않는 한 API 데이터를 모델 학습이나 개선에 사용하지 않는다고 안내합니다. 녹음은 OpenAI API 약관과 데이터 관리 정책에 따라 처리됩니다. 인식된 텍스트는 초안에만 추가되며 자동 전송되지 않습니다.</string>
     <string name="voice_cloud_consent_title">클라우드 음성 인식을 허용할까요?</string>
     <string name="voice_cloud_consent_accept">허용하고 계속</string>
     <string name="voice_cloud_consent_decline">지금은 허용 안 함</string>
@@ -42,7 +42,7 @@
     <string name="voice_no_computers">컴퓨터를 페어링하면 여기에서 Whisper를 관리할 수 있습니다.</string>
     <string name="voice_install">설치</string>
     <string name="voice_installing">설치 중…</string>
-    <string name="voice_privacy_note">자동 모드에서는 세션 컴퓨터나 이 휴대폰에서 오디오를 처리합니다. 클라우드 인식은 오디오를 Ragent Accounts와 ElevenLabs로 전송합니다. Ragent는 오디오나 전사 내용을 영구 저장하지 않지만, ElevenLabs는 데이터 정책에 따라 보관할 수 있습니다. 결과는 초안에만 추가됩니다.</string>
+    <string name="voice_privacy_note">자동 모드에서는 세션 컴퓨터나 이 휴대폰에서 오디오를 처리합니다. 클라우드 인식은 오디오를 Ragent Accounts와 OpenAI로 전송합니다. OpenAI는 API 고객이 동의하지 않는 한 API 데이터를 모델 학습에 사용하지 않는다고 안내합니다. Ragent는 오디오나 전사 내용을 영구 저장하지 않으며 결과는 초안에만 추가됩니다.</string>
     <string name="run_dock_stop">중지</string>
     <string name="run_dock_stop_description">작업 중지</string>
     <string name="decision_select_one">하나 선택</string>

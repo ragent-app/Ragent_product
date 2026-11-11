@@ -29,13 +29,13 @@ class VoiceLocalizationTest {
     fun cloudVoiceDisclosureNamesRecipientRetentionAndDraftHandlingInEveryRagentUiLocale() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val expectedDisclosure = mapOf(
-            "en" to listOf("Ragent Accounts", "ElevenLabs", "does not store", "90 days", "improve its services", "five years", "draft only"),
-            "zh-CN" to listOf("Ragent Accounts", "ElevenLabs", "存入数据库", "90 天", "改进服务", "五年", "草稿"),
-            "zh-TW" to listOf("Ragent Accounts", "ElevenLabs", "不會將", "90 天", "改善服務", "五年", "草稿"),
-            "ja" to listOf("Ragent Accounts", "ElevenLabs", "データベースに保存しません", "90日間", "サービス改善", "5年間", "下書き"),
-            "ko" to listOf("Ragent Accounts", "ElevenLabs", "데이터베이스에 저장하지 않지만", "90일간", "서비스 개선", "5년간", "초안"),
-            "fr" to listOf("Ragent Accounts", "ElevenLabs", "ne stocke ni", "90 jours", "améliorer ses services", "cinq ans", "brouillon"),
-            "es" to listOf("Ragent Accounts", "ElevenLabs", "no guarda", "90 días", "mejorar sus servicios", "cinco años", "borrador"),
+            "en" to listOf("Ragent Accounts", "OpenAI", "does not store", "90 days", "not used to train", "five years", "draft only"),
+            "zh-CN" to listOf("Ragent Accounts", "OpenAI", "存入数据库", "90 天", "不会用于训练", "五年", "草稿"),
+            "zh-TW" to listOf("Ragent Accounts", "OpenAI", "不會將", "90 天", "不會用於訓練", "五年", "草稿"),
+            "ja" to listOf("Ragent Accounts", "OpenAI", "データベースに保存しません", "90日間", "トレーニング", "5年間", "下書き"),
+            "ko" to listOf("Ragent Accounts", "OpenAI", "데이터베이스에 저장하지 않지만", "90일간", "학습", "5년간", "초안"),
+            "fr" to listOf("Ragent Accounts", "OpenAI", "ne stocke ni", "90 jours", "ne sont pas utilisées pour entraîner", "cinq ans", "brouillon"),
+            "es" to listOf("Ragent Accounts", "OpenAI", "no guarda", "90 días", "no se utilizan para entrenar", "cinco años", "borrador"),
         )
         expectedDisclosure.forEach { (tag, markers) ->
             val localized = base.createConfigurationContext(

@@ -1,9 +1,9 @@
 export const ACCOUNT_ASR_POLICY_VERSION = 'account-asr-monthly-v1';
-export const ACCOUNT_ASR_CONSENT_POLICY_VERSION = 'account-asr-third-party-processing-v2';
-export const ACCOUNT_ASR_PROVIDER = 'elevenlabs';
-export const ACCOUNT_ASR_MODEL = 'scribe_v2';
-export const ACCOUNT_ASR_PRICE_VERSION = 'elevenlabs-scribe-v2-2026-11';
-export const ACCOUNT_ASR_PRICE_MICROUSD_PER_HOUR = 220_000;
+export const ACCOUNT_ASR_CONSENT_POLICY_VERSION = 'account-asr-openai-transcription-v3';
+export const ACCOUNT_ASR_PROVIDER = 'openai';
+export const ACCOUNT_ASR_MODEL = 'gpt-transcribe';
+export const ACCOUNT_ASR_PRICE_VERSION = 'openai-gpt-transcribe-2026-11';
+export const ACCOUNT_ASR_PRICE_MICROUSD_PER_HOUR = 270_000;
 
 const DEFAULT_MINUTES = Object.freeze({ free: 15, plus: 120, pro: 600 });
 
