@@ -12,6 +12,7 @@ import os
 import pathlib
 import re
 import secrets
+import signal
 import socket
 import stat
 import subprocess
@@ -1100,6 +1101,13 @@ def _test_asr_transcription(actor, data):
                f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n"
                "Content-Type: audio/wav\r\n\r\n").encode() + audio + f"\r\n--{boundary}--\r\n".encode()
     connection = http.client.HTTPSConnection("api.openai.com", 443, timeout=30)
+    old_handler = None
+    if hasattr(signal, "SIGALRM"):
+        old_handler = signal.getsignal(signal.SIGALRM)
+        def deadline_expired(_signum, _frame):
+            raise TimeoutError("ASR provider deadline expired")
+        signal.signal(signal.SIGALRM, deadline_expired)
+        signal.setitimer(signal.ITIMER_REAL, 35)
     try:
         connection.request("POST", "/v1/audio/transcriptions", body=payload, headers={
             "Authorization": "Bearer " + accounts["OPENAI_API_KEY"],
@@ -1120,6 +1128,9 @@ def _test_asr_transcription(actor, data):
         _audit(actor, "speech.cloud.test", "provider", "failed")
         raise
     finally:
+        if old_handler is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
         connection.close()
     _audit(actor, "speech.cloud.test", "provider", "success")
     return {"text": transcript.strip(), "durationMs": (frames * 1000) // rate, "scope": "provider-only"}
