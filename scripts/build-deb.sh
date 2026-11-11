@@ -212,7 +212,10 @@ printf 'Bundling Codex %s and Claude Code %s from %s\n' "$CODEX_VERSION" "$CLAUD
 # frozen runtime payload produced by stage-runtime-payload has no .git but
 # carries the full source identity in its own manifest.
 if [ -e "$ROOT/.git" ]; then
-  [ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+  SOURCE_STATUS="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
+    echo 'Unable to verify Debian source tree status.' >&2; exit 1;
+  }
+  [ -z "$SOURCE_STATUS" ] || {
     echo 'Debian packaging requires a clean committed source tree.' >&2; exit 1;
   }
   SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
@@ -582,8 +585,13 @@ while IFS= read -r package_name; do
 done < "$PROD_DIRECT_DEPENDENCY_LIST"
 
 if [ -e "$ROOT/.git" ]; then
-  [ "$(git -C "$ROOT" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] &&
-    [ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+  FINAL_SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)" || {
+    echo 'Unable to verify Debian source commit.' >&2; exit 1;
+  }
+  FINAL_SOURCE_STATUS="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
+    echo 'Unable to verify Debian source tree status.' >&2; exit 1;
+  }
+  [ "$FINAL_SOURCE_COMMIT" = "$SOURCE_COMMIT" ] && [ -z "$FINAL_SOURCE_STATUS" ] || {
       echo 'Source changed during packaging; refusing to publish the candidate.' >&2; exit 1;
     }
 fi

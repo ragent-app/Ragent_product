@@ -67,14 +67,23 @@ SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
 [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
   echo 'A full committed source identity is required for macOS packaging.' >&2; exit 1;
 }
-[ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+SOURCE_STATUS="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
+  echo 'Unable to verify macOS source tree status.' >&2; exit 1;
+}
+[ -z "$SOURCE_STATUS" ] || {
   echo 'macOS packaging requires a clean committed source tree.' >&2; exit 1;
 }
 SOURCE_SHORT="${SOURCE_COMMIT:0:8}"
 PKG_VERSION="$(node -p "require('$ROOT/package.json').version")"
 assert_source_unchanged() {
-  [ "$(git -C "$ROOT" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] &&
-    [ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+  local current status
+  current="$(git -C "$ROOT" rev-parse --verify HEAD)" || {
+    echo 'Unable to verify macOS source commit.' >&2; exit 1;
+  }
+  status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
+    echo 'Unable to verify macOS source tree status.' >&2; exit 1;
+  }
+  [ "$current" = "$SOURCE_COMMIT" ] && [ -z "$status" ] || {
       echo 'Source changed during macOS packaging; refusing to publish the candidate.' >&2; exit 1;
     }
 }
