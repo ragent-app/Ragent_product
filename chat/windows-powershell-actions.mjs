@@ -24,6 +24,8 @@ const BUILTIN_ALIASES = new Map([
 const FILTERS = new Set(['select-object', 'sort-object', 'format-table', 'measure-object', 'out-string', 'write-output', 'get-date', 'get-location', 'get-service', 'get-process', 'get-command']);
 const SAFE_FILTER_PARAMS = new Set(['first', 'last', 'skip', 'unique', 'property', 'descending', 'width', 'line', 'name', 'displayname', 'noenumerate', 'id', 'module', 'commandtype', 'all', 'listimported', 'includeusername', 'autosize']);
 const SAFE_FILTER_SWITCHES = new Set(['unique', 'descending', 'noenumerate', 'all', 'listimported', 'includeusername', 'autosize']);
+const WORKSPACE_SCRIPT_TASKS = new Set(['build', 'check', 'format:check', 'format-check', 'lint', 'test', 'test:ci', 'test:unit', 'typecheck', 'type-check']);
+const WORKSPACE_SCRIPT_RUNNERS = new Set(['npm', 'npm.cmd', 'npm.exe', 'pnpm', 'pnpm.cmd', 'pnpm.exe', 'yarn', 'yarn.cmd', 'yarn.exe', 'bun', 'bun.exe']);
 const GET_COMMAND_TYPES = new Set(['alias', 'function', 'filter', 'cmdlet', 'externalscript', 'application', 'script', 'configuration', 'all']);
 const FILE_PARAMS = new Set(['path', 'literalpath', 'destination', 'value', 'itemtype', 'name', 'recurse', 'force', 'raw', 'encoding', 'filter', 'include', 'exclude', 'confirm']);
 const SWITCHES = new Set(['recurse', 'force', 'raw', 'confirm']);
@@ -79,6 +81,133 @@ function parseArguments(elements, allowed, switches = new Set()) {
   return { named, positional };
 }
 
+function staticExternalArguments(elements) {
+  const args = [];
+  for (const element of elements.slice(1)) {
+    if (element.kind === 'literal') { args.push(String(element.value)); continue; }
+    if (element.kind !== 'parameter') return null;
+    args.push(`-${String(element.name || '')}`);
+    if (element.argumentType) {
+      if (!['StringConstantExpressionAst', 'ConstantExpressionAst'].includes(element.argumentType)) return null;
+      args.push(String(element.value ?? ''));
+    }
+  }
+  return args;
+}
+
+function readOnlyRipgrepArgs(rawArgs) {
+  const args = [...rawArgs]; let filesOnly = false; const patterns = []; const positional = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--') { positional.push(...args.slice(index + 1)); break; }
+    if (arg === '--files') { filesOnly = true; continue; }
+    if (['-n', '--line-number', '-i', '--ignore-case', '-F', '--fixed-strings', '-l', '--files-with-matches', '-c', '--count', '--no-heading', '--color=never'].includes(arg)) continue;
+    if (['-e', '--regexp'].includes(arg)) {
+      const pattern = args[++index];
+      if (!pattern) return null;
+      patterns.push(pattern);
+      continue;
+    }
+    if (['-g', '--glob', '-t', '--type', '-T', '--type-not'].includes(arg)) {
+      if (!args[++index]) return null;
+      continue;
+    }
+    if (/^(?:--max-count|-m)=?\d+$/.test(arg)) continue;
+    if (/^-(?:[niFlc])+$/.test(arg)) continue;
+    if (arg.startsWith('-')) return null;
+    positional.push(arg);
+  }
+  if (filesOnly && patterns.length) return null;
+  if (!filesOnly && !patterns.length) {
+    if (!positional.length || positional[0].startsWith('-')) return null;
+    patterns.push(positional.shift());
+  }
+  if (positional.some((value) => !value || value === '-')) return null;
+  return { filesOnly, paths: positional.length ? positional : ['.'] };
+}
+
+export async function analyzeWindowsRipgrep(args, context = {}, {
+  fsApi = { lstat, realpath, readdir }, pathResolver = (value) => value,
+} = {}) {
+  const parsed = Array.isArray(args) && readOnlyRipgrepArgs(args);
+  if (!parsed || parsed.paths.length > 64) return { complete: false, actions: [], reason: 'ripgrep options or paths need review' };
+  const actions = [];
+  for (const rawPath of parsed.paths) {
+    const resolvedPath = pathResolver(rawPath);
+    if (!resolvedPath) return { complete: false, actions, reason: 'ripgrep path cannot be resolved' };
+    const target = await resolveTarget(resolvedPath, context.cwd, fsApi, context);
+    if (!target) return { complete: false, actions, reason: 'ripgrep path cannot be resolved' };
+    const workspace = inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot);
+    const protectedDescendant = (context.protectedRoots || []).some((root) => {
+      const path = typeof root === 'string' ? root : root?.path;
+      return typeof path === 'string' && inside(path, target.actual);
+    });
+    const action = { kind: 'read', program: 'rg', target, protected: isProtected(target, context,
+      { allowProgramDataWorkspaceRead: true }), workspace, workspaceRoot: Boolean(context.trustedWorkspaceRoot)
+        && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
+      recursive: target.directory === true };
+    if (action.recursive && workspace && !protectedDescendant) {
+      // Default ripgrep traversal skips hidden/ignored paths and does not
+      // follow symlinks. The accepted grammar excludes --hidden, --no-ignore,
+      // --follow and preprocessors, so a workspace search cannot enter the
+      // common credential/control directories or execute a helper.
+      action.recursiveVerified = true;
+    } else if (action.recursive) {
+      action.recursiveVerified = await inspectRecursiveTarget(target, context, fsApi,
+        { allowWorkspaceRoot: true, requireWorkspace: false, allowProgramDataWorkspaceRead: true });
+    }
+    actions.push(action);
+  }
+  return { complete: true, actions };
+}
+
+export async function analyzeWindowsWorkspaceScriptTask(programName, rawArgs, context = {}, {
+  fsApi = { lstat, realpath, readdir }, pathResolver = (value) => value,
+} = {}) {
+  const program = String(programName || '').toLowerCase();
+  const args = Array.isArray(rawArgs) && rawArgs.every((arg) => typeof arg === 'string') ? rawArgs : null;
+  if (!args || !context.trustedWorkspaceRoot || !inside(context.cwd, context.trustedWorkspaceRoot)) return null;
+  if (WORKSPACE_SCRIPT_RUNNERS.has(program)) {
+    let task = '';
+    if (args.length === 1 && args[0].toLowerCase() === 'test') task = 'test';
+    else if (args.length === 2 && args[0].toLowerCase() === 'run') task = args[1].toLowerCase();
+    else if (program.startsWith('yarn') && args.length === 1) task = args[0].toLowerCase();
+    else if (program.startsWith('bun') && args.length === 1 && args[0].toLowerCase() === 'test') task = 'test';
+    if (!WORKSPACE_SCRIPT_TASKS.has(task)) return null;
+    return { kind: 'read', program: `${program} ${task}`, target: null, workspace: true, caution: true };
+  }
+  if (['python', 'python.exe', 'python3', 'python3.exe'].includes(program)
+      && args.length === 2 && args[0] === '-m' && ['pytest', 'unittest'].includes(args[1].toLowerCase())) {
+    return { kind: 'read', program: `${program} -m ${args[1]}`, target: null, workspace: true, caution: true };
+  }
+  const scriptExtensions = ['node', 'node.exe'].includes(program) ? /\.(?:c|m)?js$/i
+    : ['python', 'python.exe', 'python3', 'python3.exe'].includes(program) ? /\.py$/i : null;
+  if (scriptExtensions && args.length === 1 && !args[0].startsWith('-')) {
+    const scriptPath = pathResolver(args[0]);
+    if (!scriptPath) return null;
+    const script = await resolveTarget(scriptPath, context.cwd, fsApi, context);
+    if (!script || !script.file || !inside(script.lexical, context.trustedWorkspaceRoot) || !inside(script.actual, context.trustedWorkspaceRoot)
+        || isProtected(script, context) || !scriptExtensions.test(script.actual)) return null;
+    return { kind: 'read', program: `${program} workspace script`, target: script, workspace: true, caution: true };
+  }
+  return null;
+}
+
+async function analyzeRipgrepCommand(entry, context, fsApi) {
+  if (!['rg', 'rg.exe'].includes(String(entry.name || '').toLowerCase())) return null;
+  if (entry.invocation !== 'Unknown' || entry.pipelineInput !== false || entry.redirections) {
+    return { complete: false, actions: [], reason: 'ripgrep invocation is not a standalone static read' };
+  }
+  const args = staticExternalArguments(entry.elements);
+  return analyzeWindowsRipgrep(args, context, { fsApi });
+}
+
+async function analyzeWorkspaceScriptTask(entry, context, fsApi) {
+  if (entry.invocation !== 'Unknown' || entry.pipelineInput !== false || entry.redirections) return null;
+  const args = staticExternalArguments(entry.elements);
+  return analyzeWindowsWorkspaceScriptTask(entry.name, args, context, { fsApi });
+}
+
 async function resolveTarget(raw, cwd, fsApi, context = {}) {
   if (typeof raw !== 'string' || !raw || /[*?\[\]`$]/.test(raw) || /^[~]/.test(raw)
       || typeof cwd !== 'string' || !win.isAbsolute(cwd)
@@ -94,9 +223,11 @@ async function resolveTarget(raw, cwd, fsApi, context = {}) {
   let existing = absolute; const suffix = [];
   for (;;) {
     try {
-      await fsApi.lstat(existing);
+      const info = await fsApi.lstat(existing);
       const resolved = await fsApi.realpath(existing);
-      return { lexical: absolute, actual: win.resolve(resolved, ...suffix.reverse()) };
+      return { lexical: absolute, actual: win.resolve(resolved, ...suffix.reverse()),
+        exists: suffix.length === 0, directory: suffix.length === 0 && info.isDirectory(),
+        file: suffix.length === 0 && info.isFile() };
     } catch (error) {
       if (error?.code !== 'ENOENT') return null;
       const parent = win.dirname(existing);
@@ -123,7 +254,10 @@ async function resolveCopyDestination(destination, source, context, fsApi) {
   return target;
 }
 
-function isProtected(target, context, { allowProgramDataWorkspaceRead = false } = {}) {
+function isProtected(target, context, {
+  allowProgramDataWorkspaceRead = false,
+  allowShallowDirectoryListing = false,
+} = {}) {
   const protectedRoots = (context.protectedRoots || [])
     .map((root) => typeof root === 'string' ? root : root?.path)
     .filter((root) => typeof root === 'string' && root);
@@ -137,11 +271,12 @@ function isProtected(target, context, { allowProgramDataWorkspaceRead = false } 
     && inside(target.lexical, programDataRoot) && inside(target.actual, programDataRoot)
     && inside(target.lexical, workspaceRoot) && inside(target.actual, workspaceRoot);
   return [target.lexical, target.actual].some((p) => {
-    if (protectedRoots.some((root) => inside(p, root))) return true;
+    if (!allowShallowDirectoryListing && protectedRoots.some((root) => inside(p, root))) return true;
     if (systemRoots.some((root) => inside(p, root)
-      && !(boundProgramDataWorkspaceRead && win.resolve(root).toLowerCase() === win.resolve(programDataRoot).toLowerCase()))) return true;
-    return WINDOWS_PROFILE_SENSITIVE.test(win.normalize(p))
-      || p.split(/[\\/]+/).some((part) => SENSITIVE_COMPONENT.test(part));
+      && !(boundProgramDataWorkspaceRead && win.resolve(root).toLowerCase() === win.resolve(programDataRoot).toLowerCase())
+      && !allowShallowDirectoryListing)) return true;
+    return !allowShallowDirectoryListing && (WINDOWS_PROFILE_SENSITIVE.test(win.normalize(p))
+      || p.split(/[\\/]+/).some((part) => SENSITIVE_COMPONENT.test(part)));
   });
 }
 
@@ -165,7 +300,7 @@ export async function analyzeWindowsFileChanges(entries, context = {}, { fsApi =
       regularFile = info.isFile() && !info.isSymbolicLink();
       linked = regularFile && info.nlink > 1;
     } catch (error) { if (error?.code !== 'ENOENT') return { complete: false, actions, reason: 'file change target cannot be inspected' }; }
-    const action = { kind, target, protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read' }),
+    const action = { kind, target, directory, protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read' }),
       workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       regularFile, linked,
@@ -334,6 +469,14 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     }
     const redirectionReason = await appendRedirects(entry, program);
     if (redirectionReason) return { complete: false, actions, reason: redirectionReason };
+    const ripgrep = await analyzeRipgrepCommand(entry, context, fsApi);
+    if (ripgrep) {
+      if (!ripgrep.complete) return { ...ripgrep, actions: [...actions, ...ripgrep.actions] };
+      actions.push(...ripgrep.actions);
+      continue;
+    }
+    const workspaceTask = await analyzeWorkspaceScriptTask(entry, context, fsApi);
+    if (workspaceTask) { actions.push(workspaceTask); continue; }
     if (program === 'git' || program === 'git.exe') {
       if (entry.pipelineInput !== false || !entry.elements.every((element) => element.kind === 'literal')) {
         return { complete: false, actions, reason: 'Git arguments are dynamic or come from pipeline input' };
@@ -431,10 +574,18 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     }
     const sourceTarget = await resolveTarget(source, context.cwd, fsApi, context);
     if (!sourceTarget) return { complete: false, actions, reason: 'file target cannot be resolved' };
+    const recursive = args.named.has('recurse') || (program === 'get-childitem' && args.named.has('depth'));
+    const allowShallowDirectoryListing = kind === 'read' && program === 'get-childitem'
+      && sourceTarget.directory === true && !recursive;
     const add = (action, target) => actions.push({ kind: action, program, target,
-      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read' }), workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
+      // Get-ChildItem emits directory-entry metadata only. Allow one-level
+      // enumeration even under protected roots; file contents, recursion,
+      // writes, and deletes keep their regular path checks.
+      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read', allowShallowDirectoryListing }),
+      directory: sourceTarget.directory === true,
+      workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
-      recursive: args.named.has('recurse') || (program === 'get-childitem' && args.named.has('depth')) });
+      recursive });
     if (kind === 'copy' || kind === 'move' || kind === 'rename') {
       const destTarget = kind === 'rename'
         ? await resolveTarget(win.join(win.dirname(sourceTarget.lexical), destination), context.cwd, fsApi, context)
@@ -483,20 +634,26 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
   return { complete: true, actions, parserVersion: ast.parserVersion, psVersion: ast.psVersion };
 }
 
-export function decideWindowsPowerShellActions(result, { conservative = false } = {}) {
-  if (!result.complete || !result.actions.length) return { decision: 'review', reason: result.reason || 'PowerShell analysis incomplete' };
+export function decideWindowsPowerShellActions(result, { safeOnly = false, conservative = false } = {}) {
+  // `conservative` remains as a compatibility alias for existing callers.
+  const requireWorkspaceOnly = safeOnly || conservative;
+  if (!result.complete || !result.actions.length) return { decision: 'review', reason: result.reason || 'PowerShell analysis incomplete', tier: 'danger' };
+  let cautionAction = null;
   for (const action of result.actions) {
-    if (action.requiresPinnedExecution) return { decision: 'review', reason: 'wildcard delete targets are not bound to execution', action };
-    if (action.protected) return { decision: 'review', reason: 'protected or sensitive path', action };
+    if (action.requiresPinnedExecution) return { decision: 'review', reason: 'wildcard delete targets are not bound to execution', action, tier: 'danger' };
+    if (action.protected) return { decision: 'review', reason: 'protected or sensitive path', action, tier: 'danger' };
     // Checking a directory tree is only a snapshot. Its descendants may be
     // replaced or added before an independently executed recursive removal.
-    if (action.kind === 'delete' && action.recursive) return { decision: 'review', reason: 'recursive deletion is not bound to inspected contents', action };
-    if (action.linked && action.kind !== 'delete') return { decision: 'review', reason: 'file has multiple hard links', action };
-    if ((action.kind === 'read' || action.kind === 'write') && action.recursive && !action.recursiveVerified) return { decision: 'review', reason: 'recursive file operation needs verification', action };
+    if (action.kind === 'delete' && action.recursive) return { decision: 'review', reason: 'recursive deletion is not bound to inspected contents', action, tier: 'danger' };
+    if (action.linked && action.kind !== 'delete') return { decision: 'review', reason: 'file has multiple hard links', action, tier: 'danger' };
+    if ((action.kind === 'read' || action.kind === 'write') && action.recursive && !action.recursiveVerified) return { decision: 'review', reason: 'recursive file operation needs verification', action, tier: 'danger' };
     if (action.kind === 'delete' && ((!action.workspace && !action.regularFile) || action.workspaceRoot || (action.recursive && !action.regularFile && !action.recursiveVerified) || action.target?.actual === action.target?.lexical && win.parse(action.target.actual).root === action.target.actual)) {
-      return { decision: 'review', reason: 'delete target or recursive delete needs verification', action };
+      return { decision: 'review', reason: 'delete target or recursive delete needs verification', action, tier: 'danger' };
     }
-    if (conservative && action.target && !action.workspace) return { decision: 'review', reason: 'outside conservative workspace', action };
+    if (requireWorkspaceOnly && action.target && !action.workspace) return { decision: 'review', reason: 'outside safe workspace', action, tier: 'caution' };
+    if (action.caution) cautionAction ||= action;
   }
-  return { decision: 'allow', reason: 'verified ordinary PowerShell operations' };
+  if (cautionAction && requireWorkspaceOnly) return { decision: 'review', reason: 'safe mode requires owner review for a workspace developer task', action: cautionAction, tier: 'caution' };
+  if (cautionAction) return { decision: 'allow', reason: 'verified workspace developer task', action: cautionAction, tier: 'caution' };
+  return { decision: 'allow', reason: 'verified ordinary PowerShell operations', tier: 'safe' };
 }

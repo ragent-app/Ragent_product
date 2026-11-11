@@ -43,10 +43,10 @@ Codex 的 `approvalsReviewer="user"` 只表示把已产生的审批请求交给�
 ### 为什么 Codex 仍可能产生多张人工审批卡
 
 1. **请求触发面不同。** `on-request` 只覆盖 Codex 要求升级权限的动作，不会保证普通命令进入 Ragent 分类器。Run 级项目 trust gate 会把需要审批的命令送进 Ragent；执行策略明确允许的命令仍可不发请求。0.147 的 `git status` 实测无 owner 卡，只能证明没有用户提示，不能证明是 Ragent 自动答复。新版官方语义仍是“不信任项目命令逐条审批，显式 exec-policy allow 除外”。
-2. **Windows 分类器只对可证明的命令自动放行。** `windows-approval-gate.mjs` 目前要求 Codex 命令能被还原为受信任的 PowerShell 可执行文件、`-NoProfile` 参数及可静态分析脚本。未知 shell、非 PowerShell 命令、工作目录/路径上下文缺失、额外权限、未知工具、没有对应活动项的文件变更都会保守地转人工审批。这个 fail-closed 行为安全，但覆盖面不足会表现为大量提示。
+2. **Windows 分类覆盖不足会制造误审批。** Codex App Server 的 Windows 请求使用规范 PowerShell 可执行文件和静态 `-Command`，但不带 `-NoProfile`；旧规则因此把每条这类命令都送去审批。Windows 也缺少常见 `rg` 搜索和工作区测试/构建任务的规则。当前调整允许该 Codex 协议形状进入 AST 分析，并将受限 `rg` 与常用工作区任务列为谨慎级；recommended/full-auto 对谨慎级自动放行，safe 仍可要求用户审批。非递归目录枚举只返回名称/元数据，也不再因命中系统或 Ragent 保护根而自动升级。未知 shell、路径/Run 上下文缺失、额外权限、敏感文件内容、递归敏感扫描、动态执行、危险写删和未知工具仍保留审批边界。
 3. **执行策略可能绕过 Ragent 入口。** 即使项目 trust 是 `untrusted`，Codex 执行策略允许的命令也不会触发审批事件。Ragent 必须区分“Codex 没有发事件”和“Ragent 自动答复”；不能仅凭零张 owner 卡判断自动审批器工作正常。对已允许命令应审计来源与规则，确保允许项来自经过审查的策略。
 4. **有些请求应保留人工确认。** `item/permissions/requestApproval`、MCP elicitation、额外文件系统/网络权限、信息不完整的文件变更、Codex 删除/移动请求目前不能只凭命令文本证明安全，不能为了降提示量而放宽。
-5. **受控安装 Hook 还受 shell 证明条件限制。** 荣耀手机最近一次 Codex Official Account 只读运行在执行命令前报 refresh token 已使用，未到审批阶段。本机 0.147.0 的 managed Hook 确实执行并改写安装命令；但 App Server 给出的 PowerShell argv 缺少 Ragent 要求的 `-NoProfile`，sidecar 无法证明 shell 身份，因此保留 owner 审批，不会自动运行 Hook 改写后的安装命令。
+5. **受控安装 Hook 仍按命令本身分类。** App Server 缺少 `-NoProfile` 不再单独阻断其规范 PowerShell argv 的分析。Hook 改写后的安装命令仍不在自动放行的工作区任务范围内，继续要求用户审批。荣耀手机最近一次 Codex Official Account 只读运行在执行命令前报 refresh token 已使用，未到审批阶段。
 
 ## 调整目标
 
@@ -78,15 +78,17 @@ Codex 的 `thread/start` 响应须成为启动时的能力检查点。Codex 未�
 
 - 对 Codex 实际发来的 argv/shlex 先解析成 token，不把整条命令拼回 shell 后执行或盲目重解析。
 - 为经过验证的 Windows shell/executable 形状分别调用 PowerShell、`cmd.exe` 或 Git Bash 静态分析器；只在可确认真实 executable、参数、cwd、重定向和组合命令时分类。
-- 增补少数语义明确的只读命令规则（例如限定 cwd 的 `git status`/`git diff`、路径明确的目录/文件读取）；对 `npm run`、解释器 `-c`、管道、重定向、动态变量、环境变量注入、网络或凭据路径访问默认保持谨慎，不能按 executable 名称把整类命令放行。
+- 增补受限的只读搜索规则和工作区开发任务规则：`rg` 仅接受静态只读参数，默认跳过隐藏/忽略项且不跟随链接；工作区内 `npm/pnpm/yarn/bun` 的 test/build/lint/check/typecheck 等常用任务，以及工作区内静态 JS/Python 脚本，标记为谨慎级。recommended/full-auto 对谨慎级自动放行，safe 仍请求用户审批。非递归 `Get-ChildItem` 目录枚举只读名称/元数据，可列出保护目录的直接子项，但不能读取文件内容；递归扫描、包安装、未知任务名、解释器内联代码、动态变量、额外网络/文件系统权限、敏感文件内容与危险写删继续要求审批或拒绝；不按 executable 名称放行整类命令。
 - 将完整的 `additionalPermissions`、`networkApprovalContext` 与 sandbox escape 单独分类为权限授予请求。即使命令本身是 `git status`，也不得用命令分类覆盖额外文件系统或网络授权。
 - 对 Codex `fileChange` 以活动 item 的完整 diff 为依据；合并同一 item 的多文件决策。缺少对应 item、文件路径或变更类型时仍要求用户；删除和移动继续按高风险处理，后续仅在有完整目标、可恢复性及风险证明时再讨论放宽。
 - `item/permissions/requestApproval` 与未知 MCP elicitation 继续要求用户；只自动接受由当前 Run 创建并绑定的 Ragent 管理 MCP 工具请求。
-- Windows 将 ProgramData 作为系统路径保护时，若某个 Run 的已验证工作区本身位于 ProgramData 下，允许该工作区内的只读请求自动通过。例外绑定在执行范围摘要内的 ProgramData 根、workspace 根及实际解析路径；memory/config 等保护根、敏感路径、工作区外路径和所有写入/删除仍走原策略。
+- Windows 将 ProgramData 作为系统路径保护时，若某个 Run 的已验证工作区本身位于 ProgramData 下，允许该工作区内的只读请求自动通过。例外绑定在执行范围摘要内的 ProgramData 根、workspace 根及实际解析路径；对所有保护根另有一项窄例外：非递归 `Get-ChildItem` 只返回直接子项元数据。memory/config 内容、递归读取、敏感路径内容和所有写入/删除仍走原策略。
 
 Linux 继续复用 `classifyRisk` / `decideRiskGate` 的通用安全、谨慎、危险分级；Windows 保留独立的 PowerShell/路径实现。Linux 的 `sudo`、root 执行器与策略不应直接搬到 Windows；复用的是风险语义、审批聚合、审计字段与拒绝理由。
 
 ### 4. 统一 Ragent 风险档位语义
+
+`recommended` 与 `full-auto` 使用完全相同的自动通过分类。达到自动通过标准的请求在两个档位都会自动通过；未达到标准的危险/未知请求在 recommended 中交给用户，在 full-auto 中自动拒绝。两者不能分别使用宽严不同的自动审批阈值。
 
 | Ragent 决策档位 | Safe | Caution | Danger / 未知 | 额外权限或用户提问 |
 |---|---|---|---|---|
@@ -113,7 +115,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 1. **观测先行（部分完成）：** 自动答复和 owner 请求已有 spool 事件、risk tier、原因与策略版本；projection service 已累计 Claude/Codex 的 provider、risk tier、reason code 及 policyVersion 计数，并按最近 128 个 Run 隔离；跨请求语义重复统计仍需补齐。
 2. **Codex 策略兼容（已实现）：** Windows、Linux、macOS gate Run 使用进程级项目 trust 覆盖、有效策略回读与 prompt 前 fail-closed；不会在拒绝后静默降级或重试。已验证 0.147 与 0.167 App Server 策略响应，并在 0.167 命令 fixture 验证 owner prompt、Ragent 自动批准与 full-auto 自动拒绝。
-3. **Windows Codex 命令分类（持续扩展）：** 保留 PowerShell AST、路径与权限边界；已覆盖实测命令和 Windows approval tests。其他 shell、动态命令、上下文不足时仍 fail-closed，继续从真实 App Server argv 采样。
+3. **Windows Codex 命令分类（持续扩展）：** 保留 PowerShell AST、路径与权限边界；新增 Codex App Server 缺少 `-NoProfile` 时的受限 argv 识别、静态 ripgrep 读取和常见工作区开发任务谨慎级分类。其他 shell、动态命令、上下文不足时仍 fail-closed。此次代码调整尚未运行测试或 Windows 本机回归，审批频率下降幅度尚无实测数字。
 4. **跨平台策略一致性（已实现，需 Linux/macOS CI）：** 三个平台为 safe、recommended、full-auto、conservative-auto 使用同样的项目级请求入口；POSIX 用共享风险分类器，Windows 用 PowerShell/路径分类器；profile sandbox、写入和网络边界保持独立。`granular` 不能代替逐命令 gate。
 5. **审批聚合与 UI（部分完成）：** 相同 provider request id 已幂等且保留单卡；原因码随审批记录保存。provider、risk tier、reason code 与 policyVersion 计数按最近 128 个 Run 隔离；不同 request id 的同一网络或危险操作合并仍未实现。
 6. **分层验收（部分完成）：** Windows 本机 CLI/App Server 离线 fixture 与协议和策略 suites 已覆盖；荣耀真机上的审批 UI 与本地事件重放已完成离线验收，但尚未覆盖手机 OAuth → Ragent UI → 真实服务审批链路。部署后真实服务回归及 Linux/macOS 原生环境验收仍未完成。
@@ -139,7 +141,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - 本机 Windows Codex CLI `0.147.0` 与隔离安装的 `0.167.0`：真实 App Server 启动时只设置当前 cwd 项目 trust，不发送已退役的审批枚举；返回有效 `approvalPolicy=untrusted`、reviewer=user、sandbox 和 workspace root。0.167.0 使用本机 fake Responses provider、隔离 `CODEX_HOME` 和测试 key，命令级 owner prompt、无害命令自动批准、full-auto 危险命令拒绝均通过；没有使用 Codex 账号或官方模型额度。
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
-- 本机真实 managed Hook：Ragent hook 通过 App Server 注册和信任校验，执行 preToolUse 并改写安装命令；由于当前 Codex shell argv 缺少 `-NoProfile`，sidecar 将改写后的命令保留为 owner-gated，没有自动执行。
+- 本机真实 managed Hook：Ragent hook 通过 App Server 注册和信任校验，执行 preToolUse 并改写安装命令；改写后的安装命令仍需 owner 审批。当前源码调整已允许 Codex App Server 的规范 PowerShell argv 缺少 `-NoProfile` 时进入静态分析，但本轮未重放该 Hook，也未测量审批频率变化。
 - 2026-11-10 荣耀 MTN-AN80（`MTN-AN80` / `ADNQ6R5716008635`）离线真机验收：`ApprovalAttentionDeviceTest` 16/16 通过；`ApprovalReplayDeviceTest` 使用本地合成 approval event、fake transport 和 in-memory Room 重放，1/1 通过，验证事件字段持久化以及真机卡片中的危险操作目标、条件状态和 approve/deny 控件。两组均未调用 OAuth、Codex 官方 provider 或模型额度。
 - 同日尝试 app 模块 `RunDockApprovalIslandTest`：4 个用例中 1 个通过、3 个在卡片首次显示断言处失败；因测试未等待首帧稳定，初步怀疑与 `RunDock` 入场动画/断言时序有关，尚未证实产品卡片通过或失败。本地尝试在首次断言前等待 Compose 动画空闲后，复跑被当前共享工作区 `voice_cloud_upload_disclosure` 字符串中的非法 Unicode 转义阻断；临时测试改动未保留，该字符串属于未提交的 ASR 工作，本次未修改。该 app 模块用例尚未复验。
 - Codex 0.149 的退役行为及当前 `granular` 能力依据官方文档与合并记录；0.167.0 已验证策略字段，但受管策略环境及真实 provider 账号尚未验证。

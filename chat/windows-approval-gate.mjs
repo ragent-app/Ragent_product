@@ -53,8 +53,17 @@ export function readWindowsPowerShellInvocation(approval, { systemRoot = resolve
     const commandFlag = command.findIndex((x, i) => i > 0 && /^-(?:command|c)$/i.test(x));
     if (commandFlag < 1 || commandFlag !== command.length - 2) return null;
     const flags = command.slice(1, commandFlag);
-    if (!flags.some((x) => /^-noprofile$/i.test(x)) || flags.some((x) => !/^-(?:noprofile|nologo|noninteractive)$/i.test(x))) return null;
-    return { command: command[commandFlag + 1], executable };
+    const profileDisabled = flags.some((x) => /^-noprofile$/i.test(x));
+    const codexAppServerRequest = approval?.providerMethod === 'item/commandExecution/requestApproval';
+    // Codex App Server's Windows command event binds the absolute PowerShell
+    // executable and literal -Command payload, but current versions omit
+    // -NoProfile. Keep the request analyzable when that one flag is absent;
+    // arbitrary executables, shell options, encoded commands, and trailing
+    // arguments remain rejected. Claude's direct wrapper still requires the
+    // explicit no-profile boundary.
+    if ((!profileDisabled && !codexAppServerRequest)
+        || flags.some((x) => !/^-(?:noprofile|nologo|noninteractive)$/i.test(x))) return null;
+    return { command: command[commandFlag + 1], executable, profileDisabled };
   }
   if (typeof command !== 'string' || !['powershell', 'powershell-5.1', 'pwsh'].includes(shellKind)) return null;
   // A shell name supplied with a raw command does not prove the actual binary
@@ -105,7 +114,9 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
   const params = approval?.params || {};
   const toolName = text(params.tool_name);
   const mode = text(state.riskMode);
-  const conservative = mode === 'safe' || mode === 'conservative-auto';
+  // recommended and full-auto share one auto-allow threshold. The sidecar
+  // alone changes the disposition of requests this gate does not allow.
+  const safeOnly = mode === 'safe' || mode === 'conservative-auto';
   const riskContext = state.riskContext || {};
   const requestCwd = text(params.cwd);
   if (requestCwd && !win.isAbsolute(requestCwd)) return { decision: 'prompt', reason: 'command working directory is not absolute' };
@@ -176,13 +187,13 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
     result = await analyze(command, context, { executable: invocation.executable });
     }
   }
-  const decision = decideWindowsPowerShellActions(result, { conservative });
-  const tier = decision.decision === 'allow' ? 'safe' : 'caution';
+  const decision = decideWindowsPowerShellActions(result, { safeOnly });
+  const tier = decision.tier || (decision.decision === 'allow' ? 'safe' : 'danger');
   return {
     decision: decision.decision === 'allow' ? 'auto-allow' : 'prompt',
     reason: decision.reason,
     command,
-    risk: { tier, platform, policyVersion: 'windows-approval/v1',
+    risk: { tier, platform, policyVersion: 'windows-approval/v2',
       confidence: result.complete ? 'high' : 'unknown',
       signals: { reasons: [decision.reason], targetScope: decision.action?.workspace ? 'trusted-workspace' : 'outside-workspace' },
       reasons: [{ code: result.complete ? 'windows_operation' : 'windows_analysis_incomplete', message: decision.reason }],
