@@ -23,8 +23,16 @@ try {
   const explicit=response();assert.equal(await requireAuth(request(passwordCookie),explicit),true);
   assert.equal(explicit.headers['Set-Cookie'],undefined,'a password owner session must not be replaced by a local-only session');
   const explicitTunnel=response();assert.equal(await requireAuth(request(passwordCookie,'text/html',{'x-agentoc-tunnel':'1'}),explicitTunnel),true);
+  const visitorToken=await auth.issueSession({role:'visitor',agentId:'visitor-fixture'});
+  const visitorReq=request(`visitor_session_token=${visitorToken}`);visitorReq.url='/?visitor=1';
+  const visitorRes=response();assert.equal(await requireAuth(visitorReq,visitorRes),true);
+  assert.equal(visitorRes.headers['Set-Cookie'],undefined,'visitor navigation must not mint an owner session');
+  assert.equal(auth.getAuthSession(visitorReq)?.role,'visitor');
+  const missingVisitor=request();missingVisitor.url='/?visitor=1';
+  const missingVisitorRes=response();assert.equal(await requireAuth(missingVisitor,missingVisitorRes),false);
+  assert.equal(missingVisitorRes.headers['Set-Cookie'],undefined,'a missing visitor credential must not mint an owner session');
   const tunneled=response();assert.equal(await requireAuth(request(cookie,'text/html',{'x-agentoc-tunnel':'1'}),tunneled),false);assert.equal(tunneled.status,302);
   for(let i=0;i<1000;i++){const probe=response();await requireAuth(request('','*/*'),probe);}
-  assert.equal(auth.sessions.size,2,'cookie-free non-HTML probes must not mint sessions');
+  assert.equal(auth.sessions.size,3,'cookie-free non-HTML probes must not mint sessions');
   console.log('local web session reuse, tunnel isolation, and cookie-free probes: passed');
 } finally {auth.closeAuthSessionStore();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:50});}

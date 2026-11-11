@@ -1,7 +1,6 @@
 import { randomBytes } from 'crypto';
-import { isAuthenticated, issueSession, setCookie, hasValidOwnerSessionCookie } from '../lib/auth.mjs';
-import { FILE_ASSET_ALLOWED_ORIGINS, LOCAL_WEB_AUTH_ENABLED } from '../lib/config.mjs';
-import { shouldUseLocalWebAuth, isTunneledRequest } from '../lib/windows-local-runtime.mjs';
+import { isAuthenticated, issueSession, setCookie, hasValidOwnerSessionCookie, isLocalWebSessionEligible } from '../lib/auth.mjs';
+import { FILE_ASSET_ALLOWED_ORIGINS } from '../lib/config.mjs';
 
 // ---- Rate limiting ----
 
@@ -107,13 +106,7 @@ export function generateNonce() {
  * If not, writes a 401 JSON response for API routes or a 302 redirect for pages.
  */
 export async function requireAuth(req, res) {
-  if (shouldUseLocalWebAuth({
-    enabled: LOCAL_WEB_AUTH_ENABLED,
-    remoteAddress: req?.socket?.remoteAddress,
-    url: req?.url,
-    accept: req?.headers?.accept,
-    viaTunnel: isTunneledRequest(req),
-  })) {
+  if (isLocalWebSessionEligible(req)) {
     if (hasValidOwnerSessionCookie(req)) return true;
     const sessionToken = await issueSession({ role: 'owner', authMethod: 'local_web' });
     if (sessionToken) {
