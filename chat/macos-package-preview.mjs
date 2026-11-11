@@ -50,6 +50,7 @@ export async function inspectMacosPackagePreview({ file, projectRoot } = {}) {
     const beforePath = await inspectComponents(file);
     handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
     const before = await handle.stat();
+    if (identity(before) !== beforePath[beforePath.length - 1]) return fail('target:artifact-changed');
     if (!before.isFile() || before.nlink !== 1 || before.size < 0 || before.size > MACOS_PACKAGE_PREVIEW_MAX_BYTES) {
       return fail('target:artifact-type-or-size-unverified');
     }
