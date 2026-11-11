@@ -21,7 +21,7 @@
 //      reviewerEnabled=false keeps the S6 reader code (409) unchanged.
 import assert from 'assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -131,6 +131,11 @@ try {
   const roSpawn = buildSandboxedSpawn({ command: '/bin/true', cwd: ws, runnerHome: rh, readOnly: true, mkdtemp: () => hide });
   eq(bindModeOf(roSpawn.args, ws), '--ro-bind', 'buildSandboxedSpawn readOnly=true mounts the workspace read-only');
   eq(bindModeOf(roSpawn.args, rh), null, 'buildSandboxedSpawn readOnly=true does not reopen the runner home');
+
+  let failedSpawnDir;
+  assert.throws(() => buildSandboxedSpawn({ command: '/bin/true', cwd: ws, readOnly: true,
+    readOnlyProviderFamily: 'invalid', mkdtemp: () => { failedSpawnDir = mkdtempSync(join(configDir, 'failed-sandbox-')); return failedSpawnDir; } }));
+  eq(existsSync(failedSpawnDir), false, 'failed sandbox construction removes its unused temporary directory');
 
   finishSection();
 
