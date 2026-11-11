@@ -22,6 +22,27 @@ unset AGENTOC_PACKAGED_HARNESS_ROOT
 AGENTOC_RESOURCES_DIR="$bundle"
 agentoc_ensure_runtime_shims
 [ "$AGENTOC_PACKAGED_HARNESS_ROOT" = "$bundle/runtime" ]
+# Resolve both commands in a detached-process environment, not just in the
+# launcher's shell. macOS has no /opt/agentoc/runtime fallback.
+export QA_BUNDLE="$bundle" QA_ROOT="$root" QA_HOME="$test_dir/detached-home"
+mkdir -p "$QA_HOME"
+node --input-type=module <<'EOF'
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+const root = process.env.QA_ROOT;
+const { pickRunnerEnvAllowlist } = await import(pathToFileURL(`${root}/lib/runner-env.mjs`));
+const env = pickRunnerEnvAllowlist({
+  PATH: process.env.PATH, HOME: process.env.QA_HOME,
+  AGENTOC_HARNESS_ROOT: `${process.env.QA_HOME}/managed`,
+  AGENTOC_PACKAGED_HARNESS_ROOT: `${process.env.QA_BUNDLE}/runtime`,
+});
+const moduleUrl = pathToFileURL(`${root}/lib/harness-paths.mjs`).href;
+const script = `const m = await import(${JSON.stringify(moduleUrl)}); console.log(JSON.stringify(await Promise.all(['codex','claude'].map(x=>m.resolveInternalHarnessCommandPath(x)))))`;
+const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env, encoding: 'utf8' });
+assert.equal(child.status, 0, child.stderr);
+assert.deepEqual(JSON.parse(child.stdout.trim()), [`${process.env.QA_BUNDLE}/runtime/codex`, `${process.env.QA_BUNDLE}/runtime/claude`]);
+EOF
 "$bundle/runtime/codex" 'argument with spaces'
 printf '%s\n' "$bundle/runtime/../app/vendor/codex/bin/codex.js" 'argument with spaces' > "$test_dir/expected"
 cmp "$test_dir/expected" "$QA_RECORD"

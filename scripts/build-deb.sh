@@ -362,7 +362,6 @@ cat > "$STAGE/opt/agentoc/runtime/agentoc-codex-app-server" <<'EOF'
 exec /opt/agentoc/runtime/node /opt/agentoc/vendor/codex/bin/codex.js "$@"
 EOF
 chmod 0755 "$STAGE/opt/agentoc/runtime/codex" "$STAGE/opt/agentoc/runtime/agentoc-codex-app-server"
-ln -s /opt/agentoc/runtime/codex "$STAGE/usr/bin/codex"
 
 # Prefer the official current Claude Code native package. An explicit local
 # binary remains an escape hatch for offline rebuilds, but never silently
@@ -412,7 +411,6 @@ cat > "$STAGE/opt/agentoc/runtime/claude" <<'EOF'
 exec /opt/agentoc/vendor/claude "$@"
 EOF
 chmod 0755 "$STAGE/opt/agentoc/runtime/claude"
-ln -s /opt/agentoc/runtime/claude "$STAGE/usr/bin/claude"
 printf 'codex=%s\nclaude=%s\nclaude_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$CLAUDE_BINARY_SHA" > "$STAGE/opt/agentoc/runtime/provider-versions"
 
 P2P_BUILD_BINARY="$WORK_DIR/agentoc-p2p-host-$ARCH"

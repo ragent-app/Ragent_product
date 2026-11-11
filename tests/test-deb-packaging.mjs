@@ -43,6 +43,8 @@ assert.match(buildScript, /SOURCE_COMMIT.*agentoc-source-commit/s);
 assert.match(buildScript, /Source changed during packaging; refusing to publish the candidate/);
 assert.match(buildScript, /AGENTOC_CLAUDE_BINARY_SHA256/);
 assert.match(buildScript, /CLAUDE_LICENSE_SOURCE/);
+assert.doesNotMatch(buildScript, /\$STAGE\/usr\/bin\/(?:codex|claude)/,
+  'bundled provider launchers must not replace system-wide user commands');
 assert.match(buildScript, /vendor\/licenses\/claude-code\/LICENSE\.md/);
 
 const retiredPackagePaths = [

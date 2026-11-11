@@ -23,7 +23,7 @@ import {
 const previousEnv = {};
 const touchedKeys = [
   'PATH', 'LANG', 'LC_ALL', 'TERM', 'USER', 'HOME', 'DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR',
-  'AGENTOC_PROJECT_ROOT', 'AGENTOC_HARNESS_ROOT', 'AGENTOC_CHAT_BASE_URL', 'CHAT_PORT', 'IS_SANDBOX',
+  'AGENTOC_PROJECT_ROOT', 'AGENTOC_HARNESS_ROOT', 'AGENTOC_PACKAGED_HARNESS_ROOT', 'AGENTOC_CHAT_BASE_URL', 'CHAT_PORT', 'IS_SANDBOX',
   'AGENTOC_CONFIG_DIR', 'AGENTOC_INSTANCE_ROOT', 'AGENTOC_MEMORY_DIR',
   'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_RUNNER_LIFECYCLE_SOCKET',
   'AGENTOC_CONTROL_SOCKET', 'AGENTOC_PUBLIC_BASE_URL', 'AGENTOC_NODE_RUNTIME',
@@ -55,6 +55,7 @@ try {
   process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
   process.env.AGENTOC_PROJECT_ROOT = '/opt/agentoc/app';
   process.env.AGENTOC_HARNESS_ROOT = '/opt/agentoc/harnesses';
+  process.env.AGENTOC_PACKAGED_HARNESS_ROOT = '/Applications/Ragent App.app/Contents/Resources/runtime';
   process.env.AGENTOC_CHAT_BASE_URL = 'http://127.0.0.1:7690';
   process.env.CHAT_PORT = '7690';
   process.env.IS_SANDBOX = '';
@@ -140,6 +141,7 @@ try {
   assert.equal(env.TEMP, process.env.TEMP, 'the configured task temp should reach the runner');
   assert.equal(env.AGENTOC_PROJECT_ROOT, '/opt/agentoc/app', 'AGENTOC_PROJECT_ROOT should be inherited');
   assert.equal(env.AGENTOC_HARNESS_ROOT, '/opt/agentoc/harnesses', 'AGENTOC_HARNESS_ROOT should reach the sidecar');
+  assert.equal(env.AGENTOC_PACKAGED_HARNESS_ROOT, '/Applications/Ragent App.app/Contents/Resources/runtime', 'the bundle root should reach the sidecar');
   assert.equal(env.AGENTOC_CHAT_BASE_URL, 'http://127.0.0.1:7690', 'AGENTOC_CHAT_BASE_URL should be inherited');
   assert.equal(env.CHAT_PORT, '7690', 'CHAT_PORT should be inherited');
   assert.equal(env.DISPLAY, ':1', 'DISPLAY should be inherited through the GUI allowlist');
