@@ -618,6 +618,7 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
     // approval runs; only the treatment of an ASK differs. Keep unsupported
     // harnesses explicit instead of silently claiming that bypass is gated.
     if ((options.platform || process.platform) === 'win32'
+        || capabilities.runtimeFamily === 'claude-stream-json-bidi'
         || capabilities.runtimeFamily === 'codex-app-server-json') {
       const gatedId = getProfileGatedPermissionModeId(capabilities.runtimeFamily);
       return gatedId ? cloneJson(findPermissionMode(capabilities, gatedId)) : null;

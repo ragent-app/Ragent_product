@@ -66,6 +66,7 @@ const rgWorkspace = path.join(root, 'rg-workspace');
 await mkdir(rgWorkspace);
 await writeFile(path.join(rgWorkspace, 'ordinary.txt'), 'fixture');
 await writeFile(path.join(rgWorkspace, '.env'), 'fake-secret');
+await writeFile(path.join(rgWorkspace, '.ignore'), '!.env\n');
 const rgConfig = path.join(root, 'rg-config');
 await writeFile(rgConfig, '--hidden\n');
 const rgBashPath = `'/${rgWorkspace[0].toLowerCase()}${rgWorkspace.slice(2).replaceAll('\\', '/').replace(/'/g, `'"'"'`)}'`;
@@ -73,12 +74,13 @@ for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
   state.turnActive = true; state.cwd = rgWorkspace; state.riskContext.trustedWorkspaceRoot = rgWorkspace;
   const request = (id, command) => ({ type: 'control_request', request_id: id, request: {
-    subtype: 'can_use_tool', tool_name: 'Bash', input: { command },
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command, description: 'search fixture' },
   } });
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-config-${mode}`, `rg --files ${rgBashPath}`), proc);
   const response = sent[0]?.response?.response;
   assert.equal(response?.behavior, 'allow', `${mode} should transparently disable implicit ripgrep configuration`);
   assert.match(response.updatedInput?.command || '', /^rg --no-config /);
+  assert.equal(response.updatedInput.description, 'search fixture');
   if (process.env.AGENTOC_TEST_BASH_BINARY) {
     const result = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
       cwd: rgWorkspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: rgConfig },
@@ -89,6 +91,9 @@ for (const mode of ['recommended', 'full-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-sensitive-${mode}`, `rg --files -g '*' ${rgBashPath}`), proc);
   if (mode === 'recommended') assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:rg-sensitive-${mode}`));
   else assert.equal(sent[1]?.response?.response?.behavior, 'deny');
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-existing-config-${mode}`, `rg --no-config --files ${rgBashPath}`), proc);
+  assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
+  assert.match(sent.at(-1)?.response?.response?.updatedInput?.command || '', /--iglob/);
 }
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);

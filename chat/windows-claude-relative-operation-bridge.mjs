@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { analyzeWindowsBash } from './windows-bash-actions.mjs';
-import { analyzeWindowsPowerShell, decideWindowsPowerShellActions } from './windows-powershell-actions.mjs';
+import { analyzeWindowsPowerShell, decideWindowsPowerShellActions, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
 
 // Supply the session directory explicitly to Claude's file-search tools when
@@ -50,7 +50,7 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
   try { cwd = await realpath(state.cwd); if (workspace) root = await realpath(workspace); } catch { return null; }
   if (!/^[a-z]:\\/i.test(cwd)) return null;
   const command = /^\s*rg(?:\.exe)?(?=\s|$)/i.test(original)
-    ? original.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, '$1 --no-config')
+    ? original.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`)
     : params.tool_name === 'Bash' && /^\s*curl(?:\.exe)?(?=\s|$)/i.test(original)
       ? original.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
     : /^\s*git(?:\.exe)?\s+diff(?:\s+(?:--cached|--staged))?\s*$/i.test(original)

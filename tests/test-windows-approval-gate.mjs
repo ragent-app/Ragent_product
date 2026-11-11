@@ -79,6 +79,7 @@ for (const extra of [
 ]) {
   assert.equal((await decideWindowsApproval({ ...command, params: { ...command.params, ...extra } }, state, { analyze: safe })).decision, 'prompt');
 }
+assert.equal((await decideWindowsApproval({ ...command, providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command: 'echo safe', dangerouslyDisableSandbox: true } } }, { ...state, riskMode: 'recommended' }, { analyze: safe })).decision, 'prompt');
 if (process.platform === 'win32') {
   const wrapped = { approvalId: 'wrapped', kind: 'command', params: { command: `& '${executable}' -NoProfile -Command 'Get-Content readme.txt'` } };
   assert.equal((await decideWindowsApproval(wrapped, { ...state, riskMode: 'full-auto' }, { analyze: safe })).decision, 'auto-allow');

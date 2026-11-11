@@ -5,6 +5,14 @@ import { systemPathRootsForPlatform } from './risk-policy.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 const win = path.win32;
+export const RIPGREP_SENSITIVE_EXCLUSIONS = Object.freeze([
+  '!**/.env', '!**/.env.*', '!**/ntuser.dat*',
+  ...['.git', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.agentoc', 'System Volume Information', '$Recycle.Bin']
+    .flatMap(name => [`!**/${name}`, `!**/${name}/**`]),
+  ...['Credentials', 'Protect'].flatMap(name => [`!**/AppData/Local/Microsoft/${name}/**`, `!**/AppData/Roaming/Microsoft/${name}/**`]),
+  '!**/Windows/System32/config/**', '!**/Windows/System32/Microsoft/Protect/**',
+]);
+export const ripgrepSafePrefix = () => ['--no-config', ...RIPGREP_SENSITIVE_EXCLUSIONS.flatMap(value => ['--iglob', `'${value}'`])].join(' ');
 const VERSION_PROGRAMS = new Set(['python', 'python3', 'node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'pip', 'pip3', 'git', 'go', 'cargo', 'rustc', 'dotnet', 'java', 'javac', 'gh']);
 export function analyzeWindowsVersion(programName, args) {
   const program = String(programName || '').toLowerCase().replace(/\.(?:exe|cmd)$/, '');
@@ -112,7 +120,7 @@ function staticExternalArguments(elements) {
 }
 
 function readOnlyRipgrepArgs(rawArgs) {
-  const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; const patterns = []; const positional = [];
+  const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; const patterns = []; const positional = []; const exclusions = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--') { positional.push(...args.slice(index + 1)); break; }
@@ -126,10 +134,11 @@ function readOnlyRipgrepArgs(rawArgs) {
       continue;
     }
     if (arg.startsWith('--regexp=')) { const pattern = arg.slice('--regexp='.length); if (!pattern) return null; patterns.push(pattern); continue; }
-    if (['-g', '--glob', '-t', '--type', '-T', '--type-not'].includes(arg)) {
+    if (['-g', '--glob', '--iglob', '-t', '--type', '-T', '--type-not'].includes(arg)) {
       const value = args[++index];
       if (!value) return null;
-      if (!['-g', '--glob'].includes(arg) || !value.startsWith('!')) selectsFiles = true;
+      if (arg === '--iglob' && value.startsWith('!')) exclusions.add(value.toLowerCase());
+      if (!['-g', '--glob', '--iglob'].includes(arg) || !value.startsWith('!')) selectsFiles = true;
       continue;
     }
     if (/^--(?:glob|type|type-not)=/.test(arg)) {
@@ -150,7 +159,7 @@ function readOnlyRipgrepArgs(rawArgs) {
     patterns.push(positional.shift());
   }
   if (positional.some((value) => !value || value === '-')) return null;
-  return { filesOnly, selectsFiles, configDisabled, paths: positional.length ? positional : ['.'] };
+  return { filesOnly, selectsFiles, configDisabled, exclusionsEnforced: RIPGREP_SENSITIVE_EXCLUSIONS.every(value => exclusions.has(value.toLowerCase())), paths: positional.length ? positional : ['.'] };
 }
 
 export async function analyzeWindowsRipgrep(args, context = {}, {
@@ -176,7 +185,10 @@ export async function analyzeWindowsRipgrep(args, context = {}, {
       { allowProgramDataWorkspaceRead: true, allowOrdinarySystemRead: target.file === true }), workspace, workspaceRoot: Boolean(context.trustedWorkspaceRoot)
         && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       recursive: target.directory === true };
-    if (action.recursive && workspace && !protectedDescendant && !parsed.selectsFiles) {
+    if (action.recursive && !parsed.exclusionsEnforced) {
+      return { complete: false, actions, reason: 'ripgrep sensitive exclusions are not enforced' };
+    }
+    if (action.recursive && !protectedDescendant && !parsed.selectsFiles && parsed.exclusionsEnforced) {
       // Default ripgrep traversal skips hidden/ignored paths and does not
       // follow symlinks. Positive glob/type selectors can override that
       // default and include hidden files, so they must inspect the tree.

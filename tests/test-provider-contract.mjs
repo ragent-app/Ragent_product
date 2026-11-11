@@ -223,8 +223,7 @@ assert.deepEqual(
 
 // --- privileged-approval gate (design §13–§14, Path G) ---
 // Gated mode ids per supported runtime. Claude bidi uses `default` for
-// safe/recommended or legacy privileged sessions; its full-auto default
-// remains bypassPermissions.
+// recommended/full-auto and legacy privileged sessions.
 assert.equal(getGatedPermissionModeId('claude-stream-json-bidi'), 'default');
 assert.equal(getGatedPermissionModeId('codex-app-server-json'), 'on-request-danger-full-access');
 // Unsupported runtimes (classic stream, no mid-turn permission channel) -> ''.
@@ -239,7 +238,7 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { privilegedMode: true }).approvalPolicy,
-  process.platform === 'win32' ? 'untrusted' : 'on-request',
+  'untrusted',
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { privilegedMode: true }).sandbox,
@@ -275,8 +274,7 @@ assert.equal(
   'bypassPermissions',
 );
 
-// Claude bidi uses its supported default gate for safe/recommended sessions;
-// Codex keeps its supported provider gate too. Full-auto remains bypassed.
+// Claude bidi uses its supported default gate for both risk-gated modes.
 assert.equal(
   resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'recommended' }).claudePermissionMode,
   'default',
@@ -287,7 +285,7 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'recommended' }).approvalPolicy,
-  process.platform === 'win32' ? 'untrusted' : 'on-request',
+  'untrusted',
 );
 assert.equal(
   resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'recommended', permissionMode: 'bypassPermissions' }).claudePermissionMode,
@@ -300,12 +298,22 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'full-auto' }).claudePermissionMode,
-  process.platform === 'win32' ? 'default' : 'bypassPermissions',
+  'default',
 );
 assert.equal(
   resolveProviderPermissionPolicy('claude-stream-json-bidi', { privilegedMode: true, riskMode: 'full-auto' }).claudePermissionMode,
-  process.platform === 'win32' ? 'default' : 'bypassPermissions',
+  'default',
 );
+for (const platform of ['win32', 'linux', 'darwin']) {
+  assert.equal(resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'full-auto', platform }).claudePermissionMode, 'default');
+}
+for (const riskMode of ['recommended', 'full-auto']) {
+  const gated = buildRuntimeInvocation('claude-stream-json-bidi', 'hello', { riskMode }, 'claude-bidi');
+  const index = gated.args.indexOf('--settings');
+  assert.ok(index >= 0);
+  assert.deepEqual(JSON.parse(gated.args[index + 1]).permissions.ask, ['Bash', 'PowerShell']);
+}
+assert.throws(() => buildRuntimeInvocation('claude-stream-json', 'hello', { riskMode: 'full-auto' }, 'claude'), { code: 'PERMISSION_PROFILE_UNSUPPORTED_RUNTIME' });
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'full-auto' }).id,
   'untrusted-danger-full-access',

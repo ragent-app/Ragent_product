@@ -51,7 +51,7 @@ const rgFixture = path.join(home, 'rg-fixture');
 const rgConfig = path.join(home, 'rg-config');
 if (managedRipgrep) {
   await mkdir(rgFixture); await writeFile(path.join(rgFixture, 'ordinary-fixture.txt'), 'fixture');
-  await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(rgConfig, '--hidden\n');
+  await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(path.join(rgFixture, '.ignore'), '!.env\n'); await writeFile(rgConfig, '--hidden\n');
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'git-diff', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
@@ -303,7 +303,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
         ? invocation?.command === expectedDelete?.updatedCommand && msg.params.cwd.toLowerCase() === alternateCwd.toLowerCase()
         : managedInstall
           ? rewrittenCommand === expectedBridge?.updatedCommand && preflights === 1 && submissions === 0
-          : managedRipgrep ? String(decodedArgv?.at(-1) || '').includes('rg --no-config --files')
+          : managedRipgrep ? /rg --no-config .*--files/.test(String(decodedArgv?.at(-1) || ''))
           : String(msg.params.command || '').includes('agentoc-rewritten');
       if (!hookCompleted || !rewriteMatches) {
         process.stderr.write(`approval did not contain the completed hook rewrite (hookCompleted=${hookCompleted}, rewriteMatches=${rewriteMatches}, preflights=${preflights}, submissions=${submissions})\n`); process.exitCode = 1; stage = 3;

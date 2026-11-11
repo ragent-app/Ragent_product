@@ -46,6 +46,13 @@ function codexApproval(command) {
     params: typeof command === 'string' ? { command } : { command },
   };
 }
+for (const riskMode of ['recommended', 'full-auto']) {
+  const base = bidiApproval('echo safe');
+  for (const extra of [{ additionalPermissions: { network: true } }, { networkApprovalContext: { host: 'example.org' } }]) {
+    eq(`${riskMode}: capability expansion requires review`, decideRiskGate({ ...base, params: { ...base.params, ...extra } }, { riskMode }).decision, PRIVILEGED_GATE_DECISION.PROMPT);
+  }
+  eq(`${riskMode}: explicit sandbox bypass requires review`, decideRiskGate({ ...base, params: { ...base.params, input: { ...base.params.input, dangerouslyDisableSandbox: true } } }, { riskMode }).decision, PRIVILEGED_GATE_DECISION.PROMPT);
+}
 
 const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   `agentoc-privileged --description "${desc}" --category ${category} -- ${real}`;

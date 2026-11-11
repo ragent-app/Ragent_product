@@ -14,7 +14,7 @@ function windowsReasonCode(reason, complete = false) {
   if (/additional permissions|network approval|permission grant/.test(value)) return 'windows_permission_expansion';
   if (/working directory|path context|cwd/.test(value)) return 'windows_context_unverified';
   if (/shell or command identity/.test(value)) return 'windows_shell_unverified';
-  if (/configuration is not disabled/.test(value)) return 'windows_configuration_unverified';
+  if (/configuration is not disabled|sensitive exclusions are not enforced/.test(value)) return 'windows_configuration_unverified';
   if (/file change|file targets|file target/.test(value) && /unavailable|incomplete|unknown|cannot be/.test(value)) return 'windows_file_context_incomplete';
   if (/parser unavailable|syntax error/.test(value)) return 'windows_parser_error';
   if (/protected or sensitive|recursive deletion|wildcard delete/.test(value)) return 'windows_high_risk_target';
@@ -147,7 +147,7 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
   // These requests can grant more than execution of the displayed command.
   // Command classification alone cannot authorize additional permissions.
   if (params.networkApprovalContext || params.network_approval_context
-      || params.additionalPermissions || params.additional_permissions) {
+      || params.additionalPermissions || params.additional_permissions || params.input?.dangerouslyDisableSandbox === true) {
     return promptWindowsApproval('additional permissions require owner approval', 'windows_permission_expansion', 'danger');
   }
   const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode: mode });

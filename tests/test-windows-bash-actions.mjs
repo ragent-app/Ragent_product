@@ -4,7 +4,7 @@ import { link, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { analyzeWindowsBash, parseLiteralBashWords } from '../chat/windows-bash-actions.mjs';
-import { decideWindowsPowerShellActions } from '../chat/windows-powershell-actions.mjs';
+import { decideWindowsPowerShellActions, ripgrepSafePrefix } from '../chat/windows-powershell-actions.mjs';
 import { decideWindowsApproval } from '../chat/windows-approval-gate.mjs';
 
 assert.deepEqual(parseLiteralBashWords("cat '中文 文件.md'"), ['cat', '中文 文件.md']);
@@ -46,12 +46,13 @@ if (process.platform === 'win32') {
     assert.equal((await inspect(command)).decision, 'review', command);
   }
   assert.equal((await inspect('ls -la')).decision, 'allow');
-  for (const command of ["rg --no-config --files .", "rg --no-config --files -g '!*.txt' .", "rg --no-config -S --max-count 2 -e fixture '中文 文件.md'"]) {
+  for (const command of [`rg ${ripgrepSafePrefix()} --files .`, `rg ${ripgrepSafePrefix()} --files -g '!*.txt' .`, "rg --no-config -S --max-count 2 -e fixture '中文 文件.md'"]) {
     assert.equal((await inspect(command)).decision, 'allow', `safe ripgrep request: ${command}`);
   }
-  for (const command of ["rg --files .", "rg --no-config --files -g '*' .", "rg --no-config --files --glob='*.js' .", 'rg --no-config --files -t js .', 'rg --no-config --files --type=js .', 'rg --no-config --files --hidden .', 'rg --no-config --files --follow .']) {
+  for (const command of ["rg --files .", "rg --no-config --files .", "rg --no-config --files -g '*' .", "rg --no-config --files --glob='*.js' .", 'rg --no-config --files -t js .', 'rg --no-config --files --type=js .', 'rg --no-config --files --hidden .', 'rg --no-config --files --follow .']) {
     assert.equal((await inspect(command)).decision, 'review', `ripgrep must not traverse hidden sensitive paths: ${command}`);
   }
+  assert.equal((await inspect('rg --no-config --files ordinary')).decision, 'review', 'a clean directory still needs execution-time exclusions');
   for (const command of [
     "cat '中文 文件.md' | head -n 1",
     "cat '中文 文件.md' | grep -i fixture | wc -l",

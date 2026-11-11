@@ -152,6 +152,9 @@ export function buildClaudeBidiArgs(options = {}) {
   if (typeof options.mcpConfigPath === 'string' && options.mcpConfigPath.trim()) {
     args.push('--mcp-config', options.mcpConfigPath.trim());
   }
+  if (options.forceClaudeCommandGate === true) {
+    args.push('--settings', JSON.stringify({ permissions: { ask: ['Bash', 'PowerShell'] } }));
+  }
   const permissionMode = typeof options.permissionMode === 'string' ? options.permissionMode.trim() : '';
   if (permissionMode) {
     // Preserve `default`: its stdio permission prompts are the approval gate.

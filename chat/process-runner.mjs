@@ -216,6 +216,12 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
       : {}),
   });
   const riskMode = typeof options.riskMode === 'string' ? options.riskMode.trim() : '';
+  if (riskMode === 'full-auto' && normalizedRuntimeFamily === 'claude-stream-json') {
+    const error = new Error('The claude-stream-json Harness cannot return permission decisions to Ragent');
+    error.code = 'PERMISSION_PROFILE_UNSUPPORTED_RUNTIME';
+    error.statusCode = 409;
+    throw error;
+  }
   if ((riskMode === 'safe' || riskMode === 'recommended')
       && !getGatedPermissionModeId(normalizedRuntimeFamily)) {
     const error = new Error(`The ${normalizedRuntimeFamily} Harness cannot return permission decisions to Ragent`);
@@ -262,6 +268,7 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
     args = buildClaudeBidiArgs({
       permissionMode: claudePermissionMode,
       dangerouslySkipPermissions: !claudePermissionMode && allowDangerousPermissionSkip,
+      forceClaudeCommandGate: ['recommended', 'full-auto'].includes(riskMode) && claudePermissionMode === 'default' && options.interactionMode !== 'plan',
       resume: options.claudeSessionId,
       maxTurns: options.maxTurns,
       continue: options.continue,

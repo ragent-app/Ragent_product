@@ -366,6 +366,15 @@ export function decideRiskGate(approval, options = {}) {
 
   const reasonText = `risk ${risk.tier}: ${(risk.signals?.reasons || []).join('; ') || 'no reason'}`;
 
+  const params = approval.params || {};
+  if (params.networkApprovalContext || params.network_approval_context || params.additionalPermissions || params.additional_permissions
+      || params.input?.dangerouslyDisableSandbox === true) {
+    const reason = 'additional permissions require owner approval';
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason, command,
+      risk: { ...risk, tier: RISK_TIER.DANGER, confidence: 'high', reasons: [{ code: 'permission_expansion', message: reason }],
+        signals: { ...risk.signals, reasons: [reason] } } };
+  }
+
   const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode });
   if (claudeToolDecision) return { ...claudeToolDecision, command, risk: claudeToolDecision.risk };
 

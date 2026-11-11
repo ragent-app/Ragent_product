@@ -14,6 +14,7 @@ const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-rg-hook-'));
 try {
   await writeFile(path.join(root, 'ordinary.txt'), 'fixture');
   await writeFile(path.join(root, '.env'), 'fake-secret');
+  await writeFile(path.join(root, '.ignore'), '!.env\n');
   const config = path.join(root, 'ripgrep-config');
   await writeFile(config, '--hidden\n');
   const quoted = `'${root.replaceAll("'", "''")}'`;

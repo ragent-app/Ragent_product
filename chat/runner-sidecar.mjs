@@ -2869,10 +2869,10 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
   const ripgrepBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
-    && gateDecision.reason === 'ripgrep configuration is not disabled'
+    && ['ripgrep configuration is not disabled', 'ripgrep sensitive exclusions are not enforced', 'recursive file operation needs verification'].includes(gateDecision.reason)
     ? await buildClaudeWindowsRipgrepBridge({ approval, state }) : null;
   if (ripgrepBridge) {
-    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: ripgrepBridge.updatedCommand } });
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: ripgrepBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled ripgrep response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
       type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
@@ -2898,7 +2898,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
   const relativeOperationBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !deleteBridge
-    && ['working directory is not attested', 'ripgrep configuration is not disabled', 'ripgrep path cannot be resolved', 'curl configuration is not disabled', 'Git command is not on the read-only allowlist'].includes(gateDecision.reason)
+    && ['working directory is not attested', 'ripgrep configuration is not disabled', 'ripgrep sensitive exclusions are not enforced', 'ripgrep path cannot be resolved', 'recursive file operation needs verification', 'curl configuration is not disabled', 'Git command is not on the read-only allowlist'].includes(gateDecision.reason)
     ? await buildClaudeWindowsRelativeOperationBridge({ approval, state }) : null;
   if (relativeOperationBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: relativeOperationBridge.updatedInput });

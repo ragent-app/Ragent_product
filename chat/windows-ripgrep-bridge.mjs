@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
+import { ripgrepSafePrefix } from './windows-powershell-actions.mjs';
 
 // Claude can accept a replacement tool input. Disable ripgrep's implicit
 // configuration only after the complete rewritten command passes the same
@@ -15,11 +16,12 @@ export async function buildClaudeWindowsRipgrepBridge({ approval, state } = {}) 
       || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
       || params.networkApprovalContext || params.network_approval_context
       || params.additionalPermissions || params.additional_permissions
-      || input.cwd || input.workdir || input.working_directory) return null;
+      || Object.keys(input).some(key => !['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
+      || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false)) return null;
   const command = input.command;
   if (typeof command !== 'string' || command.length > 128 * 1024
       || !/^\s*rg(?:\.exe)?(?=\s|$)/i.test(command)) return null;
-  const updatedCommand = command.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, '$1 --no-config');
+  const updatedCommand = command.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`);
   const updatedApproval = { ...approval, params: { ...params, input: { ...input, command: updatedCommand } } };
   let decision;
   try { decision = await decideWindowsApproval(updatedApproval, state); } catch { return null; }
