@@ -33,6 +33,10 @@ physical desktop result or native macOS result.
   risk mode. Check workspace boundaries, symlinks, long paths, distinct local
   OS users, privileged operations and process cleanup. Validate the actual
   sandbox and execution identity rather than relying on configuration alone.
+- For macOS, account for the current semantic approval compiler and permission
+  target validator, which do not model `darwin`. Implement and validate a
+  macOS-specific authorization path before advertising equivalent managed
+  approval capabilities; an unknown or refused command is not a passed test.
 - Verify password and account sessions, visitor scope, local and tunneled
   access, credential file permissions and the absence of secrets in logs and
   package contents. Document the local loopback trust model.
