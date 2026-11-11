@@ -14,6 +14,7 @@ await mkdir(workspace); await mkdir(outside);
 await writeFile(path.join(workspace, 'readme.txt'), 'SAFE_WORKSPACE\n');
 await writeFile(path.join(workspace, '.env'), 'PRIVATE_WORKSPACE\n');
 await writeFile(path.join(outside, 'readme.txt'), 'PRIVATE_OUTSIDE\n');
+await writeFile(path.join(outside, 'script.js'), 'process.exit(0);\n');
 const config = path.join(root, 'ripgrep.conf'); await writeFile(config, '--hidden\n');
 await writeFile(path.join(root, '.curlrc'), '--request POST\n');
 const server = createServer((req, res) => { res.end(`METHOD:${req.method}`); });
@@ -93,7 +94,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const psApproval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'PowerShell', input: { command } } });
   for (const tool of ['Bash', 'PowerShell']) {
     const make = tool === 'Bash' ? approval : psApproval;
-    for (const command of ['npm install', 'npm install react', 'pip install requests', 'python -m pip install requests', 'npm ci', 'npm run dev', 'npm run custom-task', 'git add .', "git commit -m 'message'"]) {
+    for (const command of ['npm install', 'npm install react', 'pip install requests', 'python -m pip install requests', 'npm ci', 'npm run dev', 'npm run custom-task -- --fix', 'python -m pytest -q', 'node script.js --help', 'git add .', "git commit -m 'message'"]) {
       const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: make(command), state: outsideCwd });
       assert.ok(bridge, `${riskMode}: ${tool} outside workspace: ${command}`);
     }

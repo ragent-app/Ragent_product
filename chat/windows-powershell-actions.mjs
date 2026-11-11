@@ -201,19 +201,19 @@ export async function analyzeWindowsWorkspaceScriptTask(programName, rawArgs, co
     let task = '';
     if (args.length === 1 && ['test', 'install', 'i', 'ci'].includes(args[0].toLowerCase())) task = args[0].toLowerCase();
     else if (['install', 'i', 'add'].includes(args[0]?.toLowerCase()) && args.length > 1 && args.slice(1).every(packageName)) task = 'install';
-    else if (args.length === 2 && args[0].toLowerCase() === 'run') task = args[1].toLowerCase();
+    else if (args.length >= 2 && args[0].toLowerCase() === 'run') task = args[1].toLowerCase();
     else if (program.startsWith('yarn') && args.length === 1) task = args[0].toLowerCase();
     else if (program.startsWith('bun') && args.length === 1 && args[0].toLowerCase() === 'test') task = 'test';
     if (!WORKSPACE_SCRIPT_TASKS.has(task) && !/^[a-z0-9][a-z0-9:_-]{0,127}$/.test(task)) return null;
     return { kind: 'read', program: `${program} ${task}`, target: null, workspace: inside(context.cwd, context.trustedWorkspaceRoot || ''), caution: true };
   }
   if (['python', 'python.exe', 'python3', 'python3.exe'].includes(program)
-      && args.length === 2 && args[0] === '-m' && ['pytest', 'unittest'].includes(args[1].toLowerCase())) {
+      && args.length >= 2 && args[0] === '-m' && ['pytest', 'unittest'].includes(args[1].toLowerCase())) {
     return { kind: 'read', program: `${program} -m ${args[1]}`, target: null, workspace: inside(context.cwd, context.trustedWorkspaceRoot || ''), caution: true };
   }
   const scriptExtensions = ['node', 'node.exe'].includes(program) ? /\.(?:c|m)?js$/i
     : ['python', 'python.exe', 'python3', 'python3.exe'].includes(program) ? /\.py$/i : null;
-  if (scriptExtensions && args.length === 1 && !args[0].startsWith('-')) {
+  if (scriptExtensions && args.length >= 1 && !args[0].startsWith('-')) {
     const scriptPath = pathResolver(args[0]);
     if (!scriptPath) return null;
     const script = await resolveTarget(scriptPath, context.cwd, fsApi, context);
