@@ -1,0 +1,5 @@
+# These files are executed by POSIX interpreters, including from Windows-hosted
+# checkouts. A CRLF shebang or shell program fails on Linux and macOS.
+*.sh text eol=lf
+packaging/deb/* text eol=lf
+packaging/macos/* text eol=lf
