@@ -13,6 +13,14 @@ const DIFF_SUMMARY_FLAGS = new Set([
 const DIFF_SAFE_COMMON_FLAGS = new Set(['--no-ext-diff', '--no-textconv', '--no-color', '--color=never']);
 const BRANCH_READ_FLAGS = new Set(['--show-current', '-a', '--all', '-r', '--remotes', '-v', '-vv', '--verbose', '--no-color', '--color=never', '--list']);
 const REV_PARSE_READ_FLAGS = new Set(['--show-toplevel', '--is-inside-work-tree', '--is-inside-git-dir', '--show-prefix', '--show-cdup', '--git-dir', '--git-common-dir', '--show-object-format']);
+const LS_FILES_FLAGS = new Set(['-c', '--cached', '-m', '--modified', '-d', '--deleted', '-o', '--others', '--exclude-standard', '-s', '--stage', '-z', '--full-name']);
+
+// Revision names are not paths or options. In particular, reject rev:path,
+// which can request the contents of an explicitly named sensitive file.
+function isLiteralRevision(value) {
+  return typeof value === 'string' && !value.startsWith('-') && /^[a-zA-Z0-9_./~^@{}+-]+$/.test(value)
+    && !/(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc)(?:\/|$)/i.test(value);
+}
 
 function isReadOnlyLogArgs(args) {
   for (let index = 0; index < args.length; index += 1) {
@@ -23,7 +31,8 @@ function isReadOnlyLogArgs(args) {
     }
     if (['--oneline', '--decorate', '--decorate=short', '--decorate=full', '--no-decorate', '--no-pager', '--no-color', '--color=never', '--all'].includes(arg)
         || /^-(?:n\d{1,6}|\d{1,6})$/.test(arg) || /^--max-count=\d{1,6}$/.test(arg)
-        || /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller)$/.test(arg)) continue;
+        || /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller)$/.test(arg)
+        || isLiteralRevision(arg)) continue;
     return false;
   }
   return true;
@@ -57,6 +66,9 @@ export function analyzeWindowsReadOnlyGit(argv) {
   if (subcommand === 'log' && isReadOnlyLogArgs(args)) {
     return { complete: true, actions: [readAction(subcommand)] };
   }
+  if (subcommand === 'ls-files' && args.every(arg => LS_FILES_FLAGS.has(arg))) {
+    return { complete: true, actions: [readAction(subcommand)] };
+  }
   return null;
 }
 
@@ -67,9 +79,19 @@ export function analyzeWindowsLocalGit(argv) {
       || argv.some(value => typeof value !== 'string' || value.includes('\0'))) return null;
   const subcommand = argv[1].toLowerCase();
   const args = argv.slice(2);
+  let pathspecs = [];
   let allowed = false;
   if (subcommand === 'diff') {
-    allowed = args.every(arg => DIFF_SUMMARY_FLAGS.has(arg) || DIFF_SAFE_COMMON_FLAGS.has(arg) || ['--cached', '--staged'].includes(arg));
+    const separator = args.indexOf('--');
+    const options = separator < 0 ? args : args.slice(0, separator);
+    pathspecs = separator < 0 ? [] : args.slice(separator + 1);
+    allowed = (separator < 0 || pathspecs.length > 0)
+      && pathspecs.every(arg => arg && !/[:*?\[\]]/.test(arg) && !arg.startsWith('-'))
+      && options.every(arg => DIFF_SUMMARY_FLAGS.has(arg) || DIFF_SAFE_COMMON_FLAGS.has(arg)
+      || ['--cached', '--staged'].includes(arg) || isLiteralRevision(arg));
+  } else if (subcommand === 'show') {
+    allowed = args.every(arg => DIFF_SUMMARY_FLAGS.has(arg) || DIFF_SAFE_COMMON_FLAGS.has(arg)
+      || ['--oneline', '--no-patch', '-s'].includes(arg) || isLiteralRevision(arg));
   } else if (subcommand === 'add') {
     allowed = args.length > 0 && args.every(arg => !arg.startsWith('-') || ['-A', '--all', '-u', '--update', '--'].includes(arg));
   } else if (subcommand === 'commit') {
@@ -82,5 +104,5 @@ export function analyzeWindowsLocalGit(argv) {
     }
     allowed &&= message;
   }
-  return allowed ? { complete: true, actions: [{ kind: subcommand === 'diff' ? 'read' : 'write', program: `git ${subcommand}`, target: null, caution: true }] } : null;
+  return allowed ? { complete: true, actions: [{ kind: ['diff', 'show'].includes(subcommand) ? 'read' : 'write', program: `git ${subcommand}`, target: null, caution: true }], ...(pathspecs.length ? { pathspecs } : {}) } : null;
 }

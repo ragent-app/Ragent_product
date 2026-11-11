@@ -331,6 +331,21 @@ for (const mode of ['recommended', 'full-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, request('git-diff', 'git diff'), proc);
   assert.equal(sent[3]?.response?.response?.behavior, 'allow');
   assert.match(sent[3]?.response?.response?.updatedInput?.command || '', /--no-ext-diff --no-textconv/);
+  await trackClaudeBidiApprovalRequest(run.id, state, request('git-revision', 'git diff --stat HEAD~1..HEAD'), proc);
+  assert.equal(sent[4]?.response?.response?.behavior, 'allow');
+  assert.match(sent[4]?.response?.response?.updatedInput?.command || '', /--no-ext-diff --no-textconv/);
+  await trackClaudeBidiApprovalRequest(run.id, state, request('git-show', 'git show --stat HEAD'), proc);
+  assert.equal(sent[5]?.response?.response?.behavior, 'allow');
+  assert.match(sent[5]?.response?.response?.updatedInput?.command || '', /--no-ext-diff --no-textconv/);
+  await trackClaudeBidiApprovalRequest(run.id, state, request('git-files', 'git ls-files --cached --modified'), proc);
+  assert.equal(sent[6]?.response?.response?.behavior, 'allow');
+  await trackClaudeBidiApprovalRequest(run.id, state, request('git-file-diff', 'git diff HEAD -- output.md'), proc);
+  assert.equal(sent[7]?.response?.response?.behavior, 'allow');
+  await trackClaudeBidiApprovalRequest(run.id, state, request('git-sensitive-diff', 'git diff HEAD -- .env'), proc);
+  if (mode === 'recommended') {
+    assert.equal(sent.length, 8);
+    assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === 'claude:git-sensitive-diff'));
+  } else assert.equal(sent[8]?.response?.response?.behavior, 'deny');
 }
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);

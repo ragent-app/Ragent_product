@@ -270,6 +270,13 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     const local = readonly ? null : analyzeWindowsLocalGit(words);
     if (local && context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
     const analyzed = readonly || local;
+    if (analyzed?.pathspecs) {
+      const paths = analyzed.pathspecs.map(gitBashPath);
+      if (paths.some(value => !value)) return { complete: false, actions: [], reason: 'Git path cannot be resolved' };
+      const files = await analyzeFiles(paths.map(value => ({ path: value, kind: 'read', recursive: true })), context);
+      if (!files.complete) return files;
+      analyzed.actions.push(...files.actions);
+    }
     return analyzed
       ? withOutput(analyzed)
       : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };

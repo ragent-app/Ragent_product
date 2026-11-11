@@ -550,6 +550,11 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       if (local && context.requireAbsolutePaths) return { complete: false, actions, reason: 'working directory is not attested' };
       const git = readonly || local;
       if (!git) return { complete: false, actions, reason: 'Git command is not on the read-only allowlist' };
+      if (git.pathspecs) {
+        const files = await analyzeWindowsFileChanges(git.pathspecs.map(value => ({ path: value, kind: 'read', recursive: true })), context, { fsApi });
+        if (!files.complete) return { ...files, actions: [...actions, ...git.actions, ...files.actions] };
+        git.actions.push(...files.actions);
+      }
       actions.push(...git.actions);
       continue;
     }

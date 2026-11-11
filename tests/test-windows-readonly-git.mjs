@@ -16,6 +16,8 @@ for (const argv of [
   ['git', 'log', '--oneline', '-5'],
   ['git', 'log', '-n', '5', '--pretty=short'],
   ['git', 'log', '--max-count', '10', '--decorate'],
+  ['git', 'log', '--oneline', '-5', 'HEAD~2..HEAD'],
+  ['git', 'ls-files', '--cached', '--modified'],
 ]) {
   assert.equal(analyzeWindowsReadOnlyGit(argv)?.complete, true, argv.join(' '));
 }
@@ -39,5 +41,6 @@ for (const argv of [
 }
 
 console.log('windows-readonly-git: literal read-only allowlist checks passed');
-for (const argv of [['git', 'diff'], ['git', 'diff', '--cached'], ['git', 'add', '.'], ['git', 'add', '-A'], ['git', 'commit', '-m', 'message']]) assert.equal(analyzeWindowsLocalGit(argv)?.complete, true);
-for (const argv of [['git', 'push'], ['git', 'push', '--force'], ['git', 'reset', '--hard'], ['git', 'commit', '--amend', '-m', 'x']]) assert.equal(analyzeWindowsLocalGit(argv), null);
+for (const argv of [['git', 'diff'], ['git', 'diff', '--cached'], ['git', 'diff', '--stat', 'HEAD~1..HEAD'], ['git', 'diff', 'HEAD', '--', 'src/file.txt'], ['git', 'show', '--stat', 'HEAD'], ['git', 'add', '.'], ['git', 'add', '-A'], ['git', 'commit', '-m', 'message']]) assert.equal(analyzeWindowsLocalGit(argv)?.complete, true, argv.join(' '));
+assert.deepEqual(analyzeWindowsLocalGit(['git', 'diff', 'HEAD', '--', 'src/file.txt']).pathspecs, ['src/file.txt']);
+for (const argv of [['git', 'push'], ['git', 'push', '--force'], ['git', 'reset', '--hard'], ['git', 'commit', '--amend', '-m', 'x'], ['git', 'show', 'HEAD:.env'], ['git', 'diff', '.env'], ['git', 'diff', '--output=secret'], ['git', 'show', '--ext-diff'], ['git', 'ls-files', '--with-tree=HEAD']]) assert.equal(analyzeWindowsLocalGit(argv), null, argv.join(' '));

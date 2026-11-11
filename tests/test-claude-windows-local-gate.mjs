@@ -48,7 +48,7 @@ const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === '
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
 const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
-if (readCase && (!['numbered', 'relative', 'relative-cd', 'cwd-change', 'cwd-change-rg', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+if (readCase && (!['numbered', 'relative', 'relative-cd', 'cwd-change', 'cwd-change-rg', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-diff-file', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 const cwdChangeCase = ['cwd-change', 'cwd-change-rg'].includes(readCase);
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
 if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
@@ -81,12 +81,17 @@ if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_T
 if (readCase === 'npm-task') await writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { 'qa-fixture': 'echo safe-task-fixture' } }));
 if (cwdChangeCase) { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
 if (readCase === 'cwd-change-rg') { await writeFile(path.join(root, 'child', '.env'), 'CHILD_MARKER_PRIVATE\n'); await writeFile(path.join(root, 'child', '.ignore'), '!.env\n'); }
-if (readCase === 'git-status') execFileSync('git', ['init', '-q'], { cwd: root, windowsHide: true });
+if (['git-status', 'git-show', 'git-diff-file'].includes(readCase)) execFileSync('git', ['init', '-q'], { cwd: root, windowsHide: true });
+if (['git-show', 'git-diff-file'].includes(readCase)) {
+  execFileSync('git', ['add', 'fixture.md'], { cwd: root, windowsHide: true });
+  execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture'], { cwd: root, windowsHide: true });
+  if (readCase === 'git-diff-file') await writeFile(artifact, 'changed fixture\n');
+}
 const bashArtifact = artifact.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 let readCommand = readCase === 'conditional'
   ? `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
-  : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? 'rg -n SEARCH_TOKEN .' : readCase === 'git-status' ? 'git status --short' : `ls -lah ${bashQuote(bashRoot)}`;
+  : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? 'rg -n SEARCH_TOKEN .' : readCase === 'git-status' ? 'git status --short' : readCase === 'git-show' ? 'git show --stat HEAD' : readCase === 'git-diff-file' ? 'git diff HEAD -- fixture.md' : `ls -lah ${bashQuote(bashRoot)}`;
 const powershell = process.platform === 'win32' ? path.join(process.env.SystemRoot || process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : '/usr/bin/unused-powershell';
 const dotnetScript = `[System.IO.File]::WriteAllText('${artifact.replaceAll("'", "''")}', 'dotnet fixture'${process.env.AGENTOC_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`;
 const dotnetCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(dotnetScript)}`;
@@ -251,10 +256,11 @@ try {
     await assert.rejects(access(guidanceMarker), { code: 'ENOENT' });
     assert.ok(guidanceObserved, 'real Claude must receive managed executor guidance');
   } else if (readCase) {
-    assert.equal((await readFile(artifact, 'utf8')).replaceAll('\r\n', '\n'), readCase === 'relative-write' ? 'changed\n' : readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
+    assert.equal((await readFile(artifact, 'utf8')).replaceAll('\r\n', '\n'), readCase === 'relative-write' ? 'changed\n' : readCase === 'git-diff-file' ? 'changed fixture\n' : readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
     if (readCase === 'rg-text') assert.equal(privateSearchObserved, false, 'sensitive file contents must not be included in the search result');
     if (readCase === 'relative-write') assert.equal(approvals, 1, 'real Claude must exercise the relative-operation approval callback');
     if (readCase === 'rg-text' && askAll) assert.equal(approvals, 1, 'ask rule must route the search through Ragent');
+    if (readCase === 'git-diff-file' && askAll) assert.equal(approvals, 1, 'ask rule must route the file diff through Ragent');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
     if (cwdChangeCase) assert.ok(process.platform === 'win32' ? cwdMarkerCount >= 1 && rootMarkerCount >= 1 : cwdMarkerCount >= 2,
       'both commands must succeed with the provider working-directory behavior');

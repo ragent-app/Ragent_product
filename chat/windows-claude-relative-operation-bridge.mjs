@@ -169,8 +169,8 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
     ? original.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`)
     : params.tool_name === 'Bash' && /^\s*curl(?:\.exe)?(?=\s|$)/i.test(original)
       ? original.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
-    : /^\s*git(?:\.exe)?\s+diff(?:\s+(?:--cached|--staged))?\s*$/i.test(original)
-      ? original.replace(/^(\s*git(?:\.exe)?\s+diff)(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : original;
+    : /^\s*git(?:\.exe)?\s+(?:diff|show)(?=\s|$)/i.test(original)
+      ? original.replace(/^(\s*git(?:\.exe)?\s+(?:diff|show))(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : original;
   const context = { ...state.riskContext, cwd, trustedWorkspaceRoot: root, requireAbsolutePaths: false, allowCwdRewrite: true };
   let result;
   try { result = await (params.tool_name === 'Bash' ? analyzeWindowsBash(command, context) : analyzeWindowsPowerShell(command, context)); } catch { return null; }
