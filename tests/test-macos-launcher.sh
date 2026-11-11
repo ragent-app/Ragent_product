@@ -21,9 +21,17 @@ cp "$contents/Resources/runtime/codex" "$contents/Resources/runtime/claude"
 chmod 0755 "$contents/Resources/runtime/"{codex,claude}
 cat > "$contents/Resources/app/chat-server.mjs" <<'EOF'
 import { createServer } from 'node:http';
-createServer((req, res) => { res.writeHead(req.url === '/healthz' ? 200 : 404); res.end(); })
-  .listen(Number(process.env.CHAT_PORT), '127.0.0.1');
+import { readFileSync } from 'node:fs';
+const version = readFileSync(new URL('.agentoc-package-version', import.meta.url), 'utf8').trim();
+const commit = readFileSync(new URL('.agentoc-source-commit', import.meta.url), 'utf8').trim();
+createServer((req, res) => {
+  if (req.url === '/healthz') { res.writeHead(200); res.end(); return; }
+  if (req.url === '/api/build-info') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ servicePackageVersion: version, servicePackageSourceCommit: commit })); return; }
+  res.writeHead(404); res.end();
+}).listen(Number(process.env.CHAT_PORT), '127.0.0.1');
 EOF
+printf '%s\n' 0.0.1 > "$contents/Resources/app/.agentoc-package-version"
+printf '%040d\n' 1 > "$contents/Resources/app/.agentoc-source-commit"
 cat > "$test_dir/bin/open" <<'EOF'
 #!/bin/sh
 exit 0
@@ -45,6 +53,23 @@ curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
 node -e 'const fs=require("fs");if((fs.statSync(process.argv[1]).mode & 0o777)!==0o600)process.exit(1)' "$AGENTOC_CONFIG_DIR/chat-server.log"
 "$contents/MacOS/AgentoC"
 [ "$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")" = "$server_pid" ]
+# Replacing the bundle while a service retains the same command path must not
+# silently open the old service, even if only the source revision changed.
+printf '%040d\n' 2 > "$contents/Resources/app/.agentoc-source-commit"
+if "$contents/MacOS/AgentoC" >/dev/null 2>&1; then
+  echo 'launcher accepted a service from another source revision' >&2
+  exit 1
+fi
+grep -Fq '当前应用版本不一致' "$QA_ALERT_ARGS"
+kill -0 "$server_pid"
+printf '%040d\n' 1 > "$contents/Resources/app/.agentoc-source-commit"
+printf '%s\n' 0.0.2 > "$contents/Resources/app/.agentoc-package-version"
+if "$contents/MacOS/AgentoC" >/dev/null 2>&1; then
+  echo 'launcher accepted a service from another package version' >&2
+  exit 1
+fi
+kill -0 "$server_pid"
+printf '%s\n' 0.0.1 > "$contents/Resources/app/.agentoc-package-version"
 "$contents/Resources/agentoc-stop"
 server_pid=''
 

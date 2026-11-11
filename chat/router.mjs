@@ -187,6 +187,7 @@ const parentEnglishCoursewareTemplatePath = join(__dirname, '..', 'templates', '
 const staticDir = join(__dirname, '..', 'static');
 const packageJsonPath = join(__dirname, '..', 'package.json');
 const packageBuildVersionPath = join(__dirname, '..', '.agentoc-package-version');
+const packageSourceCommitPath = join(__dirname, '..', '.agentoc-source-commit');
 const serviceBuildRoots = [
   join(__dirname, '..', 'chat'),
   join(__dirname, '..', 'lib'),
@@ -625,10 +626,16 @@ async function hasDirtyRepoPaths(paths) {
 }
 
 async function loadBuildInfo() {
+  let packageVersion = '';
+  let packageSourceCommit = '';
+  try {
+    const commit = (await readFile(packageSourceCommitPath, 'utf8')).trim();
+    if (/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)) packageSourceCommit = commit;
+  } catch {}
   let version = 'dev';
   try {
     const packagedVersion = (await readFile(packageBuildVersionPath, 'utf8')).trim();
-    if (packagedVersion) version = packagedVersion;
+    if (packagedVersion) { version = packagedVersion; packageVersion = packagedVersion; }
   } catch {}
   try {
     const pkg = JSON.parse(await readFile(packageJsonPath, 'utf8'));
@@ -673,6 +680,8 @@ async function loadBuildInfo() {
     label: serviceLabel,
     title: serviceTitle,
     serviceVersion: version,
+    servicePackageVersion: packageVersion,
+    servicePackageSourceCommit: packageSourceCommit,
     serviceCommit: commit,
     serviceDirty,
     serviceFingerprint,

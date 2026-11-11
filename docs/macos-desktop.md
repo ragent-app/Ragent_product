@@ -14,6 +14,11 @@ On first launch the app creates an owner password and stores it in the current
 user's `~/.config/agentoc/owner-credentials.txt` with owner-only permissions.
 After recording it and changing the password in Settings, delete that file.
 The configuration directory and existing credentials are retained on upgrade.
+Before replacing the app, stop its service and disable login startup if it is
+enabled. Start the replacement, then re-enable login startup if needed. The
+launcher compares the service's startup package version and source commit
+with the installed bundle; if they differ or cannot be verified, it leaves the
+service untouched and asks for a restart.
 
 ## Login startup
 

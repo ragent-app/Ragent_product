@@ -17,6 +17,8 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 - 停止服务：AgentoC.app/Contents/Resources/agentoc-stop
 - 日志：~/.config/agentoc/chat-server.log
 - 实例配置（升级保留）：~/.config/agentoc/instance.env
+- 升级前先停止服务；如启用了登录自启动，先按下方步骤停用。替换 App 后
+  再启动或重新启用。应用会检查运行中的服务版本，避免误连旧版本。
 
 可选：登录时自动启动（手机随时可连的前提）
 ------------------------------------------

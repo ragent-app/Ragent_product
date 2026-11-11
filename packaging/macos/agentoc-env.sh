@@ -57,6 +57,30 @@ agentoc_server_running() {
   return 1
 }
 
+# Compare the service's startup snapshot with this installed bundle. A running
+# process can retain the same pathname across an app replacement, so pathname
+# and a generic health check alone do not prove that the new build is running.
+agentoc_server_matches_installed_build() {
+  local port="${CHAT_PORT:-7690}"
+  [ -s "$AGENTOC_APP_DIR/.agentoc-package-version" ] && [ -s "$AGENTOC_APP_DIR/.agentoc-source-commit" ] || return 1
+  curl -fsS --max-time 3 --max-filesize 65536 "http://127.0.0.1:${port}/api/build-info" 2>/dev/null |
+    "$AGENTOC_NODE_BIN" -e '
+      const fs = require("fs");
+      let body = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", chunk => { body += chunk; if (body.length > 65536) process.exit(1); });
+      process.stdin.on("end", () => {
+        try {
+          const value = JSON.parse(body);
+          const version = fs.readFileSync(process.argv[1], "utf8").trim();
+          const commit = fs.readFileSync(process.argv[2], "utf8").trim();
+          if (!version || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit) ||
+              value.servicePackageVersion !== version || value.servicePackageSourceCommit !== commit) process.exit(1);
+        } catch { process.exit(1); }
+      });
+    ' "$AGENTOC_APP_DIR/.agentoc-package-version" "$AGENTOC_APP_DIR/.agentoc-source-commit"
+}
+
 # Provision first-run credentials exactly like the Debian postinst:
 # auth.json (scrypt owner credentials) + instance.env (session secret,
 # local-mode cookies, connectivity defaults). Both live in the instance

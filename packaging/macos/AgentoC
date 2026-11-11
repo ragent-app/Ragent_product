@@ -50,8 +50,12 @@ BASE_URL="http://127.0.0.1:${PORT}"
 mkdir -p "$(dirname "$AGENTOC_RUN_LOG")"
 
 if agentoc_server_running; then
-  open_manager
-  exit 0
+  if agentoc_server_matches_installed_build; then
+    open_manager
+    exit 0
+  fi
+  report_start_failure '已运行的 Ragent 服务与当前应用版本不一致，或无法确认版本。请先停止旧服务；如果启用了登录自启动，请先停用后再重新启用。'
+  exit 1
 fi
 
 if lsof -ti ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -71,7 +75,7 @@ echo $! > "$AGENTOC_PID_FILE"
 
 ready=0
 for _ in $(seq 1 60); do
-  if agentoc_server_running && curl -sf -o /dev/null --max-time 1 "$BASE_URL/healthz" 2>/dev/null; then
+  if agentoc_server_running && curl -sf -o /dev/null --max-time 1 "$BASE_URL/healthz" 2>/dev/null && agentoc_server_matches_installed_build; then
     ready=1
     break
   fi
