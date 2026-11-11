@@ -24,9 +24,10 @@ unregister it. The tool leaves configuration, credentials, workspaces and
 logs in place. It will not overwrite a different LaunchAgent or unload another
 job with the same label. Disable it before moving the app, then enable it from
 the new location. A pre-existing manually installed job must be reviewed and
-removed separately. Native tests have exercised registration and removal with
-an isolated stub service; actual login, recovery and upgrades still require
-acceptance using the final installed app.
+removed separately. A 0.0.18 test app built from commit `eff2bbe` passed isolated native
+registration, service health, process termination and automatic recovery,
+and unregistration with configuration retained. Actual logout/login and
+upgrades still require acceptance using the final installed app.
 
 ## Approval limitation
 
