@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { promisify } from 'node:util';
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +15,9 @@ await writeFile(path.join(workspace, 'readme.txt'), 'SAFE_WORKSPACE\n');
 await writeFile(path.join(workspace, '.env'), 'PRIVATE_WORKSPACE\n');
 await writeFile(path.join(outside, 'readme.txt'), 'PRIVATE_OUTSIDE\n');
 const config = path.join(root, 'ripgrep.conf'); await writeFile(config, '--hidden\n');
+await writeFile(path.join(root, '.curlrc'), '--request POST\n');
+const server = createServer((req, res) => { res.end(`METHOD:${req.method}`); });
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const approval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'Bash', input: { command, description: 'read fixture' } } });
 const bash = process.env.AGENTOC_TEST_BASH_BINARY;
 assert.ok(bash, 'real Git Bash path is required');
@@ -58,6 +63,18 @@ for (const riskMode of ['recommended', 'full-auto']) {
   execFileSync(bash, ['--noprofile', '--norc', '-c', deletion.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
   assert.equal(await access(path.join(outside, destination)).then(() => true, () => false), false);
   const outsideCwd = { ...state, cwd: outside };
+  const curl = await buildClaudeWindowsRelativeOperationBridge({ approval: approval('curl -fsSL https://example.org/docs'), state: outsideCwd });
+  assert.ok(curl);
+  assert.match(curl.updatedInput.command, /curl --disable --proto =http,https --proto-redir =http,https -fsSL/);
+  const localCurl = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(`curl -fsS http://127.0.0.1:${server.address().port}/`), state: outsideCwd });
+  assert.ok(localCurl);
+  const curlResult = await promisify(execFile)(bash, ['--noprofile', '--norc', '-c', localCurl.updatedInput.command], {
+    cwd: outside, encoding: 'utf8', windowsHide: true, env: { ...process.env, CURL_HOME: root },
+  });
+  assert.equal(curlResult.stdout, 'METHOD:GET', 'user curl configuration must not turn the request into a POST');
+  for (const command of ['curl -d secret https://example.org', 'curl -F secret https://example.org', 'curl file:///tmp/secret', 'curl -o .env https://example.org']) {
+    assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state: outsideCwd }), null, command);
+  }
   const outsideCurrent = await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cat readme.txt'), state: outsideCwd });
   assert.ok(outsideCurrent, `${riskMode}: cwd outside workspace must not be categorically rejected`);
   assert.match(execFileSync(bash, ['--noprofile', '--norc', '-c', outsideCurrent.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true }), /PRIVATE_OUTSIDE/);
@@ -90,6 +107,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cat readme.txt'), state: { ...state, turnActive: false } }), null);
 }
 const actual = await realpath(root); const parent = await realpath(os.tmpdir());
+await new Promise(resolve => server.close(resolve));
 assert.equal(path.dirname(actual).toLowerCase(), parent.toLowerCase());
 assert.ok(path.basename(actual).startsWith('agentoc-claude-cwd-'));
 await rm(actual, { recursive: true, force: true });

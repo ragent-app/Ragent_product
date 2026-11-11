@@ -215,6 +215,19 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   const program = words[0];
   const version = analyzeWindowsVersion(program, words.slice(1));
   if (version) return withOutput({ complete: true, actions: [version] });
+  if (['curl', 'curl.exe'].includes(String(program).toLowerCase())) {
+    const prefix = ['--disable', '--proto', '=http,https', '--proto-redir', '=http,https'];
+    const args = words.slice(1);
+    if (!prefix.every((arg, index) => args[index] === arg)) return { complete: false, actions: [], reason: 'curl configuration is not disabled' };
+    const rest = args.slice(prefix.length); let urls = 0;
+    for (const arg of rest) {
+      if (/^-[fsSLI]+$/.test(arg) || ['--fail', '--silent', '--show-error', '--location', '--head', '--compressed'].includes(arg)) continue;
+      try { const url = new URL(arg); if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) return { complete: false, actions: [], reason: 'curl target needs review' }; urls += 1; }
+      catch { return { complete: false, actions: [], reason: 'curl arguments need review' }; }
+    }
+    if (urls !== 1) return { complete: false, actions: [], reason: 'curl target needs review' };
+    return withOutput({ complete: true, actions: [{ kind: 'read', program: 'curl web request', target: null, caution: true }] });
+  }
   if (['rg', 'rg.exe'].includes(String(program).toLowerCase())) {
     const analyzed = await analyzeWindowsRipgrep(words.slice(1), context, { pathResolver: gitBashPath });
     return withOutput(analyzed);
