@@ -307,6 +307,7 @@ function runBroker() {
   const pendingServerRequests = new Map();
   const pendingThreadClients = [];
   const threadStartQueue = [];
+  const pendingThreadReloads = new Map();
   let activeThreadRequestId = null;
   let nextRequestId = 10_000;
   let upstreamReady = false;
@@ -359,7 +360,22 @@ function runBroker() {
     while (threadStartQueue.length > 0) {
       const entry = threadStartQueue.shift();
       if (entry.client.destroyed) continue;
+      if (entry.message.method === 'thread/resume') {
+        const owner = threadOwners.get(entry.message.params?.threadId);
+        if (owner && owner !== entry.client && !owner.destroyed) {
+          sendClient(entry.client, { id: entry.clientId, error: { code: -32004, message: 'Codex thread is owned by another connected client' } });
+          continue;
+        }
+      }
       activeThreadRequestId = entry.id;
+      if (entry.message.method === 'thread/resume') {
+        // A loaded thread retains its previous MCP config. Release it before
+        // resuming so this run's capabilities and tokens take effect.
+        const reloadId = nextRequestId++;
+        pendingThreadReloads.set(reloadId, entry);
+        try { upstream.stdin.write(`${JSON.stringify({ id: reloadId, method: 'thread/unsubscribe', params: { threadId: entry.message.params.threadId } })}\n`); } catch {}
+        return;
+      }
       pending.set(entry.id, { client: entry.client, clientId: entry.clientId });
       pendingThreadClients.push(entry.client);
       try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch {}
@@ -372,6 +388,20 @@ function runBroker() {
     const serverRequest = typeof message.method === 'string' && isRequest(message);
     if (!serverRequest && message.id === BROKER_INTERNAL_INITIALIZE_ID) {
       upstreamReady = !message.error;
+      return;
+    }
+    if (!serverRequest && !message.method && pendingThreadReloads.has(message.id)) {
+      const entry = pendingThreadReloads.get(message.id);
+      pendingThreadReloads.delete(message.id);
+      if (message.error || entry.client.destroyed) {
+        if (message.error) sendClient(entry.client, { id: entry.clientId, error: { code: -32005, message: 'Could not release the previous Codex thread configuration' } });
+        activeThreadRequestId = null;
+        sendNextThreadRequest();
+        return;
+      }
+      pending.set(entry.id, { client: entry.client, clientId: entry.clientId });
+      pendingThreadClients.push(entry.client);
+      try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch {}
       return;
     }
     if (serverRequest) {
@@ -501,7 +531,7 @@ function runBroker() {
     }
     // A fork reads its source thread; it must not take ownership of that
     // source. Ownership of the newly created thread comes from its response.
-    if (threadId && message.method !== 'thread/fork') threadOwners.set(threadId, client);
+    if (threadId && message.method !== 'thread/fork' && message.method !== 'thread/resume') threadOwners.set(threadId, client);
     const startsThread = message.method === 'thread/start' || message.method === 'thread/resume' || message.method === 'thread/fork';
     const rewritten = { ...message };
     if (isRequest(message)) {

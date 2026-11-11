@@ -113,6 +113,15 @@ const fakeUpstream = `
           process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
           process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id } } }) + '\\n');
         }, nextThread % 2 ? 150 : 5);
+      } else if (message.method === 'thread/unsubscribe') {
+        const id = message.params.threadId;
+        setTimeout(() => process.stdout.write(JSON.stringify(id === 'reject-release'
+          ? { id: message.id, error: { code: -32008, message: 'release failed' } }
+          : { id: message.id, result: { status: 'unsubscribed' } }) + '\\n'), 25);
+      } else if (message.method === 'thread/resume') {
+        const id = message.params.threadId;
+        process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
+        process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id }, config: message.params.config } }) + '\\n');
       } else if (message.method === 'turn/start') {
         if (message.params.input[0].text === 'approval') {
           // Server request ids may collide with pending client request ids.
@@ -270,6 +279,20 @@ async function startApprovalProxy() {
 }
 
 const [left, right] = await Promise.all([startApprovalProxy(), startApprovalProxy()]);
+left.proxy.send({ method: 'thread/resume', id: 91, params: { threadId: 'new-resume', config: {} } });
+await new Promise(resolve => setTimeout(resolve, 10));
+right.proxy.send({ method: 'thread/resume', id: 92, params: { threadId: 'new-resume', config: {} } });
+const [newResumeMessages, deniedResume] = await Promise.all([
+  Promise.all([left.proxy.next(), left.proxy.next()]), right.proxy.next(),
+]);
+assert.equal(newResumeMessages.find(message => message.id === 91).result.thread.id, 'new-resume');
+assert.equal(deniedResume.error.code, -32004);
+left.proxy.send({ method: 'thread/resume', id: 98, params: { threadId: 'reject-release', config: {} } });
+assert.equal((await left.proxy.next()).error.code, -32005);
+left.proxy.send({ method: 'thread/resume', id: 97, params: { threadId: left.threadId, config: { mcp_servers: { new_run: {} } } } });
+const resumeMessages = [await left.proxy.next(), await left.proxy.next()];
+assert.equal(resumeMessages.find(message => message.id === 97).result.config.mcp_servers.new_run != null, true);
+assert.equal(resumeMessages.find(message => message.method === 'thread/started').params.thread.id, left.threadId);
 right.proxy.send({ method: 'turn/start', id: 99, params: { threadId: left.threadId, input: [{ type: 'text', text: 'approval' }] } });
 assert.equal((await right.proxy.next()).error.code, -32004);
 for (const item of [left, right]) item.proxy.send({ method: 'turn/start', id: 2, params: { threadId: item.threadId, input: [{ type: 'text', text: 'approval' }] } });
