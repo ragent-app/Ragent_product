@@ -27,10 +27,17 @@ agentoc_config_dir() {
 AGENTOC_PID_FILE="$(agentoc_config_dir)/agentoc.pid"
 AGENTOC_RUN_LOG="$(agentoc_config_dir)/chat-server.log"
 
+agentoc_is_server_pid() {
+  local pid="$1" command
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  command="$(ps -ww -p "$pid" -o command= 2>/dev/null || true)"
+  [ "$command" = "$AGENTOC_NODE_BIN $AGENTOC_APP_DIR/chat-server.mjs" ]
+}
+
 agentoc_server_pid() {
   local pid
   pid="$(cat "$AGENTOC_PID_FILE" 2>/dev/null || true)"
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+  if agentoc_is_server_pid "$pid"; then
     printf '%s' "$pid"
     return 0
   fi
@@ -38,12 +45,13 @@ agentoc_server_pid() {
 }
 
 agentoc_server_running() {
-  local port="${CHAT_PORT:-7690}"
-  if agentoc_server_pid >/dev/null; then
-    return 0
-  fi
-  # A server may be running from another launch path (LaunchAgent, manual run).
-  curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:${port}/healthz" 2>/dev/null
+  local port="${CHAT_PORT:-7690}" pid
+  # Verify the listening process, including LaunchAgent starts without a PID
+  # file. Another service's health endpoint must not be mistaken for ours.
+  for pid in $(lsof -ti ":${port}" -sTCP:LISTEN 2>/dev/null || true); do
+    if agentoc_is_server_pid "$pid"; then return 0; fi
+  done
+  return 1
 }
 
 # Provision first-run credentials exactly like the Debian postinst:

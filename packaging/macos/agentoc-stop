@@ -14,7 +14,10 @@ if [ -n "$pid" ]; then
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.25
   done
-  kill -9 "$pid" 2>/dev/null || true
+  if agentoc_is_server_pid "$pid"; then
+    printf 'AgentoC chat server did not stop (pid %s)\n' "$pid" >&2
+    exit 1
+  fi
   rm -f "$AGENTOC_PID_FILE"
   printf 'AgentoC chat server stopped (pid %s)\n' "$pid"
   exit 0
@@ -25,7 +28,7 @@ pids="$(lsof -ti ":${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
 if [ -n "$pids" ]; then
   # Only kill processes whose command line is the packaged chat server.
   for pid in $pids; do
-    if ps -p "$pid" -o command= 2>/dev/null | grep -q "chat-server.mjs"; then
+    if agentoc_is_server_pid "$pid"; then
       kill "$pid" 2>/dev/null || true
       printf 'AgentoC chat server stopped (pid %s)\n' "$pid"
     fi

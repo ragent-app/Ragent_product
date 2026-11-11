@@ -25,7 +25,7 @@ echo $! > "$AGENTOC_PID_FILE"
 
 ready=0
 for _ in $(seq 1 60); do
-  if curl -sf -o /dev/null --max-time 1 "$BASE_URL/healthz" 2>/dev/null; then
+  if agentoc_server_running && curl -sf -o /dev/null --max-time 1 "$BASE_URL/healthz" 2>/dev/null; then
     ready=1
     break
   fi
