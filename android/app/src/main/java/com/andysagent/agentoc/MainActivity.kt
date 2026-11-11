@@ -954,6 +954,7 @@ class MainActivity : ComponentActivity() {
                 val otherDeviceProjects by app.runtime.otherDeviceProjects.collectAsStateWithLifecycle()
                 val backgroundTargetSummaries by app.runtime.backgroundTargetSummaries.collectAsStateWithLifecycle()
                 val targetConnectionStates by app.runtime.targetConnectionStates.collectAsStateWithLifecycle()
+                val targetTurnQuotaFailures by app.runtime.targetTurnQuotaFailures.collectAsStateWithLifecycle()
                 LaunchedEffect(runtimeConnectionState, notificationPermissionRequested) {
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                         runtimeConnectionState.name != "Connected" ||
@@ -980,6 +981,14 @@ class MainActivity : ComponentActivity() {
                 val localStartup by localStartupFlow.collectAsStateWithLifecycle(initialValue = null)
                 val computerDirectory = localStartup?.first ?: com.andysagent.agentoc.core.datastore.ComputerDirectory()
                 val currentWorkbenchTargetId = temporaryControlTargetId ?: computerDirectory.activeTargetId
+                LaunchedEffect(targetTurnQuotaFailures, currentWorkbenchTargetId) {
+                    val failedTargetId = currentWorkbenchTargetId ?: return@LaunchedEffect
+                    val failure = targetTurnQuotaFailures[failedTargetId] ?: return@LaunchedEffect
+                    if (pendingComputerConnectionId != failedTargetId) {
+                        app.runtime.clearTargetTurnQuotaFailure(failedTargetId)
+                        reportComputerConnectionFailure(failure)
+                    }
+                }
                 val tabletDualPane = windowSizeClass.widthSizeClass == androidx.compose.material3.windowsizeclass.WindowWidthSizeClass.Expanded &&
                     androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp -
                         com.andysagent.agentoc.core.designsystem.AgentocSizes.PhoneShell >= 320.dp
@@ -1542,6 +1551,7 @@ class MainActivity : ComponentActivity() {
                                     } else {
                                         pendingComputerConnectionId = event.instanceId
                                         pendingComputerConnectionIsPrimary = true
+                                        app.runtime.clearTargetTurnQuotaFailure(event.instanceId)
                                         val hasStoredAccountSession = runCatching {
                                             app.runtime.configStore.accountSession.first() != null
                                         }.getOrDefault(false)
@@ -1584,6 +1594,7 @@ class MainActivity : ComponentActivity() {
                                         computerDirectory.activeTarget?.instanceId == event.instanceId
                                     requestError = null
                                     computerConnectionError = null
+                                    app.runtime.clearTargetTurnQuotaFailure(event.instanceId)
                                     runtimeScope.launch {
                                         val hasStoredAccountSession = runCatching {
                                             app.runtime.configStore.accountSession.first() != null
@@ -1638,6 +1649,7 @@ class MainActivity : ComponentActivity() {
                                             pendingComputerConnectionId = null
                                             pendingComputerConnectionIsPrimary = true
                                             accounts.onEvent(AccountsEvent.Refresh)
+                                            app.runtime.clearTargetTurnQuotaFailure(event.instanceId)
                                             reportComputerConnectionFailure(error)
                                         }
                                     }

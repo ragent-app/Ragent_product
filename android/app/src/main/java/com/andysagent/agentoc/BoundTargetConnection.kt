@@ -52,6 +52,7 @@ internal class BoundTargetConnection(
     private val renewCarrierCredential: (suspend (String?, String, () -> Boolean) -> Unit)? = null,
     private val releaseAccountReservation: (suspend (String) -> Unit)? = null,
     private val onNetworkRestored: () -> Unit = {},
+    private val onTurnQuotaExceeded: (AccountSessionException) -> Unit = {},
 ) : TargetConnectionController {
     private val bootstrapClient = ConnectionBootstrapClient(endpointProvider, credentialProvider)
     @Volatile private var plan: BootstrapConnectionPlan? = null
@@ -368,6 +369,11 @@ internal class BoundTargetConnection(
                     } catch (error: Throwable) {
                         ensureActive()
                         if (!started || generation != refreshGeneration.get()) return@launch
+                        error.asTurnQuotaFailure()?.let { quotaFailure ->
+                            connectionDebugTrace(application, instanceId, "turn-connection-quota-exceeded")
+                            onTurnQuotaExceeded(quotaFailure)
+                            return@launch
+                        }
                         if (error.isAuthenticationFailure() || (needsRenewal && (error is IllegalArgumentException
                                 || (error is ApiException && error.statusCode in setOf(400, 404, 409))))) {
                             if (credentialProvider()?.takeIf { it.isNotBlank() } != attemptedCredential) return@launch
@@ -389,6 +395,17 @@ internal class BoundTargetConnection(
                 }
             } finally { expiryJob?.cancel() }
         }
+    }
+
+    private fun Throwable.asTurnQuotaFailure(): AccountSessionException? {
+        val code = when (this) {
+            is ApiException -> code
+            is AccountSessionException -> code
+            is AccountsRepositoryException -> code
+            else -> null
+        }?.takeIf { it in setOf("turn_connection_quota_exceeded", "turn_quota_exceeded") } ?: return null
+        return this as? AccountSessionException
+            ?: AccountSessionException(429, code, "The account has reached its active connection limit.", retryable = false, cause = this)
     }
 
     private fun canRetainCarrier(retained: BootstrapConnectionPlan?, session: PlannedTurnSession?, credential: String?): Boolean =

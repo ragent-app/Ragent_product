@@ -19,6 +19,25 @@ import java.util.concurrent.atomic.AtomicInteger
 class BoundTargetConnectionTest {
     private val application get() = ApplicationProvider.getApplicationContext<Application>()
 
+    @Test fun automaticBootstrapQuotaDenialIsReportedOnceAndStopsRetrying() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val transport = OkHttpAgentoCTransport({ "" }, { "rda_quota_fixture" }, requireVerifiedCarrier = true)
+        val quotaFailure = AccountSessionException(429, "turn_connection_quota_exceeded", "quota reached", retryable = false)
+        val reported = CompletableDeferred<AccountSessionException>()
+        val attempts = AtomicInteger()
+        val controller = BoundTargetConnection("pc-quota", application, { "" }, { "rda_quota_fixture" }, { null },
+            transport, scope, scope, endpointlessBootstrap = {
+                attempts.incrementAndGet()
+                throw quotaFailure
+            }, onAuthenticationRequired = {}, onTurnQuotaExceeded = { reported.complete(it) })
+        try {
+            controller.start()
+            assertSame(quotaFailure, withTimeout(5_000) { reported.await() })
+            delay(150)
+            assertEquals(1, attempts.get())
+        } finally { controller.stop(); transport.close(); scope.coroutineContext[Job]?.cancelAndJoin() }
+    }
+
     @Test fun repeatedCarrierRecoveryKeepsInFlightJoinButRouteChangeRestartsIt() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)

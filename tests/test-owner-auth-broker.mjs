@@ -562,6 +562,22 @@ try {
       createdAt: issuedAt,
       lastSeenAt: issuedAt,
       revokedAt: '',
+    }, {
+      deviceId: 'adev_directory_expired_phone',
+      accountId: 'acct_owner_1',
+      alias: 'Expired installation',
+      platform: 'android',
+      createdAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      lastSeenAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      revokedAt: '',
+    }, {
+      deviceId: 'adev_directory_unrefreshable_phone',
+      accountId: 'acct_owner_1',
+      alias: 'Unrefreshable installation',
+      platform: 'android',
+      createdAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      lastSeenAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      revokedAt: '',
     }];
     state.accountDeviceKeys = [{
       keyId: normalizedKey.keyId,
@@ -570,6 +586,22 @@ try {
       publicKey: normalizedKey.publicKey,
       fingerprint: createDevicePublicKeyFingerprint(normalizedKey.publicKey),
       createdAt: issuedAt,
+      revokedAt: '',
+    }, {
+      keyId: 'key_expired_directory_phone',
+      accountId: 'acct_owner_1',
+      deviceId: 'adev_directory_expired_phone',
+      publicKey: normalizedKey.publicKey,
+      fingerprint: 'expired-device-fingerprint',
+      createdAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      revokedAt: '',
+    }, {
+      keyId: 'key_unrefreshable_directory_phone',
+      accountId: 'acct_owner_1',
+      deviceId: 'adev_directory_unrefreshable_phone',
+      publicKey: normalizedKey.publicKey,
+      fingerprint: 'unrefreshable-device-fingerprint',
+      createdAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
       revokedAt: '',
     }];
     state.accountCredentials = [{
@@ -582,6 +614,26 @@ try {
       issuedAt,
       expiresAt: new Date(now + 60 * 60 * 1000).toISOString(),
       revokedAt: '',
+    }, {
+      credentialId: 'racid_directory_expired_phone',
+      tokenHash: createHash('sha256').update('rac_expired_directory_phone').digest('hex'),
+      accountId: 'acct_owner_1',
+      deviceId: 'adev_directory_expired_phone',
+      keyId: 'key_expired_directory_phone',
+      scope: 'account-directory',
+      issuedAt: new Date(now - 4 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: new Date(now - 12 * 60 * 60 * 1000).toISOString(),
+      revokedAt: '',
+    }, {
+      credentialId: 'racid_directory_unrefreshable_phone',
+      tokenHash: createHash('sha256').update('rac_unrefreshable_directory_phone').digest('hex'),
+      accountId: 'acct_owner_1',
+      deviceId: 'adev_directory_unrefreshable_phone',
+      keyId: 'key_unrefreshable_directory_phone',
+      scope: 'account-directory',
+      issuedAt: new Date(now - 6 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
+      revokedAt: '',
     }];
 
     const directory = await broker.listAccountDirectoryDevices({ credential });
@@ -589,6 +641,15 @@ try {
     assert.equal(directory.devices.some((device) => device.deviceId === instanceId), true);
     assert.equal(directory.devices.some((device) => device.deviceId === 'other-dev-001'), false);
     assert.equal(directory.devices.some((device) => Object.hasOwn(device, 'source')), false);
+    assert.equal(directory.devices.some((device) => device.deviceId === 'adev_directory_expired_phone'), false,
+      'An expired phone login is history, not a currently logged-in account device');
+    assert.equal(state.accountDevices.some((device) => device.deviceId === 'adev_directory_expired_phone'), true,
+      'Keep an expired phone during the signed credential recovery window');
+    assert.equal(state.accountDevices.some((device) => device.deviceId === 'adev_directory_unrefreshable_phone'), false,
+      'Remove a phone after its signed session can no longer be recovered');
+    assert.equal(state.accountDeviceKeys.some((key) => key.keyId === 'key_unrefreshable_directory_phone'), false);
+    assert.equal(state.accountCredentials.some((item) => item.credentialId === 'racid_directory_unrefreshable_phone'), false);
+    assert.equal(directory.quota.registeredPhones, 1);
   });
 
   await check('listBindingHistory 返回按时间倒序的历史', async () => {

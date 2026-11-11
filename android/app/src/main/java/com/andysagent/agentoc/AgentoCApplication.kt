@@ -84,6 +84,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
@@ -425,8 +426,11 @@ class AndroidRuntimeGraph internal constructor(
     }
     private val mutableBackgroundTargetSummaries = MutableStateFlow<Map<String, TargetSummary>>(emptyMap())
     private val mutableTargetConnectionStates = MutableStateFlow<Map<String, RuntimeConnectionState>>(emptyMap())
+    private val mutableTargetTurnQuotaFailures = MutableStateFlow<Map<String, AccountSessionException>>(emptyMap())
     /** Observe existing shared carriers without starting or retaining a connection. */
     val targetConnectionStates: StateFlow<Map<String, RuntimeConnectionState>> = mutableTargetConnectionStates.asStateFlow()
+    /** Quota failures from automatic carrier recovery, surfaced to the foreground UI. */
+    val targetTurnQuotaFailures: StateFlow<Map<String, AccountSessionException>> = mutableTargetTurnQuotaFailures.asStateFlow()
     /** Summary-only UI observation; carriers remain owned by the shared target lease pool. */
     val backgroundTargetSummaries: StateFlow<Map<String, TargetSummary>> = mutableBackgroundTargetSummaries.asStateFlow()
     private val targetSummaryCodec = ProtocolCodec()
@@ -1633,9 +1637,20 @@ class AndroidRuntimeGraph internal constructor(
 
     /** Wait for this specific background computer, without selecting or restarting it. */
     internal suspend fun awaitBackgroundComputerConnected(instanceId: String) {
-        if (!awaitConnectedComputer(targetConnectionStates, instanceId, connectionWaitTimeoutMs)) {
-            throw AppApiException(ApiError(ApiErrorCode.TARGET_OFFLINE, "Computer connection timed out", retryable = true))
+        val outcome = withTimeoutOrNull(connectionWaitTimeoutMs) {
+            combine(targetConnectionStates, targetTurnQuotaFailures) { states, failures ->
+                (states[instanceId] == RuntimeConnectionState.Connected) to failures[instanceId]
+            }.first { (connected, quotaFailure) -> connected || quotaFailure != null }
         }
+        when {
+            outcome?.first == true -> Unit
+            outcome?.second != null -> throw requireNotNull(outcome.second)
+            else -> throw AppApiException(ApiError(ApiErrorCode.TARGET_OFFLINE, "Computer connection timed out", retryable = true))
+        }
+    }
+
+    internal fun clearTargetTurnQuotaFailure(instanceId: String) {
+        mutableTargetTurnQuotaFailures.update { failures -> failures - instanceId }
     }
 
     private fun encodePathSegment(value: String): String =
@@ -1700,6 +1715,7 @@ class AndroidRuntimeGraph internal constructor(
                 else current
             }
             if (state == RuntimeConnectionState.Connected) {
+                mutableTargetTurnQuotaFailures.update { failures -> failures - target.instanceId }
                 notificationRegistrar?.invoke() ?: registerFcmTokenWhenConnected(runtime.instanceId)
             }
             if (state == RuntimeConnectionState.Connected) refreshBackgroundSummary(runtime)
@@ -1816,6 +1832,9 @@ class AndroidRuntimeGraph internal constructor(
                 renewTargetCarrierCredential(runtime, credential, deviceId, current)
             },
             onEndpointResolved = { runtime.endpoint = it },
+            onTurnQuotaExceeded = { error ->
+                mutableTargetTurnQuotaFailures.update { failures -> failures + (target.instanceId to error) }
+            },
         )
         runtime = TargetRuntime(target.instanceId, target.endpoint.trimEnd('/'), "", targetTransport, repository, controller,
             childScope, disposeStorage = { database.close() })

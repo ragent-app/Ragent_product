@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
 
 import com.andysagent.agentoc.core.model.AppLanguage
@@ -53,6 +55,21 @@ data class AccountSessionMetadata(
     val expiresAt: String,
     val demoAccessMode: String? = null,
 )
+
+/**
+ * Android 8+ scopes ANDROID_ID to the signing key, Android user and device.
+ * Hash it before persisting/sending so the raw platform identifier is never
+ * exposed as an account directory device id.
+ */
+internal fun stableAccountDeviceIdFromAndroidId(androidId: String?): String? {
+    val normalized = androidId?.trim()?.lowercase(Locale.ROOT)?.takeIf {
+        it.matches(Regex("^[0-9a-f]{16}$")) && it != "9774d56d682e549c" && it != "0000000000000000"
+    } ?: return null
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest("agentoc-account-device-v1:$normalized".toByteArray(Charsets.UTF_8))
+    val suffix = digest.take(24).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    return "adev_android_$suffix"
+}
 
 /**
  * Non-secret directory metadata for one remote AgentoC computer.
@@ -504,18 +521,23 @@ class ClientConfigStore private constructor(private val context: Context, privat
         }
     }
 
-    /**
-     * The account device identifier is non-secret but must survive restart so
-     * Accounts can associate this Keystore public key with the same phone.
-     */
+    /** Use one stable account-device identity across reinstallations on this Android user/device. */
     suspend fun getOrCreateAccountDeviceId(): String {
         var result = ""
         preferences.edit { prefs ->
-            result = prefs[Keys.accountDeviceId].orEmpty().trim()
-            if (!accountDeviceIdPattern.matches(result)) {
-                result = "adev_${UUID.randomUUID()}"
-                prefs[Keys.accountDeviceId] = result
+            val currentSessionDeviceId = prefs[Keys.accountSessionDeviceId].orEmpty().trim()
+            val hasStoredSession = prefs[Keys.accountSessionAccountId].orEmpty().isNotBlank()
+                && accountDeviceIdPattern.matches(currentSessionDeviceId)
+            val stableDeviceId = stableAccountDeviceIdFromAndroidId(
+                android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID),
+            )
+            result = when {
+                hasStoredSession -> currentSessionDeviceId
+                stableDeviceId != null -> stableDeviceId
+                accountDeviceIdPattern.matches(prefs[Keys.accountDeviceId].orEmpty().trim()) -> prefs[Keys.accountDeviceId].orEmpty().trim()
+                else -> "adev_${UUID.randomUUID()}"
             }
+            prefs[Keys.accountDeviceId] = result
         }
         return result
     }

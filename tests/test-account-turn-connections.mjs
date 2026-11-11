@@ -25,7 +25,9 @@ const identity = await loadOrCreateInstanceIdentity({ filePath: join(home, 'comp
 const secondIdentity = await loadOrCreateInstanceIdentity({ filePath: join(home, 'computer-b.json') });
 const accountId = 'acct_turn_central_1';
 const accountDeviceId = 'adev_turn_android_1';
+const staleAccountDeviceId = 'adev_turn_android_stale';
 const targetDeviceId = 'rdev_turn_target_1';
+const staleTargetDeviceId = 'rdev_turn_target_stale';
 const devices = ['phone-1', 'phone-2', 'phone-3'].map((deviceId) => ({
   deviceId,
   instanceId: identity.instanceId,
@@ -52,7 +54,25 @@ const state = {
     createdAt: new Date(now).toISOString(),
     lastSeenAt: new Date(now).toISOString(),
     revokedAt: '',
+  }, {
+    deviceId: staleAccountDeviceId,
+    accountId,
+    alias: 'Old installation',
+    platform: 'android',
+    createdAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    lastSeenAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    revokedAt: '',
   }],
+  accountDeviceKeys: [
+    { keyId: 'key-current-phone', accountId, deviceId: accountDeviceId, revokedAt: '' },
+    { keyId: 'key-stale-phone', accountId, deviceId: staleAccountDeviceId, revokedAt: '' },
+  ],
+  accountCredentials: [
+    { credentialId: 'credential-current-phone', accountId, deviceId: accountDeviceId, keyId: 'key-current-phone',
+      scope: 'account-directory', expiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString(), revokedAt: '' },
+    { credentialId: 'credential-stale-phone', accountId, deviceId: staleAccountDeviceId, keyId: 'key-stale-phone',
+      scope: 'account-directory', expiresAt: new Date(now - 12 * 60 * 60 * 1000).toISOString(), revokedAt: '' },
+  ],
   accountJoinIntents: [{
     intentId: 'rji_turn_target_1',
     instanceId: identity.instanceId,
@@ -61,6 +81,13 @@ const state = {
     accountDeviceId: '',
     // Rendezvous completion is the terminal state used after the phone has
     // received the target's account-join result.
+    status: 'rendezvous_completed',
+  }, {
+    intentId: 'rji_turn_stale_target',
+    instanceId: identity.instanceId,
+    deviceId: staleTargetDeviceId,
+    accountId,
+    accountDeviceId: staleAccountDeviceId,
     status: 'rendezvous_completed',
   }],
   accountJoinGrants: [{
@@ -75,6 +102,21 @@ const state = {
     createdAt: new Date(now - 1000).toISOString(),
     expiresAt: new Date(now + 60000).toISOString(),
     redeemedAt: new Date(now - 500).toISOString(),
+  }],
+  turnConnectionLeases: [{
+    connectionId: createTurnConnectionId({ accountId, instanceId: identity.instanceId, deviceId: staleTargetDeviceId }),
+    accountId,
+    instanceId: identity.instanceId,
+    deviceId: staleTargetDeviceId,
+    quotaDeviceId: staleAccountDeviceId,
+    deviceKind: 'phone',
+    status: 'reserved',
+    plan: 'free',
+    createdAt: new Date(now - 5 * 60 * 1000).toISOString(),
+    updatedAt: new Date(now - 5 * 60 * 1000).toISOString(),
+    expiresAt: new Date(now + 25 * 60 * 1000).toISOString(),
+    releasedAt: '',
+    releaseReason: '',
   }],
 };
 const store = { mutate: async (mutator) => mutator(state) };
@@ -116,6 +158,7 @@ try {
   assert.equal(first.authorization.authorized, true);
   assert.equal(first.authorization.activePhones, 1);
   assert.equal(first.authorization.activeComputers, 1);
+  assert.equal(state.turnConnectionLeases[0].status, 'released', 'A phone lease without a live account session is freed before quota admission');
 
   await assert.rejects(
     () => broker.reserveTurnConnection(request({ actor: identity, deviceId: 'phone-2', purpose: 'turn-reserve' })),
@@ -152,16 +195,23 @@ try {
   assert.equal(v2.authorization.activeComputers, 1);
   assert.equal(state.turnConnectionLeases.at(-1).quotaDeviceId, accountDeviceId);
   assert.equal(state.accountJoinIntents[0].accountDeviceId, '', 'Do not invent a link for the stale completion');
+  await assert.rejects(
+    () => broker.reserveTurnConnection(request({ actor: identity, deviceId: staleTargetDeviceId, purpose: 'turn-reserve' })),
+    (error) => error.code === 'turn_connection_phone_session_inactive' && error.statusCode === 401,
+  );
 
   // The grant may be pruned after its completion was persisted. Only the
   // genuinely linked completion can authorize this target; never the old row.
   state.accountJoinGrants = [];
   await broker.releaseTurnConnection(request({ actor: identity, deviceId: targetDeviceId, purpose: 'turn-release' }));
   assert.equal((await broker.reserveTurnConnection(request({ actor: identity, deviceId: targetDeviceId, purpose: 'turn-reserve' }))).authorization.authorized, true);
+  const beforeRevokedPhoneCheck = Object.fromEntries(['accountDevices', 'accountDeviceKeys', 'accountCredentials',
+    'accountJoinIntents', 'accountJoinGrants', 'devices', 'accountCredentialRefreshes', 'accountSessionChallenges',
+    'turnConnectionLeases'].map((key) => [key, structuredClone(state[key])]));
   state.accountDevices[0].revokedAt = new Date(now).toISOString();
   await assert.rejects(broker.reserveTurnConnection(request({ actor: identity, deviceId: targetDeviceId, purpose: 'turn-reserve' })),
     error => error.code === 'turn_connection_device_invalid');
-  state.accountDevices[0].revokedAt = '';
+  for (const [key, value] of Object.entries(beforeRevokedPhoneCheck)) state[key] = value;
   const retainedIntent = state.accountJoinIntents.find(intent => intent.intentId === 'rji_turn_target_1');
   retainedIntent.accountDeviceId = '';
   await assert.rejects(broker.reserveTurnConnection(request({ actor: identity, deviceId: targetDeviceId, purpose: 'turn-reserve' })),

@@ -461,6 +461,52 @@ function registeredDeviceCount(draft, accountId, deviceKind) {
     && effectiveDeviceKind(item) === deviceKind).length;
 }
 
+function activeAccountPhoneSessionIds(draft, accountId, nowMs) {
+  const devices = new Map(getAccountDevices(draft)
+    .filter((item) => item.accountId === accountId && !item.revokedAt && !item.unboundAt)
+    .map((item) => [item.deviceId, item]));
+  const keys = new Map(getAccountDeviceKeys(draft)
+    .filter((item) => item.accountId === accountId && !item.revokedAt)
+    .map((item) => [item.keyId, item]));
+  const active = new Set();
+  for (const credential of getAccountCredentials(draft)) {
+    const expiresAt = Date.parse(credential?.expiresAt || '');
+    if (credential?.accountId !== accountId || credential.revokedAt || !hasCredentialScope(credential, 'account-directory')
+      || !Number.isFinite(expiresAt) || expiresAt <= nowMs) continue;
+    const device = devices.get(credential.deviceId);
+    const key = keys.get(credential.keyId);
+    if (!device || !key || key.accountId !== accountId || key.deviceId !== device.deviceId) continue;
+    active.add(device.deviceId);
+  }
+  return active;
+}
+
+function releaseInactiveAccountPhoneLeases(draft, accountId, nowMs) {
+  const activePhones = activeAccountPhoneSessionIds(draft, accountId, nowMs);
+  const links = completedTurnPhoneLinks(draft, accountId);
+  let released = 0;
+  for (const lease of getTurnConnectionLeases(draft)) {
+    if (lease.accountId !== accountId || effectiveDeviceKind(lease) !== 'phone'
+      || !isActiveTurnConnectionLease(lease, nowMs)) continue;
+    let phoneId = trimString(lease.quotaDeviceId);
+    if (!/^adev_[A-Za-z0-9_-]+$/.test(phoneId)) {
+      const linkedIds = new Set((links.get(JSON.stringify([lease.instanceId, lease.deviceId])) || []).map((link) => link.phoneId));
+      if (linkedIds.size !== 1) continue;
+      phoneId = [...linkedIds][0];
+    }
+    if (activePhones.has(phoneId)) continue;
+    const now = new Date(Math.max(nowMs, turnLeaseObservedAt(lease))).toISOString();
+    Object.assign(lease, { status: 'released', updatedAt: now, releasedAt: now, releaseReason: 'account-session-inactive' });
+    released++;
+  }
+  return released;
+}
+
+function activeAccountTurnConnectionState(draft, accountId, nowMs, options = {}) {
+  releaseInactiveAccountPhoneLeases(draft, accountId, nowMs);
+  return activeTurnConnectionState(draft, accountId, nowMs, options);
+}
+
 function entitlementClaims(draft, accountId, nowMs, deviceKind = '', resolveEntitlement = resolveAccountEntitlement) {
   const entitlement = resolveEntitlement(draft, accountId, nowMs);
   return {
@@ -3153,10 +3199,23 @@ export function createOwnerAuthBroker({
   }
 
   function projectAccountDeviceDirectory(draft, accountId, { localInstanceId = '' } = {}) {
+    const nowMs = clock();
+    pruneUnrefreshableAccountPhoneSessions(draft, accountId, nowMs);
+    const activePhoneIds = activeAccountPhoneSessionIds(draft, accountId, nowMs);
+    const hasAccountSessionDevices = getAccountDevices(draft).some((item) => item.accountId === accountId);
+    const phoneLinks = completedTurnPhoneLinks(draft, accountId);
+    const isCurrentPhone = (device) => {
+      if (!hasAccountSessionDevices) return true;
+      if (activePhoneIds.has(device.deviceId)) return true;
+      const linkedIds = new Set((phoneLinks.get(JSON.stringify([device.instanceId, device.deviceId])) || [])
+        .map((link) => link.phoneId));
+      return linkedIds.size === 1 && activePhoneIds.has([...linkedIds][0]);
+    };
     const bindings = getInstanceBindings(draft);
     const devices = getDevices(draft)
       .filter((item) => item.accountId === accountId && !item.unboundAt
-        && !bindings.find((binding) => binding.instanceId === item.instanceId)?.revokedAt)
+        && !bindings.find((binding) => binding.instanceId === item.instanceId)?.revokedAt
+        && (effectiveDeviceKind(item) !== 'phone' || isCurrentPhone(item)))
       .map((device) => {
         const deviceBinding = bindings.find((item) => item.instanceId === device.instanceId);
         return {
@@ -3178,10 +3237,10 @@ export function createOwnerAuthBroker({
     const knownDeviceIds = new Set(devices.map((device) => device.deviceId));
     // Account-session phones have an `adev_` identity and intentionally do
     // not create a target-local trusted-device row. Include them directly so
-    // the account directory is complete instead of silently showing only
-    // computers and legacy `rdev_` rows.
+    // the account directory includes only devices with a live login session.
     for (const accountDevice of getAccountDevices(draft)
-      .filter((item) => item.accountId === accountId && !item.unboundAt && !item.revokedAt)) {
+      .filter((item) => item.accountId === accountId && !item.unboundAt && !item.revokedAt
+        && activePhoneIds.has(item.deviceId))) {
       if (knownDeviceIds.has(accountDevice.deviceId)) continue;
       devices.push({
         deviceId: accountDevice.deviceId,
@@ -3229,9 +3288,10 @@ export function createOwnerAuthBroker({
       }))
       .sort((left, right) => `${left.scope}:${left.key}`.localeCompare(`${right.scope}:${right.key}`));
     const entitlement = resolveEntitlement(draft, accountId, clock());
-    const registeredPhones = registeredDeviceCount(draft, accountId, 'phone');
+    const registeredPhones = hasAccountSessionDevices
+      ? activePhoneIds.size : registeredDeviceCount(draft, accountId, 'phone');
     const registeredComputers = registeredDeviceCount(draft, accountId, 'computer');
-    const activeConnections = activeTurnConnectionState(draft, accountId, clock());
+    const activeConnections = activeAccountTurnConnectionState(draft, accountId, nowMs);
     return {
       devices,
       syncCatalog,
@@ -3263,8 +3323,9 @@ export function createOwnerAuthBroker({
       const authenticated = authenticateAccountCredential(draft, rawCredential, 'account-directory');
       const now = clock();
       const accountId = authenticated.credential.accountId;
+      pruneUnrefreshableAccountPhoneSessions(draft, accountId, now);
       const entitlement = resolveEntitlement(draft, accountId, now);
-      const active = activeTurnConnectionState(draft, accountId, now);
+      const active = activeAccountTurnConnectionState(draft, accountId, now);
       const used = { phones: active.activePhoneDeviceIds.length, computers: active.activeInstanceIds.length };
       return {
         contractVersion: 2,
@@ -3519,6 +3580,27 @@ export function createOwnerAuthBroker({
     return releasedConnections;
   }
 
+  function pruneUnrefreshableAccountPhoneSessions(draft, accountId, nowMs) {
+    const devices = getAccountDevices(draft).filter((item) => item.accountId === accountId);
+    const credentials = getAccountCredentials(draft);
+    const keys = getAccountDeviceKeys(draft);
+    let removed = 0;
+    for (const device of devices) {
+      const canRefresh = credentials.some((credential) => {
+        if (credential?.accountId !== accountId || credential.deviceId !== device.deviceId || credential.revokedAt) return false;
+        const expiresAt = Date.parse(credential.expiresAt || '');
+        if (!Number.isFinite(expiresAt) || expiresAt + ACCOUNT_CREDENTIAL_TTL_MS <= nowMs) return false;
+        const key = keys.find((item) => item.keyId === credential.keyId);
+        return !device.revokedAt && !device.unboundAt && key && key.accountId === accountId
+          && key.deviceId === device.deviceId && !key.revokedAt;
+      });
+      if (canRefresh) continue;
+      removeAccountPhoneAssociation(draft, accountId, device.deviceId, new Date(nowMs).toISOString());
+      removed++;
+    }
+    return removed;
+  }
+
   async function logoutAccountSession({ credential: rawCredential = '' } = {}) {
     const result = await store.mutate(async (draft) => {
       const authenticated = authenticateAccountCredential(draft, rawCredential, 'account-directory');
@@ -3632,6 +3714,8 @@ export function createOwnerAuthBroker({
     if (deviceKind === 'phone') {
       const links = completedTurnPhoneLinks(draft, accountId).get(JSON.stringify([instanceId, deviceId])) || [];
       const phoneIds = new Set(links.map(link => link.phoneId));
+      const activePhoneIds = activeAccountPhoneSessionIds(draft, accountId, clock());
+      let linkedInactivePhone = false;
       // A historical incomplete link must not mask a later, valid completion
       // for the same fixed target/device. Each candidate still needs its own
       // durable phone link and a currently active account device.
@@ -3640,14 +3724,18 @@ export function createOwnerAuthBroker({
           ? getAccountDevices(draft).find((entry) => entry.deviceId === accountDeviceId
             && entry.accountId === accountId && !entry.revokedAt)
           : null;
-        if (phoneIds.size === 1 && accountDevice) {
+        if (phoneIds.size === 1 && accountDevice && activePhoneIds.has(accountDevice.deviceId)) {
           // Heal file-store snapshots created before migration 015. PostgreSQL
           // performs the same backfill in the migration itself.
           if (intent && !trimString(intent.accountDeviceId)) intent.accountDeviceId = accountDevice.deviceId;
           return { quotaDeviceId: accountDevice.deviceId };
         }
+        if (phoneIds.size === 1 && accountDevice) linkedInactivePhone = true;
       }
       // A retained legacy row cannot override a known revoked/ambiguous link.
+      if (linkedInactivePhone) {
+        throw createError('turn_connection_phone_session_inactive', 'This phone no longer has an active account session.', 401);
+      }
       if (links.length) throw createError('turn_connection_device_invalid', 'TURN device is not registered to this account.', 403);
     }
     const legacyDevice = getDevices(draft).find((entry) => entry.deviceId === deviceId);
@@ -3670,6 +3758,9 @@ export function createOwnerAuthBroker({
     }
     const result = await store.mutate(async (draft) => {
       assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      const nowMs = clock();
+      pruneUnrefreshableAccountPhoneSessions(draft, normalized.accountId, nowMs);
+      releaseInactiveAccountPhoneLeases(draft, normalized.accountId, nowMs);
       const { quotaDeviceId } = resolveTurnConnectionDevice(draft, {
         accountId: normalized.accountId,
         instanceId: normalized.instance.instanceId,
@@ -3700,7 +3791,7 @@ export function createOwnerAuthBroker({
       if (conflictingPair && normalized.protocolVersion === 1) {
         throw createError('turn_connection_identity_conflict', 'The device pair already has an active TURN connection.', 409);
       }
-      const active = activeTurnConnectionState(draft, normalized.accountId, clock(), {
+      const active = activeAccountTurnConnectionState(draft, normalized.accountId, clock(), {
         excludeConnectionId: normalized.connectionId,
       });
       const entitlement = resolveEntitlement(draft, normalized.accountId, clock());
@@ -3895,6 +3986,9 @@ export function createOwnerAuthBroker({
     if (normalized.protocolVersion !== 3) throw createError('turn_handoff_request_invalid', 'Handoff protocol is required.', 400);
     return store.mutate(async (draft) => {
       assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      const now = clock();
+      pruneUnrefreshableAccountPhoneSessions(draft, normalized.accountId, now);
+      releaseInactiveAccountPhoneLeases(draft, normalized.accountId, now);
       resolveTurnConnectionDevice(draft, { ...normalized, instanceId: normalized.instance.instanceId });
       const leases = getTurnConnectionLeases(draft);
       const next = leases.find(lease => lease.connectionId === normalized.connectionId
@@ -4063,7 +4157,7 @@ export function createOwnerAuthBroker({
           - Number(a.instanceId === demoAccountAuth.defaultInstanceId));
       }
       const entitlement = resolveEntitlement(draft, accountId, clock());
-      const activeConnections = activeTurnConnectionState(draft, accountId, clock());
+      const activeConnections = activeAccountTurnConnectionState(draft, accountId, clock());
       return {
         contractVersion: hasCredential ? 2 : 1,
         capabilities: hasCredential ? { accountSessions: true, accountJoinGrants: true } : undefined,
