@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
 
-if (process.platform !== 'win32' || process.env.AGENTOC_RUN_CLAUDE_LOCAL_GATE !== '1') {
+if ((process.platform !== 'win32' && process.env.AGENTOC_QA_POSIX !== '1') || process.env.AGENTOC_RUN_CLAUDE_LOCAL_GATE !== '1') {
   console.log('claude-windows-local-gate: skipped (opt-in Windows integration test)'); process.exit(0);
 }
 const binary = process.env.AGENTOC_TEST_CLAUDE_BINARY;
@@ -83,7 +83,7 @@ const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerC
 let readCommand = readCase === 'conditional'
   ? `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
   : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? 'rg -n SEARCH_TOKEN .' : readCase === 'git-status' ? 'git status --short' : `ls -lah ${bashQuote(bashRoot)}`;
-const powershell = path.join(process.env.SystemRoot || process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const powershell = process.platform === 'win32' ? path.join(process.env.SystemRoot || process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : '/usr/bin/unused-powershell';
 const dotnetScript = `[System.IO.File]::WriteAllText('${artifact.replaceAll("'", "''")}', 'dotnet fixture'${process.env.AGENTOC_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`;
 const dotnetCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(dotnetScript)}`;
 const guidanceMarker = path.join(root, 'admin-command-ran.txt');
@@ -154,7 +154,7 @@ const boundContext = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
 const run = await createRun({ status: { sessionId: 'claude-local-fixture', requestId: 'fixture', state: 'running', tool: 'claude' },
   manifest: { sessionId: 'claude-local-fixture', requestId: 'fixture', folder: root, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: {} } });
 const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, riskContextValid: boundContext?.valid ?? true,
-  riskContext: boundContext?.riskContext ?? { platform: 'win32', trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
+  riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
 if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
 if (nativePowerShell) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
 if (guidanceCase) {

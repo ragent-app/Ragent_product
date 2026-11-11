@@ -119,7 +119,7 @@ function staticExternalArguments(elements) {
   return args;
 }
 
-function readOnlyRipgrepArgs(rawArgs) {
+export function readOnlyRipgrepArgs(rawArgs) {
   const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; const patterns = []; const positional = []; const exclusions = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];

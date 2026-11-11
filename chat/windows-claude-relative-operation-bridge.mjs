@@ -1,8 +1,63 @@
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
-import { analyzeWindowsBash } from './windows-bash-actions.mjs';
-import { analyzeWindowsPowerShell, decideWindowsPowerShellActions, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
+import { analyzeWindowsBash, parseLiteralBashWords } from './windows-bash-actions.mjs';
+import { analyzeWindowsPowerShell, decideWindowsPowerShellActions, readOnlyRipgrepArgs, RIPGREP_SENSITIVE_EXCLUSIONS, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
+
+// On POSIX, inspect literal ripgrep targets and append case-insensitive
+// exclusions after the caller's selectors so those selectors cannot override
+// them. Non-literal commands stay with the existing risk decision.
+export async function buildClaudePosixRipgrepBridge({ approval, state } = {}) {
+  const params = approval?.params || {}; const input = params.input;
+  if (process.platform === 'win32' || approval?.providerMethod !== 'can_use_tool' || approval?.kind !== 'command'
+      || params.tool_name !== 'Bash' || !input || typeof input !== 'object' || Array.isArray(input)
+      || state?.turnActive !== true || state?.riskContextValid !== true || !['recommended', 'full-auto'].includes(state?.riskMode)
+      || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
+      || params.networkApprovalContext || params.network_approval_context || params.additionalPermissions || params.additional_permissions
+      || Object.keys(input).some(key => !['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
+      || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false)
+      || !path.posix.isAbsolute(state.cwd || '')) return null;
+  const words = parseLiteralBashWords(input.command);
+  if (!words || !['rg', 'rg.exe'].includes(words[0])) return null;
+  const parsed = readOnlyRipgrepArgs(words.slice(1));
+  const review = { review: true, reason: 'ripgrep target requires owner review' };
+  if (!parsed) return words.slice(1).some(arg => /^(?:--hidden|--follow|--no-ignore(?:-.*)?|--pre(?:=.*)?|-u{1,3})$/i.test(arg)) ? review : null;
+  let cwd; try { cwd = await realpath(state.cwd); } catch { return review; }
+  if (!Array.isArray(state.riskContext?.protectedRoots)) return review;
+  const roots = state.riskContext.protectedRoots.map(root => typeof root === 'string' ? root : root?.path)
+    .filter(root => typeof root === 'string' && path.posix.isAbsolute(root));
+  const inside = (candidate, root) => { const rel = path.posix.relative(root, candidate); return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel)); };
+  const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc)(?:\/|$)/i;
+  for (const requested of parsed.paths) {
+    if (requested.startsWith('~')) return review;
+    const lexical = path.posix.resolve(cwd, requested); let current = lexical; let actual; const missing = [];
+    for (;;) {
+      try { actual = path.posix.resolve(await realpath(current), ...missing.reverse()); break; }
+      catch (error) {
+        if (error?.code !== 'ENOENT') return review;
+        const parent = path.posix.dirname(current);
+        if (parent === current) return review;
+        missing.push(path.posix.basename(current)); current = parent;
+      }
+    }
+    if (lexical === '/' || actual === '/' || sensitive.test(lexical) || sensitive.test(actual)) return review;
+    for (const root of roots) {
+      let resolvedRoot = root; try { resolvedRoot = await realpath(root); } catch {}
+      if ([lexical, actual].some(target => inside(target, root) || inside(root, target) || inside(target, resolvedRoot) || inside(resolvedRoot, target))) return review;
+    }
+    for (const protectedSystemPath of ['/etc/shadow', '/etc/gshadow', '/etc/ssh', '/root/.ssh']) {
+      if ([lexical, actual].some(target => inside(target, protectedSystemPath) || inside(protectedSystemPath, target))) return review;
+    }
+  }
+  const args = words.slice(1); const boundary = args.indexOf('--');
+  const guards = RIPGREP_SENSITIVE_EXCLUSIONS.flatMap(value => ['--iglob', value]);
+  const updated = boundary < 0 ? [...args, ...guards] : [...args.slice(0, boundary), ...guards, ...args.slice(boundary)];
+  const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const command = [words[0], '--no-config', ...updated].map(quote).join(' ');
+  const bound = parsed.paths.some(target => !path.posix.isAbsolute(target))
+    ? `if [[ . -ef ${quote(cwd)} ]]; then ${command}; else [[ 1 == 0 ]]; fi` : command;
+  return { updatedInput: { ...input, command: bound } };
+}
 
 // Supply the session directory explicitly to Claude's file-search tools when
 // their optional path was omitted, and classify the same input we return.

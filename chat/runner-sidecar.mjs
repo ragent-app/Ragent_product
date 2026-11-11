@@ -112,7 +112,7 @@ import {
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
 import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
-import { buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
+import { buildClaudePosixRipgrepBridge, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
@@ -2862,9 +2862,27 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   // privileged op). Non-privileged sessions pass through unchanged.
   // Any Claude MCP tool that is not the exact run-scoped allowlist entry must
   // remain an explicit user decision, even in a risk-gated session.
-  const gateDecision = isMcpTool
+  let gateDecision = isMcpTool
     ? { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'MCP tool requires explicit server binding or user approval' }
     : await decideRunGate(approval, state);
+
+  const posixRipgrep = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+    ? await buildClaudePosixRipgrepBridge({ approval, state }) : null;
+  if (posixRipgrep?.review) {
+    gateDecision = { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: posixRipgrep.reason,
+      risk: { ...gateDecision.risk, tier: 'danger', reasons: [{ code: 'posix_ripgrep_sensitive_target', message: posixRipgrep.reason }] } };
+  } else if (posixRipgrep) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: posixRipgrep.updatedInput });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound ripgrep response');
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'ripgrep bound to execution directory and sensitive exclusions', ...riskAuditFields(gateDecision.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, gateDecision.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
+  }
 
   const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
