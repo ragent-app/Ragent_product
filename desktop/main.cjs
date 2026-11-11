@@ -6,7 +6,11 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const updateCheck = require("./update-check.cjs");
 
-const SERVICE_ORIGIN = "http://127.0.0.1:7690";
+const configuredPort = process.env.AGENTOC_DESKTOP_PORT || "7690";
+if (!/^[0-9]{1,5}$/.test(configuredPort) || Number(configuredPort) < 1 || Number(configuredPort) > 65535) {
+  throw new Error("Invalid desktop service port");
+}
+const SERVICE_ORIGIN = `http://127.0.0.1:${Number(configuredPort)}`;
 const MANAGER_URL = `${SERVICE_ORIGIN}/?desktop=manager`;
 const RETRY_INTERVAL_MS = 1800;
 const AUTH_HOSTS = new Set([

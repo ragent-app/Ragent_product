@@ -9,7 +9,7 @@ set -euo pipefail
 # Env overrides:
 #   AGENTOC_DMG_OUTPUT_DIR    output directory (default: <repo>/release)
 #   AGENTOC_PACKAGE_VERSION   manual version override
-#   AGENTOC_NODE_VERSION      bundled Node version (default: v24.18.0)
+#   AGENTOC_NODE_VERSION      bundled Node version (default: v24.12.0)
 #   AGENTOC_NODE_CACHE_DIR    Node tarball cache (default: ~/.cache/agentoc-build)
 #   AGENTOC_NPM_REGISTRY      npm registry (default: https://registry.npmjs.org)
 #   AGENTOC_CODEX_VERSION     codex version (default: adapter catalog target)
@@ -46,7 +46,11 @@ case "$ARCH" in
 esac
 
 OUTPUT_DIR="${AGENTOC_DMG_OUTPUT_DIR:-$ROOT/release}"
-NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.18.0}"
+NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.12.0}"
+[[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -s "$ROOT/third_party_licenses/node/${NODE_VERSION}-LICENSE.txt" ] || {
+  echo 'Bundled Node version requires its matching third-party license notice.' >&2
+  exit 1
+}
 NODE_CACHE_DIR="${AGENTOC_NODE_CACHE_DIR:-$HOME/.cache/agentoc-build/node}"
 NPM_REGISTRY="${AGENTOC_NPM_REGISTRY:-https://registry.npmjs.org}"
 

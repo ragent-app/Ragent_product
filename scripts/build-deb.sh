@@ -87,7 +87,11 @@ if [ "${AGENTOC_PRINT_VERSION_ONLY:-0}" = "1" ]; then
   printf '%s\n' "$VERSION"
   exit 0
 fi
-NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.18.0}"
+NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.12.0}"
+[[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -s "$ROOT/third_party_licenses/node/${NODE_VERSION}-LICENSE.txt" ] || {
+  echo 'Bundled Node version requires its matching third-party license notice.' >&2
+  exit 1
+}
 NODE_CACHE_DIR="${AGENTOC_NODE_CACHE_DIR:-/srv/agentoc-promoted-data/workspace/cache/node}"
 NPM_REGISTRY="${AGENTOC_NPM_REGISTRY:-https://registry.npmjs.org}"
 QRCODE_TERMINAL_VERSION=0.12.0
