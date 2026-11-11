@@ -603,6 +603,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
         // only a Run-specific MCP fallback acquires a process lock in the
         // sidecar after preparation.
         holdNativeOAuthLock: false,
+        forceRunScopedHome: manifest.executionScope?.accessMode === 'read',
         runnerReadable: true,
         runnerOwnerUid: runnerOwnership.uid,
         runnerOwnerGid: runnerOwnership.gid,

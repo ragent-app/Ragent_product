@@ -41,6 +41,7 @@ import { parseScopedCodexModel, readPreferredCodexModelFromConfig } from './mode
 import { access, lstat, open, readFile, realpath } from 'fs/promises';
 import { buildSandboxedSpawn, requireSandboxAvailability } from '../lib/runner-sandbox.mjs';
 import { readOnlyWorkspaceForRun } from './read-only-run-sandbox.mjs';
+import { openReadOnlyProviderSeeds, closeReadOnlyProviderSeeds, deliverReadOnlyProviderSeeds } from './read-only-provider-home.mjs';
 import { createFileChangeStatsTracker } from './file-change-stats.mjs';
 import {
   FILE_ASSET_ID_PATTERN,
@@ -4077,9 +4078,17 @@ async function main() {
   // writers. Brokered Codex runs therefore keep the broker boundary intact;
   // the non-brokered MCP/sandbox path retains its existing sandbox behavior.
   const wrapRequiredSandbox = (command, commandArgs, environment) => {
+    let providerSeeds = null;
     try {
       const guiEnvironment = readOnlyWorkspace ? {} : pickRunnerGuiEnvironment(environment);
-      return buildSandboxedSpawn({
+      if (readOnlyWorkspace) {
+        providerSeeds = openReadOnlyProviderSeeds({
+          family: (isCodexAppServerFamily || runtimeFamily === 'codex-json') ? 'codex' : isClaudeFamily ? 'claude' : '',
+          env: environment,
+          runId,
+        });
+      }
+      const sandbox = buildSandboxedSpawn({
         command,
         args: commandArgs,
         cwd: resolvedFolder.cwd,
@@ -4092,14 +4101,19 @@ async function main() {
           ...(readOnlyWorkspace ? [readOnlyWorkspace] : []),
         ],
         exposeHostDevices: Boolean(guiEnvironment.DISPLAY),
+        readOnlyProviderSeeds: providerSeeds?.seeds || [],
+        readOnlyProviderFamily: providerSeeds?.family || '',
       });
+      return { ...sandbox, providerSeeds };
     } catch (error) {
+      closeReadOnlyProviderSeeds(providerSeeds);
       throw Object.assign(new Error(`Runner sandbox setup failed; refusing an unsandboxed run: ${normalizeErrorMessage(error)}`), {
         code: 'RUNNER_SANDBOX_SETUP_FAILED',
         cause: error,
       });
     }
   };
+  let sandboxProviderSeeds = null;
   if (sandboxRequired && !codexAppServerBrokered) {
     const sandbox = wrapRequiredSandbox(resolvedCommand.file, resolvedCommand.args, spawnEnv);
     spawnCommand = sandbox.command;
@@ -4107,47 +4121,61 @@ async function main() {
     spawnShell = false;
     spawnWindowsVerbatimArguments = false;
     sandboxEmptyDir = sandbox.emptyDir;
+    sandboxProviderSeeds = sandbox.providerSeeds;
   }
   const managedStdin = isClaudeFamily || isCodexAppServerFamily || isAgyFamily || isPiFamily || acp === true;
-  const windowsJob = assertWindowsManagedJob(await createWindowsJobObject());
+  let windowsJob;
   let proc;
-  if (windowsJob) {
-    if (spawnShell === true) {
-      await windowsJob.close();
-      throw new Error('Windows managed provider spawn refuses shell:true');
-    }
-    try {
+  let providerSeedsDelivered = false;
+  try {
+    windowsJob = assertWindowsManagedJob(await createWindowsJobObject());
+    if (windowsJob) {
+      if (spawnShell === true) {
+        await windowsJob.close();
+        throw new Error('Windows managed provider spawn refuses shell:true');
+      }
+      try {
+        await assertRunLaunchBoundary(runId);
+        proc = await windowsJob.createProcess({
+          file: spawnCommand,
+          args: spawnArgs,
+          cwd: resolvedFolder.cwd,
+          env: providerSpawnEnv,
+          windowsVerbatimArguments: spawnWindowsVerbatimArguments === true,
+          stdin: managedStdin,
+          stdout: true,
+          stderr: true,
+        });
+      } catch (error) {
+        try { await windowsJob.terminate(0xC0DE); } catch {}
+        await windowsJob.close();
+        throw error;
+      }
+      await updateRun(runId, (current) => ({ ...current, windowsJobObjectManaged: true, windowsJobObjectCreation: 'suspended-create-assign-resume' }));
+    } else {
       await assertRunLaunchBoundary(runId);
-      proc = await windowsJob.createProcess({
-        file: spawnCommand,
-        args: spawnArgs,
+      proc = spawn(spawnCommand, spawnArgs, {
         cwd: resolvedFolder.cwd,
+        stdio: [managedStdin ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(sandboxProviderSeeds?.seeds || []).map(() => 'pipe')],
         env: providerSpawnEnv,
-        windowsVerbatimArguments: spawnWindowsVerbatimArguments === true,
-        stdin: managedStdin,
-        stdout: true,
-        stderr: true,
+        shell: spawnShell,
+        windowsVerbatimArguments: spawnWindowsVerbatimArguments,
+        // Generic routers (micro-agent, connector helpers, and custom harness
+        // commands) may create their own provider/tool children. Keep the
+        // provider in a dedicated POSIX process group so cancellation and idle
+        // termination close the whole tree instead of only the root process.
+        ...(process.platform !== 'win32' ? { detached: true } : {}),
       });
-    } catch (error) {
-      try { await windowsJob.terminate(0xC0DE); } catch {}
-      await windowsJob.close();
-      throw error;
     }
-    await updateRun(runId, (current) => ({ ...current, windowsJobObjectManaged: true, windowsJobObjectCreation: 'suspended-create-assign-resume' }));
-  } else {
-    await assertRunLaunchBoundary(runId);
-    proc = spawn(spawnCommand, spawnArgs, {
-      cwd: resolvedFolder.cwd,
-      stdio: [managedStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-      env: providerSpawnEnv,
-      shell: spawnShell,
-      windowsVerbatimArguments: spawnWindowsVerbatimArguments,
-      // Generic routers (micro-agent, connector helpers, and custom harness
-      // commands) may create their own provider/tool children. Keep the
-      // provider in a dedicated POSIX process group so cancellation and idle
-      // termination close the whole tree instead of only the root process.
-      ...(process.platform !== 'win32' ? { detached: true } : {}),
-    });
+    if (sandboxProviderSeeds?.seeds.length) {
+      deliverReadOnlyProviderSeeds(proc, sandboxProviderSeeds);
+      providerSeedsDelivered = true;
+    }
+  } catch (error) {
+    if (sandboxEmptyDir) { try { rmSync(sandboxEmptyDir, { recursive: true, force: true }); } catch {} }
+    throw error;
+  } finally {
+    if (!providerSeedsDelivered) closeReadOnlyProviderSeeds(sandboxProviderSeeds);
   }
   if (sandboxEmptyDir) {
     proc.once('close', () => {
@@ -5506,6 +5534,7 @@ async function main() {
     let fallbackShell = fallbackSpec.shell;
     let fallbackVerbatim = fallbackSpec.windowsVerbatimArguments === true;
     let fallbackSandboxDir = null;
+    let fallbackProviderSeeds = null;
     if (sandboxRequired) {
       const sandbox = wrapRequiredSandbox(fallbackCommand, fallbackArgs, fallbackEnv);
       fallbackCommand = sandbox.command;
@@ -5513,41 +5542,55 @@ async function main() {
       fallbackShell = false;
       fallbackVerbatim = false;
       fallbackSandboxDir = sandbox.emptyDir;
+      fallbackProviderSeeds = sandbox.providerSeeds;
     }
-    const fallbackJob = assertWindowsManagedJob(await createWindowsJobObject());
+    let fallbackJob;
     let fallbackProc;
-    if (fallbackJob) {
-      if (fallbackShell === true) {
-        await fallbackJob.close();
-        throw new Error('Windows managed Claude fallback refuses shell:true');
-      }
-      try {
+    let fallbackSeedsDelivered = false;
+    try {
+      fallbackJob = assertWindowsManagedJob(await createWindowsJobObject());
+      if (fallbackJob) {
+        if (fallbackShell === true) {
+          await fallbackJob.close();
+          throw new Error('Windows managed Claude fallback refuses shell:true');
+        }
+        try {
+          await assertRunLaunchBoundary(runId);
+          fallbackProc = await fallbackJob.createProcess({
+            file: fallbackCommand,
+            args: fallbackArgs,
+            cwd: resolvedFolder.cwd,
+            env: fallbackEnv,
+            windowsVerbatimArguments: fallbackVerbatim,
+            stdin: true,
+            stdout: true,
+            stderr: true,
+          });
+        } catch (error) {
+          try { await fallbackJob.terminate(0xC0DE); } catch {}
+          await fallbackJob.close();
+          throw error;
+        }
+      } else {
         await assertRunLaunchBoundary(runId);
-        fallbackProc = await fallbackJob.createProcess({
-          file: fallbackCommand,
-          args: fallbackArgs,
+        fallbackProc = spawn(fallbackCommand, fallbackArgs, {
           cwd: resolvedFolder.cwd,
+          stdio: ['pipe', 'pipe', 'pipe', ...(fallbackProviderSeeds?.seeds || []).map(() => 'pipe')],
           env: fallbackEnv,
+          shell: fallbackShell,
           windowsVerbatimArguments: fallbackVerbatim,
-          stdin: true,
-          stdout: true,
-          stderr: true,
+          ...(process.platform !== 'win32' ? { detached: true } : {}),
         });
-      } catch (error) {
-        try { await fallbackJob.terminate(0xC0DE); } catch {}
-        await fallbackJob.close();
-        throw error;
       }
-    } else {
-      await assertRunLaunchBoundary(runId);
-      fallbackProc = spawn(fallbackCommand, fallbackArgs, {
-        cwd: resolvedFolder.cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: fallbackEnv,
-        shell: fallbackShell,
-        windowsVerbatimArguments: fallbackVerbatim,
-        ...(process.platform !== 'win32' ? { detached: true } : {}),
-      });
+      if (fallbackProviderSeeds?.seeds.length) {
+        deliverReadOnlyProviderSeeds(fallbackProc, fallbackProviderSeeds);
+        fallbackSeedsDelivered = true;
+      }
+    } catch (error) {
+      if (fallbackSandboxDir) { try { rmSync(fallbackSandboxDir, { recursive: true, force: true }); } catch {} }
+      throw error;
+    } finally {
+      if (!fallbackSeedsDelivered) closeReadOnlyProviderSeeds(fallbackProviderSeeds);
     }
     if (fallbackSandboxDir) {
       fallbackProc.once('close', () => {

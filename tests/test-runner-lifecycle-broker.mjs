@@ -363,7 +363,7 @@ try {
       AGENTOC_RUNNER_INHERITED_GROUPS: 'owner',
     },
     resolveRunnerOwnershipImpl: async () => ({ uid: null, gid: null }),
-    readManifestImpl: async () => ({ tool: 'agy', options: { runtimeFamily: 'agy-json' } }),
+    readManifestImpl: async () => ({ tool: 'agy', executionScope: { accessMode: 'read' }, options: { runtimeFamily: 'agy-json' } }),
     prepareNativeRunProviderHomeImpl: async (runId, manifest, options) => {
       agyPrepareCalls.push({ runId, manifest, options });
       return {
@@ -383,10 +383,12 @@ try {
     runId,
     providerHomesRoot: options.providerHomesRoot,
     runnerReadable: options.runnerReadable,
+    forceRunScopedHome: options.forceRunScopedHome,
   })), [{
     runId: 'run_agy12345',
     providerHomesRoot: agyProviderHomesRoot,
     runnerReadable: true,
+    forceRunScopedHome: true,
   }]);
 
   // If systemd-run itself fails, the already-granted group + ACLs are rolled

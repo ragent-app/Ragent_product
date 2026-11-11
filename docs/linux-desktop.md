@@ -41,11 +41,14 @@ running without the requested isolation. Without this option, the product does
 not claim that this bubblewrap boundary is active.
 
 Read-only Runs require this sandbox regardless of the optional setting. Their
-host filesystem, including the runner home, is mounted read-only, which may
-prevent providers that need to write to their home from starting. This is a
+host filesystem, including the runner home, is mounted read-only. Codex and
+Claude receive a private temporary home seeded from selected managed provider
+files; changes there do not persist. Native OAuth credentials are refused for
+this mode to avoid consuming or rotating shared refresh tokens from a copy.
+Other providers and configurations may still be incompatible. This is a
 filesystem boundary, not a complete network or inter-process isolation claim;
-real provider compatibility and the remaining security boundaries require
-separate acceptance.
+real provider compatibility and remaining security boundaries require separate
+acceptance.
 
 ## Maintain and remove
 

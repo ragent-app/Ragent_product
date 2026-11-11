@@ -298,6 +298,7 @@ export async function prepareDetachedRunnerProvider(runId, {
       // connects to the machine-local app-server broker instead, allowing
       // independent threads on the same account to run concurrently.
       holdNativeOAuthLock: false,
+      forceRunScopedHome: manifest.executionScope?.accessMode === 'read',
       runnerReadable,
     });
     if (nativeResult?.ok !== true) {
