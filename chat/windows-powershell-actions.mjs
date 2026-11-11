@@ -190,9 +190,16 @@ export async function analyzeWindowsWorkspaceScriptTask(programName, rawArgs, co
   const program = String(programName || '').toLowerCase();
   const args = Array.isArray(rawArgs) && rawArgs.every((arg) => typeof arg === 'string') ? rawArgs : null;
   if (!args || !win.isAbsolute(context.cwd || '')) return null;
+  const packageName = value => /^[a-z0-9@][a-z0-9@/_.~^+\-\[\],=<>!]*$/i.test(value);
+  const pipArgs = ['pip', 'pip.exe', 'pip3', 'pip3.exe'].includes(program) ? args
+    : ['python', 'python.exe', 'python3', 'python3.exe'].includes(program) && args[0] === '-m' && args[1]?.toLowerCase() === 'pip' ? args.slice(2) : null;
+  if (pipArgs && pipArgs[0]?.toLowerCase() === 'install' && pipArgs.length > 1 && pipArgs.slice(1).every(packageName)) {
+    return { kind: 'read', program: `${program} install packages`, target: null, workspace: inside(context.cwd, context.trustedWorkspaceRoot || ''), caution: true };
+  }
   if (WORKSPACE_SCRIPT_RUNNERS.has(program)) {
     let task = '';
     if (args.length === 1 && ['test', 'install', 'i', 'ci'].includes(args[0].toLowerCase())) task = args[0].toLowerCase();
+    else if (['install', 'i', 'add'].includes(args[0]?.toLowerCase()) && args.length > 1 && args.slice(1).every(packageName)) task = 'install';
     else if (args.length === 2 && args[0].toLowerCase() === 'run') task = args[1].toLowerCase();
     else if (program.startsWith('yarn') && args.length === 1) task = args[0].toLowerCase();
     else if (program.startsWith('bun') && args.length === 1 && args[0].toLowerCase() === 'test') task = 'test';
