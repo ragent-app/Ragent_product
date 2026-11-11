@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+runtime_dir="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+exec "$runtime_dir/node" "$runtime_dir/../app/vendor/codex/bin/codex.js" "$@"

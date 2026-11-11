@@ -130,23 +130,12 @@ agentoc_source_instance_env() {
 }
 
 agentoc_ensure_runtime_shims() {
-  local bin_dir="$HOME/.local/bin"
-  mkdir -p "$bin_dir"
-  case ":$PATH:" in
-    *":$bin_dir:"*) ;;
-    *) PATH="$bin_dir:$PATH" ;;
-  esac
-  local codex_shim="$bin_dir/codex"
-  if [ ! -x "$codex_shim" ] && [ -f "$AGENTOC_APP_DIR/vendor/codex/bin/codex.js" ]; then
-    printf '#!/usr/bin/env bash\nexec "%s" "%s" "$@"\n' "$AGENTOC_NODE_BIN" "$AGENTOC_APP_DIR/vendor/codex/bin/codex.js" > "$codex_shim"
-    chmod +x "$codex_shim"
-    agentoc_log "installed codex shim: $codex_shim"
-  fi
-  local claude_bin="$AGENTOC_APP_DIR/bin/claude"
-  local claude_shim="$bin_dir/claude"
-  if [ ! -e "$claude_shim" ] && [ -x "$claude_bin" ]; then
-    printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$claude_bin" > "$claude_shim"
-    chmod +x "$claude_shim"
-    agentoc_log "installed claude shim: $claude_shim"
-  fi
+  local bin_dir="$AGENTOC_RESOURCES_DIR/runtime"
+  [ -x "$bin_dir/codex" ] && [ -x "$bin_dir/claude" ] || {
+    agentoc_log "packaged provider launchers are missing: $bin_dir" >&2
+    return 1
+  }
+  AGENTOC_PACKAGED_HARNESS_ROOT="${AGENTOC_PACKAGED_HARNESS_ROOT:-$bin_dir}"
+  PATH="$bin_dir:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+  export AGENTOC_PACKAGED_HARNESS_ROOT PATH
 }

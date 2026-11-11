@@ -49,8 +49,8 @@ Cloudflare Realtime TURN 中转。
 
 AI 执行引擎
 -----------
-- CodeX (codex)：已内置（含 macOS 原生引擎），首次启动自动安装命令 shim。
-- Claude Code (claude)：已内置原生二进制，首次启动自动安装命令 shim。
+- Codex (codex)：已内置（含 macOS 原生引擎），由应用包内的启动器调用。
+- Claude Code (claude)：已内置原生二进制，由应用包内的启动器调用。
 - 首次使用需在 设置 → 模型提供方 完成对应账号登录/API Key 配置。
 
 安全说明

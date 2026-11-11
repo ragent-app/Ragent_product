@@ -216,6 +216,8 @@ ACTUAL_SHA="$(shasum -a 256 "$NODE_CACHE_DIR/$NODE_TARBALL" | awk '{ print $1 }'
 mkdir -p "$CONTENTS/Resources/runtime"
 tar -xzf "$NODE_CACHE_DIR/$NODE_TARBALL" -C "$WORK_DIR"
 install -m 0755 "$WORK_DIR/$NODE_DIST/bin/node" "$CONTENTS/Resources/runtime/node"
+install -m 0755 "$ROOT/packaging/macos/runtime-codex" "$CONTENTS/Resources/runtime/codex"
+install -m 0755 "$ROOT/packaging/macos/runtime-claude" "$CONTENTS/Resources/runtime/claude"
 
 # ── 4. P2P host sidecar (darwin Mach-O) ──────────────────────────────────────
 if [ -n "${AGENTOC_P2P_HOST_BINARY:-}" ]; then
@@ -336,6 +338,8 @@ for required in \
   "$APP_DIR/chat-server.mjs" \
   "$APP_DIR/cli.js" \
   "$APP_DIR/vendor/codex/bin/codex.js" \
+  "$CONTENTS/Resources/runtime/codex" \
+  "$CONTENTS/Resources/runtime/claude" \
   "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE/package.json" \
   "$APP_DIR/bin/claude" \
   "$APP_DIR/bin/agentoc-p2p-host" \
