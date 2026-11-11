@@ -61,6 +61,11 @@ if [ -n "${AGENTOC_PACKAGE_VERSION:-}" ]; then
 else
   VERSION="$PKG_VERSION+main.$SOURCE_COMMIT.$(date +%Y%m%d%H%M)"
 fi
+BUNDLE_VERSION="${VERSION%%+*}"
+[[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo 'macOS bundle version must have three numeric components.' >&2
+  exit 1
+}
 
 resolve_npm_version() {
   local package_name="$1"
@@ -176,6 +181,25 @@ while IFS= read -r package_name; do
   fi
 done < "$PROD_DIRECT_DEPENDENCY_LIST"
 
+# Embed the pinned cross-platform manager inside the main application bundle.
+DESKTOP_BUILD="$WORK_DIR/desktop-build"
+mkdir -p "$DESKTOP_BUILD"
+install -m 0644 "$ROOT/desktop/package.json" "$ROOT/desktop/package-lock.json" "$DESKTOP_BUILD/"
+(cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" npm ci --no-audit --no-fund)
+(cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" node node_modules/electron/install.js)
+MANAGER="$CONTENTS/Resources/Manager.app"
+cp -R "$DESKTOP_BUILD/node_modules/electron/dist/Electron.app" "$MANAGER"
+MANAGER_APP="$MANAGER/Contents/Resources/app"
+mkdir -p "$MANAGER_APP/assets"
+for name in main.cjs preload.cjs update-check.cjs wait.html; do
+  install -m 0644 "$ROOT/desktop/$name" "$MANAGER_APP/$name"
+done
+install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$MANAGER_APP/assets/agentoc-android-logo.png"
+DESKTOP_VERSION="$(node -p "require('$ROOT/desktop/package.json').version")"
+printf '{"name":"ragent-desktop-manager","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$MANAGER_APP/package.json"
+plutil -replace CFBundleIdentifier -string cloud.agenton.ragent.manager "$MANAGER/Contents/Info.plist"
+plutil -replace CFBundleName -string Ragent "$MANAGER/Contents/Info.plist"
+
 # ── 3. Bundled Node runtime ──────────────────────────────────────────────────
 NODE_DIST="node-${NODE_VERSION}-darwin-${NODE_ARCH}"
 NODE_TARBALL="${NODE_DIST}.tar.gz"
@@ -259,7 +283,7 @@ esac
 install -m 0755 "$CLAUDE_EXTRACT_DIR/claude" "$APP_DIR/bin/claude"
 
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
-sed "s/{{VERSION}}/$VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
+sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
 install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/AgentoC"
 install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/MacOS/agentoc-service"
 install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/MacOS/agentoc-stop"

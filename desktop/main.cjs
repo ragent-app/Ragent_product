@@ -6,7 +6,8 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const updateCheck = require("./update-check.cjs");
 
-const configuredPort = process.env.AGENTOC_DESKTOP_PORT || "7690";
+const portArg = process.platform === "darwin" ? process.argv.find((value) => value.startsWith("--agentoc-service-port=")) : "";
+const configuredPort = portArg ? portArg.slice("--agentoc-service-port=".length) : process.env.AGENTOC_DESKTOP_PORT || "7690";
 if (!/^[0-9]{1,5}$/.test(configuredPort) || Number(configuredPort) < 1 || Number(configuredPort) > 65535) {
   throw new Error("Invalid desktop service port");
 }
@@ -32,9 +33,9 @@ async function refreshUpdate() {
   updatePending = (async () => {
     let currentVersion;
     try {
-      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : "../../..");
+      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
       currentVersion = (await fs.readFile(path.join(metadataDir, ".agentoc-package-version"), "utf8")).trim();
-      if (process.platform === "linux") currentVersion = currentVersion.split("+")[0];
+      if (process.platform !== "win32") currentVersion = currentVersion.split("+")[0];
       const currentCommit = await fs.readFile(path.join(metadataDir, ".agentoc-source-commit"), "utf8").catch(() => "");
       const currentBuild = await fs.readFile(path.join(metadataDir, ".agentoc-package-build"), "utf8").catch(() => "");
       updateState = { status: "ready", ...(await updateCheck.check(currentVersion, undefined, { currentCommit, currentBuild })) };

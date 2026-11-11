@@ -15,8 +15,16 @@ BASE_URL="http://127.0.0.1:${PORT}"
 
 mkdir -p "$(dirname "$AGENTOC_RUN_LOG")"
 
+open_manager() {
+  if [ -d "$AGENTOC_RESOURCES_DIR/Manager.app" ]; then
+    open "$AGENTOC_RESOURCES_DIR/Manager.app" --args "--agentoc-service-port=$PORT"
+  else
+    open "$BASE_URL"
+  fi
+}
+
 if agentoc_server_running; then
-  open "$BASE_URL"
+  open_manager
   exit 0
 fi
 
@@ -39,4 +47,4 @@ if [ "$ready" -ne 1 ]; then
   agentoc_log "Service did not start; inspect $AGENTOC_RUN_LOG"
   exit 1
 fi
-open "$BASE_URL"
+open_manager

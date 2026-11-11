@@ -5,11 +5,11 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 1. 把 AgentoC.app 拖入 Applications（或直接双击运行）。
 2. 首次运行会自动生成 owner 登录凭据并弹出文本文件显示用户名/密码
    （保存在 ~/.config/agentoc/owner-credentials.txt，登录后请改密并删除该文件）。
-3. 浏览器自动打开 http://127.0.0.1:7690/
+3. 自动打开 Ragent 桌面管理器；也可在浏览器中打开 http://127.0.0.1:7690/。
 
 日常使用
 --------
-- 双击 AgentoC.app：启动服务并打开控制台（服务已在运行时仅打开页面）。
+- 双击 AgentoC.app：启动服务并打开桌面管理器（服务已运行时仅打开管理器）。
 - 命令行：AgentoC.app/Contents/MacOS/agentoc-cli <command>
   （例如 agentoc-cli doctor、agentoc-cli set-password）
 - 停止服务：AgentoC.app/Contents/MacOS/agentoc-stop
