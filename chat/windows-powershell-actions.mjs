@@ -105,7 +105,7 @@ function parseArguments(elements, allowed, switches = new Set()) {
   return { named, positional };
 }
 
-function staticExternalArguments(elements) {
+export function staticExternalArguments(elements) {
   const args = [];
   for (const element of elements.slice(1)) {
     if (element.kind === 'literal') { args.push(String(element.value)); continue; }

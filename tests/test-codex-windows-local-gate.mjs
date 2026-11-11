@@ -136,7 +136,7 @@ const server = createServer((req, res) => {
     const deleteCommand = managedDeleteRelative && providerRequests === 1 ? `Remove-Item -LiteralPath '${relativeTarget.replace(/'/g, "''")}' -Recurse -Force` : `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
     const adminCommand = process.env.AGENTOC_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.AGENTOC_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start agentoc-fixture' : process.env.AGENTOC_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name agentoc-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
     const shellCommand = managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand
-      : managedRipgrep ? `rg --files '${rgFixture.replace(/'/g, "''")}'` : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
+      : managedRipgrep ? `rg --files ${process.env.AGENTOC_QA_RG_GLOB === '1' ? "-g '*' " : ''}'${rgFixture.replace(/'/g, "''")}'` : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
     const argsObject = { [shellCommandField]: shellCommand };
     if (Object.hasOwn(shellToolProperties, 'yield_time_ms')) argsObject.yield_time_ms = 1000;
     if (Object.hasOwn(shellToolProperties, 'workdir') && (process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete)) argsObject.workdir = alternateCwd;

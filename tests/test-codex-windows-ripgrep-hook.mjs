@@ -40,8 +40,14 @@ try {
       { cwd: root, windowsHide: true, encoding: 'utf8' });
     assert.match(hiddenOutput, /\.hidden\.txt/);
     assert.doesNotMatch(hiddenOutput, /\.env/);
+    const glob = await buildCodexWindowsRipgrepHookDecision({ event: { ...event, tool_input: { command: `rg --files -g '*' ${quoted}` } }, state, runId: 'fixture-run' });
+    assert.equal(glob.hookSpecificOutput?.permissionDecision, 'allow');
+    const globOutput = execFileSync(resolveWindowsSystemPaths().powershell,
+      ['-NoProfile', '-NonInteractive', '-Command', glob.hookSpecificOutput.updatedInput.command],
+      { cwd: root, windowsHide: true, encoding: 'utf8' });
+    assert.match(globOutput, /ordinary\.txt/); assert.doesNotMatch(globOutput, /\.env/);
     for (const changed of [
-      { ...event, tool_input: { command: `rg --files -g '*' ${quoted}` } },
+      { ...event, tool_input: { command: `rg --files -g '*' ${quoted}; Remove-Item '${root.replaceAll("'", "''")}'` } },
       { ...event, tool_input: { command: `rg --files ${quoted}`, sandbox_permissions: 'require_escalated' } },
       { ...event, tool_input: { command: 'rg --files .' } },
       { ...event, permission_mode: 'plan' },

@@ -146,6 +146,11 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.ok(outsideCurrent, `${riskMode}: cwd outside workspace must not be categorically rejected`);
   assert.match(execFileSync(bash, ['--noprofile', '--norc', '-c', outsideCurrent.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true }), /PRIVATE_OUTSIDE/);
   const psApproval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'PowerShell', input: { command } } });
+  const psGlob = await buildClaudeWindowsRelativeOperationBridge({ approval: psApproval("rg --files -g '*' ../outside"), state });
+  assert.ok(psGlob, `${riskMode}: PowerShell filtered search outside workspace`);
+  const psGlobOutput = execFileSync(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-Command', psGlob.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+  assert.match(psGlobOutput, /readme\.txt/); assert.doesNotMatch(psGlobOutput, /\.env|\.ssh/i);
   const psGit = await buildClaudeWindowsRelativeOperationBridge({ approval: psApproval('git -C ../outside status --short'), state });
   assert.ok(psGit, `${riskMode}: PowerShell Git outside workspace`);
   for (const tool of ['Bash', 'PowerShell']) {

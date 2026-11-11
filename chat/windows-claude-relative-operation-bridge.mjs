@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { analyzeWindowsBash, parseLiteralBashWords, splitLiteralCompound } from './windows-bash-actions.mjs';
 import { analyzeWindowsPowerShell, decideWindowsPowerShellActions, readOnlyRipgrepArgs, RIPGREP_SENSITIVE_EXCLUSIONS, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
+import { appendPowerShellRipgrepGuards } from './windows-ripgrep-bridge.mjs';
 
 export async function buildClaudePosixCwdTransition({ approval, state } = {}) {
   const params = approval?.params || {}; const input = params.input;
@@ -192,7 +193,9 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
       ? segment.replace(/^(\s*git(?:\.exe)?\s+(?:diff|show))(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : segment;
   const compound = params.tool_name === 'Bash' ? splitLiteralCompound(original) : null;
   const command = compound ? compound.segments.map((segment, index) =>
-    `${index ? ` ${compound.operators[index - 1]} ` : ''}${rewriteSegment(segment)}`).join('') : rewriteSegment(original);
+    `${index ? ` ${compound.operators[index - 1]} ` : ''}${rewriteSegment(segment)}`).join('')
+    : params.tool_name === 'PowerShell' && /^\s*rg(?:\.exe)?(?=\s|$)/i.test(original)
+      ? (await appendPowerShellRipgrepGuards(original) || rewriteSegment(original)) : rewriteSegment(original);
   const context = { ...state.riskContext, cwd, trustedWorkspaceRoot: root, requireAbsolutePaths: false, allowCwdRewrite: true };
   let result;
   try { result = await (params.tool_name === 'Bash' ? analyzeWindowsBash(command, context) : analyzeWindowsPowerShell(command, context)); } catch { return null; }

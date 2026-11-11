@@ -1,6 +1,24 @@
 import path from 'node:path';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
-import { ripgrepSafePrefix } from './windows-powershell-actions.mjs';
+import { RIPGREP_SENSITIVE_EXCLUSIONS, ripgrepSafePrefix, staticExternalArguments } from './windows-powershell-actions.mjs';
+import { parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
+
+export async function appendPowerShellRipgrepGuards(command) {
+  let ast; try { ast = await parseWindowsPowerShellAst(command); } catch { return null; }
+  if (ast.errors.length || ast.dynamicNodes.length || ast.chainOperators?.length || ast.commands.length !== 1 || ast.expressions?.length) return null;
+  const entry = ast.commands[0];
+  if (!['rg', 'rg.exe'].includes(String(entry.name || '').toLowerCase()) || entry.invocation !== 'Unknown'
+      || entry.pipelineInput !== false || entry.redirections || entry.elements[0]?.kind !== 'literal'
+      || entry.elements.slice(1).some(element => element.kind !== 'literal'
+        && (element.kind !== 'parameter' || element.argumentType || element.value != null))) return null;
+  const args = staticExternalArguments(entry.elements);
+  if (!args) return null;
+  const boundary = args.indexOf('--');
+  const guards = RIPGREP_SENSITIVE_EXCLUSIONS.flatMap(value => ['--iglob', value]);
+  const ordered = boundary < 0 ? [...args, ...guards] : [...args.slice(0, boundary), ...guards, ...args.slice(boundary)];
+  const quote = value => `'${String(value).replaceAll("'", "''")}'`;
+  return [entry.name, '--no-config', ...ordered.map(quote)].join(' ');
+}
 
 // Claude can accept a replacement tool input. Disable ripgrep's implicit
 // configuration only after the complete rewritten command passes the same
@@ -21,7 +39,8 @@ export async function buildClaudeWindowsRipgrepBridge({ approval, state } = {}) 
   const command = input.command;
   if (typeof command !== 'string' || command.length > 128 * 1024
       || !/^\s*rg(?:\.exe)?(?=\s|$)/i.test(command)) return null;
-  const updatedCommand = command.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`);
+  const updatedCommand = (params.tool_name === 'PowerShell' && await appendPowerShellRipgrepGuards(command))
+    || command.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`);
   const updatedApproval = { ...approval, params: { ...params, input: { ...input, command: updatedCommand } } };
   let decision;
   try { decision = await decideWindowsApproval(updatedApproval, state); } catch { return null; }
