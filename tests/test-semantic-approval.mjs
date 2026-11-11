@@ -30,7 +30,7 @@ const request = {
   sessionId: 'session_1', runId: 'run_1', turnId: 'turn_1', requestKey: 'request_1',
   executionClass: 'host',
 };
-const trustedContext = { cwd: '/project', projectRoot: '/project', home: '/home/owner' };
+const trustedContext = { cwd: '/project', projectRoot: '/project', home: '/home/owner', platform: 'linux' };
 const packageFacts = async ({ packages, manager }) => ({
   manager,
   source: 'trusted_repository',
@@ -90,5 +90,18 @@ const unresolved = await prepareSemanticApproval({
   resolverOptions: { fsProvider: { name: 'no-package-provider', packageFacts: async () => null } },
 });
 eq('metadata unavailable fails closed', unresolved.projection.decision, 'DENY');
+
+// Platform is a server-owned fact. A missing, empty, or macOS platform must
+// not inherit Linux package semantics or be overridden by a caller claim.
+for (const platform of [undefined, '', 'darwin']) {
+  const denied = await prepareSemanticApproval({
+    request: { ...request, platform: 'linux' },
+    trustedContext: { ...trustedContext, platform },
+    resolverOptions: { fsProvider: { name: 'package-fixture', packageFacts } },
+  });
+  eq(`platform ${String(platform)} is denied`, denied.projection.decision, 'DENY');
+  check(`platform ${String(platform)} has unknown effect`, denied.compiler.operations.every((op) => op.primaryAction === 'unknown.host_effect'));
+  check(`platform ${String(platform)} cannot issue capability`, !denied.capabilityEligible);
+}
 
 console.log(`semantic-approval: ${passed} checks passed`);

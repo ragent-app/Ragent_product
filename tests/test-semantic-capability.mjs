@@ -39,7 +39,7 @@ const keys = generateKeyPairSync('ed25519');
 function packageDecision(name = 'nginx', snapshotIdentity = 'pkg-snapshot-1') {
   const compiled = compileSemanticOperations({
     request: { rawCommand: `apt-get install ${name}`, sessionId: 's1', runId: 'r1', turnId: 't1', requestKey: `req-${name}`, executionClass: 'host' },
-    trustedContext: { cwd: '/project', projectRoot: '/project', home: '/home/owner' },
+    trustedContext: { cwd: '/project', projectRoot: '/project', home: '/home/owner', platform: 'linux' },
   });
   const resolution = {
     scope: { computed: true, kind: 'system', containment: 'inside' },

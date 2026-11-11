@@ -65,7 +65,8 @@ function trustedCompilerContext(context) {
     cwd: isNonEmptyString(value.cwd) ? value.cwd : '',
     projectRoot: isNonEmptyString(value.projectRoot) ? value.projectRoot : '',
     home: isNonEmptyString(value.home) ? value.home : '',
-    platform: isNonEmptyString(value.platform) ? value.platform : 'linux',
+    // A missing trusted platform must not silently acquire Linux semantics.
+    platform: isNonEmptyString(value.platform) ? value.platform : 'unknown',
   };
 }
 

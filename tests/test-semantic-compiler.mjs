@@ -51,7 +51,7 @@ function baseRequest(rawCommand, overrides = {}) {
 function compile(rawCommand, overrides = {}) {
   return compileSemanticOperations({
     request: baseRequest(rawCommand, overrides),
-    trustedContext: { cwd: '/workspace/acme', projectRoot: '/workspace/acme', home: '/home/user' },
+    trustedContext: { cwd: '/workspace/acme', projectRoot: '/workspace/acme', home: '/home/user', platform: 'linux' },
   });
 }
 
@@ -309,7 +309,7 @@ eq('empty strictness ALLOW identity', empty.strictness, STRICTNESS.ALLOW);
 // parserFacts 永远不能覆盖 rawCommand；即便提供伪造 facts 也必须重建。
 const injected = compileSemanticOperations({
   request: baseRequest('rm -f build/old.log'),
-  trustedContext: { cwd: '/workspace/acme', projectRoot: '/workspace/acme', home: '/home/user' },
+  trustedContext: { cwd: '/workspace/acme', projectRoot: '/workspace/acme', home: '/home/user', platform: 'linux' },
   parserFacts: parseCommandFacts('rm -f build/old.log', {
     cwd: '/workspace/acme',
     projectRoot: '/workspace/acme',
@@ -320,7 +320,7 @@ eq('injected primary', injected.operations[0].primaryAction, 'fs.delete');
 eq('injected hash matches', injected.source.rawRequestHash, golden.source.rawRequestHash);
 const forgedFacts = compileSemanticOperations({
   request: baseRequest('rm -rf /'),
-  trustedContext: { cwd: '/workspace/acme', projectRoot: '/workspace/acme', home: '/home/user' },
+  trustedContext: { cwd: '/workspace/acme', projectRoot: '/workspace/acme', home: '/home/user', platform: 'linux' },
   parserFacts: parseCommandFacts('cat /workspace/acme/readme.md', {
     cwd: '/workspace/acme',
     projectRoot: '/workspace/acme',
@@ -332,9 +332,23 @@ eq('forged facts use raw target', forgedFacts.operations[0].target.kind, 'filesy
 check('forged facts cannot lower strictness', forgedFacts.strictness !== STRICTNESS.ALLOW);
 const untrustedCwd = compileSemanticOperations({
   request: baseRequest('rm -rf .ssh', { cwd: '/home/user', projectRoot: '/home/user', home: '/home/user' }),
+  trustedContext: { platform: 'linux' },
 });
 eq('untrusted request cwd is ignored', untrustedCwd.operations[0].target.root, '.ssh');
 check('untrusted request cwd has no computed scope', untrustedCwd.operations[0].scope.computed === false);
+
+// Missing or unsupported trusted platform cannot fall back to Linux semantics,
+// even when an untrusted request claims to be Linux.
+for (const platform of [undefined, '', 'darwin']) {
+  const result = compileSemanticOperations({
+    request: baseRequest('rm -f build/old.log', { platform: 'linux' }),
+    trustedContext: { cwd: '/workspace/acme', platform },
+  });
+  eq(`unsupported platform ${String(platform)} denies`, result.strictness, STRICTNESS.DENY);
+  check(`unsupported platform ${String(platform)} refuses`, result.refusals.length === 1);
+  eq(`unsupported platform ${String(platform)} has unknown effect`, result.operations[0].primaryAction, 'unknown.host_effect');
+  check(`unsupported platform ${String(platform)} records reason`, result.operations[0].analysis.unknowns.includes('platform:unsupported'));
+}
 
 // 环境注入适用于全部 executable，而非仅 package manager。
 for (const [raw, marker] of [

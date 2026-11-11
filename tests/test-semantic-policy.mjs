@@ -28,7 +28,7 @@ function operations(rawCommand) {
       turnId: 'turn_1',
       requestKey: 'request_1',
     },
-    trustedContext: { cwd: '/project', projectRoot: '/project', home: '/home/owner' },
+    trustedContext: { cwd: '/project', projectRoot: '/project', home: '/home/owner', platform: 'linux' },
   });
   return compiled.operations;
 }
