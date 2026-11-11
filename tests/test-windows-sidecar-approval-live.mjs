@@ -14,6 +14,10 @@ const workspace = path.join(root, 'instance', 'workspace');
 await mkdir(workspace, { recursive: true });
 await writeFile(path.join(workspace, 'readme.txt'), 'fixture');
 await writeFile(path.join(workspace, '..', 'outside-visible.txt'), 'ordinary outside fixture');
+await mkdir(path.join(workspace, '..', 'outside-search'));
+await writeFile(path.join(workspace, '..', 'outside-search', 'ordinary.txt'), 'fixture');
+await writeFile(path.join(workspace, '..', 'outside-search', '.env'), 'fake-secret');
+await writeFile(path.join(workspace, '..', 'outside-search', '.ignore'), '!.env\n');
 const psPath = (name) => `'${path.join(workspace, name).replace(/'/g, "''")}'`;
 const bashPath = (name) => {
   const absolute = path.join(workspace, name);
@@ -152,6 +156,13 @@ for (const mode of ['recommended', 'full-auto']) {
     request: { subtype: 'can_use_tool', tool_name: 'Glob', input: { pattern: '*.txt' } } }, proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   assert.equal(sent.at(-1)?.response?.response?.updatedInput?.path, workspace);
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-outside-${mode}`, 'rg --files ../outside-search'), proc);
+  assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent.at(-1).response.response.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.match(output, /ordinary\.txt/);
+    assert.doesNotMatch(output, /\.env/);
+  }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`cd-outside-${mode}`, 'cd .. && cat outside-visible.txt'), proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   assert.match(sent.at(-1)?.response?.response?.updatedInput?.command || '', /builtin cd --/);
