@@ -105,8 +105,11 @@ for (const mode of ['recommended', 'full-auto']) {
     assert.doesNotMatch(result, /\.env/, 'the real command must not honor the hidden-file config');
   }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-sensitive-${mode}`, `rg --files -g '*' ${rgBashPath}`), proc);
-  if (mode === 'recommended') assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:rg-sensitive-${mode}`));
-  else assert.equal(sent[1]?.response?.response?.behavior, 'deny');
+  assert.equal(sent[1]?.response?.response?.behavior, 'allow');
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    const selected = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent[1].response.response.updatedInput.command], { cwd: rgWorkspace, encoding: 'utf8', windowsHide: true });
+    assert.match(selected, /ordinary\.txt/); assert.doesNotMatch(selected, /\.env/i);
+  }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-existing-config-${mode}`, `rg --no-config --files ${rgBashPath}`), proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   assert.match(sent.at(-1)?.response?.response?.updatedInput?.command || '', /--iglob/);

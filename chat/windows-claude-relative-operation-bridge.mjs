@@ -175,7 +175,15 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
   try { cwd = await realpath(state.cwd); if (workspace) root = await realpath(workspace); } catch { return null; }
   if (!/^[a-z]:\\/i.test(cwd)) return null;
   const rewriteSegment = segment => /^\s*rg(?:\.exe)?(?=\s|$)/i.test(segment)
-    ? segment.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`)
+    ? (() => {
+      const words = params.tool_name === 'Bash' ? parseLiteralBashWords(segment) : null;
+      if (!words) return segment.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`);
+      const args = words.slice(1); const boundary = args.indexOf('--');
+      const guards = RIPGREP_SENSITIVE_EXCLUSIONS.flatMap(value => ['--iglob', value]);
+      const rewritten = boundary < 0 ? [...args, ...guards] : [...args.slice(0, boundary), ...guards, ...args.slice(boundary)];
+      const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+      return [words[0], '--no-config', ...rewritten.map(quote)].join(' ');
+    })()
     : params.tool_name === 'Bash' && /^\s*curl(?:\.exe)?(?=\s|$)/i.test(segment)
       ? segment.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
     : /^\s*git(?:\.exe)?\s+-C\s+(?:'[^']*'|"[^"]*"|[^\s]+)\s+(?:diff|show)(?=\s|$)/i.test(segment)

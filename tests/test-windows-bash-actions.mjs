@@ -63,6 +63,8 @@ if (process.platform === 'win32') {
     assert.equal((await inspect(command)).decision, 'review', `ripgrep must not traverse hidden sensitive paths: ${command}`);
   }
   assert.equal((await inspect('rg --no-config --files ordinary')).decision, 'review', 'a clean directory still needs execution-time exclusions');
+  assert.equal((await inspect(`rg ${ripgrepSafePrefix()} --files -g '*' .`)).decision, 'review', 'a later positive glob may override earlier exclusions');
+  assert.equal((await inspect(`rg --no-config --files -g '*' ${ripgrepSafePrefix()} .`)).decision, 'allow', 'all exclusions following the selector keep the selected search bounded');
   for (const command of [
     "cat '中文 文件.md' | head -n 1",
     "cat '中文 文件.md' | grep -i fixture | wc -l",

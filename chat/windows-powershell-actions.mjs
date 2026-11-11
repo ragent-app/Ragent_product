@@ -120,7 +120,7 @@ function staticExternalArguments(elements) {
 }
 
 export function readOnlyRipgrepArgs(rawArgs) {
-  const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; const patterns = []; const positional = []; const exclusions = new Set();
+  const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; let lastSelector = -1; const patterns = []; const positional = []; const exclusions = new Map();
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--') { positional.push(...args.slice(index + 1)); break; }
@@ -138,14 +138,14 @@ export function readOnlyRipgrepArgs(rawArgs) {
     if (['-g', '--glob', '--iglob', '-t', '--type', '-T', '--type-not'].includes(arg)) {
       const value = args[++index];
       if (!value) return null;
-      if (arg === '--iglob' && value.startsWith('!')) exclusions.add(value.toLowerCase());
-      if (!['-g', '--glob', '--iglob'].includes(arg) || !value.startsWith('!')) selectsFiles = true;
+      if (arg === '--iglob' && value.startsWith('!')) exclusions.set(value.toLowerCase(), index);
+      if (!['-g', '--glob', '--iglob'].includes(arg) || !value.startsWith('!')) { selectsFiles = true; lastSelector = index; }
       continue;
     }
     if (/^--(?:glob|type|type-not)=/.test(arg)) {
       const offset = arg.indexOf('='); const value = arg.slice(offset + 1);
       if (!value) return null;
-      if (!arg.startsWith('--glob=') || !value.startsWith('!')) selectsFiles = true;
+      if (!arg.startsWith('--glob=') || !value.startsWith('!')) { selectsFiles = true; lastSelector = index; }
       continue;
     }
     if (arg === '--max-count' || arg === '-m') { if (!/^\d+$/.test(args[++index] || '')) return null; continue; }
@@ -160,7 +160,8 @@ export function readOnlyRipgrepArgs(rawArgs) {
     patterns.push(positional.shift());
   }
   if (positional.some((value) => !value || value === '-')) return null;
-  return { filesOnly, selectsFiles, configDisabled, exclusionsEnforced: RIPGREP_SENSITIVE_EXCLUSIONS.every(value => exclusions.has(value.toLowerCase())), paths: positional.length ? positional : ['.'] };
+  return { filesOnly, selectsFiles, configDisabled, exclusionsEnforced: RIPGREP_SENSITIVE_EXCLUSIONS.every(value => exclusions.has(value.toLowerCase())),
+    exclusionsAfterSelectors: RIPGREP_SENSITIVE_EXCLUSIONS.every(value => (exclusions.get(value.toLowerCase()) ?? -1) > lastSelector), paths: positional.length ? positional : ['.'] };
 }
 
 export async function analyzeWindowsRipgrep(args, context = {}, {
@@ -189,7 +190,7 @@ export async function analyzeWindowsRipgrep(args, context = {}, {
     if (action.recursive && !parsed.exclusionsEnforced) {
       return { complete: false, actions, reason: 'ripgrep sensitive exclusions are not enforced' };
     }
-    if (action.recursive && !protectedDescendant && !parsed.selectsFiles && parsed.exclusionsEnforced) {
+    if (action.recursive && !protectedDescendant && parsed.exclusionsEnforced && (!parsed.selectsFiles || parsed.exclusionsAfterSelectors)) {
       // Default ripgrep traversal skips hidden/ignored paths and does not
       // follow symlinks. Positive glob/type selectors can override that
       // default and include hidden files, so they must inspect the tree.

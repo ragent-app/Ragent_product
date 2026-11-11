@@ -68,7 +68,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const found = execFileSync(bash, ['--noprofile', '--norc', '-c', outsideText.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: config } });
   assert.match(found, /SEARCH_TOKEN=public/);
   assert.doesNotMatch(found, /SEARCH_TOKEN=private|\.env|\.ssh/i);
-  for (const command of ['rg --hidden -n SEARCH_TOKEN ../outside', 'rg -uu -n SEARCH_TOKEN ../outside', 'rg --no-ignore --hidden -n SEARCH_TOKEN ../outside']) {
+  for (const command of ['rg --hidden -n SEARCH_TOKEN ../outside', 'rg -uu -n SEARCH_TOKEN ../outside', 'rg --no-ignore --hidden -n SEARCH_TOKEN ../outside', "rg -g '*' -n SEARCH_TOKEN ../outside", "rg --hidden -g '*.txt' -n SEARCH_TOKEN ../outside"]) {
     const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state });
     assert.ok(bridge, `${riskMode}: ${command}`);
     const result = execFileSync(bash, ['--noprofile', '--norc', '-c', bridge.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: config } });
@@ -169,7 +169,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   }
   assert.equal((await readFile(path.join(outside, `ps-${riskMode}.txt`), 'utf8')).trim(), 'safe');
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: psApproval('Get-Content .env'), state }), null);
-  for (const command of ['cat .env', 'echo danger > .env', 'npm run dev > .env', 'git status > .env', 'find . -delete', "rg --files -g '*' .", 'rm -rf .', 'cat "$(whoami)"']) {
+  for (const command of ['cat .env', 'echo danger > .env', 'npm run dev > .env', 'git status > .env', 'find . -delete', 'rm -rf .', 'cat "$(whoami)"']) {
     assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state }), null, command);
   }
   const elevated = approval('cat readme.txt'); elevated.params.input.dangerouslyDisableSandbox = true;
