@@ -186,10 +186,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           subtype: 'can_use_tool',
           tool_name: 'Bash',
           display_name: 'Bash',
-          input: { command: 'rm temp.txt', description: 'Delete temp file' },
-          description: 'Delete temp file',
-          permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'rm temp.txt' }], behavior: 'allow', destination: 'session' }],
-          blocked_path: '/tmp/temp.txt',
+          input: { command: 'rm -rf .git', description: 'Delete git metadata' },
+          description: 'Delete git metadata',
+          permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'rm -rf .git' }], behavior: 'allow', destination: 'session' }],
+          blocked_path: '.git',
           tool_use_id: 'tool-approval-1',
         },
       });
@@ -458,9 +458,8 @@ try {
   });
   assert.ok(approvalStartRes.status === 200 || approvalStartRes.status === 202, approvalStartRes.text);
   const approvalRunId = approvalStartRes.json.run.id;
-  // Unattended modes fail closed when a provider unexpectedly asks for a
-  // permission decision. Manual MCP and privileged approvals are exercised
-  // independently below.
+  // Full-auto permits caution-tier work but must deny danger-tier requests.
+  // The fake provider only emits the request; it never executes the command.
   const deniedUnattendedRun = await waitFor(async () => {
     const res = await request(port, 'GET', `/api/runs/${approvalRunId}`);
     return res.json?.run?.state === 'failed' ? res.json.run : false;
