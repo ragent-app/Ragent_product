@@ -321,7 +321,7 @@ private fun AttentionCard(
     // The decision itself is the headline; source and status are supporting information.
     val localized = localizedExplanation(item.approval?.explanation?.toExplanationUiState())
     val originalPresentation = approvalPresentation(item)
-    val presentation = if (localized?.riskCode != null) originalPresentation.copy(
+    val presentation = if (localized?.riskCode != null || localized?.operation != null) originalPresentation.copy(
         headline = if (localized.operation != null) localized.summary ?: originalPresentation.headline
             else item.approval?.reason?.takeIf(String::isNotBlank) ?: localized.summary ?: originalPresentation.headline,
         consequence = localized.reason ?: originalPresentation.consequence,

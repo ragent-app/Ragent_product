@@ -87,6 +87,15 @@ class ApprovalAttentionDeviceTest {
         rule.onNodeWithText(rule.activity.getString(R.string.attention_deny)).assertIsDisplayed()
     }
 
+    @Test fun structuredOperationWithoutRiskCodeStillShowsTargetInHeadline() {
+        val approval = Approval(id = "no-code", sessionId = "s", runId = "r", title = "Bash",
+            command = "if true; then rm example; fi", explanation = ApprovalExplanation(
+                operation = "delete", targets = listOf("example"), conditional = true))
+        val state = AttentionReducer.reduce(AttentionUiState(), AttentionReducer.project(listOf(Session("s", "Other session")), listOf(approval))).copy(expanded = true)
+        rule.setContent { AgentocTheme { AttentionSurface(state, onEvent = {}, onOpenSession = {}) } }
+        rule.onNodeWithTag("attention-headline").assert(androidx.compose.ui.test.hasText("example", substring = true))
+    }
+
     @Test fun legacyProviderHeadlineDoesNotRepeatInExpandedDetails() {
         val approval = Approval(id = "legacy", sessionId = "s", runId = "r", title = "Bash", reason = "Remove example",
             command = "if true; then rm example; fi", explanation = ApprovalExplanation(
