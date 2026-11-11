@@ -113,7 +113,23 @@ assert.match(postinst, /systemd-run --on-active=15/,
   'executor-owned package configuration must defer its own restart until dpkg exits');
 
 assert.doesNotMatch(prerm, /agentoc-maintenance|maintenance-control/);
-assert.match(prerm, /stop agentoc-privileged-executor\.service/);
+assert.match(prerm, /stop_unit agentoc-privileged-executor\.service/);
+// Exercise the real removal guard with simulated systemd outcomes, without
+// stopping the system services on the machine running the test.
+if (process.platform !== 'win32') {
+  const stopGuard = prerm.slice(prerm.indexOf('stop_unit() {'), prerm.indexOf('\nif [ "${1:-}" = remove ]'));
+  assert.ok(stopGuard.startsWith('stop_unit() {'));
+  for (const [stopResult, reportedState, expectedStatus] of [
+    ['0', '', 0], ['1', 'inactive', 0], ['1', 'failed', 0],
+    ['1', 'active', 1], ['1', 'deactivating', 1], ['1', '', 1],
+  ]) {
+    const script = `systemctl() { if [ "$1" = stop ]; then return "$STOP_RESULT"; fi; printf '%s\\n' "$REPORTED_STATE"; }\n${stopGuard}\nstop_unit example.service`;
+    const result = spawnSync('sh', ['-c', script], {
+      env: { ...process.env, STOP_RESULT: stopResult, REPORTED_STATE: reportedState }, encoding: 'utf8',
+    });
+    assert.equal(result.status, expectedStatus, `stop=${stopResult} state=${reportedState}`);
+  }
+}
 assert.match(postrm, /! -name accounts/);
 assert.match(postrm, /\/var\/lib\/agentoc-run \/var\/log\/agentoc/);
 assert.match(postinst, /mktemp \/etc\/agentoc\/\.initial-credentials\.XXXXXX/);

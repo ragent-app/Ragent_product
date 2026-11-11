@@ -59,6 +59,11 @@ acceptance.
   state and logs. State for a separately deployed Accounts service under
   `/var/lib/agentoc/accounts` is retained.
 
+Removal stops the service, activation sockets, brokers and detached Runs. If
+systemd cannot confirm that a component has stopped, package removal fails;
+inspect the relevant unit with `systemctl status` and its journal, resolve the
+failure, then retry the removal.
+
 An update should use a newer Debian package version. The desktop update check
 offers the matching Linux x86-64 release asset when one is published; it does
 not install the update automatically. Back up data before an upgrade and read

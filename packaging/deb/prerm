@@ -1,20 +1,34 @@
 #!/bin/sh
 set -eu
 
+# A removed executable must not leave its service or detached Runs alive.
+# Older installations may lack a unit, so tolerate a failed stop only when
+# systemd can still confirm that the unit is inactive or failed.
+stop_unit() {
+  unit="$1"
+  if systemctl stop "$unit" >/dev/null 2>&1; then return 0; fi
+  state="$(systemctl show --property=ActiveState --value "$unit" 2>/dev/null)" || state=''
+  case "$state" in inactive|failed) return 0 ;; esac
+  echo "Cannot confirm $unit is stopped; refusing to remove AgentoC." >&2
+  return 1
+}
+
 if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
   if [ -d /run/systemd/system ]; then
-    systemctl stop agentoc-storage-gc.timer >/dev/null 2>&1 || true
+    stop_unit agentoc-storage-gc.timer
     systemctl disable agentoc-storage-gc.timer >/dev/null 2>&1 || true
-    systemctl stop agentoc.service >/dev/null 2>&1 || true
+    stop_unit agentoc.service
     # Stop socket activation before stopping the brokers, otherwise a request
     # can bring either service back while the package is being removed.
-    systemctl disable --now agentoc-runner-lifecycle.socket agentoc-runner-supervisor.socket >/dev/null 2>&1 || true
-    systemctl stop agentoc-runner-lifecycle.service >/dev/null 2>&1 || true
-    systemctl stop agentoc-runner-supervisor.service >/dev/null 2>&1 || true
+    systemctl disable agentoc-runner-lifecycle.socket agentoc-runner-supervisor.socket >/dev/null 2>&1 || true
+    stop_unit agentoc-runner-lifecycle.socket
+    stop_unit agentoc-runner-supervisor.socket
+    stop_unit agentoc-runner-lifecycle.service
+    stop_unit agentoc-runner-supervisor.service
     # Runs are detached transient units in this dedicated slice, so stopping
     # the brokers alone does not terminate active provider processes.
-    systemctl stop agentoc-runners.slice >/dev/null 2>&1 || true
-    systemctl stop agentoc-privileged-executor.service >/dev/null 2>&1 || true
+    stop_unit agentoc-runners.slice
+    stop_unit agentoc-privileged-executor.service
   fi
   if [ -x /usr/lib/agentoc/retire-legacy-cc-switch ]; then
     /usr/lib/agentoc/retire-legacy-cc-switch || true
