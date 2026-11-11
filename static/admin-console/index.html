@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#f6f7fb">
+    <title>Ragent 控制台</title>
+    <link rel="stylesheet" href="/assets/tabler.min.css">
+    <link rel="stylesheet" href="/assets/admin.css">
+    <script src="/assets/admin.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#overview" aria-label="Ragent 控制台首页">
+          <span class="brand-mark" aria-hidden="true">R</span>
+          <span><strong>Ragent</strong><small>控制台</small></span>
+        </a>
+        <div class="topbar-right">
+          <span class="environment-pill"><span class="status-dot"></span>Oracle · 生产环境</span>
+          <span id="ownerIdentity" class="owner-identity">安全连接</span>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="sidebar" aria-label="主导航">
+          <p class="nav-caption">管理</p>
+          <button class="nav-item is-active" data-view="overview"><span class="nav-icon">⌂</span>总览</button>
+          <button class="nav-item" data-view="services"><span class="nav-icon">◈</span>中心服务</button>
+          <button class="nav-item" data-view="database"><span class="nav-icon">▤</span>数据库</button>
+          <button class="nav-item" data-view="secrets"><span class="nav-icon">⌑</span>密钥与凭据</button>
+          <button class="nav-item" data-view="audit"><span class="nav-icon">≡</span>操作记录</button>
+          <div class="sidebar-note">
+            <span class="sidebar-note-icon">✓</span>
+            <strong>管理入口受保护</strong>
+            <small>仅允许所有者账号访问，密钥不会在页面回显。</small>
+          </div>
+        </aside>
+
+        <main id="mainContent" class="content" tabindex="-1">
+          <div class="content-heading">
+            <div>
+              <p class="eyebrow">RAGENT · SERVER OPERATIONS</p>
+              <h1 id="pageTitle">总览</h1>
+              <p id="pageDescription" class="muted">查看中心服务、数据库与用量的健康状态。</p>
+            </div>
+            <div class="heading-actions">
+              <span id="lastUpdated" class="muted small"></span>
+              <button id="refreshButton" class="btn btn-outline-secondary">刷新</button>
+            </div>
+          </div>
+          <div id="flash" class="flash" role="status" aria-live="polite"></div>
+          <section id="viewRoot" aria-live="polite"></section>
+          <footer class="page-footer">
+            <span>Ragent 中心服务</span>
+            <span>所有写入操作均记录审计，不记录密钥内容。</span>
+          </footer>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

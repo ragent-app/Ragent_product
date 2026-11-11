@@ -1,0 +1,41 @@
+[Unit]
+Description=Ragent owner-only admin console
+After=network-online.target agentoc-admin-helper.service
+Wants=network-online.target
+Requires=agentoc-admin-helper.service
+
+[Service]
+Type=simple
+User=agentoc-admin
+Group=agentoc-admin
+SupplementaryGroups=agentoc-admin
+EnvironmentFile=/etc/agentoc/admin-console.env
+Environment=AGENTOC_ADMIN_HOST=127.0.0.1
+Environment=AGENTOC_ADMIN_PORT=7722
+Environment=AGENTOC_ADMIN_SOCKET=/run/agentoc-admin/helper.sock
+Environment=AGENTOC_ADMIN_BACKUP_DIR=/var/lib/agentoc-admin/backups
+Environment=AGENTOC_ADMIN_PUBLIC_DIR=/opt/agentoc-admin/current/public
+WorkingDirectory=/opt/agentoc-admin/current
+ExecStart=/opt/agentoc-accounts/current/runtime/node /opt/agentoc-admin/current/server.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectProc=invisible
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/agentoc-admin/current /var/lib/agentoc-admin/backups
+ReadWritePaths=/run/agentoc-admin
+
+[Install]
+WantedBy=multi-user.target
