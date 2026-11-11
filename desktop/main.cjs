@@ -186,12 +186,11 @@ function createMainWindow() {
     if (event.sender !== mainWindow?.webContents || !updateState.updateAvailable || !updateCheck.releaseAssetUrl(updateState.downloadUrl)) return false;
     try { await shell.openExternal(updateState.downloadUrl); return true; } catch { return false; }
   });
-  ipcMain.handle("desktop:write-text", (event, value) => {
+  ipcMain.handle("desktop:write-text", async (event, value) => {
     if (event.sender !== mainWindow?.webContents || typeof value !== "string") return false;
     if (Buffer.byteLength(value, "utf8") > 4096) return false;
     const { clipboard } = require("electron");
-    clipboard.writeText(value);
-    return true;
+    try { await clipboard.writeText(value); return true; } catch { return false; }
   });
   ipcMain.on("desktop:retry", (event) => {
     if (event.sender === mainWindow?.webContents) void checkService();

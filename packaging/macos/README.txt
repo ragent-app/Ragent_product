@@ -1,5 +1,7 @@
 Ragent — 本地 AI 自动化工作台 (macOS)
 
+需要 macOS 13 或更新版本。桌面管理器使用 Electron 44。
+
 快速开始 / Quick start
 ----------------------
 1. 把 AgentoC.app 拖入 Applications（或直接双击运行）。
