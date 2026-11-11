@@ -18,8 +18,19 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.deepEqual(await planWindowsSafeDelete({ command: 'Remove-Item -Path build\\* -Recurse', state: { ...state, riskMode } }),
     { workspace: root, relative: 'build', contentsOnly: true, force: false });
 }
+await mkdir(path.join(root, 'outside-protected', 'build', '.ssh'), { recursive: true });
+const outsideProtected = { ...state, cwd: path.join(root, 'alternate'), riskContext: { trustedWorkspaceRoot: path.join(root, 'alternate') } };
+assert.equal(await planWindowsBashSafeDelete({ command: 'rm -rf ../outside-protected/build', state: outsideProtected }), null);
+assert.equal(await planWindowsBashSafeDelete({ command: 'rm -rf .', state: { ...state, cwd: path.join(root, 'build'), riskContext: { trustedWorkspaceRoot: path.join(root, 'build') } } }), null);
 assert.deepEqual(await planWindowsSafeDelete({ command: 'Remove-Item -LiteralPath build -Recurse', state: { ...state, cwd: path.join(root, 'alternate') } }),
   { workspace: root, relative: 'alternate\\build', contentsOnly: false, force: false });
+for (const riskMode of ['recommended', 'full-auto']) {
+  const outsideState = { ...state, riskMode, cwd: path.join(root, 'alternate'), riskContext: { trustedWorkspaceRoot: path.join(root, 'alternate') } };
+  assert.deepEqual(await planWindowsSafeDelete({ command: 'Remove-Item -LiteralPath ..\\build -Recurse', state: outsideState }),
+    { workspace: root, relative: 'build', contentsOnly: false, force: false });
+  assert.deepEqual(await planWindowsBashSafeDelete({ command: 'rm -rf ../build', state: outsideState }),
+    { workspace: root, relative: 'build', contentsOnly: false, force: true });
+}
 for (const command of ['Remove-Item -Path . -Recurse -Force', 'Remove-Item -Path danger -Recurse', 'Remove-Item -Path ..\\other -Recurse',
   'Remove-Item -Path build\\*.txt -Recurse', 'Remove-Item -LiteralPath build\\* -Recurse', 'Remove-Item -Path $env:TEMP -Recurse',
   'Remove-Item -Path build -Recurse; Write-Output x', 'Remove-Item -Path build', 'Remove-Item -Path build -Recurse -WhatIf',

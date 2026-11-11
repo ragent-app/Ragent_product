@@ -21,6 +21,25 @@ const { buildWindowsSafeDeleteBridge } = await import('../chat/windows-safe-dele
 const { planWindowsSafeDeleteList } = await import('../chat/windows-safe-delete-plan.mjs');
 const exec = promisify(execFile);
 try {
+for (const mode of ['recommended', 'full-auto']) {
+  const parent = path.join(root, `external-${mode}`); const workspace = path.join(parent, 'project');
+  await mkdir(workspace, { recursive: true });
+  await mkdir(path.join(parent, 'build'));
+  await writeFile(path.join(parent, 'build', 'fixture.txt'), 'fixture');
+  const state = { riskMode: mode, turnActive: true, cwd: workspace, riskContextValid: true,
+    riskContext: { trustedWorkspaceRoot: workspace, protectedRoots: [] } };
+  const approval = { approvalId: `claude:outside-${mode}`, providerMethod: 'can_use_tool', params: {
+    tool_name: 'Bash', input: { command: 'rm -rf ../build' },
+  } };
+  const bridge = await buildWindowsSafeDeleteBridge({ approval, state, runId: `outside-${mode}`, helperPath });
+  assert.ok(bridge, `${mode}: outside generated output should use native controlled deletion`);
+  const encoded = /--request '([A-Za-z0-9_-]+)'$/.exec(bridge.updatedCommand)?.[1];
+  assert.ok(encoded);
+  await assert.rejects(exec(helperPath, ['--request', encoded], { cwd: parent, windowsHide: true }));
+  assert.equal(await readFile(path.join(parent, 'build', 'fixture.txt'), 'utf8'), 'fixture');
+  assert.deepEqual(JSON.parse((await exec(helperPath, ['--request', encoded], { cwd: workspace, windowsHide: true })).stdout), { ok: true, deleted: 2 });
+  await assert.rejects(readFile(path.join(parent, 'build', 'fixture.txt')), { code: 'ENOENT' });
+}
 for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
   const workspace = path.join(root, mode);
   await mkdir(path.join(workspace, 'build'), { recursive: true });

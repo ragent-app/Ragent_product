@@ -97,15 +97,28 @@ export async function compileWindowsSafeDelete(command, { parse = parseWindowsPo
 }
 
 // The helper independently pins and rechecks every target at execution time.
+function deletionRootFor(root, absolute) {
+  const rel = win.relative(win.resolve(root), absolute);
+  if (!rel) return '';
+  if (rel && rel !== '..' && !rel.startsWith('..\\') && !win.isAbsolute(rel)) return win.resolve(root);
+  // Conventional generated output directories can be cleaned outside the
+  // project too; the native helper still validates and pins every descendant.
+  if (!['build', 'dist', 'node_modules', 'target', 'coverage', '__pycache__'].includes(win.basename(absolute).toLowerCase())) return '';
+  const parent = win.dirname(absolute);
+  return parent && parent.toLowerCase() !== win.parse(parent).root.toLowerCase() ? parent : '';
+}
 export async function planWindowsSafeDelete({ command, state }, { parse = parseWindowsPowerShellAst, analyze = analyzeWindowsPowerShell, inspect = lstat } = {}) {
   if (!['recommended', 'full-auto'].includes(state?.riskMode) || state?.riskContextValid !== true) return null;
   const context = { ...(state.riskContext || {}), cwd: state.cwd };
-  const root = context.trustedWorkspaceRoot;
+  let root = context.trustedWorkspaceRoot;
   if (!/^[a-z]:[\\/]/i.test(root || '') || !/^[a-z]:[\\/]/i.test(context.cwd || '')) return null;
   const compiled = await compileWindowsSafeDelete(command, { parse });
   if (!compiled) return null;
   const { target, contentsOnly, force, ast } = compiled;
   const absolute = win.resolve(context.cwd, target);
+  root = deletionRootFor(root, absolute);
+  if (!root) return null;
+  context.trustedWorkspaceRoot = root;
   const relative = win.relative(win.resolve(root), absolute);
   if (!relative || relative === '..' || relative.startsWith('..\\') || win.isAbsolute(relative)) return null;
   let result;
@@ -139,11 +152,14 @@ export function compileWindowsBashSafeDelete(command) {
 export async function planWindowsBashSafeDelete({ command, state }, { analyze = analyzeWindowsBash, inspect = lstat } = {}) {
   if (!['recommended', 'full-auto'].includes(state?.riskMode) || state?.riskContextValid !== true) return null;
   const context = { ...(state.riskContext || {}), cwd: state.cwd };
-  const root = context.trustedWorkspaceRoot;
+  let root = context.trustedWorkspaceRoot;
   if (!/^[a-z]:[\\/]/i.test(root || '') || !/^[a-z]:[\\/]/i.test(context.cwd || '')) return null;
   const compiled = compileWindowsBashSafeDelete(command);
   if (!compiled) return null;
   const absolute = win.resolve(context.cwd, compiled.target);
+  root = deletionRootFor(root, absolute);
+  if (!root) return null;
+  context.trustedWorkspaceRoot = root;
   const relative = win.relative(win.resolve(root), absolute);
   if (!relative || relative === '..' || relative.startsWith('..\\') || win.isAbsolute(relative)) return null;
   let result;
