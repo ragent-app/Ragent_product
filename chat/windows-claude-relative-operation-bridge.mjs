@@ -165,12 +165,15 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
   let cwd; let root = '';
   try { cwd = await realpath(state.cwd); if (workspace) root = await realpath(workspace); } catch { return null; }
   if (!/^[a-z]:\\/i.test(cwd)) return null;
-  const command = /^\s*rg(?:\.exe)?(?=\s|$)/i.test(original)
-    ? original.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`)
-    : params.tool_name === 'Bash' && /^\s*curl(?:\.exe)?(?=\s|$)/i.test(original)
-      ? original.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
-    : /^\s*git(?:\.exe)?\s+(?:diff|show)(?=\s|$)/i.test(original)
-      ? original.replace(/^(\s*git(?:\.exe)?\s+(?:diff|show))(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : original;
+  const rewriteSegment = segment => /^\s*rg(?:\.exe)?(?=\s|$)/i.test(segment)
+    ? segment.replace(/^(\s*rg(?:\.exe)?)(?=\s|$)/i, `$1 ${ripgrepSafePrefix()}`)
+    : params.tool_name === 'Bash' && /^\s*curl(?:\.exe)?(?=\s|$)/i.test(segment)
+      ? segment.replace(/^(\s*curl(?:\.exe)?)(?=\s|$)/i, '$1 --disable --proto =http,https --proto-redir =http,https')
+    : /^\s*git(?:\.exe)?\s+(?:diff|show)(?=\s|$)/i.test(segment)
+      ? segment.replace(/^(\s*git(?:\.exe)?\s+(?:diff|show))(?=\s|$)/i, '$1 --no-ext-diff --no-textconv') : segment;
+  const compound = params.tool_name === 'Bash' ? splitLiteralCompound(original) : null;
+  const command = compound ? compound.segments.map((segment, index) =>
+    `${index ? ` ${compound.operators[index - 1]} ` : ''}${rewriteSegment(segment)}`).join('') : rewriteSegment(original);
   const context = { ...state.riskContext, cwd, trustedWorkspaceRoot: root, requireAbsolutePaths: false, allowCwdRewrite: true };
   let result;
   try { result = await (params.tool_name === 'Bash' ? analyzeWindowsBash(command, context) : analyzeWindowsPowerShell(command, context)); } catch { return null; }

@@ -83,6 +83,12 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.ok(changeDir, `${riskMode}: ordinary directory change and read outside the workspace`);
   assert.match(execFileSync(bash, ['--noprofile', '--norc', '-c', changeDir.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true }), /PRIVATE_OUTSIDE/);
   assert.notEqual(spawnSync(bash, ['--noprofile', '--norc', '-c', changeDir.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true }).status, 0);
+  const changeSearch = await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && rg -n SEARCH_TOKEN .'), state });
+  assert.ok(changeSearch, `${riskMode}: search after directory change outside workspace`);
+  const searchAfterCd = execFileSync(bash, ['--noprofile', '--norc', '-c', changeSearch.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: config } });
+  assert.match(searchAfterCd, /SEARCH_TOKEN=public/);
+  assert.doesNotMatch(searchAfterCd, /SEARCH_TOKEN=private|\.env|\.ssh/i);
+  assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && rg SEARCH_TOKEN .env'), state }), null);
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval('cd ../outside && rm -rf /'), state }), null);
   for (const tool of ['Glob', 'Grep', 'LS', 'List']) {
     const search = { providerMethod: 'can_use_tool', kind: 'permissions', params: { tool_name: tool, input: { pattern: 'readme' } } };

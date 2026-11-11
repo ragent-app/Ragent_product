@@ -131,6 +131,19 @@ for (const mode of ['recommended', 'full-auto']) {
       assert.match(output, command.startsWith('rg ') || command.startsWith('ls ') ? /readme\.txt/ : /fixture/);
     }
   }
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`cd-outside-search-${mode}`, 'cd ../outside-search && rg --files .'), proc);
+  const outsideSearchResponse = sent[ordinaryCommands.length]?.response?.response;
+  assert.equal(outsideSearchResponse?.behavior, 'allow', `${mode}: search after moving outside the workspace should auto-allow`);
+  assert.match(outsideSearchResponse.updatedInput?.command || '', /rg --no-config/);
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideSearchResponse.updatedInput.command], {
+      cwd: workspace, encoding: 'utf8', windowsHide: true,
+    });
+    assert.match(output, /ordinary\.txt/);
+    assert.doesNotMatch(output, /\.env/i);
+  }
+  // The remaining assertions use the original sequence offsets.
+  sent.pop();
   await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-write-${mode}`, `echo safe > created-${mode}.txt`), proc);
   const write = sent[ordinaryCommands.length]?.response?.response;
   assert.equal(write?.behavior, 'allow', `${mode}: ordinary workspace write should not ask or deny`);
