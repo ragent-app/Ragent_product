@@ -1,0 +1,62 @@
+name: Build Linux and macOS candidates
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Three-part candidate version
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+          - runner: macos-15
+            platform: macos
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.0
+          cache-dependency-path: p2p/go.sum
+      - name: Validate and build candidate
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          export AGENTOC_PACKAGE_VERSION="$RELEASE_VERSION"
+          export AGENTOC_NODE_CACHE_DIR="$RUNNER_TEMP/node-cache"
+          export AGENTOC_DEB_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
+          export AGENTOC_DMG_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
+          export ELECTRON_CACHE="$RUNNER_TEMP/electron-cache"
+          mkdir -p "$AGENTOC_NODE_CACHE_DIR" "$AGENTOC_DEB_OUTPUT_DIR" "$ELECTRON_CACHE"
+          node tests/test-desktop-update.cjs
+          if [ "$PLATFORM" = linux ]; then
+            node tests/test-deb-packaging.mjs
+            bash scripts/build-deb.sh
+            (cd "$AGENTOC_DEB_OUTPUT_DIR" && sha256sum agentoc_*.deb > SHA256SUMS.txt)
+          else
+            [ "$(uname -m)" = arm64 ]
+            bash tests/test-macos-service-identity.sh
+            bash scripts/build-dmg.sh
+            (cd "$AGENTOC_DMG_OUTPUT_DIR" && shasum -a 256 agentoc_*.dmg > SHA256SUMS.txt)
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ragent-${{ matrix.platform }}-candidate
+          path: ${{ runner.temp }}/ragent-release/
+          if-no-files-found: error
+          retention-days: 7
