@@ -208,6 +208,21 @@ if [ "$CLAUDE_ADAPTER_COMPATIBLE" != "yes" ]; then
 fi
 printf 'Bundling Codex %s and Claude Code %s from %s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$NPM_REGISTRY"
 
+# Do not attribute a package built from a dirty tree to a clean commit. A
+# frozen runtime payload produced by stage-runtime-payload has no .git but
+# carries the full source identity in its own manifest.
+if [ -e "$ROOT/.git" ]; then
+  [ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+    echo 'Debian packaging requires a clean committed source tree.' >&2; exit 1;
+  }
+  SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
+else
+  SOURCE_COMMIT="$(cat "$ROOT/.agentoc-source-commit" 2>/dev/null || true)"
+fi
+[[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
+  echo 'A full committed source identity is required for Debian packaging.' >&2; exit 1;
+}
+
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb.XXXXXX")"
 STAGE="$WORK_DIR/stage"
 APP_DIR="$STAGE/opt/agentoc/app"
@@ -246,6 +261,7 @@ tar -xzf "$WORK_DIR/$PACK_FILE" -C "$APP_DIR" --strip-components=1 \
 # still change after each packaged deployment instead of reusing a stale PWA
 # cache when the normalized mtimes happen to be identical.
 printf '%s\n' "$VERSION" > "$APP_DIR/.agentoc-package-version"
+printf '%s\n' "$SOURCE_COMMIT" > "$APP_DIR/.agentoc-source-commit"
 
 PROD_DIRECT_DEPENDENCY_LIST="$WORK_DIR/prod-direct-dependencies.txt"
 [ -f "$ROOT/package-lock.json" ] || { echo "Missing package-lock.json; cannot stage reproducible production dependencies" >&2; exit 1; }
@@ -555,5 +571,11 @@ while IFS= read -r package_name; do
   fi
 done < "$PROD_DIRECT_DEPENDENCY_LIST"
 
+if [ -e "$ROOT/.git" ]; then
+  [ "$(git -C "$ROOT" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] &&
+    [ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+      echo 'Source changed during packaging; refusing to publish the candidate.' >&2; exit 1;
+    }
+fi
 mv -f "$OUTPUT" "$FINAL_OUTPUT"
 printf '%s\n' "$FINAL_OUTPUT"

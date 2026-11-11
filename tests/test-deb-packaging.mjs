@@ -38,6 +38,10 @@ const legacyCcSwitchRetirement = read('packaging/deb/retire-legacy-cc-switch');
 const repairStateAccess = read('packaging/deb/repair-state-access');
 const packageJson = JSON.parse(read('package.json'));
 
+assert.match(buildScript, /Debian packaging requires a clean committed source tree/);
+assert.match(buildScript, /SOURCE_COMMIT.*agentoc-source-commit/s);
+assert.match(buildScript, /Source changed during packaging; refusing to publish the candidate/);
+
 const retiredPackagePaths = [
   'packaging/deb/agentoc-maintenance-admin',
   'packaging/deb/agentoc-maintenance-broker.service',
