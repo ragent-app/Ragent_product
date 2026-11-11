@@ -28,9 +28,11 @@ async function refreshUpdate() {
   updatePending = (async () => {
     let currentVersion;
     try {
-      currentVersion = (await fs.readFile(path.resolve(app.getAppPath(), "../../../.agentoc-package-version"), "utf8")).trim();
-      const currentCommit = await fs.readFile(path.resolve(app.getAppPath(), "../../../.agentoc-source-commit"), "utf8").catch(() => "");
-      const currentBuild = await fs.readFile(path.resolve(app.getAppPath(), "../../../.agentoc-package-build"), "utf8").catch(() => "");
+      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : "../../..");
+      currentVersion = (await fs.readFile(path.join(metadataDir, ".agentoc-package-version"), "utf8")).trim();
+      if (process.platform === "linux") currentVersion = currentVersion.split("+")[0];
+      const currentCommit = await fs.readFile(path.join(metadataDir, ".agentoc-source-commit"), "utf8").catch(() => "");
+      const currentBuild = await fs.readFile(path.join(metadataDir, ".agentoc-package-build"), "utf8").catch(() => "");
       updateState = { status: "ready", ...(await updateCheck.check(currentVersion, undefined, { currentCommit, currentBuild })) };
     } catch {
       updateState = { status: "error", ...(currentVersion ? { currentVersion } : {}) };

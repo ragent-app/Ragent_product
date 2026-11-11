@@ -7,7 +7,8 @@
         "generate-token.mjs", "set-password.mjs", "setup.sh", "start.sh", "restart.sh", "stop.sh",
         "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "README.md", "README.zh.md", "DESIGN.md", "PRODUCT.md",
         "memory/system.md", "memory/auto-system-memory.md",
-        "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs"
+        "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs",
+        "desktop/package.json", "desktop/package-lock.json", "desktop/main.cjs", "desktop/preload.cjs", "desktop/update-check.cjs", "desktop/wait.html"
       ],
       "prefixes": [
         "lib/", "chat/", "shared/", "static/", "templates/", "automation/", "connectors/", "skills/",

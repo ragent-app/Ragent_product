@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ragent
+Comment=Open the Ragent desktop manager
+Comment[zh_CN]=打开 Ragent 桌面管理器
+Exec=/opt/agentoc/Desktop/ragent
+Icon=agentoc
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true

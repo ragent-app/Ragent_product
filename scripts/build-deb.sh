@@ -259,6 +259,34 @@ while IFS= read -r package_name; do
   fi
 done < "$PROD_DIRECT_DEPENDENCY_LIST"
 
+# Build the same locked Electron manager as Windows in a disposable directory.
+# Electron's install step downloads the distribution for the build host, so a
+# cross-architecture package must not silently ship the wrong executable.
+if [ "$ARCH" != "$(dpkg --print-architecture)" ]; then
+  echo 'The desktop manager requires a native-architecture Debian build host.' >&2
+  exit 1
+fi
+DESKTOP_BUILD="$WORK_DIR/desktop-build"
+DESKTOP_ROOT="$STAGE/opt/agentoc/Desktop"
+mkdir -p "$DESKTOP_BUILD" "$DESKTOP_ROOT"
+install -m 0644 "$ROOT/desktop/package.json" "$ROOT/desktop/package-lock.json" "$DESKTOP_BUILD/"
+(cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" npm ci --no-audit --no-fund)
+cp -a "$DESKTOP_BUILD/node_modules/electron/dist/." "$DESKTOP_ROOT/"
+mv "$DESKTOP_ROOT/electron" "$DESKTOP_ROOT/ragent"
+DESKTOP_MACHINE="$(od -An -tx1 -j18 -N2 "$DESKTOP_ROOT/ragent" | tr -d ' \n')"
+[ "$DESKTOP_MACHINE" = "$EXPECTED_ELF_MACHINE" ] || { echo 'Electron architecture mismatch' >&2; exit 1; }
+DESKTOP_APP="$DESKTOP_ROOT/resources/app"
+mkdir -p "$DESKTOP_APP/assets"
+for name in main.cjs preload.cjs update-check.cjs wait.html; do
+  install -m 0644 "$ROOT/desktop/$name" "$DESKTOP_APP/$name"
+done
+install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$DESKTOP_APP/assets/agentoc-android-logo.png"
+DESKTOP_VERSION="$(node -p "require('$ROOT/desktop/package.json').version")"
+printf '{"name":"ragent-desktop-manager","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$DESKTOP_APP/package.json"
+# Chromium's setuid helper is installed root-owned by dpkg; the renderer still
+# uses Electron's sandbox and must not fall back to --no-sandbox.
+chmod 4755 "$DESKTOP_ROOT/chrome-sandbox"
+
 NODE_DIST="node-${NODE_VERSION}-linux-${NODE_ARCH}"
 NODE_TARBALL="${NODE_DIST}.tar.xz"
 NODE_BASE_URL="https://nodejs.org/dist/${NODE_VERSION}"
@@ -417,6 +445,7 @@ install -m 0644 "$ROOT/packaging/deb/agentoc-storage-gc.service" "$STAGE/lib/sys
 install -m 0644 "$ROOT/packaging/deb/agentoc-storage-gc.timer" "$STAGE/lib/systemd/system/agentoc-storage-gc.timer"
 install -m 0640 "$ROOT/packaging/deb/agentoc.env" "$STAGE/etc/agentoc/agentoc.env"
 install -m 0644 "$ROOT/packaging/deb/agentoc.desktop" "$STAGE/usr/share/applications/agentoc.desktop"
+install -m 0644 "$ROOT/packaging/deb/ragent.desktop" "$STAGE/usr/share/applications/ragent.desktop"
 install -m 0644 "$ROOT/static/icon-512.png" "$STAGE/usr/share/icons/hicolor/512x512/apps/agentoc.png"
 install -m 0755 "$ROOT/packaging/deb/postinst" "$STAGE/DEBIAN/postinst"
 install -m 0755 "$ROOT/packaging/deb/preinst" "$STAGE/DEBIAN/preinst"
@@ -479,7 +508,7 @@ Section: net
 Priority: optional
 Architecture: $ARCH
 Maintainer: Ninglo
-Depends: adduser, ca-certificates, util-linux, acl
+Depends: adduser, ca-certificates, util-linux, acl, libasound2t64 | libasound2, libatk-bridge2.0-0, libatk1.0-0, libatspi2.0-0, libc6, libcairo2, libcups2, libdbus-1-3, libdrm2, libexpat1, libgbm1, libglib2.0-0, libgtk-3-0, libnspr4, libnss3, libpango-1.0-0, libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2
 Description: AgentoC local AI workbench with TURN-first mobile pairing
  AgentoC runs an AI automation control plane on the local machine and can
  pair through authenticated Cloudflare Realtime TURN and upgrade to LAN/P2P
