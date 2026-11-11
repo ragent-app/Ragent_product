@@ -112,7 +112,8 @@ assert.match(postinst, /systemd-run --on-active=15/,
 
 assert.doesNotMatch(prerm, /agentoc-maintenance|maintenance-control/);
 assert.match(prerm, /stop agentoc-privileged-executor\.service/);
-assert.match(postrm, /\/var\/lib\/agentoc \/var\/log\/agentoc/);
+assert.match(postrm, /! -name accounts/);
+assert.match(postrm, /\/var\/lib\/agentoc-run \/var\/log\/agentoc/);
 assert.match(postinst, /mktemp \/etc\/agentoc\/\.initial-credentials\.XXXXXX/);
 assert.match(postinst, /chmod 0600 "\$credentials_tmp"/);
 assert.doesNotMatch(postinst, /echo "初始登录密码：\$INITIAL_PASSWORD/);

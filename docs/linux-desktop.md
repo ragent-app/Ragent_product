@@ -37,7 +37,9 @@ have the configured service user's ordinary file access. Check
 - `systemctl status agentoc.service` shows the service state.
 - `journalctl -u agentoc.service` shows the service log.
 - `sudo apt remove agentoc` removes the package and keeps user state.
-- `sudo apt purge agentoc` removes the package's local configuration and data.
+- `sudo apt purge agentoc` removes the host's local configuration, data, run
+  state and logs. State for a separately deployed Accounts service under
+  `/var/lib/agentoc/accounts` is retained.
 
 An update should use a newer Debian package version. The desktop update check
 offers the matching Linux x86-64 release asset when one is published; it does

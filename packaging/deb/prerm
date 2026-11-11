@@ -6,6 +6,9 @@ if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
     systemctl stop agentoc-storage-gc.timer >/dev/null 2>&1 || true
     systemctl disable agentoc-storage-gc.timer >/dev/null 2>&1 || true
     systemctl stop agentoc.service >/dev/null 2>&1 || true
+    # Stop socket activation before stopping the brokers, otherwise a request
+    # can bring either service back while the package is being removed.
+    systemctl disable --now agentoc-runner-lifecycle.socket agentoc-runner-supervisor.socket >/dev/null 2>&1 || true
     systemctl stop agentoc-runner-lifecycle.service >/dev/null 2>&1 || true
     systemctl stop agentoc-runner-supervisor.service >/dev/null 2>&1 || true
     systemctl stop agentoc-privileged-executor.service >/dev/null 2>&1 || true

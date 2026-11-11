@@ -60,6 +60,10 @@ agentoc_server_running() {
 # config dir so upgrades never overwrite user edits.
 agentoc_first_run_bootstrap() {
   local config_dir auth_file env_file password salt hash secret
+  # Protect credentials from the instant each file is created, not only after
+  # a later chmod. The subshell contains the more restrictive umask.
+  (
+  umask 077
   config_dir="$(agentoc_config_dir)"
   auth_file="$config_dir/auth.json"
   env_file="$config_dir/instance.env"
@@ -90,13 +94,15 @@ agentoc_first_run_bootstrap() {
   if [ ! -s "$auth_file" ]; then
     password="$(openssl rand -hex 12 2>/dev/null || "$AGENTOC_NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(12).toString("hex")+"\n")')"
     salt="$(openssl rand -hex 16 2>/dev/null || "$AGENTOC_NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(16).toString("hex")+"\n")')"
-    hash="$("$AGENTOC_NODE_BIN" -e '
+    hash="$(printf '%s' "$password" | "$AGENTOC_NODE_BIN" -e '
       const { scryptSync } = require("crypto");
-      const [password, saltHex] = process.argv.slice(1);
+      const { readFileSync } = require("fs");
+      const password = readFileSync(0, "utf8");
+      const [saltHex] = process.argv.slice(1);
       const salt = Buffer.from(saltHex, "hex");
       const hash = scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
       process.stdout.write(hash.toString("hex"));
-    ' "$password" "$salt")"
+    ' "$salt")"
     "$AGENTOC_NODE_BIN" -e '
       const { writeFileSync, chmodSync } = require("fs");
       const [file, passwordHash] = process.argv.slice(1);
@@ -116,6 +122,7 @@ agentoc_first_run_bootstrap() {
     agentoc_log "generated owner credentials: $creds_file"
     open -t "$creds_file" 2>/dev/null || true
   fi
+  )
 }
 
 agentoc_source_instance_env() {

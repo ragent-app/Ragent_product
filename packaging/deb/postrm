@@ -6,10 +6,23 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "${1:-}" = purge ]; then
-  rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d
+  rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d /etc/systemd/system/agentoc-runner-supervisor.socket.d
   rm -f /etc/agentoc/service-user /etc/agentoc/auth-secret /etc/agentoc/initial-credentials
   rmdir /etc/agentoc >/dev/null 2>&1 || true
-  rm -rf /var/lib/agentoc /var/log/agentoc /run/agentoc-privileged-executor /var/log/agentoc-privileged
+  # Accounts is a separately deployed service; its state must survive removal
+  # of the desktop host even though both historically share this parent.
+  if [ -d /var/lib/agentoc ] && [ ! -L /var/lib/agentoc ]; then
+    find /var/lib/agentoc -mindepth 1 -maxdepth 1 ! -name accounts -exec rm -rf -- {} +
+    if [ -e /var/lib/agentoc/accounts ] || [ -L /var/lib/agentoc/accounts ]; then
+      chown root:root /var/lib/agentoc
+      if getent passwd agentoc-accounts >/dev/null 2>&1; then
+        setfacl -m u:agentoc-accounts:--x /var/lib/agentoc
+      fi
+    else
+      rmdir /var/lib/agentoc
+    fi
+  fi
+  rm -rf /var/lib/agentoc-run /var/log/agentoc /run/agentoc-privileged-executor /var/log/agentoc-privileged
   deluser --system agentoc >/dev/null 2>&1 || true
   delgroup --system agentoc >/dev/null 2>&1 || true
   delgroup --system agentoc-privileged >/dev/null 2>&1 || true

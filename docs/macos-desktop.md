@@ -10,6 +10,11 @@ automatically create an owner session. Loopback TCP is shared by local OS users,
 so this mode treats other local users and programs as trusted. Remote access
 requires its own authentication and an appropriate network boundary.
 
+On first launch the app creates an owner password and stores it in the current
+user's `~/.config/agentoc/owner-credentials.txt` with owner-only permissions.
+After recording it and changing the password in Settings, delete that file.
+The configuration directory and existing credentials are retained on upgrade.
+
 ## Build and signing
 
 Build on a clean committed Apple Silicon Mac with Node 24, the Go version in

@@ -53,6 +53,7 @@ jobs:
             [ "$(uname -m)" = arm64 ]
             bash tests/test-macos-service-identity.sh
             bash tests/test-macos-runtime-layout.sh
+            bash tests/test-macos-first-run.sh
             bash scripts/build-dmg.sh
             asset="agentoc_${RELEASE_VERSION}-darwin-arm64.dmg"
             (cd "$AGENTOC_DMG_OUTPUT_DIR" && shasum -a 256 "$asset" > SHA256SUMS.txt)
