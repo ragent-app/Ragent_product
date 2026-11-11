@@ -9,6 +9,8 @@
 import { createInterface } from 'node:readline';
 import { request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_NAME = 'agentoc-approved-actions';
@@ -36,7 +38,7 @@ function jsonRpcResult(id, result) {
   return { jsonrpc: '2.0', id, result };
 }
 
-function actionTool() {
+export function actionTool() {
   return {
     name: 'agentoc_request_actions',
     description: 'Propose related host-administrator actions. For Windows winget installs and service control, use this tool rather than running them directly. Eligible installs may start automatically and dangerous actions go to owner review. An executing status is not completion: call this tool with statusOnly=true and the same requestKey and identical action until it reports succeeded, failed or unknown. Never repeat an operation when its outcome is unknown; check the original requestKey.',
@@ -67,7 +69,7 @@ function actionTool() {
   };
 }
 
-function agentCreateTool() {
+export function agentCreateTool() {
   return {
     name: 'agentoc_create_agent',
     description: 'Propose one fully specified Ragent Agent for owner review. This tool never creates the Agent directly and never receives owner credentials.',
@@ -104,7 +106,7 @@ function agentCreateTool() {
   };
 }
 
-function readConfig() {
+export function readConfig() {
   return {
     enabled: envFlag('AGENTOC_APPROVED_ACTIONS_ENABLED'),
     agentCreateEnabled: envFlag('AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED'),
@@ -188,8 +190,7 @@ function normalizeActions(args) {
   });
 }
 
-async function requestActions(args, requestId) {
-  const config = readConfig();
+export async function requestActions(args, requestId, config = readConfig()) {
   if (!config.enabled) throw new Error('approved action capability is unavailable for this runtime');
   if (!config.token || !config.sessionId || !config.runId || !config.turnId) {
     throw new Error('approved action capability is not bound to an active run');
@@ -229,8 +230,7 @@ async function requestActions(args, requestId) {
   };
 }
 
-async function requestAgentCreate(args, requestId) {
-  const config = readConfig();
+export async function requestAgentCreate(args, requestId, config = readConfig()) {
   if (!config.enabled || !config.agentCreateEnabled) {
     throw new Error('managed Agent creation capability is unavailable for this runtime');
   }
@@ -261,7 +261,7 @@ async function requestAgentCreate(args, requestId) {
   };
 }
 
-async function handleRequest(request) {
+export async function handleRequest(request, config = readConfig()) {
   const id = request.id;
   if (request.method === 'initialize') {
     return jsonRpcResult(id, {
@@ -272,7 +272,6 @@ async function handleRequest(request) {
   }
   if (request.method === 'ping') return jsonRpcResult(id, {});
   if (request.method === 'tools/list') {
-    const config = readConfig();
     return jsonRpcResult(id, {
       tools: config.enabled
         ? [actionTool(), ...(config.agentCreateEnabled ? [agentCreateTool()] : [])]
@@ -283,10 +282,10 @@ async function handleRequest(request) {
     const name = trimString(request.params?.name);
     try {
       if (name === 'agentoc_request_actions') {
-        return jsonRpcResult(id, toolResult(JSON.stringify(await requestActions(request.params?.arguments || {}, id))));
+        return jsonRpcResult(id, toolResult(JSON.stringify(await requestActions(request.params?.arguments || {}, id, config))));
       }
       if (name === 'agentoc_create_agent') {
-        return jsonRpcResult(id, toolResult(JSON.stringify(await requestAgentCreate(request.params?.arguments || {}, id))));
+        return jsonRpcResult(id, toolResult(JSON.stringify(await requestAgentCreate(request.params?.arguments || {}, id, config))));
       }
       return jsonRpcResult(id, toolResult(`Unknown tool: ${name}`, true));
     } catch (error) {
@@ -296,8 +295,9 @@ async function handleRequest(request) {
   return jsonRpcError(id, -32601, `Method not found: ${request.method}`);
 }
 
-const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-rl.on('line', (line) => {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+ const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+ rl.on('line', (line) => {
   const text = trimString(line);
   if (!text) return;
   let request;
@@ -309,4 +309,5 @@ rl.on('line', (line) => {
   void handleRequest(request).then((response) => {
     process.stdout.write(`${JSON.stringify(response)}\n`);
   });
-});
+ });
+}
