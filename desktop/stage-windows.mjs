@@ -29,7 +29,16 @@ if (process.argv[6] === '--move-staged-electron') {
       || resolve(targetParent, 'Desktop') !== destination) {
     throw new Error('Electron move must stay inside the installer staging directory.');
   }
-  await rename(source, destination);
+  try {
+    await rename(source, destination);
+  } catch (error) {
+    // Windows can temporarily deny moving a freshly extracted Electron tree
+    // while another process has a file open. Keep the staging boundary and
+    // require a new destination before falling back to a copy.
+    if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) throw error;
+    await mkdir(destination);
+    await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+  }
 } else {
   await mkdir(destination, { recursive: true });
   await cp(distRoot, destination, { recursive: true });
