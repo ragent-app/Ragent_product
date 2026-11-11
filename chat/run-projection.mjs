@@ -720,7 +720,13 @@ export function createRunProjectionService({
   function approvalRiskForPayload(payload, run, requestInfo = null) {
     const explicit = readRiskAuditInfo(payload);
     if (explicit.tier || explicit.policyVersion || explicit.reasonCodes.length > 0) return explicit;
-    return classifyApprovalRisk(requestInfo || readApprovalRequestInfo(payload), run);
+    const info = requestInfo || readApprovalRequestInfo(payload);
+    const approvalId = trimString(info?.approvalId) || trimString(payload?.approvalId);
+    const pending = approvalId && Array.isArray(run?.appServerPendingApprovals)
+      ? run.appServerPendingApprovals.find(entry => trimString(entry?.approvalId) === approvalId) : null;
+    const gateRisk = readRiskAuditInfo(pending);
+    if (gateRisk.tier || gateRisk.policyVersion || gateRisk.reasonCodes.length > 0) return gateRisk;
+    return classifyApprovalRisk(info, run);
   }
   registerCache('approvalSuppression', {
     kind: 'counters',

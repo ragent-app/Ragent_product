@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 
 export const WINDOWS_APPROVAL_PAYLOAD_FILES = Object.freeze([
   'chat/approved-action-queue.mjs', 'chat/windows-approval-gate.mjs', 'chat/windows-powershell-ast.mjs', 'chat/windows-powershell-actions.mjs',
-  'chat/windows-bash-actions.mjs', 'chat/windows-elevation-guidance.mjs', 'chat/windows-service-control.mjs', 'chat/windows-service-grant.mjs', 'chat/windows-service-proposal.mjs', 'chat/windows-service-activity.mjs', 'chat/windows-system-paths.mjs', 'chat/windows-winget-discovery.mjs',
+  'chat/windows-bash-actions.mjs', 'chat/windows-ripgrep-bridge.mjs', 'chat/windows-elevation-guidance.mjs', 'chat/windows-service-control.mjs', 'chat/windows-service-grant.mjs', 'chat/windows-service-proposal.mjs', 'chat/windows-service-activity.mjs', 'chat/windows-system-paths.mjs', 'chat/windows-winget-discovery.mjs',
   'chat/windows-managed-auto-install.mjs', 'chat/windows-msi-auto-install.mjs', 'chat/windows-auto-install-authorization.mjs', 'chat/windows-auto-install-bridge.mjs', 'chat/codex-managed-hook-setup.mjs',
   'chat/windows-user-install-store.mjs', 'chat/windows-user-install-executor.mjs', 'chat/windows-user-install-bridge.mjs', 'chat/windows-run-identity.mjs',
   'lib/windows-execution-identity.mjs', 'lib/windows-owner-identity-paths.mjs', 'lib/windows-owner-os-paths.mjs', 'lib/windows-job-object.mjs', 'lib/executable-resolution.mjs',

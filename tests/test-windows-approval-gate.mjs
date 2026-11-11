@@ -36,7 +36,12 @@ const safe = async () => ({ complete: true, actions: [{ kind: 'write', workspace
 const unknown = async () => ({ complete: false, actions: [], reason: 'unresolved expression' });
 for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal((await decideWindowsApproval(command, { ...state, riskMode }, { analyze: safe })).decision, 'auto-allow');
-  assert.equal((await decideWindowsApproval(command, { ...state, riskMode }, { analyze: unknown })).decision, 'prompt');
+  const unresolved = await decideWindowsApproval(command, { ...state, riskMode }, { analyze: unknown });
+  assert.equal(unresolved.decision, 'prompt');
+  assert.equal(unresolved.risk.tier, 'unknown', 'incomplete analysis is not reported as a proven dangerous action');
+  assert.equal(unresolved.risk.reasons[0].code, 'windows_analysis_incomplete');
+  const unsupported = await decideWindowsApproval(command, { ...state, riskMode }, { analyze: async () => ({ complete: false, actions: [], reason: 'dynamic or unsupported PowerShell syntax' }) });
+  assert.equal(unsupported.risk.reasons[0].code, 'windows_syntax_unsupported');
 }
 assert.equal((await decideWindowsApproval(command, { ...state, riskMode: 'conservative-auto' }, { analyze: async () => ({ complete: true, actions: [{ kind: 'write', workspace: false, target: {} }] }) })).decision, 'prompt');
 assert.equal((await decideWindowsApproval(command, { ...state, riskMode: 'safe' }, { analyze: async () => ({ complete: true, actions: [{ kind: 'write', workspace: false, target: {} }] }) })).decision, 'prompt');
@@ -52,6 +57,7 @@ const unknownTool = { ...safeTool, approvalId: 'tool-3', params: { tool_name: 'U
 assert.equal((await decideWindowsApproval(unknownTool, { ...state, riskMode: 'recommended' })).decision, 'prompt');
 const extraPermission = { ...safeTool, approvalId: 'tool-4', params: { ...safeTool.params, additionalPermissions: { network: true } } };
 assert.equal((await decideWindowsApproval(extraPermission, { ...state, riskMode: 'recommended' })).decision, 'prompt');
+assert.equal((await decideWindowsApproval(extraPermission, { ...state, riskMode: 'recommended' })).risk.reasons[0].code, 'windows_permission_expansion');
 const missingChanges = { approvalId: 'file-2', kind: 'file_change', providerMethod: 'item/fileChange/requestApproval', params: { changes: [{ path: 'C:\\work\\a' }] } };
 assert.equal((await decideWindowsApproval(missingChanges, state)).decision, 'prompt');
 const observed = { ...missingChanges, params: { itemId: 'item-1' } };
@@ -66,6 +72,7 @@ assert.equal((await decideWindowsApproval({ ...observed, params: { itemId: 'item
 const moveState = { ...state, activeItems: new Map([['item-1', { type: 'fileChange', changes: [{ path: 'C:\\work\\a', kind: { type: 'update', move_path: 'C:\\other\\b' } }] }]]) };
 assert.equal((await decideWindowsApproval(observed, moveState, { analyzeFiles: safe })).decision, 'prompt', 'a Codex move includes a deletion and requires owner review');
 assert.equal((await decideWindowsApproval(command, { ...state, riskContextValid: false })).decision, 'prompt');
+assert.equal((await decideWindowsApproval(command, { ...state, riskContextValid: false })).risk.reasons[0].code, 'windows_context_unverified');
 for (const extra of [
   { networkApprovalContext: { host: 'example.com', protocol: 'https' } },
   { additionalPermissions: { network: { enabled: true } } },

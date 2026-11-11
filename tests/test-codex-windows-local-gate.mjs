@@ -46,6 +46,13 @@ const installCommand = process.env.AGENTOC_QA_HOOK_WRAPPED_INSTALL === '1'
   ? `agentoc-privileged --description "Install fixture" --category install -- ${packageCommand}`
   : packageCommand;
 const managedDelete = process.env.AGENTOC_QA_HOOK_MANAGED_DELETE === '1';
+const managedRipgrep = process.env.AGENTOC_QA_HOOK_MANAGED_RG === '1';
+const rgFixture = path.join(home, 'rg-fixture');
+const rgConfig = path.join(home, 'rg-config');
+if (managedRipgrep) {
+  await mkdir(rgFixture); await writeFile(path.join(rgFixture, 'ordinary-fixture.txt'), 'fixture');
+  await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(rgConfig, '--hidden\n');
+}
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
@@ -74,7 +81,7 @@ if (managedDelete) {
   if (managedDeleteRelative) { await mkdir(path.join(alternateCwd, 'delete-target')); await writeFile(path.join(alternateCwd, 'delete-target', 'fixture.txt'), 'fixture'); }
   if (dangerousRetry) { outsideFixture = await mkdtemp(path.join(tmpdir(), 'agentoc-delete-outside-')); await mkdir(path.join(outsideFixture, 'target')); await writeFile(path.join(outsideFixture, 'target', 'keep.txt'), 'keep'); }
 }
-const productionStartup = (managedInstall || managedDelete || managedElevation) && process.env.AGENTOC_QA_PRODUCTION_STARTUP === '1';
+const productionStartup = (managedInstall || managedDelete || managedElevation || managedRipgrep) && process.env.AGENTOC_QA_PRODUCTION_STARTUP === '1';
 const failSecondPreflight = managedInstall && process.env.AGENTOC_QA_PREFLIGHT_FAIL_SECOND === '1';
 let preflights = 0; let submissions = 0;
 let providerRequests = 0;
@@ -118,7 +125,8 @@ const server = createServer((req, res) => {
     const relativeTarget = dangerousRetry ? path.relative(alternateCwd, deleteTarget) : 'delete-target';
     const deleteCommand = managedDeleteRelative && providerRequests === 1 ? `Remove-Item -LiteralPath '${relativeTarget.replace(/'/g, "''")}' -Recurse -Force` : `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
     const adminCommand = process.env.AGENTOC_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.AGENTOC_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start agentoc-fixture' : process.env.AGENTOC_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name agentoc-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
-    const shellCommand = managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
+    const shellCommand = managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand
+      : managedRipgrep ? `rg --files '${rgFixture.replace(/'/g, "''")}'` : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
     const argsObject = { [shellCommandField]: shellCommand };
     if (Object.hasOwn(shellToolProperties, 'yield_time_ms')) argsObject.yield_time_ms = 1000;
     if (Object.hasOwn(shellToolProperties, 'workdir') && (process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete)) argsObject.workdir = alternateCwd;
@@ -150,8 +158,8 @@ let hookConfig = '';
 let fixtureHookCommand = '';
 let fixtureHookSourcePath = path.join(home, 'config.toml');
 if (hookExperiment) {
-  const hookPath = managedInstall || managedDelete || managedElevation ? fileURLToPath(new URL('../scripts/agentoc-codex-windows-install-hook.mjs', import.meta.url)) : path.join(home, 'fixture-hook.cjs');
-  if (!managedInstall && !managedDelete && !managedElevation) await writeFile(hookPath, `const fs=require('fs'); process.on('uncaughtException', e => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-error.txt'))}, String(e.stack)); process.exitCode=1; }); let data=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', c => data += c); process.stdin.on('end', () => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-input.json'))}, data); fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-process-cwd.txt'))}, process.cwd()); JSON.parse(data); ${hookShouldFail ? "throw new Error('fixture hook failure');" : ''} process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'allow',updatedInput:{command:"Write-Output 'agentoc-rewritten'"}}})); });`);
+  const hookPath = managedInstall || managedDelete || managedElevation || managedRipgrep ? fileURLToPath(new URL('../scripts/agentoc-codex-windows-install-hook.mjs', import.meta.url)) : path.join(home, 'fixture-hook.cjs');
+  if (!managedInstall && !managedDelete && !managedElevation && !managedRipgrep) await writeFile(hookPath, `const fs=require('fs'); process.on('uncaughtException', e => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-error.txt'))}, String(e.stack)); process.exitCode=1; }); let data=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', c => data += c); process.stdin.on('end', () => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-input.json'))}, data); fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-process-cwd.txt'))}, process.cwd()); JSON.parse(data); ${hookShouldFail ? "throw new Error('fixture hook failure');" : ''} process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'allow',updatedInput:{command:"Write-Output 'agentoc-rewritten'"}}})); });`);
   const quote = value => `'${value.replace(/'/g, "''")}'`;
   const command = `& ${quote(process.execPath)} ${quote(hookPath)}`;
   fixtureHookCommand = command;
@@ -176,7 +184,8 @@ const env = { ...process.env, CODEX_HOME: home, XDG_CACHE_HOME: home, XDG_CONFIG
   http_proxy: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9', all_proxy: 'http://127.0.0.1:9', no_proxy: '127.0.0.1,localhost' };
 delete env.OPENAI_API_KEY;
 if (pinnedIdentity) env.AGENTOC_WINDOWS_USER_INSTALL_IDENTITY = JSON.stringify(pinnedIdentity);
-if (managedDelete) env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId: run.id, helperPath: safeDeleteBinary,
+if (managedRipgrep) env.RIPGREP_CONFIG_PATH = rgConfig;
+if (managedDelete || managedRipgrep) env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId: run.id, helperPath: safeDeleteBinary || '',
   state: { riskMode, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } } });
 let productionOverlay = null;
 if (productionStartup) {
@@ -227,7 +236,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     if (productionStartup) {
       stage = 1;
       productionState = { initialized: false, initializeRequestId: 1, threadRequestId: 2, nextControlRequestId: 200, cwd: home,
-        codexWindowsInstallHook: productionOverlay.codexWindowsInstallHook, riskMode, permissionMode: 'untrusted-danger-full-access', model: 'gpt-5.4' };
+        codexWindowsInstallHook: productionOverlay.codexWindowsInstallHook, riskMode, permissionMode: 'untrusted-danger-full-access', agentocApprovalGate: true, model: 'gpt-5.4' };
       handleCodexAppServerInitializeResponse(child, productionState, msg);
       return;
     }
@@ -293,6 +302,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
         ? invocation?.command === expectedDelete?.updatedCommand && msg.params.cwd.toLowerCase() === alternateCwd.toLowerCase()
         : managedInstall
           ? rewrittenCommand === expectedBridge?.updatedCommand && preflights === 1 && submissions === 0
+          : managedRipgrep ? String(decodedArgv?.at(-1) || '').includes('rg --no-config --files')
           : String(msg.params.command || '').includes('agentoc-rewritten');
       if (!hookCompleted || !rewriteMatches) {
         process.stderr.write(`approval did not contain the completed hook rewrite (hookCompleted=${hookCompleted}, rewriteMatches=${rewriteMatches}, preflights=${preflights}, submissions=${submissions})\n`); process.exitCode = 1; stage = 3;
@@ -314,7 +324,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
         setTimeout(() => { child.kill(); server.close(); }, 100);
         return;
       }
-      if (managedInstall || managedDelete) {
+      if (managedInstall || managedDelete || managedRipgrep) {
         const state = { riskMode, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, startedTurn: true,
           windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.AGENTOC_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
           threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set() };
@@ -384,7 +394,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
       ? await readFile(path.join(home, 'renamed-fixture.txt'), 'utf8').catch(() => null) === 'fixture content' && !await access(fileFixture).then(() => true, () => false)
       : fileCommand === 'clear' ? await readFile(fileFixture, 'utf8').catch(() => null) === ''
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
-    if (msg.params.item.exitCode !== 0 || !fileResult || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (!hookExpectedRun && hookCompleted) || (managedInstall && submissions !== 1)) {
+    if (msg.params.item.exitCode !== 0 || !fileResult || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || (managedInstall && submissions !== 1)) {
       process.stderr.write('approved harmless command failed\n'); process.exitCode = 1;
     } else process.stdout.write(fileCommand ? `codex-windows-local-gate: ${fileCommand} executed on isolated fixture\n` : managedDelete ? 'codex-windows-local-gate: bound deletion used the approved absolute target\n' : managedInstall ? 'codex-windows-local-gate: managed install bridge reached mock control plane\n' : hookShouldFail ? 'codex-windows-local-gate: failed hook; original passed gate\n' : hookExpectedRun ? 'codex-windows-local-gate: hook rewrote approved harmless command\n' : hookExperiment ? 'codex-windows-local-gate: untrusted hook skipped; original passed gate\n' : 'codex-windows-local-gate: auto-allow executed harmless command\n');
     child.kill(); server.close();

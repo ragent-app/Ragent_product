@@ -2,6 +2,7 @@
 import { fileURLToPath } from 'node:url';
 import { buildCodexWindowsInstallHookDecision } from '../chat/codex-windows-install-hook.mjs';
 import { buildCodexWindowsSafeDeleteHookDecision } from '../chat/codex-windows-safe-delete-hook.mjs';
+import { buildCodexWindowsRipgrepHookDecision } from '../chat/windows-ripgrep-bridge.mjs';
 import { buildCodexWindowsElevationGuidance } from '../chat/windows-elevation-guidance.mjs';
 
 // A malformed event or unavailable control plane leaves the original command
@@ -21,6 +22,8 @@ async function main() {
     const decision = await buildCodexWindowsSafeDeleteHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
       helperPath: safeDeleteContext.helperPath });
     if (decision.hookSpecificOutput) return decision;
+    const ripgrep = await buildCodexWindowsRipgrepHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId });
+    if (ripgrep.hookSpecificOutput) return ripgrep;
   }
   const channel = { endpoint: process.env.AGENTOC_APPROVED_ACTIONS_ENDPOINT, token: process.env.AGENTOC_APPROVED_ACTIONS_TOKEN,
     sessionId: process.env.AGENTOC_APPROVED_ACTIONS_SESSION_ID, runId: process.env.AGENTOC_APPROVED_ACTIONS_RUN_ID,

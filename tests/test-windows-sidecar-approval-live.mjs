@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 
 if (process.platform !== 'win32') {
   console.log('windows-sidecar-approval-live: skipped (requires Windows)');
@@ -60,6 +61,34 @@ for (const mode of ['recommended', 'full-auto']) {
     assert.match(sent[0]?.response?.response?.message || '', /run path context is unavailable/);
   }
 }
+const rgWorkspace = path.join(root, 'rg-workspace');
+await mkdir(rgWorkspace);
+await writeFile(path.join(rgWorkspace, 'ordinary.txt'), 'fixture');
+await writeFile(path.join(rgWorkspace, '.env'), 'fake-secret');
+const rgConfig = path.join(root, 'rg-config');
+await writeFile(rgConfig, '--hidden\n');
+const rgBashPath = `'/${rgWorkspace[0].toLowerCase()}${rgWorkspace.slice(2).replaceAll('\\', '/').replace(/'/g, `'"'"'`)}'`;
+for (const mode of ['recommended', 'full-auto']) {
+  const { run, state, sent, proc } = await fixture(mode);
+  state.turnActive = true; state.cwd = rgWorkspace; state.riskContext.trustedWorkspaceRoot = rgWorkspace;
+  const request = (id, command) => ({ type: 'control_request', request_id: id, request: {
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command },
+  } });
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-config-${mode}`, `rg --files ${rgBashPath}`), proc);
+  const response = sent[0]?.response?.response;
+  assert.equal(response?.behavior, 'allow', `${mode} should transparently disable implicit ripgrep configuration`);
+  assert.match(response.updatedInput?.command || '', /^rg --no-config /);
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    const result = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
+      cwd: rgWorkspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: rgConfig },
+    });
+    assert.match(result, /ordinary\.txt/);
+    assert.doesNotMatch(result, /\.env/, 'the real command must not honor the hidden-file config');
+  }
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-sensitive-${mode}`, `rg --files -g '*' ${rgBashPath}`), proc);
+  if (mode === 'recommended') assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:rg-sensitive-${mode}`));
+  else assert.equal(sent[1]?.response?.response?.behavior, 'deny');
+}
 for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
   const readWorkspace = { type: 'control_request', request_id: `workspace-read-${mode}`, request: {
@@ -69,6 +98,18 @@ for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, readWorkspace, proc);
   assert.equal(sent[0]?.response?.response?.behavior, 'allow', `${mode} should automatically allow a verified workspace directory read`);
   assert.equal((await getRun(run.id)).appServerPendingApprovals?.length || 0, 0, `${mode} should not surface a verified workspace read for owner approval`);
+}
+for (const mode of ['recommended', 'full-auto']) {
+  const { run, state, sent, proc } = await fixture(mode);
+  const request = (id, command) => ({ type: 'control_request', request_id: id, request: {
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command },
+  } });
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`pipeline-read-${mode}`, `cat ${bashPath('readme.txt')} | grep fixture | head -n 1`), proc);
+  assert.equal(sent[0]?.response?.response?.behavior, 'allow', `${mode} should automatically answer a verified read pipeline`);
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`pipeline-unsafe-${mode}`, `cat ${bashPath('readme.txt')} | bash -c 'rm -rf /'`), proc);
+  if (mode === 'recommended') {
+    assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:pipeline-unsafe-${mode}`));
+  } else assert.equal(sent[1]?.response?.response?.behavior, 'deny');
 }
 for (const mode of ['full-auto', 'recommended', 'conservative-auto']) {
   const { run, state, sent, proc } = await fixture(mode);

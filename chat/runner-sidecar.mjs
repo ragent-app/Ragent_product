@@ -109,6 +109,7 @@ import {
   isUserFacingGateKind,
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
+import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
@@ -2864,6 +2865,21 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
 
   const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
+  const ripgrepBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
+    && gateDecision.reason === 'ripgrep configuration is not disabled'
+    ? await buildClaudeWindowsRipgrepBridge({ approval, state }) : null;
+  if (ripgrepBridge) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: ripgrepBridge.updatedCommand } });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled ripgrep response');
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'ripgrep configuration disabled for verified read', ...riskAuditFields(ripgrepBridge.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, ripgrepBridge.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
+  }
   const relativeRetry = gateDecision.reason === 'working directory is not attested' && approval.kind === 'command' &&
     ['PowerShell', 'Bash'].includes(approval.params?.tool_name) && state.turnActive === true && state.riskContextValid === true &&
     ['recommended', 'full-auto'].includes(state.riskMode) && state.interactionMode !== 'plan' && state.permissionMode !== 'plan';
@@ -3697,6 +3713,7 @@ async function main() {
     spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId, helperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), state: { riskMode: appServerState.riskMode, riskContextValid: true,
       interactionMode: appServerState.interactionMode, permissionMode: appServerState.permissionMode,
       riskContext: { platform: 'win32', trustedWorkspaceRoot: appServerState.riskContext.trustedWorkspaceRoot,
+        programDataRoot: appServerState.riskContext.programDataRoot || '',
         protectedRoots: appServerState.riskContext.protectedRoots, systemPathRoots: appServerState.riskContext.systemPathRoots || [] } } });
   }
   const browserChannel = manifest.options?.browserChannel;

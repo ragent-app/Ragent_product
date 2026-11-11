@@ -106,7 +106,90 @@ function splitLiteralOutput(command) {
   return words && output?.length === 1 && output[0] ? { words, output: output[0] } : null;
 }
 
+// Split only literal shell operators, without executing or expanding the text.
+// Each segment is classified separately; a pipe may contain only a verified
+// read followed by filters that consume stdin and cannot open additional files.
+function splitLiteralCompound(command) {
+  if (typeof command !== 'string' || !command.trim() || command.length > 128 * 1024 || /[\r\n\0]/.test(command)) return null;
+  const segments = []; const operators = []; let quote = ''; let start = 0;
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    if (quote === "'") { if (c === "'") quote = ''; continue; }
+    if (quote === '"') {
+      if (c === '"') quote = '';
+      else if (c === '\\' && i + 1 < command.length && /[\\"$`]/.test(command[i + 1])) i += 1;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === '\\') { i += 1; continue; }
+    if (!['|', '&', ';'].includes(c)) continue;
+    let operator = c;
+    if (c === '&' && command[i + 1] === '&') { operator = '&&'; i += 1; }
+    else if (c === '&' || (c === '|' && ['|', '&'].includes(command[i + 1]))) return null;
+    const segment = command.slice(start, i + 1 - operator.length).trim();
+    if (!segment) return null;
+    segments.push(segment); operators.push(operator); start = i + 1;
+    if (segments.length > 16) return null;
+  }
+  if (quote) return null;
+  const last = command.slice(start).trim();
+  if (!last) return null;
+  segments.push(last);
+  return { segments, operators };
+}
+
+function isReadOnlyStdinFilter(command) {
+  const words = parseLiteralBashWords(command);
+  if (!words?.length) return false;
+  const [program, ...args] = words;
+  if (['head', 'tail'].includes(program)) {
+    for (let i = 0; i < args.length; i += 1) {
+      const arg = args[i];
+      if (arg === '-') continue;
+      if (/^-(?:n|c)$/.test(arg)) { if (!/^\d{1,9}$/.test(args[++i] || '')) return false; continue; }
+      if (/^-(?:n|c)\d{1,9}$/.test(arg) || /^--(?:lines|bytes)=\d{1,9}$/.test(arg)) continue;
+      return false;
+    }
+    return true;
+  }
+  if (program === 'wc') return args.every(arg => arg === '-' || /^-[clmwL]+$/.test(arg));
+  if (program !== 'grep') return false;
+  let pattern = false; let positional = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (!positional && arg === '--') { positional = true; continue; }
+    if (!positional && arg === '-e') {
+      if (pattern || !args[++i]) return false;
+      pattern = true; continue;
+    }
+    if (!positional && /^-[iFEnwvcl]+$/.test(arg)) continue;
+    if (!pattern && arg !== '-') { pattern = true; continue; }
+    if (arg !== '-') return false;
+  }
+  return pattern;
+}
+
 export async function analyzeWindowsBash(command, context = {}, { analyzeFiles = analyzeWindowsFileChanges } = {}) {
+  const compound = splitLiteralCompound(command);
+  if (!compound) return { complete: false, actions: [], reason: 'Bash command requires expansion or parsing' };
+  if (compound.operators.length) {
+    const actions = []; let pipeInput = false;
+    for (let i = 0; i < compound.segments.length; i += 1) {
+      const segment = compound.segments[i];
+      const nextPipe = compound.operators[i] === '|';
+      if (pipeInput) {
+        if (!isReadOnlyStdinFilter(segment)) return { complete: false, actions, reason: 'Bash pipeline filter is not a verified stdin-only read' };
+        actions.push({ kind: 'read', program: 'stdin filter', target: null });
+      } else {
+        const result = await analyzeWindowsBash(segment, context, { analyzeFiles });
+        if (!result.complete || !result.actions.length) return { ...result, actions: [...actions, ...(result.actions || [])] };
+        if (nextPipe && result.actions.some(action => action.kind !== 'read')) return { complete: false, actions, reason: 'Bash pipeline source is not read-only' };
+        actions.push(...result.actions);
+      }
+      pipeInput = nextPipe;
+    }
+    return { complete: true, actions };
+  }
   const split = splitLiteralOutput(command);
   const words = split?.words;
   if (!words) return { complete: false, actions: [], reason: 'Bash command requires expansion or parsing' };

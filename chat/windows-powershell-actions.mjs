@@ -96,24 +96,35 @@ function staticExternalArguments(elements) {
 }
 
 function readOnlyRipgrepArgs(rawArgs) {
-  const args = [...rawArgs]; let filesOnly = false; const patterns = []; const positional = [];
+  const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; const patterns = []; const positional = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--') { positional.push(...args.slice(index + 1)); break; }
     if (arg === '--files') { filesOnly = true; continue; }
-    if (['-n', '--line-number', '-i', '--ignore-case', '-F', '--fixed-strings', '-l', '--files-with-matches', '-c', '--count', '--no-heading', '--color=never'].includes(arg)) continue;
+    if (arg === '--no-config') { configDisabled = true; continue; }
+    if (['-n', '--line-number', '-i', '--ignore-case', '-S', '--smart-case', '-s', '--case-sensitive', '-F', '--fixed-strings', '-l', '--files-with-matches', '-c', '--count', '-w', '--word-regexp', '-o', '--only-matching', '-H', '--with-filename', '-I', '--no-filename', '--no-heading', '--color=never'].includes(arg)) continue;
     if (['-e', '--regexp'].includes(arg)) {
       const pattern = args[++index];
       if (!pattern) return null;
       patterns.push(pattern);
       continue;
     }
+    if (arg.startsWith('--regexp=')) { const pattern = arg.slice('--regexp='.length); if (!pattern) return null; patterns.push(pattern); continue; }
     if (['-g', '--glob', '-t', '--type', '-T', '--type-not'].includes(arg)) {
-      if (!args[++index]) return null;
+      const value = args[++index];
+      if (!value) return null;
+      if (!['-g', '--glob'].includes(arg) || !value.startsWith('!')) selectsFiles = true;
       continue;
     }
+    if (/^--(?:glob|type|type-not)=/.test(arg)) {
+      const offset = arg.indexOf('='); const value = arg.slice(offset + 1);
+      if (!value) return null;
+      if (!arg.startsWith('--glob=') || !value.startsWith('!')) selectsFiles = true;
+      continue;
+    }
+    if (arg === '--max-count' || arg === '-m') { if (!/^\d+$/.test(args[++index] || '')) return null; continue; }
     if (/^(?:--max-count|-m)=?\d+$/.test(arg)) continue;
-    if (/^-(?:[niFlc])+$/.test(arg)) continue;
+    if (/^-(?:[niFsSlcwHoI])+$/.test(arg)) continue;
     if (arg.startsWith('-')) return null;
     positional.push(arg);
   }
@@ -123,7 +134,7 @@ function readOnlyRipgrepArgs(rawArgs) {
     patterns.push(positional.shift());
   }
   if (positional.some((value) => !value || value === '-')) return null;
-  return { filesOnly, paths: positional.length ? positional : ['.'] };
+  return { filesOnly, selectsFiles, configDisabled, paths: positional.length ? positional : ['.'] };
 }
 
 export async function analyzeWindowsRipgrep(args, context = {}, {
@@ -131,6 +142,9 @@ export async function analyzeWindowsRipgrep(args, context = {}, {
 } = {}) {
   const parsed = Array.isArray(args) && readOnlyRipgrepArgs(args);
   if (!parsed || parsed.paths.length > 64) return { complete: false, actions: [], reason: 'ripgrep options or paths need review' };
+  // RIPGREP_CONFIG_PATH may otherwise enable hidden files, symlink following,
+  // or a preprocessor even when none of those options appear in this request.
+  if (!parsed.configDisabled) return { complete: false, actions: [], reason: 'ripgrep configuration is not disabled' };
   const actions = [];
   for (const rawPath of parsed.paths) {
     const resolvedPath = pathResolver(rawPath);
@@ -146,11 +160,10 @@ export async function analyzeWindowsRipgrep(args, context = {}, {
       { allowProgramDataWorkspaceRead: true }), workspace, workspaceRoot: Boolean(context.trustedWorkspaceRoot)
         && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
       recursive: target.directory === true };
-    if (action.recursive && workspace && !protectedDescendant) {
+    if (action.recursive && workspace && !protectedDescendant && !parsed.selectsFiles) {
       // Default ripgrep traversal skips hidden/ignored paths and does not
-      // follow symlinks. The accepted grammar excludes --hidden, --no-ignore,
-      // --follow and preprocessors, so a workspace search cannot enter the
-      // common credential/control directories or execute a helper.
+      // follow symlinks. Positive glob/type selectors can override that
+      // default and include hidden files, so they must inspect the tree.
       action.recursiveVerified = true;
     } else if (action.recursive) {
       action.recursiveVerified = await inspectRecursiveTarget(target, context, fsApi,
@@ -478,10 +491,13 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const workspaceTask = await analyzeWorkspaceScriptTask(entry, context, fsApi);
     if (workspaceTask) { actions.push(workspaceTask); continue; }
     if (program === 'git' || program === 'git.exe') {
-      if (entry.pipelineInput !== false || !entry.elements.every((element) => element.kind === 'literal')) {
+      if (entry.pipelineInput !== false || entry.elements[0]?.kind !== 'literal'
+          || entry.elements.slice(1).some(element => element.kind !== 'literal'
+            && (element.kind !== 'parameter' || element.argumentType || element.value != null))) {
         return { complete: false, actions, reason: 'Git arguments are dynamic or come from pipeline input' };
       }
-      const git = analyzeWindowsReadOnlyGit(entry.elements.map((element) => String(element.value)));
+      const args = staticExternalArguments(entry.elements);
+      const git = args && analyzeWindowsReadOnlyGit([entry.name, ...args]);
       if (!git) return { complete: false, actions, reason: 'Git command is not on the read-only allowlist' };
       actions.push(...git.actions);
       continue;

@@ -100,10 +100,10 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
 let result = await inspect('Get-Content readme.txt | Select-Object -First 1');
 assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
-for (const command of ['git status --short', 'git diff --stat', 'git branch --show-current']) {
+for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline']) {
   assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
 }
-for (const command of ['git add .', 'git commit -m test', 'git diff', 'git status --ignored=matching']) {
+for (const command of ['git add .', 'git commit -m test', 'git diff', 'git status --ignored=bogus']) {
   assert.equal((await inspect(command)).decision, 'review', `${command} is not on the read-only Git allowlist`);
 }
 result = await inspect(`Set-Content -LiteralPath '${path.join(workspace, 'chain.txt')}' -Value PASS && Get-Content -LiteralPath '${path.join(workspace, 'chain.txt')}' 2>&1 | Out-String`);

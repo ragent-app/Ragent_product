@@ -9,6 +9,24 @@ import { decideClaudeToolApproval } from './claude-tool-policy.mjs';
 const win = path.win32;
 const text = (value) => typeof value === 'string' ? value.trim() : '';
 
+function windowsReasonCode(reason, complete = false) {
+  const value = String(reason || '').toLowerCase();
+  if (/additional permissions|network approval|permission grant/.test(value)) return 'windows_permission_expansion';
+  if (/working directory|path context|cwd/.test(value)) return 'windows_context_unverified';
+  if (/shell or command identity/.test(value)) return 'windows_shell_unverified';
+  if (/configuration is not disabled/.test(value)) return 'windows_configuration_unverified';
+  if (/file change|file targets|file target/.test(value) && /unavailable|incomplete|unknown|cannot be/.test(value)) return 'windows_file_context_incomplete';
+  if (/parser unavailable|syntax error/.test(value)) return 'windows_parser_error';
+  if (/protected or sensitive|recursive deletion|wildcard delete/.test(value)) return 'windows_high_risk_target';
+  if (!complete && /dynamic|unsupported|unrecognized|expansion|not yet supported|not a verified|not read-only|not on the read-only/.test(value)) return 'windows_syntax_unsupported';
+  return complete ? 'windows_operation' : 'windows_analysis_incomplete';
+}
+
+function promptWindowsApproval(reason, code = windowsReasonCode(reason), tier = 'unknown') {
+  return { decision: 'prompt', reason, risk: { tier, platform: 'windows', policyVersion: 'windows-approval/v3',
+    confidence: 'unknown', signals: { reasons: [reason] }, reasons: [{ code, message: reason }] } };
+}
+
 // Codex app-server serializes its executable argv using shlex_join. Decode
 // that representation as data, not as PowerShell (or as a shell to execute).
 // Shell operators outside quotes are not produced by shlex_join and fail
@@ -119,7 +137,7 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
   const safeOnly = mode === 'safe' || mode === 'conservative-auto';
   const riskContext = state.riskContext || {};
   const requestCwd = text(params.cwd);
-  if (requestCwd && !win.isAbsolute(requestCwd)) return { decision: 'prompt', reason: 'command working directory is not absolute' };
+  if (requestCwd && !win.isAbsolute(requestCwd)) return promptWindowsApproval('command working directory is not absolute');
   const context = {
     ...riskContext,
     cwd: requestCwd || state.cwd,
@@ -130,19 +148,19 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
   // Command classification alone cannot authorize additional permissions.
   if (params.networkApprovalContext || params.network_approval_context
       || params.additionalPermissions || params.additional_permissions) {
-    return { decision: 'prompt', reason: 'additional permissions require owner approval' };
+    return promptWindowsApproval('additional permissions require owner approval', 'windows_permission_expansion', 'danger');
   }
   const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode: mode });
   if (claudeToolDecision) return claudeToolDecision;
-  if (state.riskContextValid === false) return { decision: 'prompt', reason: 'run path context is unavailable' };
+  if (state.riskContextValid === false) return promptWindowsApproval('run path context is unavailable');
   let result; let command = ''; let platform = 'powershell';
   if (isKnownFileGate(approval, toolName)) {
-    if (text(params.grantRoot)) return { decision: 'prompt', reason: 'a continuing file permission grant requires owner approval' };
+    if (text(params.grantRoot)) return promptWindowsApproval('a continuing file permission grant requires owner approval', 'windows_permission_expansion', 'danger');
     const input = params.input || {};
     const activeItem = text(params.itemId) && state.activeItems instanceof Map ? state.activeItems.get(text(params.itemId)) : null;
     if (approval?.providerMethod === 'item/fileChange/requestApproval'
         && (!activeItem || activeItem.type !== 'fileChange')) {
-      return { decision: 'prompt', reason: 'matching active file change is unavailable' };
+      return promptWindowsApproval('matching active file change is unavailable');
     }
     const providerChanges = Array.isArray(activeItem?.changes) ? activeItem.changes : params.changes;
     const rawChanges = Array.isArray(providerChanges) ? providerChanges
@@ -158,13 +176,13 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
     })
       : filePath ? [{ path: filePath, kind: ['Read', 'Glob', 'Grep', 'LS', 'List'].includes(toolName) ? 'read' : 'write' }]
         : [];
-    if (entries.length > 10000 || entries.some((entry) => !entry.path || entry.kind === 'unknown')) return { decision: 'prompt', reason: 'file change details are incomplete or too large' };
+    if (entries.length > 10000 || entries.some((entry) => !entry.path || entry.kind === 'unknown')) return promptWindowsApproval('file change details are incomplete or too large');
     if (approval?.providerMethod === 'item/fileChange/requestApproval' && entries.some((entry) => entry.kind === 'delete')) {
-      return { decision: 'prompt', reason: 'Codex file deletion requires owner review' };
+      return promptWindowsApproval('Codex file deletion requires owner review', 'windows_file_deletion_review', 'danger');
     }
     result = await analyzeFiles(entries, context);
   } else {
-    if (approval?.kind !== 'command') return { decision: 'prompt', reason: 'non-command request requires owner decision' };
+    if (approval?.kind !== 'command') return promptWindowsApproval('non-command request requires owner decision', 'windows_unrecognized_request');
     if (approval?.providerMethod === 'can_use_tool' && toolName === 'Bash') {
       command = typeof params.input?.command === 'string' ? params.input.command : '';
       // Claude on Windows exposes a Bash tool. When it explicitly invokes
@@ -182,21 +200,21 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
       }
     } else {
     const invocation = await invocationReader(approval);
-    if (!invocation) return { decision: 'prompt', reason: 'Windows shell or command identity cannot be verified' };
+    if (!invocation) return promptWindowsApproval('Windows shell or command identity cannot be verified');
     command = invocation.command;
     result = await analyze(command, context, { executable: invocation.executable });
     }
   }
   const decision = decideWindowsPowerShellActions(result, { safeOnly });
-  const tier = decision.tier || (decision.decision === 'allow' ? 'safe' : 'danger');
+  const tier = result.complete ? (decision.tier || (decision.decision === 'allow' ? 'safe' : 'danger')) : 'unknown';
   return {
     decision: decision.decision === 'allow' ? 'auto-allow' : 'prompt',
     reason: decision.reason,
     command,
-    risk: { tier, platform, policyVersion: 'windows-approval/v2',
+    risk: { tier, platform, policyVersion: 'windows-approval/v3',
       confidence: result.complete ? 'high' : 'unknown',
       signals: { reasons: [decision.reason], targetScope: decision.action?.workspace ? 'trusted-workspace' : 'outside-workspace' },
-      reasons: [{ code: result.complete ? 'windows_operation' : 'windows_analysis_incomplete', message: decision.reason }],
+      reasons: [{ code: windowsReasonCode(decision.reason, result.complete), message: decision.reason }],
       actions: result.actions },
   };
 }

@@ -43,6 +43,28 @@ if (process.platform === 'win32') {
     assert.equal((await inspect(command)).decision, 'review', command);
   }
   assert.equal((await inspect('ls -la')).decision, 'allow');
+  for (const command of ["rg --no-config --files .", "rg --no-config --files -g '!*.txt' .", "rg --no-config -S --max-count 2 -e fixture '中文 文件.md'"]) {
+    assert.equal((await inspect(command)).decision, 'allow', `safe ripgrep request: ${command}`);
+  }
+  for (const command of ["rg --files .", "rg --no-config --files -g '*' .", "rg --no-config --files --glob='*.js' .", 'rg --no-config --files -t js .', 'rg --no-config --files --type=js .', 'rg --no-config --files --hidden .', 'rg --no-config --files --follow .']) {
+    assert.equal((await inspect(command)).decision, 'review', `ripgrep must not traverse hidden sensitive paths: ${command}`);
+  }
+  for (const command of [
+    "cat '中文 文件.md' | head -n 1",
+    "cat '中文 文件.md' | grep -i fixture | wc -l",
+    'git status --short && git branch --show-current',
+    'git status --short; git branch --show-current',
+  ]) assert.equal((await inspect(command)).decision, 'allow', `ordinary compound read: ${command}`);
+  for (const command of [
+    "cat '中文 文件.md' | bash -c 'rm -rf ordinary'",
+    "cat '中文 文件.md' | grep -f secret/.ssh/fixture-key",
+    "cat '中文 文件.md' | head secret/.ssh/fixture-key",
+    "cat '中文 文件.md' | head -n $(whoami)",
+    "cat '中文 文件.md' || rm -rf ordinary",
+    "cat '中文 文件.md' && rm -rf secret",
+    "echo fixture > ordinary-link | head",
+    "cat '中文 文件.md' | head > secret/.ssh/key",
+  ]) assert.equal((await inspect(command)).decision, 'review', `unsafe compound request: ${command}`);
   assert.equal((await inspect('mkdir -p output')).decision, 'allow');
   assert.equal((await inspect('rm -rf ordinary')).decision, 'review');
   assert.equal((await inspect('rm --recursive --force ordinary')).decision, 'review');
@@ -72,10 +94,10 @@ if (process.platform === 'win32') {
   const file = bashPath(path.join(workspace, '中文 文件.md'));
   const secret = bashPath(path.join(workspace, 'secret'));
   const request = command => ({ kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command } } });
-  for (const command of ['git status --short', 'git diff --stat', 'git branch --show-current']) {
+  for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline']) {
     assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
   }
-  for (const command of ['git add .', 'git commit -m test', 'git diff', 'git status --ignored=matching']) {
+  for (const command of ['git add .', 'git commit -m test', 'git diff', 'git status --ignored=bogus']) {
     assert.equal((await inspect(command)).decision, 'review', `${command} is not on the read-only Git allowlist`);
   }
   for (const riskMode of ['recommended', 'full-auto']) {
@@ -84,6 +106,8 @@ if (process.platform === 'win32') {
     assert.equal((await decideWindowsApproval(request(`cat -n '${file}'`), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`ls -lah '${secret}'`), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`ls -R '${secret}'`), state)).decision, 'prompt');
+    assert.equal((await decideWindowsApproval(request(`cat '${file}' | head -n 1`), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request(`cat '${file}' | bash -c 'rm -rf /'`), state)).decision, 'prompt');
   }
   if (process.env.AGENTOC_TEST_BASH_BINARY) {
     const bash = process.env.AGENTOC_TEST_BASH_BINARY;
@@ -91,6 +115,8 @@ if (process.platform === 'win32') {
     assert.match(numbered, /\b1\s+fixture/);
     const listing = execFileSync(bash, ['--noprofile', '--norc', '-c', `ls -1 '${bashPath(workspace)}'`], { cwd: workspace, encoding: 'utf8', windowsHide: true });
     assert.ok(listing.includes('中文 文件.md'));
+    const pipeline = execFileSync(bash, ['--noprofile', '--norc', '-c', `cat '${file}' | grep -i fixture | head -n 1`], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.equal(pipeline.trim(), 'fixture');
   }
   await rm(root, { recursive: true, force: true });
 }
