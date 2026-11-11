@@ -29,6 +29,7 @@ import com.andysagent.agentoc.core.designsystem.AgentoAlertDialog as AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.foundation.layout.Column
@@ -281,6 +282,9 @@ class MainActivity : ComponentActivity() {
     // 配对深链: 相机/其他 App 识别 agentoc://pair 后唤起本 App 时携带的 URI。
     private var pendingPairingUri by mutableStateOf<String?>(null)
     private var pendingGoogleSignIn by mutableStateOf<GoogleSignInRequest?>(null)
+    private var pendingBrowserAgreement by mutableStateOf(false)
+    private var pendingDemoAgreement by mutableStateOf(false)
+    private var signInVoiceConsentPending = false
     private var googleSignInToLaunch by mutableStateOf<GoogleSignInRequest?>(null)
     private var googleSignInSuccess by mutableStateOf<GoogleSignInRequest?>(null)
     // 浏览器登录回退（无 GMS 设备）: 挑战持有后交给浏览器完成 Google 登录。
@@ -392,6 +396,7 @@ class MainActivity : ComponentActivity() {
         pendingSessionNavigation = savedInstanceState?.getString("agentoc.navigation.pending")?.let { payload ->
             if (payload.length > 4096) null else runCatching { AppApiJson.decodeFromString<SessionNavigationRequest>(payload).validated() }.getOrNull()
         }
+        signInVoiceConsentPending = savedInstanceState?.getBoolean("agentoc.signin.voiceConsentPending") == true
         restoreBrowserSignInRecovery(savedInstanceState?.getString("agentoc.browser.signIn"))?.let { recovered ->
             GoogleSignInRequest.entries.firstOrNull { it.name == recovered.purpose }?.let { purpose ->
                 browserSignInRequest = purpose
@@ -692,7 +697,19 @@ class MainActivity : ComponentActivity() {
                         preferAuthorized = preferAuthorizedAccount,
                     )
                     when (result) {
-                        is GoogleAccountChallengeResult.Success -> when (request) {
+                        is GoogleAccountChallengeResult.Success -> {
+                            if (signInVoiceConsentPending) {
+                                try {
+                                    app.runtime.accountSessions.setAccountAsrConsent(accepted = true)
+                                    signInVoiceConsentPending = false
+                                    voiceController.refreshCloudUsage()
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (error: Exception) {
+                                    signInVoiceConsentPending = false
+                                    requestError = getString(WorkbenchR.string.voice_cloud_unavailable)
+                                }
+                            }
+                            when (request) {
                             GoogleSignInRequest.Account -> {
                                 accounts.onEvent(AccountsEvent.AccountSessionEstablished(result.profile))
                                 googleSignInSuccess = request
@@ -726,8 +743,11 @@ class MainActivity : ComponentActivity() {
                                     requestError = error.message ?: "Could not manage computers."
                                 }
                             }
+                            }
                         }
-                        GoogleAccountChallengeResult.Cancelled -> when (request) {
+                        GoogleAccountChallengeResult.Cancelled -> {
+                            signInVoiceConsentPending = false
+                            when (request) {
                             GoogleSignInRequest.Account -> accounts.onEvent(AccountsEvent.SignInCancelled)
                             GoogleSignInRequest.PairComputer,
                             GoogleSignInRequest.PairComputerFromWelcome -> pairingOnboarding.onEvent(
@@ -737,8 +757,10 @@ class MainActivity : ComponentActivity() {
                                 pendingComputerConnectionId = null
                                 pendingComputerConnectionIsPrimary = true
                             }
+                            }
                         }
                         is GoogleAccountChallengeResult.Failed -> {
+                            signInVoiceConsentPending = false
                             if (request == GoogleSignInRequest.ManageDevices) {
                                 pendingComputerConnectionId = null
                                 pendingComputerConnectionIsPrimary = true
@@ -793,6 +815,17 @@ class MainActivity : ComponentActivity() {
                         try {
                             val profile = app.runtime.completeBrowserAccountSession(challenge)
                             browserSessionEstablished = true
+                            if (signInVoiceConsentPending) {
+                                try {
+                                    app.runtime.accountSessions.setAccountAsrConsent(accepted = true)
+                                    signInVoiceConsentPending = false
+                                    voiceController.refreshCloudUsage()
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (error: Exception) {
+                                    signInVoiceConsentPending = false
+                                    requestError = getString(WorkbenchR.string.voice_cloud_unavailable)
+                                }
+                            }
                             challenge = null
                             browserSignInChallenge = null
                             googleSignInSuccess = request
@@ -923,6 +956,17 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(chatState.sessionId) { voiceController.loadSession(chatState.sessionId) }
                 LaunchedEffect(demoSignInState.signedInProfile) {
                     val profile = demoSignInState.signedInProfile ?: return@LaunchedEffect
+                    if (signInVoiceConsentPending) {
+                        try {
+                            app.runtime.accountSessions.setAccountAsrConsent(accepted = true)
+                            signInVoiceConsentPending = false
+                            voiceController.refreshCloudUsage()
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) {
+                            signInVoiceConsentPending = false
+                            requestError = getString(WorkbenchR.string.voice_cloud_unavailable)
+                        }
+                    }
                     accounts.onEvent(AccountsEvent.AccountSessionEstablished(profile))
                     welcomeSuppressedBySignIn = true
                     pairingOnboarding.onEvent(PairingOnboardingEvent.Dismiss)
@@ -1405,9 +1449,13 @@ class MainActivity : ComponentActivity() {
                     },
                     onRequestBrowserSignIn = { request ->
                         requestError = null
-                        browserSignInRequest = request
+                        pendingBrowserAgreement = true
+                        pendingGoogleSignIn = request
                     },
-                    onRequestDemoSignIn = demoSignIn::open,
+                    onRequestDemoSignIn = {
+                        pendingDemoAgreement = true
+                        pendingGoogleSignIn = GoogleSignInRequest.Account
+                    },
                     onRequestComputerDiscovery = {
                         requestError = null
                         runtimeScope.launch {
@@ -1856,21 +1904,33 @@ class MainActivity : ComponentActivity() {
                     onUsernameChanged = demoSignIn::usernameChanged,
                     onPasswordChanged = demoSignIn::passwordChanged,
                     onSubmit = demoSignIn::submit,
-                    onDismiss = demoSignIn::dismiss,
+                    onDismiss = {
+                        signInVoiceConsentPending = false
+                        demoSignIn.dismiss()
+                    },
                 )
                 pendingGoogleSignIn?.let { request ->
                     GoogleSignInConfirmationDialog(
                         request = request,
+                        isDemoSignIn = pendingDemoAgreement,
                         onDemoSignIn = {
                             pendingGoogleSignIn = null
-                            demoSignIn.open()
+                            pendingDemoAgreement = true
+                            pendingGoogleSignIn = request
                         },
                         onConfirm = {
                             pendingGoogleSignIn = null
+                            signInVoiceConsentPending = true
                             if (request == GoogleSignInRequest.Account) {
                                 accounts.onEvent(AccountsEvent.SignIn)
                             }
-                            googleSignInToLaunch = request
+                            when {
+                                pendingDemoAgreement -> demoSignIn.open()
+                                pendingBrowserAgreement -> browserSignInRequest = request
+                                else -> googleSignInToLaunch = request
+                            }
+                            pendingDemoAgreement = false
+                            pendingBrowserAgreement = false
                         },
                         onDismiss = {
                             if (request == GoogleSignInRequest.ManageDevices) {
@@ -1878,6 +1938,8 @@ class MainActivity : ComponentActivity() {
                                 pendingComputerConnectionIsPrimary = true
                             }
                             pendingGoogleSignIn = null
+                            pendingBrowserAgreement = false
+                            pendingDemoAgreement = false
                         },
                     )
                 }
@@ -1911,6 +1973,7 @@ class MainActivity : ComponentActivity() {
                             browserSignInRetryTick += 1
                         },
                         onCancel = {
+                            signInVoiceConsentPending = false
                             browserSignInError = null
                             when (activeBrowserRequest) {
                                 GoogleSignInRequest.Account -> accounts.onEvent(AccountsEvent.SignInCancelled)
@@ -2018,6 +2081,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("agentoc.signin.voiceConsentPending", signInVoiceConsentPending)
         pendingPairingScanFromWelcome?.let { outState.putBoolean("agentoc.setup.fromWelcome", it) }
         outState.putStringArrayList("agentoc.navigation.consumed", ArrayList(consumedNotificationKeys))
         navigationIntakeKey?.let { outState.putString("agentoc.navigation.intakeKey", it) }
@@ -2041,7 +2105,9 @@ internal fun GoogleSignInConfirmationDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     onDemoSignIn: (() -> Unit)? = null,
+    isDemoSignIn: Boolean = false,
 ) {
+    val uriHandler = LocalUriHandler.current
     val detail = stringResource(
         when (request) {
             GoogleSignInRequest.PairComputer,
@@ -2051,8 +2117,8 @@ internal fun GoogleSignInConfirmationDialog(
         },
     )
     AgentoDialog(
-        title = stringResource(WorkbenchR.string.settings_google_sign_in_title),
-        confirmLabel = stringResource(WorkbenchR.string.pairing_continue),
+        title = stringResource(WorkbenchR.string.sign_in_agreement_title),
+        confirmLabel = stringResource(WorkbenchR.string.voice_cloud_consent_accept),
         dismissLabel = stringResource(WorkbenchR.string.settings_cancel),
         onConfirm = onConfirm,
         onDismiss = onDismiss,
@@ -2060,11 +2126,24 @@ internal fun GoogleSignInConfirmationDialog(
     ) {
         Column {
             Text(
-                text = detail,
+                text = stringResource(WorkbenchR.string.sign_in_agreement_summary),
                 style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
                 color = LocalAgentocColors.current.secondaryContent,
             )
-            onDemoSignIn?.let { onDemo ->
+            Text(
+                text = if (isDemoSignIn) stringResource(WorkbenchR.string.demo_sign_in_title) else detail,
+                style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                color = LocalAgentocColors.current.secondaryContent,
+            )
+            Text(
+                text = stringResource(WorkbenchR.string.voice_cloud_upload_disclosure),
+                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                color = LocalAgentocColors.current.secondaryContent,
+            )
+            TextButton(onClick = { uriHandler.openUri("https://support.agentoncloud.com/privacy/") }) {
+                Text(stringResource(WorkbenchR.string.account_privacy_open))
+            }
+            onDemoSignIn?.takeUnless { isDemoSignIn }?.let { onDemo ->
                 TextButton(onClick = onDemo) { Text(stringResource(WorkbenchR.string.demo_sign_in_title)) }
             }
         }

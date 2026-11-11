@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sign_in_agreement_title">隐私与语音使用协议</string>
+    <string name="sign_in_agreement_summary">点击“允许并继续”，即表示你同意隐私声明，并同意按以下说明进行云端语音处理。你可以在设置中撤回语音同意。</string>
+
     <string name="settings_voice">语音识别</string>
     <string name="settings_voice_summary">云端语音识别和用量</string>
 

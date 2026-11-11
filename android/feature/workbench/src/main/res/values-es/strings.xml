@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sign_in_agreement_title">Acuerdo de privacidad y voz</string>
+    <string name="sign_in_agreement_summary">Al seleccionar «Permitir y continuar», aceptas el aviso de privacidad y el tratamiento de voz en la nube descrito a continuación. Puedes retirar el consentimiento de voz en ajustes.</string>
+
     <string name="settings_voice">Reconocimiento de voz</string>
     <string name="settings_voice_summary">Reconocimiento de voz en la nube y uso</string>
 

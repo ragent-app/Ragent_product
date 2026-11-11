@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sign_in_agreement_title">Accord de confidentialité et vocal</string>
+    <string name="sign_in_agreement_summary">En sélectionnant « Autoriser et continuer », vous acceptez la notice de confidentialité et le traitement vocal dans le cloud décrit ci-dessous. Vous pouvez retirer ce consentement dans les paramètres.</string>
+
     <string name="settings_voice">Reconnaissance vocale</string>
     <string name="settings_voice_summary">Reconnaissance vocale cloud et utilisation</string>
 

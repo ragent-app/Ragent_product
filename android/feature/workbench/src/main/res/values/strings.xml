@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sign_in_agreement_title">Privacy and voice agreement</string>
+    <string name="sign_in_agreement_summary">By selecting “Allow and continue”, you agree to the Privacy Notice and consent to cloud voice processing as described below. You can revoke voice consent in settings.</string>
+
     <string name="settings_voice">Voice recognition</string>
     <string name="settings_voice_summary">Cloud speech recognition and usage</string>
 

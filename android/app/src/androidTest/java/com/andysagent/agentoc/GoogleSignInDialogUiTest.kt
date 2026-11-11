@@ -14,18 +14,38 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.designsystem.LocalAgentocColors
 import com.andysagent.agentoc.feature.workbench.GoogleSignInRequest
 import com.andysagent.agentoc.feature.workbench.R as WorkbenchR
 import kotlin.math.abs
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 
 class GoogleSignInDialogUiTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    fun agreementDisplaysVoiceDisclosureBeforeConfirmingSignIn() {
+        var accepted = false
+        composeRule.setContent {
+            AgentocTheme {
+                GoogleSignInConfirmationDialog(
+                    request = GoogleSignInRequest.Account,
+                    onConfirm = { accepted = true }, onDismiss = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText(composeRule.activity.getString(WorkbenchR.string.sign_in_agreement_summary)).assertExists()
+        composeRule.onNodeWithText(composeRule.activity.getString(WorkbenchR.string.voice_cloud_upload_disclosure)).assertExists()
+        assertFalse(accepted)
+        composeRule.onNodeWithText(composeRule.activity.getString(WorkbenchR.string.voice_cloud_consent_accept)).performClick()
+        assertTrue(accepted)
+    }
 
     @Test
     fun darkSignInDialogUsesDenseNeutralSurfaceOverHighContrastContent() {

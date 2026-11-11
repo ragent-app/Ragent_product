@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sign_in_agreement_title">プライバシーと音声利用への同意</string>
+    <string name="sign_in_agreement_summary">「許可して続行」を選択すると、プライバシー通知と以下のクラウド音声処理に同意します。音声への同意は設定で取り消せます。</string>
+
     <string name="settings_voice">音声認識</string>
     <string name="settings_voice_summary">クラウド音声認識と使用量</string>
 

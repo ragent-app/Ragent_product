@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sign_in_agreement_title">隱私與語音使用協議</string>
+    <string name="sign_in_agreement_summary">點選「允許並繼續」，即表示你同意隱私聲明，並同意依以下說明進行雲端語音處理。你可以在設定中撤回語音同意。</string>
+
     <string name="settings_voice">語音辨識</string>
     <string name="settings_voice_summary">雲端語音辨識與用量</string>
 
