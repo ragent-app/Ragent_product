@@ -36,30 +36,46 @@ internal suspend fun recordVoiceWav(
             recorder.release()
             "Phone microphone could not be initialized"
         }
-        val maxPcmBytes = sampleRate * 2 * maxSeconds
-        val pcm = ByteArrayOutputStream(maxPcmBytes)
-        val buffer = ByteArray(bufferSize)
-        try {
+        val data = try {
             recorder.startRecording()
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Phone microphone did not start" }
-            val deadline = System.nanoTime() + maxSeconds * 1_000_000_000L
-            while (!stopRequested.get() && System.nanoTime() < deadline && pcm.size() < maxPcmBytes) {
-                val remaining = maxPcmBytes - pcm.size()
-                val read = recorder.read(buffer, 0, minOf(buffer.size, remaining), AudioRecord.READ_BLOCKING)
-                if (read < 0) error("Phone microphone read failed ($read)")
-                if (read > 0) {
-                    pcm.write(buffer, 0, read)
-                    onLevel(pcmLevel(buffer, read))
-                }
+            collectVoicePcm(stopRequested, maxSeconds, bufferSize, onLevel = onLevel) { buffer, length ->
+                recorder.read(buffer, 0, length, AudioRecord.READ_BLOCKING)
             }
         } finally {
             runCatching { recorder.stop() }
             recorder.release()
         }
-        val data = pcm.toByteArray()
-        if (data.size < sampleRate) throw VoiceRecordingTooShortException()
         encodePcm16Wav(data, sampleRate)
     }
+
+/** Capture bounded PCM without depending on the recorder's buffer size. */
+internal fun collectVoicePcm(
+    stopRequested: AtomicBoolean,
+    maxSeconds: Int,
+    bufferSize: Int,
+    onLevel: (Float) -> Unit = {},
+    nowNanos: () -> Long = System::nanoTime,
+    read: (ByteArray, Int) -> Int,
+): ByteArray {
+    require(maxSeconds in 1..20 && bufferSize > 0)
+    val sampleRate = 16_000
+    val maxPcmBytes = sampleRate * 2 * maxSeconds
+    val pcm = ByteArrayOutputStream(maxPcmBytes)
+    val buffer = ByteArray(bufferSize)
+    val deadline = nowNanos() + maxSeconds * 1_000_000_000L
+    while (!stopRequested.get() && nowNanos() < deadline && pcm.size() < maxPcmBytes) {
+        val readCount = read(buffer, minOf(buffer.size, maxPcmBytes - pcm.size()))
+        if (readCount < 0) error("Phone microphone read failed ($readCount)")
+        if (readCount > 0) {
+            pcm.write(buffer, 0, readCount)
+            onLevel(pcmLevel(buffer, readCount))
+        }
+    }
+    val data = pcm.toByteArray()
+    if (data.size < sampleRate) throw VoiceRecordingTooShortException()
+    return data
+}
 
 private fun pcmLevel(buffer: ByteArray, length: Int): Float {
     val samples = length / 2
