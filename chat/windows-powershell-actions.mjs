@@ -179,19 +179,19 @@ export async function analyzeWindowsWorkspaceScriptTask(programName, rawArgs, co
 } = {}) {
   const program = String(programName || '').toLowerCase();
   const args = Array.isArray(rawArgs) && rawArgs.every((arg) => typeof arg === 'string') ? rawArgs : null;
-  if (!args || !context.trustedWorkspaceRoot || !inside(context.cwd, context.trustedWorkspaceRoot)) return null;
+  if (!args || !win.isAbsolute(context.cwd || '')) return null;
   if (WORKSPACE_SCRIPT_RUNNERS.has(program)) {
     let task = '';
-    if (args.length === 1 && args[0].toLowerCase() === 'test') task = 'test';
+    if (args.length === 1 && ['test', 'install', 'i', 'ci'].includes(args[0].toLowerCase())) task = args[0].toLowerCase();
     else if (args.length === 2 && args[0].toLowerCase() === 'run') task = args[1].toLowerCase();
     else if (program.startsWith('yarn') && args.length === 1) task = args[0].toLowerCase();
     else if (program.startsWith('bun') && args.length === 1 && args[0].toLowerCase() === 'test') task = 'test';
-    if (!WORKSPACE_SCRIPT_TASKS.has(task)) return null;
-    return { kind: 'read', program: `${program} ${task}`, target: null, workspace: true, caution: true };
+    if (!WORKSPACE_SCRIPT_TASKS.has(task) && !/^[a-z0-9][a-z0-9:_-]{0,127}$/.test(task)) return null;
+    return { kind: 'read', program: `${program} ${task}`, target: null, workspace: inside(context.cwd, context.trustedWorkspaceRoot || ''), caution: true };
   }
   if (['python', 'python.exe', 'python3', 'python3.exe'].includes(program)
       && args.length === 2 && args[0] === '-m' && ['pytest', 'unittest'].includes(args[1].toLowerCase())) {
-    return { kind: 'read', program: `${program} -m ${args[1]}`, target: null, workspace: true, caution: true };
+    return { kind: 'read', program: `${program} -m ${args[1]}`, target: null, workspace: inside(context.cwd, context.trustedWorkspaceRoot || ''), caution: true };
   }
   const scriptExtensions = ['node', 'node.exe'].includes(program) ? /\.(?:c|m)?js$/i
     : ['python', 'python.exe', 'python3', 'python3.exe'].includes(program) ? /\.py$/i : null;
@@ -199,9 +199,9 @@ export async function analyzeWindowsWorkspaceScriptTask(programName, rawArgs, co
     const scriptPath = pathResolver(args[0]);
     if (!scriptPath) return null;
     const script = await resolveTarget(scriptPath, context.cwd, fsApi, context);
-    if (!script || !script.file || !inside(script.lexical, context.trustedWorkspaceRoot) || !inside(script.actual, context.trustedWorkspaceRoot)
+    if (!script || !script.file
         || isProtected(script, context) || !scriptExtensions.test(script.actual)) return null;
-    return { kind: 'read', program: `${program} workspace script`, target: script, workspace: true, caution: true };
+    return { kind: 'read', program: `${program} script`, target: script, workspace: inside(script.lexical, context.trustedWorkspaceRoot || '') && inside(script.actual, context.trustedWorkspaceRoot || ''), caution: true };
   }
   return null;
 }
@@ -489,7 +489,10 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       continue;
     }
     const workspaceTask = await analyzeWorkspaceScriptTask(entry, context, fsApi);
-    if (workspaceTask) { actions.push(workspaceTask); continue; }
+    if (workspaceTask) {
+      if (context.requireAbsolutePaths) return { complete: false, actions, reason: 'working directory is not attested' };
+      actions.push(workspaceTask); continue;
+    }
     if (program === 'git' || program === 'git.exe') {
       if (entry.pipelineInput !== false || entry.elements[0]?.kind !== 'literal'
           || entry.elements.slice(1).some(element => element.kind !== 'literal'

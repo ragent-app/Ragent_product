@@ -152,6 +152,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 ## 当前证据与未决项
 
 - Claude Windows 的 Bash 和 PowerShell 普通相对路径读取、写入及单文件删除，现在会先按统一风险规则分析，再在执行时核对工作目录；目标或工作目录位于工作区外本身不会触发审批。执行目录不一致时停止，敏感目标和无法确认的操作仍交给原策略。请求审批与 full-auto 的自动通过标准相同。真实 Windows Bash、PowerShell 与 sidecar fixture 已验证；此方案没有固定目录句柄，分析与执行间目录被替换仍存在竞态。
+- 常见无参数依赖安装、项目自定义脚本以及普通 Node/Python 脚本允许在工作区外按同一标准自动处理；Claude 的相对工作目录在执行时核对。包安装和项目脚本会执行其自身代码，静态审批不能保证代码内部没有危险操作；这与扩大自动通过范围同时存在。测试只验证请求分类和目录约束，没有实际联网安装依赖。
 
 - 本机 Windows Codex CLI `0.147.0` 与隔离安装的 `0.167.0`：真实 App Server 启动时只设置当前 cwd 项目 trust，不发送已退役的审批枚举；返回有效 `approvalPolicy=untrusted`、reviewer=user、sandbox 和 workspace root。0.167.0 使用本机 fake Responses provider、隔离 `CODEX_HOME` 和测试 key，命令级 owner prompt、无害命令自动批准、full-auto 危险命令拒绝均通过；没有使用 Codex 账号或官方模型额度。
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。

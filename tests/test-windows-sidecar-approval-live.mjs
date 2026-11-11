@@ -290,6 +290,9 @@ for (const mode of ['recommended', 'full-auto']) {
   assert.match(sent[0]?.response?.response?.updatedInput?.command || '', /CurrentLocation/);
   await trackClaudeBidiApprovalRequest(run.id, state, request('absolute-write', `Set-Content -Path ${psPath('output.md')} -Value hello`), proc);
   assert.equal(sent[1]?.response?.response?.behavior, 'allow');
+  await trackClaudeBidiApprovalRequest(run.id, state, request('npm-dev', 'npm run dev'), proc);
+  assert.equal(sent[2]?.response?.response?.behavior, 'allow');
+  assert.match(sent[2]?.response?.response?.updatedInput?.command || '', /CurrentLocation/);
 }
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);

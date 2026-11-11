@@ -62,6 +62,13 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.ok(outsideCurrent, `${riskMode}: cwd outside workspace must not be categorically rejected`);
   assert.match(execFileSync(bash, ['--noprofile', '--norc', '-c', outsideCurrent.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true }), /PRIVATE_OUTSIDE/);
   const psApproval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'PowerShell', input: { command } } });
+  for (const tool of ['Bash', 'PowerShell']) {
+    const make = tool === 'Bash' ? approval : psApproval;
+    for (const command of ['npm install', 'npm ci', 'npm run dev', 'npm run custom-task']) {
+      const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: make(command), state: outsideCwd });
+      assert.ok(bridge, `${riskMode}: ${tool} outside workspace: ${command}`);
+    }
+  }
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const psOptions = { cwd: workspace, encoding: 'utf8', windowsHide: true };
   for (const command of ['Get-Content readme.txt', 'Get-Content ../outside/readme.txt', `Set-Content -Path ../outside/ps-${riskMode}.txt -Value safe`]) {
@@ -72,7 +79,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   }
   assert.equal((await readFile(path.join(outside, `ps-${riskMode}.txt`), 'utf8')).trim(), 'safe');
   assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: psApproval('Get-Content .env'), state }), null);
-  for (const command of ['cat .env', 'echo danger > .env', "rg --files -g '*' .", 'rm -rf .', 'cat "$(whoami)"']) {
+  for (const command of ['cat .env', 'echo danger > .env', 'npm run dev > .env', 'git status > .env', "rg --files -g '*' .", 'rm -rf .', 'cat "$(whoami)"']) {
     assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state }), null, command);
   }
   const elevated = approval('cat readme.txt'); elevated.params.input.dangerouslyDisableSandbox = true;

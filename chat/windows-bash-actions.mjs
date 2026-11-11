@@ -205,19 +205,27 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   const output = split.output ? gitBashPath(split.output) : '';
   if (split.output && !output) return { complete: false, actions: [], reason: 'Bash redirection path cannot be resolved' };
   const outputEntry = output ? [{ path: output, kind: 'write' }] : [];
+  const withOutput = async (analyzed) => {
+    if (!analyzed.complete || !outputEntry.length) return analyzed;
+    const destination = await analyzeFiles(outputEntry, context);
+    return destination.complete
+      ? { ...analyzed, actions: [...analyzed.actions, ...destination.actions] }
+      : { ...destination, actions: [...analyzed.actions, ...(destination.actions || [])] };
+  };
   const program = words[0];
   if (['rg', 'rg.exe'].includes(String(program).toLowerCase())) {
     const analyzed = await analyzeWindowsRipgrep(words.slice(1), context, { pathResolver: gitBashPath });
-    return { ...analyzed, actions: [...analyzed.actions, ...outputEntry] };
+    return withOutput(analyzed);
   }
   const workspaceTask = await analyzeWindowsWorkspaceScriptTask(program, words.slice(1), context, { pathResolver: gitBashPath });
   if (workspaceTask) {
-    return { complete: true, actions: [workspaceTask, ...outputEntry] };
+    if (context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
+    return withOutput({ complete: true, actions: [workspaceTask] });
   }
   if (['git', 'git.exe'].includes(String(program).toLowerCase())) {
     const analyzed = analyzeWindowsReadOnlyGit(words);
     return analyzed
-      ? { ...analyzed, actions: [...analyzed.actions, ...outputEntry] }
+      ? withOutput(analyzed)
       : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };
   }
   if ((program === 'pwd' && words.length === 1) || program === 'echo') {
