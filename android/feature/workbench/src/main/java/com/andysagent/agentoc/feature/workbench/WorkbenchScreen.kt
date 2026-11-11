@@ -5473,14 +5473,8 @@ private fun SettingsDetailSurface(
                                     androidx.compose.material3.TextButton(
                                         onClick = { onEvent(WorkbenchEvent.RevokeCloudVoiceConsent) },
                                         enabled = !state.voice.cloudConsentBusy,
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag("voice-consent-revoke"),
                                     ) { Text(stringResource(R.string.voice_cloud_consent_revoke)) }
-                                } else if (state.voice.cloudAvailable && state.voice.cloudConsentKnown) {
-                                    androidx.compose.material3.TextButton(
-                                        onClick = { onEvent(WorkbenchEvent.AcceptCloudVoiceConsent) },
-                                        enabled = !state.voice.cloudConsentBusy,
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                    ) { Text(stringResource(R.string.voice_cloud_consent_accept)) }
                                 }
                             }
                         }
@@ -5491,6 +5485,15 @@ private fun SettingsDetailSurface(
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth).padding(horizontal = 8.dp),
                             )
+                        }
+                        if (state.voice.cloudAvailable && state.voice.cloudConsentKnown && !state.voice.cloudConsentGranted) {
+                            item(key = "voice-consent-grant") {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { onEvent(WorkbenchEvent.AcceptCloudVoiceConsent) },
+                                    enabled = !state.voice.cloudConsentBusy,
+                                    modifier = Modifier.fillMaxWidth().widthIn(max = AgentocSizes.ContentMaxWidth).testTag("voice-consent-grant"),
+                                ) { Text(stringResource(R.string.voice_cloud_consent_accept)) }
+                            }
                         }
                     }
                     SettingsPage.Account -> {
