@@ -72,6 +72,7 @@ async function main() {
     const asset = await fetch(`${base}/assets/admin.css`, { headers: { 'cf-access-jwt-assertion': token() } });
     assert.equal(asset.status, 200, 'authorized owners can load the console assets');
     assert.match(asset.headers.get('content-type'), /text\/css/);
+    assert.match(asset.headers.get('cache-control'), /no-cache/, 'admin UI assets are revalidated after a console release');
 
     const authorized = await fetch(`${base}/api/secrets`, { headers: { 'cf-access-jwt-assertion': token() } });
     assert.equal(authorized.status, 200);
@@ -97,6 +98,16 @@ async function main() {
     assert.doesNotMatch(writtenBody, /secret-value-never-echoed/);
     assert.equal(seen.at(-1).data.value, 'secret-value-never-echoed', 'the value reaches only the privileged helper');
     assert.equal(seen.at(-1).actor, ownerEmail);
+
+    const diagnostics = await fetch(`${base}/api/diagnostics/run`, {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': token(), Origin: 'https://ops.agentoncloud.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ignored: true }),
+    });
+    assert.equal(diagnostics.status, 200, 'owners can run the restricted diagnostics operation');
+    assert.equal(seen.at(-1).op, 'diagnostics');
+    assert.equal(seen.at(-1).actor, ownerEmail);
+    assert.deepEqual(seen.at(-1).data, {}, 'the request cannot provide commands or diagnostic targets');
 
     const direct = await fetch(`${base}/`);
     assert.equal(direct.status, 401, 'the page itself is denied without Cloudflare Access');

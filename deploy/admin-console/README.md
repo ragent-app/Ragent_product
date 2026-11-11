@@ -7,12 +7,15 @@ Owner-only operational console for the central Oracle services. The UI is built 
 - Cloudflare Access protects `ops.agentoncloud.com` with a single-email allow policy and independent TOTP MFA.
 - The application independently verifies the signed Cloudflare Access JWT, issuer, audience, expiry, and exact owner email. An origin request without a valid signed JWT is denied.
 - The web process runs as `agentoc-admin`, listens only on loopback, cannot write service configuration, and has read-only access to backup files.
-- A separate root helper accepts only a fixed allowlist over a Unix socket and checks the connecting process UID. It can write four specific credential types, update the Accounts ASR flag, rotate the Accounts database application password, inspect fixed read-only SQL summaries, apply the packaged Accounts migrations, create/download/restore PostgreSQL backups, and restart a fixed set of services. It cannot run arbitrary shell commands or SQL.
+- A separate root helper accepts only a fixed allowlist over a Unix socket and checks the connecting process UID. It can write four specific credential types, update the Accounts ASR flag, rotate the Accounts database application password, inspect fixed read-only SQL summaries, apply the packaged Accounts migrations, create/download/restore PostgreSQL backups, restart a fixed set of services, and run fixed diagnostics. It cannot run arbitrary shell commands or SQL.
 - Passwords and provider keys are never returned by API responses or written to logs. Configuration files remain root-only or service-user-only as required by the services. Audit entries contain actor, action, target, and outcome only.
 
 ## Managed settings and services
 
 - Accounts API health, account totals, ASR request totals, TURN lease counts, and FCM queue counts.
+- Host load, memory, disk capacity, systemd process memory/CPU/tasks/restarts, PostgreSQL container CPU/memory/process/restart counters, and seven-day aggregate ASR/TURN/FCM trends.
+- A bounded 24-hour resource history sampled once per minute while an owner has the overview, services, or monitoring page open. No account, device, transcript, audio, notification body, or provider credential is stored in the metric history.
+- On-demand functionality checks for Accounts, TURN, signaling, tunnel health endpoints, Accounts/TURN public-key discovery, a fixed `SELECT 1`, Caddy configuration validation, and local FCM/ASR configuration status. Tests do not send real FCM notifications, upload audio to a billable ASR provider, or simulate an online phone/computer session; those checks are explicitly reported as skipped.
 - OpenAI Transcription API key and cloud ASR enable/disable. Enabling requires the applied OpenAI consent migration and an explicit in-page acknowledgement of provider data controls/privacy disclosure.
 - Active FCM service account JSON.
 - Cloudflare TURN shared secret and TURN broker token.
@@ -40,6 +43,7 @@ Create the system group and user `agentoc-admin`, then create the directories:
 ```text
 /var/lib/agentoc-admin             root:agentoc-admin 0750
 /var/lib/agentoc-admin/backups    root:agentoc-admin 0750
+/var/lib/agentoc-admin/metrics.json root:root 0600 (created by the helper on first sample)
 /var/log/agentoc-admin            root:root 0700
 ```
 

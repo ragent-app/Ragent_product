@@ -261,7 +261,7 @@ export function createAdminServer({
       res.writeHead(200, {
         'Content-Type': contentTypeFor(assetName),
         'Content-Length': asset.length,
-        'Cache-Control': 'private, max-age=3600',
+        'Cache-Control': assetName === 'tabler.min.css' ? 'private, max-age=3600' : 'private, no-cache, max-age=0',
         'X-Content-Type-Options': 'nosniff',
       });
       return res.end(asset);
@@ -326,6 +326,10 @@ export function createAdminServer({
       } else if (resource === 'services' && resourceId && pathname.endsWith('/restart')) {
         operation = 'restart_service';
         data.service = resourceId;
+      } else if (pathname === '/api/diagnostics/run') {
+        operation = 'diagnostics';
+        data = {};
+        timeout = 120_000;
       }
       if (!operation) return sendJson(res, 404, { error: 'not_found' });
       const result = await helperClient({ op: operation, actor: identity.email, data }, timeout);

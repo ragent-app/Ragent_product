@@ -2,6 +2,8 @@
 """Narrow privileged helper for the owner-only AgentoC control panel."""
 
 import datetime as dt
+import http.client
+import ipaddress
 import json
 import os
 import pathlib
@@ -12,9 +14,8 @@ import stat
 import subprocess
 import tempfile
 import time
-import urllib.error
+import shutil
 import urllib.parse
-import urllib.request
 
 try:
     import grp
@@ -32,6 +33,7 @@ ACCOUNTS_ENV = pathlib.Path("/etc/agentoc/accounts.env")
 TURN_ENV = pathlib.Path("/etc/agentoc/turn-broker.env")
 FCM_FILE = pathlib.Path("/var/lib/agentoc/accounts/fcm-service-account.json")
 BACKUP_DIR = pathlib.Path("/var/lib/agentoc-admin/backups")
+METRICS_FILE = pathlib.Path("/var/lib/agentoc-admin/metrics.json")
 AUDIT_FILE = pathlib.Path("/var/log/agentoc-admin/audit.jsonl")
 ACCOUNTS_SERVICE = "agentoc-accounts.service"
 DATABASE_CONTAINER = "agentoc-pg"
@@ -44,6 +46,11 @@ ACCOUNTS_HOST_DEFAULT = "127.0.0.1"
 ACCOUNTS_PORT_DEFAULT = 7700
 TURN_HOST_DEFAULT = "127.0.0.1"
 TURN_PORT_DEFAULT = 7710
+SIGNALING_PORT_DEFAULT = 7791
+TUNNEL_PORT_DEFAULT = 17890
+METRICS_SAMPLE_INTERVAL_SECONDS = 60
+METRICS_RETENTION_SECONDS = 24 * 60 * 60
+METRICS_MAX_SAMPLES = 1500
 
 SERVICES = {
     "agentoc-accounts": "agentoc-accounts.service",
@@ -227,15 +234,24 @@ def _run_with_input_file(args, input_file, *, timeout=240, check=True):
     return result
 
 
-def _systemd_status(unit):
-    result = _run(["systemctl", "show", unit, "--no-page", "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp,FragmentPath"], check=False)
+def _systemd_status(unit, timeout=6):
+    properties = "ActiveState,SubState,MainPID,ActiveEnterTimestamp,FragmentPath,MemoryCurrent,CPUUsageNSec,TasksCurrent,NRestarts"
+    result = _run(["systemctl", "show", unit, "--no-page", f"--property={properties}"], timeout=timeout, check=False)
     if result.returncode != 0:
-        return {"active": False, "state": "unknown", "substate": "unknown", "pid": None, "since": None, "fragmentPath": None}
+        return {
+            "active": False, "state": "unknown", "substate": "unknown", "pid": None,
+            "since": None, "fragmentPath": None, "memoryBytes": None,
+            "cpuUsageNs": None, "tasks": None, "restartCount": None,
+        }
     values = {}
     for line in result.stdout.decode("utf-8", "replace").splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
             values[key] = value
+    def numeric(name):
+        value = values.get(name, "")
+        return int(value) if value.isdigit() else None
+
     return {
         "active": values.get("ActiveState") == "active",
         "state": values.get("ActiveState", "unknown"),
@@ -243,7 +259,154 @@ def _systemd_status(unit):
         "pid": int(values["MainPID"]) if values.get("MainPID", "0").isdigit() and values.get("MainPID") != "0" else None,
         "since": values.get("ActiveEnterTimestamp") or None,
         "fragmentPath": values.get("FragmentPath") or None,
+        "memoryBytes": numeric("MemoryCurrent"),
+        "cpuUsageNs": numeric("CPUUsageNSec"),
+        "tasks": numeric("TasksCurrent"),
+        "restartCount": numeric("NRestarts"),
     }
+
+
+def _docker_container_metrics():
+    """Read resource counters for the fixed PostgreSQL container; never accepts a caller-supplied name."""
+    state = _run(
+        ["docker", "inspect", "--format", "{{.RestartCount}}|{{.State.Status}}", DATABASE_CONTAINER],
+        timeout=5,
+        check=False,
+    )
+    if state.returncode != 0:
+        return {"active": False, "state": "unavailable", "restartCount": None, "cpuPercent": None, "memoryBytes": None, "memoryLimitBytes": None, "pids": None}
+    try:
+        restart_count, container_state = state.stdout.decode("utf-8", "replace").strip().split("|", 1)
+        restart_count = int(restart_count)
+    except (ValueError, TypeError):
+        restart_count, container_state = None, "unknown"
+
+    stats = _run(
+        ["docker", "stats", "--no-stream", "--format", "{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.PIDs}}", DATABASE_CONTAINER],
+        timeout=8,
+        check=False,
+    )
+    cpu_percent = memory_bytes = memory_limit = pids = None
+    if stats.returncode == 0:
+        try:
+            cpu_value, memory_value, _memory_percent, pids_value = stats.stdout.decode("utf-8", "replace").strip().split("|", 3)
+            cpu_percent = float(cpu_value.strip().rstrip("%"))
+            used_text, limit_text = memory_value.split("/", 1)
+            memory_bytes = _parse_docker_bytes(used_text)
+            memory_limit = _parse_docker_bytes(limit_text)
+            pids = int(pids_value)
+        except (ValueError, TypeError):
+            pass
+    return {
+        "active": container_state == "running",
+        "state": container_state,
+        "restartCount": restart_count,
+        "cpuPercent": cpu_percent,
+        "memoryBytes": memory_bytes,
+        "memoryLimitBytes": memory_limit,
+        "pids": pids,
+    }
+
+
+def _parse_docker_bytes(value):
+    match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]+)\s*", value)
+    if not match:
+        return None
+    scales = {
+        "B": 1, "kB": 1000, "KB": 1000, "KiB": 1024,
+        "MB": 1000 ** 2, "MiB": 1024 ** 2,
+        "GB": 1000 ** 3, "GiB": 1024 ** 3,
+        "TB": 1000 ** 4, "TiB": 1024 ** 4,
+    }
+    scale = scales.get(match.group(2))
+    return int(float(match.group(1)) * scale) if scale else None
+
+
+def _host_metrics():
+    metrics = {"cpuCount": os.cpu_count(), "memoryTotalBytes": None, "memoryAvailableBytes": None, "load1": None, "load5": None, "load15": None, "diskTotalBytes": None, "diskFreeBytes": None}
+    try:
+        values = {}
+        for line in pathlib.Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+            match = re.match(r"^(MemTotal|MemAvailable):\s+(\d+)\s+kB$", line)
+            if match:
+                values[match.group(1)] = int(match.group(2)) * 1024
+        metrics["memoryTotalBytes"] = values.get("MemTotal")
+        metrics["memoryAvailableBytes"] = values.get("MemAvailable")
+    except OSError:
+        pass
+    try:
+        load = pathlib.Path("/proc/loadavg").read_text(encoding="ascii").split()
+        metrics.update({"load1": float(load[0]), "load5": float(load[1]), "load15": float(load[2])})
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        disk = shutil.disk_usage("/")
+        metrics["diskTotalBytes"] = disk.total
+        metrics["diskFreeBytes"] = disk.free
+    except OSError:
+        pass
+    return metrics
+
+
+def _read_metric_samples(now_epoch=None):
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    try:
+        content = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
+        samples = content.get("samples", []) if isinstance(content, dict) else []
+    except (OSError, ValueError, json.JSONDecodeError):
+        samples = []
+    if not isinstance(samples, list):
+        return []
+    cutoff = now_epoch - METRICS_RETENTION_SECONDS
+    retained = [sample for sample in samples if isinstance(sample, dict) and isinstance(sample.get("epoch"), (int, float)) and sample["epoch"] >= cutoff]
+    return retained[-METRICS_MAX_SAMPLES:]
+
+
+def _record_metrics(services, platform, now_epoch=None):
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    samples = _read_metric_samples(now_epoch)
+    if samples and now_epoch - float(samples[-1]["epoch"]) < METRICS_SAMPLE_INTERVAL_SECONDS:
+        return {"sampledAt": samples[-1].get("at"), "host": _host_metrics(), "history": samples}
+    service_metrics = {}
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        service_metrics[name] = {
+            "memoryBytes": service.get("memoryBytes"),
+            "cpuUsageNs": service.get("cpuUsageNs"),
+            "tasks": service.get("tasks"),
+            "restartCount": service.get("restartCount"),
+        }
+    caddy = platform.get("caddy", {})
+    service_metrics["caddy"] = {key: caddy.get(key) for key in ("memoryBytes", "cpuUsageNs", "tasks", "restartCount")}
+    legacy_gateway = platform.get("legacyConnectivityGateway", {})
+    service_metrics["legacyConnectivityGateway"] = {key: legacy_gateway.get(key) for key in ("memoryBytes", "cpuUsageNs", "tasks", "restartCount")}
+    postgres = platform.get("postgres", {})
+    service_metrics["postgres"] = {
+        "memoryBytes": postgres.get("memoryBytes"),
+        "cpuPercent": postgres.get("cpuPercent"),
+        "tasks": postgres.get("pids"),
+        "restartCount": postgres.get("restartCount"),
+    }
+    previous = samples[-1] if samples else None
+    elapsed = now_epoch - float(previous["epoch"]) if previous else 0
+    if previous and elapsed > 0:
+        for name, current in service_metrics.items():
+            old = previous.get("services", {}).get(name, {})
+            old_cpu = old.get("cpuUsageNs")
+            new_cpu = current.get("cpuUsageNs")
+            if isinstance(old_cpu, int) and isinstance(new_cpu, int) and new_cpu >= old_cpu:
+                current["cpuPercent"] = round((new_cpu - old_cpu) / (elapsed * 1_000_000_000) * 100, 2)
+    sample = {
+        "epoch": now_epoch,
+        "at": dt.datetime.fromtimestamp(now_epoch, dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "host": _host_metrics(),
+        "services": service_metrics,
+    }
+    samples.append(sample)
+    samples = samples[-METRICS_MAX_SAMPLES:]
+    atomic_write(METRICS_FILE, json.dumps({"samples": samples}, separators=(",", ":")), mode=0o600, owner=0, group=0)
+    return {"sampledAt": sample["at"], "host": sample["host"], "history": samples}
 
 
 def _service_restart(unit):
@@ -319,6 +482,8 @@ SELECT json_build_object(
   'databaseName', current_database(),
   'databaseVersion', current_setting('server_version'),
   'databaseSizeBytes', pg_database_size(current_database()),
+  'databaseConnections', (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()),
+  'databaseMaxConnections', current_setting('max_connections')::integer,
   'accountCount', (SELECT count(*) FROM accounts),
   'latestMigration', (SELECT max(version) FROM schema_migrations),
   'asr', COALESCE((SELECT json_agg(json_build_object('state', state, 'requests', requests, 'audioMs', audio_ms, 'providerCostMicroUsd', provider_cost_micro_usd) ORDER BY state) FROM (
@@ -332,6 +497,57 @@ SELECT json_build_object(
     SELECT status, count(*) AS events FROM account_fcm_outbox GROUP BY status
   ) AS fcm_counts), '[]'::json)
 )::text
+""".strip()
+
+
+ASR_TREND_SQL = """
+WITH days AS (
+  SELECT generate_series(current_date - 6, current_date, interval '1 day')::date AS day
+), daily AS (
+  SELECT created_at::date AS day, count(*) AS requests,
+    COALESCE(sum(billable_duration_ms), 0) AS audio_ms,
+    COALESCE(sum(provider_cost_microusd), 0) AS provider_cost_micro_usd
+  FROM account_asr_requests
+  WHERE created_at >= current_date - 6
+  GROUP BY created_at::date
+)
+SELECT COALESCE(json_agg(json_build_object(
+  'date', to_char(days.day, 'YYYY-MM-DD'), 'requests', COALESCE(daily.requests, 0),
+  'audioMs', COALESCE(daily.audio_ms, 0), 'providerCostMicroUsd', COALESCE(daily.provider_cost_micro_usd, 0)
+) ORDER BY days.day), '[]'::json)::text
+FROM days LEFT JOIN daily USING (day)
+""".strip()
+
+
+TURN_TREND_SQL = """
+WITH days AS (
+  SELECT generate_series(current_date - 6, current_date, interval '1 day')::date AS day
+), daily AS (
+  SELECT created_at::date AS day, count(*) AS connections
+  FROM account_connection_leases
+  WHERE created_at >= current_date - 6
+  GROUP BY created_at::date
+)
+SELECT COALESCE(json_agg(json_build_object(
+  'date', to_char(days.day, 'YYYY-MM-DD'), 'connections', COALESCE(daily.connections, 0)
+) ORDER BY days.day), '[]'::json)::text
+FROM days LEFT JOIN daily USING (day)
+""".strip()
+
+
+FCM_TREND_SQL = """
+WITH days AS (
+  SELECT generate_series(current_date - 6, current_date, interval '1 day')::date AS day
+), daily AS (
+  SELECT created_at::date AS day, count(*) AS events
+  FROM account_fcm_outbox
+  WHERE created_at >= current_date - 6
+  GROUP BY created_at::date
+)
+SELECT COALESCE(json_agg(json_build_object(
+  'date', to_char(days.day, 'YYYY-MM-DD'), 'events', COALESCE(daily.events, 0)
+) ORDER BY days.day), '[]'::json)::text
+FROM days LEFT JOIN daily USING (day)
 """.strip()
 
 
@@ -353,6 +569,23 @@ def _json_query(sql, **kwargs):
         raise AdminError("DATABASE_RESPONSE_INVALID") from exc
 
 
+def _usage_trends():
+    trends = {"asr": [], "turn": [], "fcm": []}
+    try:
+        trends["asr"] = _json_query(ASR_TREND_SQL) or []
+        trends["turn"] = _json_query(TURN_TREND_SQL) or []
+        has_fcm_created_at = _query(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'account_fcm_outbox' AND column_name = 'created_at')::text"
+        ) == "t"
+        if has_fcm_created_at:
+            trends["fcm"] = _json_query(FCM_TREND_SQL) or []
+    except AdminError:
+        # The primary health snapshot remains useful if an optional trend query
+        # is unavailable on an older database schema.
+        return {"asr": [], "turn": [], "fcm": []}
+    return trends
+
+
 def _migration_state():
     applied = _json_query("SELECT COALESCE(json_agg(version ORDER BY version), '[]'::json)::text FROM schema_migrations") or []
     applied_set = {str(item) for item in applied}
@@ -372,12 +605,17 @@ def _migration_state():
 
 
 def _readiness(host, port, route):
-    url = f"http://{host}:{port}{route}"
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:
-            return response.status == 200
-    except (OSError, urllib.error.URLError, TimeoutError):
+        status, _payload = _loopback_http_json(host, port, route)
+        return status == 200
+    except AdminError:
         return False
+
+
+def _readiness_metric(host, port, route):
+    started = time.monotonic()
+    healthy = _readiness(host, port, route)
+    return healthy, round((time.monotonic() - started) * 1000)
 
 
 def _overview():
@@ -391,24 +629,37 @@ def _overview():
         key: {"label": key.replace("-", " ").title(), **_systemd_status(unit)}
         for key, unit in SERVICES.items()
     }
-    services["agentoc-accounts"]["health"] = _readiness(account_host, account_port, "/readyz")
-    services["turn-credential-broker"]["health"] = _readiness(turn_host, turn_port, "/healthz")
+    for service_id, host, port, route in (
+        ("agentoc-accounts", account_host, account_port, "/readyz"),
+        ("turn-credential-broker", turn_host, turn_port, "/healthz"),
+        ("agentoc-signaling", "127.0.0.1", SIGNALING_PORT_DEFAULT, "/health"),
+        ("agentoc-tunnel-server", "127.0.0.1", TUNNEL_PORT_DEFAULT, "/health"),
+    ):
+        healthy, latency_ms = _readiness_metric(host, port, route)
+        services[service_id]["health"] = healthy
+        services[service_id]["healthLatencyMs"] = latency_ms
     try:
         database = _json_query(OVERVIEW_SQL)
         migration = _migration_state()
         database_available = isinstance(database, dict)
+        if database_available:
+            database["trends"] = _usage_trends()
     except AdminError:
         database = {"databaseName": DATABASE_NAME, "databaseSizeBytes": 0, "accountCount": 0, "asr": [], "turn": [], "fcm": []}
         migration = {"available": [], "applied": [], "pending": []}
         database_available = False
     asr = _secret_metadata()
+    platform = {
+        "caddy": _systemd_status("caddy.service"),
+        "legacyConnectivityGateway": _systemd_status("agentoc-connectivity-gateway.service"),
+        "postgres": _docker_container_metrics(),
+    }
+    metrics = _record_metrics(services, platform)
     return {
         "updatedAt": utc_now(),
         "services": services,
-        "platform": {
-            "caddy": _systemd_status("caddy.service"),
-            "legacyConnectivityGateway": _systemd_status("agentoc-connectivity-gateway.service"),
-        },
+        "platform": platform,
+        "metrics": metrics,
         "database": database,
         "databaseAvailable": database_available,
         "migrations": {"appliedCount": len(migration["applied"]), "pendingCount": len(migration["pending"]), "latest": migration["available"][-1]["version"] if migration["available"] else None},
@@ -416,6 +667,163 @@ def _overview():
         "asrKeyConfigured": any(item["id"] == "openai-api-key" and item["configured"] for item in asr["items"]),
         "fcmConfigured": next(item["configured"] for item in asr["items"] if item["id"] == "fcm-service-account"),
     }
+
+
+def _loopback_http_json(host, port, route):
+    host = str(host or "").strip().lower()
+    if host == "localhost":
+        host = "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise AdminError("LOCAL_ENDPOINT_NOT_ALLOWED") from exc
+    if not address.is_loopback:
+        raise AdminError("LOCAL_ENDPOINT_NOT_ALLOWED")
+    try:
+        port = int(port)
+    except (TypeError, ValueError) as exc:
+        raise AdminError("LOCAL_ENDPOINT_NOT_ALLOWED") from exc
+    if not 1 <= port <= 65535 or not isinstance(route, str) or not route.startswith("/") or "\r" in route or "\n" in route:
+        raise AdminError("LOCAL_ENDPOINT_NOT_ALLOWED")
+    connection = http.client.HTTPConnection(host, port, timeout=3)
+    try:
+        connection.request("GET", route, headers={"Accept": "application/json", "Connection": "close"})
+        response = connection.getresponse()
+        body = response.read(64 * 1024 + 1)
+        if len(body) > 64 * 1024:
+            raise AdminError("LOCAL_RESPONSE_TOO_LARGE")
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AdminError("LOCAL_RESPONSE_INVALID") from exc
+        return response.status, payload
+    except (OSError, http.client.HTTPException, TimeoutError) as exc:
+        raise AdminError("LOCAL_ENDPOINT_UNAVAILABLE") from exc
+    finally:
+        connection.close()
+
+
+def _run_diagnostics(actor):
+    accounts = read_env(ACCOUNTS_ENV)
+    turn_env = read_env(TURN_ENV)
+    account_host = accounts.get("AGENTOC_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
+    account_port = accounts.get("PORT", ACCOUNTS_PORT_DEFAULT)
+    turn_host = turn_env.get("AGENTOC_TURN_BROKER_HOST", TURN_HOST_DEFAULT)
+    turn_port = turn_env.get("AGENTOC_TURN_BROKER_PORT", TURN_PORT_DEFAULT)
+    checks = []
+
+    def add_check(check_id, label, action):
+        started = time.monotonic()
+        try:
+            status, detail = action()
+        except AdminError as exc:
+            status, detail = "fail", {
+                "LOCAL_ENDPOINT_NOT_ALLOWED": "服务地址不是本机回环地址，已阻止检查。",
+                "LOCAL_ENDPOINT_UNAVAILABLE": "本机服务暂时无法连接。",
+                "LOCAL_RESPONSE_INVALID": "服务返回内容无法识别。",
+                "LOCAL_RESPONSE_TOO_LARGE": "服务响应超出安全检查大小。",
+            }.get(exc.code, "检查没有通过，请查看服务状态。")
+        except Exception:
+            status, detail = "fail", "检查没有通过，请查看服务状态。"
+        checks.append({
+            "id": check_id,
+            "label": label,
+            "status": status,
+            "detail": detail,
+            "durationMs": round((time.monotonic() - started) * 1000),
+        })
+
+    def endpoint_check(check_id, label, unit, host, port, route, predicate, ok_detail):
+        def run():
+            service = _systemd_status(unit)
+            if not service.get("active"):
+                return "fail", "systemd 服务当前未运行。"
+            status, payload = _loopback_http_json(host, port, route)
+            if status != 200 or not predicate(payload):
+                return "fail", "本机健康接口未返回预期状态。"
+            return "pass", ok_detail
+        add_check(check_id, label, run)
+
+    endpoint_check(
+        "accounts", "Accounts API 就绪", ACCOUNTS_SERVICE, account_host, account_port, "/readyz",
+        lambda payload: isinstance(payload, dict) and payload.get("status") == "ready",
+        "服务已就绪；检查只读取健康接口。",
+    )
+    endpoint_check(
+        "turn-broker", "TURN 凭据 broker", SERVICES["turn-credential-broker"], turn_host, turn_port, "/healthz",
+        lambda payload: isinstance(payload, dict) and payload.get("ok") is True,
+        "broker 健康接口正常。",
+    )
+    endpoint_check(
+        "signaling", "P2P 信令服务", SERVICES["agentoc-signaling"], "127.0.0.1", SIGNALING_PORT_DEFAULT, "/health",
+        lambda payload: isinstance(payload, dict) and payload.get("ok") is True,
+        "信令服务健康接口正常。",
+    )
+    endpoint_check(
+        "tunnel", "远程隧道服务", SERVICES["agentoc-tunnel-server"], "127.0.0.1", TUNNEL_PORT_DEFAULT, "/health",
+        lambda payload: isinstance(payload, dict) and payload.get("ok") is True,
+        "隧道进程健康接口正常；未建立真实手机/电脑连接。",
+    )
+
+    def check_jwks(path, label):
+        def run():
+            status, payload = _loopback_http_json(account_host, account_port, path)
+            if status != 200 or not isinstance(payload, dict) or not isinstance(payload.get("keys"), list) or not payload["keys"]:
+                return "fail", f"{label}未返回可用公钥集合。"
+            return "pass", "公钥集合可读取；不会展示密钥材料。"
+        return run
+
+    add_check("accounts-jwks", "Accounts 公钥发现", check_jwks("/.well-known/jwks.json", "Accounts JWKS"))
+    add_check("turn-jwks", "TURN broker 公钥发现", check_jwks("/.well-known/turn-broker-jwks.json", "TURN JWKS"))
+
+    def check_database():
+        if _query("SELECT 1") != "1":
+            return "fail", "PostgreSQL 固定只读探针未返回预期结果。"
+        return "pass", "Accounts 数据库可查询。"
+    add_check("database", "PostgreSQL 查询", check_database)
+
+    def check_caddy():
+        status = _systemd_status("caddy.service")
+        if not status.get("active"):
+            return "fail", "Caddy 服务当前未运行。"
+        validation = _run(["caddy", "validate", "--config", "/etc/caddy/Caddyfile"], timeout=10, check=False)
+        if validation.returncode != 0:
+            return "fail", "Caddy 配置校验失败。"
+        return "pass", "HTTPS 入口运行中，配置语法有效。"
+    add_check("caddy", "HTTPS 入口与配置", check_caddy)
+
+    def check_fcm_config():
+        metadata = _fcm_metadata()
+        if not metadata.get("available"):
+            return "warn", "FCM 服务账号路径未纳入安全管理。"
+        if not metadata.get("configured"):
+            return "warn", "FCM 服务账号未配置或格式无效。"
+        mode = stat.S_IMODE(FCM_FILE.stat().st_mode)
+        if mode & 0o077:
+            return "fail", "FCM 服务账号文件权限过宽。"
+        return "pass", "凭据文件格式与本机权限有效；未向设备发送推送。"
+    add_check("fcm-config", "FCM 配置与文件权限", check_fcm_config)
+
+    def check_asr_config():
+        metadata = _secret_metadata()
+        key_present = any(item["id"] == "openai-api-key" and item["configured"] for item in metadata["items"])
+        if metadata["asrEnabled"] and key_present:
+            return "warn", "ASR 已开启且 API key 已配置；未发送音频，因此未验证实际转写或产生费用。"
+        if key_present:
+            return "warn", "ASR API key 已配置但服务未开启；未调用供应商接口。"
+        return "warn", "ASR API key 未配置；未调用供应商接口。"
+    add_check("asr-config", "云端语音识别配置", check_asr_config)
+
+    for check_id, label, detail in (
+        ("fcm-delivery", "FCM 实际推送", "未执行：需要发送真实推送到设备，可能打扰用户。"),
+        ("asr-transcription", "ASR 实际转写", "未执行：需要上传音频并调用计费接口。"),
+        ("device-session", "手机与电脑端到端连接", "未执行：需要一台真实在线设备参与验证。"),
+    ):
+        checks.append({"id": check_id, "label": label, "status": "skipped", "detail": detail, "durationMs": 0})
+
+    summary = {key: sum(check["status"] == key for check in checks) for key in ("pass", "fail", "warn", "skipped")}
+    _audit(actor, "diagnostics.run", "central-services", "attention" if summary["fail"] else "completed")
+    return {"performedAt": utc_now(), "checks": checks, "summary": summary}
 
 
 def _database():
@@ -823,6 +1231,8 @@ def handle_operation(request):
         return _check_backup(data.get("backupId"))
     if op == "audit":
         return _read_audit()
+    if op == "diagnostics":
+        return _run_diagnostics(actor)
     if op == "set_secret":
         return _set_secret(actor, data)
     if op == "set_asr":

@@ -4,6 +4,8 @@
   const viewTitles = {
     overview: ['总览', '查看中心服务、数据库与用量的健康状态。'],
     services: ['中心服务', '查看 Ragent 服务、数据库、入口和 Accounts 内的集成能力。'],
+    monitoring: ['监控指标', '查看中心服务资源指标与语音、TURN、推送的近期用量趋势。'],
+    diagnostics: ['功能测试', '运行本机健康接口、数据库和入口配置检查。'],
     database: ['数据库', '查看结构和迁移状态，创建备份并在需要时恢复。'],
     secrets: ['密钥与凭据', '安全替换正在使用的服务凭据，并按需启用云端语音识别。'],
     audit: ['操作记录', '查看密钥轮换、数据库维护和服务操作的审计记录。'],
@@ -22,6 +24,7 @@
     'database.restore': '恢复数据库备份',
     'database.migrations.apply': '应用数据库迁移',
     'service.restart': '重启中心服务',
+    'diagnostics.run': '运行中心服务功能检查',
   };
   const errorMessages = {
     access_denied: '访问身份校验失败，请重新通过 Cloudflare 安全验证。',
@@ -42,7 +45,7 @@
     RESTORE_FAILED: '备份恢复失败；恢复操作使用事务，现有数据库未被部分覆盖。',
   };
 
-  const state = { view: 'overview', overview: null, secrets: null, database: null, audit: null, busy: false };
+  const state = { view: 'overview', overview: null, secrets: null, database: null, audit: null, diagnostics: null, busy: false };
   const root = document.getElementById('viewRoot');
   const flash = document.getElementById('flash');
   const title = document.getElementById('pageTitle');
@@ -106,10 +109,10 @@
     state.audit = await api('/api/audit');
   }
 
-  async function refreshCurrent() {
+  async function refreshCurrent({ quiet = false } = {}) {
     if (state.busy) return;
     state.busy = true;
-    root.innerHTML = '<div class="loading-state">正在读取服务器状态…</div>';
+    if (!quiet) root.innerHTML = '<div class="loading-state">正在读取服务器状态…</div>';
     try {
       await loadOverview();
       if (state.view === 'secrets') await loadSecrets();
@@ -228,6 +231,98 @@
     </div>`;
   }
 
+  function compactTime(value) {
+    const text = String(value || '');
+    const match = text.match(/(\d{2}:\d{2})/);
+    return match ? match[1] : '—';
+  }
+
+  function trendPercent(value, maximum) {
+    return Math.max(5, Math.min(100, Math.ceil(Number(value || 0) / Math.max(1, Number(maximum || 0)) * 20) * 5));
+  }
+
+  function trendChart(titleText, rows, valueField, unit) {
+    const values = (rows || []).map((row) => ({
+      label: String(row.date || '').slice(5),
+      value: Math.max(0, Number(row[valueField] || 0)),
+    }));
+    if (!values.length) return `<section class="panel-card"><div class="panel-title-row"><div><h2>${esc(titleText)}</h2><p>暂无可用的近期趋势数据</p></div></div><div class="empty-state">等待数据库记录或支持该指标的历史数据。</div></section>`;
+    const maximum = Math.max(1, ...values.map((item) => item.value));
+    return `<section class="panel-card"><div class="panel-title-row"><div><h2>${esc(titleText)}</h2><p>最近 7 天 · 单位：${esc(unit)}</p></div></div>
+      <div class="trend-bars" role="img" aria-label="${esc(titleText)}最近七天趋势">${values.map((item) => {
+        const level = trendPercent(item.value, maximum);
+        return `<div class="trend-column"><strong>${esc(Number(item.value).toLocaleString('zh-CN'))}</strong><div class="trend-track" data-level="${level}"><i></i></div><small>${esc(item.label)}</small></div>`;
+      }).join('')}</div></section>`;
+  }
+
+  function resourceCard(label, status, sample, live = {}) {
+    const isActive = Boolean(status?.active);
+    const cpuPercent = sample?.cpuPercent;
+    const cpu = cpuPercent != null && Number.isFinite(Number(cpuPercent)) ? `${Number(cpuPercent).toFixed(1)}%` : '—';
+    const memory = sample?.memoryBytes ?? live?.memoryBytes;
+    const tasks = sample?.tasks ?? live?.tasks;
+    const restarts = live?.restartCount ?? sample?.restartCount;
+    const cumulativeCpu = live?.cpuUsageNs;
+    const cpuTotal = Number.isFinite(Number(cumulativeCpu)) ? `${(Number(cumulativeCpu) / 1e9 / 60).toFixed(1)} 分钟` : '—';
+    return `<article class="resource-card"><div class="resource-card-head"><strong>${esc(label)}</strong>${statusPill(isActive, status?.health === undefined ? true : status.health)}</div>
+      <div class="resource-values"><div><small>CPU 当前</small><strong>${cpu}</strong></div><div><small>内存</small><strong>${esc(memory == null ? '—' : bytes(memory))}</strong></div><div><small>任务 / 进程</small><strong>${esc(tasks ?? '—')}</strong></div><div><small>重启次数</small><strong>${esc(restarts ?? '—')}</strong></div></div>
+      <small class="resource-foot">累计 CPU ${esc(cpuTotal)} · ${Number.isFinite(Number(status?.healthLatencyMs)) ? `健康探针 ${Number(status.healthLatencyMs)} ms · ` : ''}${isActive ? `自 ${esc(status?.since || '—')} 运行` : `状态：${esc(status?.state || 'unknown')}`}</small></article>`;
+  }
+
+  function renderMonitoring() {
+    const overview = state.overview || {};
+    const db = overview.database || {};
+    const platform = overview.platform || {};
+    const metrics = overview.metrics || {};
+    const host = metrics.host || {};
+    const history = metrics.history || [];
+    const latest = history.at(-1);
+    const sampleServices = latest?.services || {};
+    const serviceMetrics = overview.services || {};
+    const resourceCards = [
+      resourceCard('Accounts API', serviceMetrics['agentoc-accounts'], sampleServices['agentoc-accounts'], serviceMetrics['agentoc-accounts']),
+      resourceCard('TURN 凭据 broker', serviceMetrics['turn-credential-broker'], sampleServices['turn-credential-broker'], serviceMetrics['turn-credential-broker']),
+      resourceCard('P2P 信令服务', serviceMetrics['agentoc-signaling'], sampleServices['agentoc-signaling'], serviceMetrics['agentoc-signaling']),
+      resourceCard('反向隧道服务', serviceMetrics['agentoc-tunnel-server'], sampleServices['agentoc-tunnel-server'], serviceMetrics['agentoc-tunnel-server']),
+      resourceCard('Caddy HTTPS 入口', platform.caddy, sampleServices.caddy, platform.caddy),
+      resourceCard('PostgreSQL', platform.postgres, sampleServices.postgres, platform.postgres),
+      ...(platform.legacyConnectivityGateway?.active || platform.legacyConnectivityGateway?.fragmentPath
+        ? [resourceCard('旧 connectivity-gateway（需审查）', { ...platform.legacyConnectivityGateway, health: false }, sampleServices.legacyConnectivityGateway, platform.legacyConnectivityGateway)]
+        : []),
+    ].join('');
+    const usedMemory = Number(host.memoryTotalBytes || 0) - Number(host.memoryAvailableBytes || 0);
+    const memoryPercent = Number(host.memoryTotalBytes) > 0 ? `${Math.max(0, usedMemory / Number(host.memoryTotalBytes) * 100).toFixed(1)}%` : '—';
+    const memoryHistory = history.slice(-12).map((sample) => ({
+      date: compactTime(sample.at),
+      total: Object.values(sample.services || {}).reduce((sum, item) => sum + Number(item?.memoryBytes || 0), 0),
+    }));
+    const memoryChart = memoryHistory.length ? `<section class="panel-card"><div class="panel-title-row"><div><h2>中心进程内存采样</h2><p>面板打开期间每分钟记录一次，最长保留 24 小时</p></div><small class="muted">${history.length} 个样本</small></div><div class="trend-bars" role="img" aria-label="中心进程内存采样趋势">${(() => {
+      const maximum = Math.max(1, ...memoryHistory.map((item) => item.total));
+      return memoryHistory.map((item) => `<div class="trend-column"><strong>${esc(bytes(item.total))}</strong><div class="trend-track" data-level="${trendPercent(item.total, maximum)}"><i></i></div><small>${esc(item.date)}</small></div>`).join('');
+    })()}</div></section>` : '';
+    const trends = db.trends || {};
+    const fcmRows = db.fcm || [];
+    const pendingFcm = fcmRows.filter((row) => /pending|retry|queued/i.test(String(row.status))).reduce((sum, row) => sum + Number(row.events || 0), 0);
+    const failedFcm = fcmRows.filter((row) => /fail|error/i.test(String(row.status))).reduce((sum, row) => sum + Number(row.events || 0), 0);
+    return `<div class="section-stack">
+      <section class="metric-grid">${metric('主机内存使用', memoryPercent, `${bytes(usedMemory)} / ${bytes(host.memoryTotalBytes)}`, '▥')}${metric('系统负载', host.load1 == null ? '—' : Number(host.load1).toFixed(2), `1 / 5 / 15 分钟：${host.load5 ?? '—'} · ${host.load15 ?? '—'}`, '⌁')}${metric('磁盘可用', bytes(host.diskFreeBytes), `总量 ${bytes(host.diskTotalBytes)}`, '▤')}${metric('数据库连接', overview.databaseAvailable ? `${Number(db.databaseConnections || 0)} / ${Number(db.databaseMaxConnections || 0) || '—'}` : '不可用', '当前连接 / PostgreSQL 上限', '⇄')}${metric('监控采样', latest?.at ? date(latest.at) : '等待采样', '仅在面板打开并刷新时采样', '◷')}</section>
+      <section><div class="panel-title-row"><div><h2>中心服务资源</h2><p>CPU 为最近采样间隔的单核等效占用（100% = 一个逻辑核）；累计 CPU 为服务启动后的总量。</p></div><button class="btn btn-outline-secondary btn-sm" data-action="navigate" data-view="diagnostics">运行功能检查</button></div><div class="resource-grid">${resourceCards}</div></section>
+      ${memoryChart}
+      <section><div class="panel-title-row"><div><h2>业务用量趋势</h2><p>来源于中心数据库的按日汇总，不包含账号标识、音频、文本或推送内容。</p></div></div><div class="trend-grid">${trendChart('云端语音识别请求', trends.asr || [], 'requests', '次')}${trendChart('TURN 连接租约', trends.turn || [], 'connections', '条')}${trendChart('FCM 推送事件', trends.fcm || [], 'events', '条')}</div></section>
+      <section class="panel-card"><div class="panel-title-row"><div><h2>集成服务队列</h2><p>FCM 与云端语音由 Accounts 承载，不存在独立的本地守护进程。</p></div></div><div class="usage-list"><div class="usage-row"><span>ASR 记录总量</span><strong>${Number((db.asr || []).reduce((sum, row) => sum + Number(row.requests || 0), 0)).toLocaleString('zh-CN')}</strong></div><div class="usage-row"><span>FCM 待处理/重试</span><strong>${pendingFcm.toLocaleString('zh-CN')}</strong></div><div class="usage-row"><span>FCM 失败记录</span><strong>${failedFcm.toLocaleString('zh-CN')}</strong></div><div class="usage-row"><span>数据库可用性</span><strong>${overview.databaseAvailable ? '正常' : '不可用'}</strong></div></div></section>
+      <div class="security-callout"><span>i</span><div><strong>监控数据范围</strong>主机和进程指标由 Linux、systemd 与 Docker 提供；业务趋势从数据库汇总。历史资源采样在控制台打开期间每分钟保存一次，最多保留 24 小时。</div></div>
+    </div>`;
+  }
+
+  function renderDiagnostics() {
+    const result = state.diagnostics;
+    if (!result) return `<section class="panel-card diagnostics-intro"><div><h2>中心服务功能有效性检查</h2><p>运行只读的本机服务健康接口、数据库查询、公钥发现和 Caddy 配置校验。</p><button class="btn btn-primary" data-action="run-diagnostics">运行检查</button></div><div class="security-callout"><span>i</span><div><strong>安全范围</strong>检查不会发送 FCM 推送、上传语音、调用计费转写，也不会执行真实设备配对或改变数据库。</div></div></section>`;
+    const labels = { pass: '通过', fail: '失败', warn: '需关注', skipped: '未执行' };
+    const tones = { pass: 'good', fail: 'bad', warn: 'warn', skipped: 'neutral' };
+    const summary = result.summary || {};
+    return `<div class="section-stack"><section class="panel-card"><div class="panel-title-row"><div><h2>最近一次检查</h2><p>${date(result.performedAt)} · 检查不会执行真实推送、音频转写或终端配对。</p></div><button class="btn btn-primary btn-sm" data-action="run-diagnostics">重新运行</button></div><div class="diagnostic-summary">${['pass', 'fail', 'warn', 'skipped'].map((key) => `<span class="state-pill" data-state="${tones[key]}">${labels[key]} ${Number(summary[key] || 0)}</span>`).join('')}</div></section><section class="panel-card"><div class="diagnostic-list">${(result.checks || []).map((check) => `<article class="diagnostic-row"><div><strong>${esc(check.label)}</strong><small>${esc(check.detail)}</small></div><span class="state-pill" data-state="${tones[check.status] || 'neutral'}">${labels[check.status] || '未知'}</span><time>${Number(check.durationMs || 0)} ms</time></article>`).join('')}</div></section><div class="security-callout"><span>i</span><div><strong>端到端验证边界</strong>“通过”表示中心服务器本机接口和配置检查通过。FCM 实际投递、真实音频转写与手机/电脑配对列为未执行，因为它们会发送外部请求、产生费用或需要真实设备。</div></div></div>`;
+  }
+
   function renderMigrations(migrations) {
     const pending = migrations?.pending || [];
     const available = migrations?.available || [];
@@ -299,7 +394,11 @@
   function renderAudit() {
     const entries = state.audit?.entries || [];
     if (!entries.length) return '<section class="panel-card"><div class="empty-state">还没有管理操作记录。</div></section>';
-    return `<section class="panel-card"><div class="panel-title-row"><div><h2>最近操作</h2><p>最多显示最近 100 条记录；不会保存凭据内容。</p></div></div><div class="audit-list">${entries.map((entry) => `<article class="audit-item"><time>${date(entry.at)}</time><div><strong>${esc(actionLabels[entry.action] || entry.action)}</strong><small>${esc(entry.actor)} · ${esc(entry.target)}</small></div><span class="audit-outcome" data-state="${entry.result === 'success' || entry.result === 'enabled' || entry.result === 'disabled' ? 'good' : 'bad'}">${entry.result === 'success' ? '完成' : entry.result === 'enabled' ? '已开启' : entry.result === 'disabled' ? '已关闭' : '需检查'}</span></article>`).join('')}</div></section>`;
+    return `<section class="panel-card"><div class="panel-title-row"><div><h2>最近操作</h2><p>最多显示最近 100 条记录；不会保存凭据内容。</p></div></div><div class="audit-list">${entries.map((entry) => {
+      const successful = ['success', 'enabled', 'disabled', 'completed'].includes(entry.result);
+      const resultLabel = entry.result === 'enabled' ? '已开启' : entry.result === 'disabled' ? '已关闭' : entry.result === 'completed' ? '已完成' : entry.result === 'success' ? '完成' : '需检查';
+      return `<article class="audit-item"><time>${date(entry.at)}</time><div><strong>${esc(actionLabels[entry.action] || entry.action)}</strong><small>${esc(entry.actor)} · ${esc(entry.target)}</small></div><span class="audit-outcome" data-state="${successful ? 'good' : 'bad'}">${resultLabel}</span></article>`;
+    }).join('')}</div></section>`;
   }
 
   function render() {
@@ -309,6 +408,8 @@
     document.querySelectorAll('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === state.view));
     if (state.view === 'overview') root.innerHTML = renderOverview();
     if (state.view === 'services') root.innerHTML = renderServices();
+    if (state.view === 'monitoring') root.innerHTML = renderMonitoring();
+    if (state.view === 'diagnostics') root.innerHTML = renderDiagnostics();
     if (state.view === 'database') root.innerHTML = renderDatabase();
     if (state.view === 'secrets') root.innerHTML = renderSecrets();
     if (state.view === 'audit') root.innerHTML = renderAudit();
@@ -393,6 +494,14 @@
     } else if (actionName === 'rotate-db-password') {
       if (!window.confirm('生成新密码并轮换 Accounts 数据库应用账号？服务会短暂重启；检查失败时会自动回滚。')) return;
       await action('/api/database/password-rotation', {}, '数据库密码已轮换，服务健康检查通过。');
+    } else if (actionName === 'run-diagnostics') {
+      try {
+        const result = await action('/api/diagnostics/run', {}, '中心服务检查已完成。', false);
+        state.diagnostics = result;
+        await refreshCurrent();
+      } catch {
+        // The shared action handler already presents a safe error message.
+      }
     }
   });
 
@@ -419,5 +528,10 @@
   });
 
   document.getElementById('refreshButton').addEventListener('click', () => void refreshCurrent());
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible' && ['overview', 'services', 'monitoring'].includes(state.view)) {
+      void refreshCurrent({ quiet: true });
+    }
+  }, 60_000);
   void refreshCurrent();
 })();
