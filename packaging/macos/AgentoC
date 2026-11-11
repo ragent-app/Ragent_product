@@ -6,15 +6,6 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
 
-agentoc_first_run_bootstrap
-agentoc_source_instance_env
-agentoc_ensure_runtime_shims
-
-PORT="${CHAT_PORT:-7690}"
-BASE_URL="http://127.0.0.1:${PORT}"
-
-mkdir -p "$(dirname "$AGENTOC_RUN_LOG")"
-
 open_manager() {
   if [ -d "$AGENTOC_RESOURCES_DIR/Manager.app" ]; then
     open "$AGENTOC_RESOURCES_DIR/Manager.app" --args "--agentoc-service-port=$PORT"
@@ -39,6 +30,24 @@ end run
 APPLESCRIPT
   fi
 }
+
+if ! agentoc_first_run_bootstrap; then
+  report_start_failure "无法初始化本地配置或凭据。请检查 $(agentoc_config_dir) 的文件和访问权限。"
+  exit 1
+fi
+if ! agentoc_source_instance_env; then
+  report_start_failure "无法读取本地配置，请检查 $(agentoc_config_dir)/instance.env。"
+  exit 1
+fi
+if ! agentoc_ensure_runtime_shims; then
+  report_start_failure '应用内的运行组件缺失，请重新安装完整的 Ragent 应用。'
+  exit 1
+fi
+
+PORT="${CHAT_PORT:-7690}"
+BASE_URL="http://127.0.0.1:${PORT}"
+
+mkdir -p "$(dirname "$AGENTOC_RUN_LOG")"
 
 if agentoc_server_running; then
   open_manager

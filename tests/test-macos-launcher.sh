@@ -62,4 +62,14 @@ fi
 grep -Fq "端口 $port" "$QA_ALERT_ARGS"
 "$contents/MacOS/agentoc-stop"
 kill -0 "$other_pid"
+
+export AGENTOC_CONFIG_DIR="$test_dir/incomplete-config"
+mkdir -p "$AGENTOC_CONFIG_DIR"
+: > "$AGENTOC_CONFIG_DIR/instance.env"
+if "$contents/MacOS/AgentoC" >/dev/null 2>&1; then
+  echo 'launcher accepted incomplete existing configuration' >&2
+  exit 1
+fi
+grep -Fq '无法初始化本地配置或凭据' "$QA_ALERT_ARGS"
+[ ! -s "$AGENTOC_CONFIG_DIR/instance.env" ]
 printf '%s\n' 'macOS launcher lifecycle checks passed'

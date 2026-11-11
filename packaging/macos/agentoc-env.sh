@@ -143,7 +143,10 @@ agentoc_source_instance_env() {
   if [ -s "$env_file" ]; then
     set -a
     # shellcheck disable=SC1090
-    source "$env_file"
+    if ! source "$env_file"; then
+      set +a
+      return 1
+    fi
     set +a
   fi
 }
