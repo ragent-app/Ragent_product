@@ -37,6 +37,18 @@ notarization and before returning the artifact. An optional prebuilt P2P host re
 both `AGENTOC_P2P_HOST_BINARY` and `AGENTOC_P2P_HOST_SHA256`; the input digest
 before app signing is recorded with the bundled runtime versions.
 
+For a build without a second checkout or worktree, the same builder can read
+from a bare Git object store containing the complete objects required by the
+desktop payload. Provide an explicit output directory, set
+`AGENTOC_SOURCE_GIT_DIR` to that bare store and `AGENTOC_SOURCE_COMMIT` to its
+full expected HEAD commit. Invoke the builder and its staging scripts from a
+bootstrap copy of those exact committed files, including the matching Node
+license. The builder compares the bootstrap scripts with Git, stages the
+allowlisted source from committed objects, and checks the staged file hashes
+again before notarization and publishing the candidate. The object store must
+not contain credentials or depend on missing, lazily fetched objects. This
+mode does not require a Git checkout on the Mac.
+
 Without a signing identity the build is ad-hoc signed and is suitable only for
 controlled testing. For a direct-distribution candidate, set
 `AGENTOC_MAC_SIGN_IDENTITY` to a Developer ID Application identity available

@@ -18,6 +18,8 @@ set -euo pipefail
 #   AGENTOC_P2P_HOST_SHA256   expected lowercase SHA-256 for the prebuilt sidecar
 #   AGENTOC_MAC_SIGN_IDENTITY Developer ID Application signing identity
 #   AGENTOC_MAC_NOTARY_PROFILE notarytool keychain profile (submits to Apple)
+#   AGENTOC_SOURCE_GIT_DIR    bare Git object store for a frozen source build
+#   AGENTOC_SOURCE_COMMIT     expected full commit ID (required with the above)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -63,20 +65,100 @@ if [ -n "$NOTARY_PROFILE" ]; then
   [[ "$NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo 'Invalid notarytool keychain profile name.' >&2; exit 1; }
 fi
 
-SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-dmg.XXXXXX")"
+cleanup() { rm -rf "$WORK_DIR"; }
+trap cleanup EXIT
+
+SOURCE_GIT_DIR="${AGENTOC_SOURCE_GIT_DIR:-}"
+if [ -n "$SOURCE_GIT_DIR" ]; then
+  SOURCE_GIT_DIR="$(cd "$SOURCE_GIT_DIR" && pwd -P)"
+  export GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+  [ ! -e "$SOURCE_GIT_DIR/objects/info/alternates" ] &&
+    [ ! -e "$SOURCE_GIT_DIR/objects/info/http-alternates" ] || {
+      echo 'Frozen source Git directory must not use alternate object stores.' >&2; exit 1;
+    }
+  [ -n "${AGENTOC_DMG_OUTPUT_DIR:-}" ] || {
+    echo 'Frozen source builds require an explicit output directory.' >&2; exit 1;
+  }
+  [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --is-bare-repository)" = true ] || {
+    echo 'Frozen source Git directory must be bare.' >&2; exit 1;
+  }
+  SOURCE_COMMIT="${AGENTOC_SOURCE_COMMIT:-}"
+  [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] &&
+    [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] || {
+      echo 'Frozen source requires the expected full commit ID at bare HEAD.' >&2; exit 1;
+    }
+  # Bootstrap the frozen staging code only after comparing its exact bytes
+  # against the specified commit. The object store has no working checkout.
+  for input in scripts/build-dmg.sh scripts/stage-runtime-payload.mjs scripts/verify-runtime-payload.mjs; do
+    git -C "$SOURCE_GIT_DIR" show "$SOURCE_COMMIT:$input" > "$WORK_DIR/bootstrap-input" || exit 1
+    cmp -s "$ROOT/$input" "$WORK_DIR/bootstrap-input" || {
+      echo "Frozen source bootstrap differs from the specified commit: $input" >&2; exit 1;
+    }
+  done
+  node "$ROOT/scripts/stage-runtime-payload.mjs" --source "$SOURCE_GIT_DIR" \
+    --destination "$WORK_DIR/frozen-source" --profile desktop --source-mode git-objects
+  ROOT="$WORK_DIR/frozen-source"
+  [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
+    echo 'Frozen source staging returned a different commit.' >&2; exit 1;
+  }
+  [ -s "$ROOT/third_party_licenses/node/${NODE_VERSION}-LICENSE.txt" ] || {
+    echo 'The frozen commit does not contain the bundled Node license.' >&2; exit 1;
+  }
+  FROZEN_MANIFEST_SHA="$(shasum -a 256 "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')"
+else
+  SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
+fi
 [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
   echo 'A full committed source identity is required for macOS packaging.' >&2; exit 1;
 }
-SOURCE_STATUS="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
-  echo 'Unable to verify macOS source tree status.' >&2; exit 1;
-}
-[ -z "$SOURCE_STATUS" ] || {
-  echo 'macOS packaging requires a clean committed source tree.' >&2; exit 1;
-}
+if [ -z "$SOURCE_GIT_DIR" ]; then
+  SOURCE_STATUS="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
+    echo 'Unable to verify macOS source tree status.' >&2; exit 1;
+  }
+  [ -z "$SOURCE_STATUS" ] || {
+    echo 'macOS packaging requires a clean committed source tree.' >&2; exit 1;
+  }
+fi
 SOURCE_SHORT="${SOURCE_COMMIT:0:8}"
 PKG_VERSION="$(node -p "require('$ROOT/package.json').version")"
 assert_source_unchanged() {
   local current status
+  if [ -n "$SOURCE_GIT_DIR" ]; then
+    current="$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" || exit 1
+    [ "$current" = "$SOURCE_COMMIT" ] &&
+      [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] &&
+      [ "$(shasum -a 256 "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')" = "$FROZEN_MANIFEST_SHA" ] || {
+        echo 'Frozen source identity changed during macOS packaging.' >&2; exit 1;
+      }
+    node --input-type=module - "$ROOT" <<'NODE'
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+const root = process.argv[2];
+const manifest = JSON.parse(readFileSync(join(root, 'runtime-payload-manifest.json'), 'utf8'));
+const expected = new Map(manifest.files.map(({ path, sha256 }) => [path, sha256]));
+const found = new Set();
+function walk(dir, prefix = '') {
+  for (const name of readdirSync(dir)) {
+    const rel = prefix ? `${prefix}/${name}` : name;
+    const file = join(dir, name);
+    const st = lstatSync(file);
+    if (st.isSymbolicLink()) throw new Error(`Frozen source contains a symlink: ${rel}`);
+    if (st.isDirectory()) { walk(file, rel); continue; }
+    if (!st.isFile()) throw new Error(`Frozen source contains a non-file: ${rel}`);
+    if (!prefix && ['.agentoc-source-commit', 'runtime-payload-manifest.json'].includes(name)) continue;
+    if (!expected.has(rel) || createHash('sha256').update(readFileSync(file)).digest('hex') !== expected.get(rel)) {
+      throw new Error(`Frozen source changed: ${rel}`);
+    }
+    found.add(rel);
+  }
+}
+walk(root);
+if (found.size !== expected.size) throw new Error('Frozen source is incomplete');
+NODE
+    return
+  fi
   current="$(git -C "$ROOT" rev-parse --verify HEAD)" || {
     echo 'Unable to verify macOS source commit.' >&2; exit 1;
   }
@@ -182,7 +264,6 @@ fi
 printf 'Building AgentoC %s (darwin/%s) with Codex %s and Claude Code %s\n' \
   "$VERSION" "$ARCH" "$CODEX_VERSION" "$CLAUDE_VERSION"
 
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-dmg.XXXXXX")"
 STAGE="$WORK_DIR/stage"
 CONTENTS="$STAGE/AgentoC.app/Contents"
 APP_DIR="$CONTENTS/Resources/app"
@@ -191,12 +272,14 @@ FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 DMG_PATH="$WORK_DIR/$OUTPUT_NAME"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$APP_DIR" "$OUTPUT_DIR"
 
-cleanup() { rm -rf "$WORK_DIR"; }
-trap cleanup EXIT
-
 # ── 1. Application files from the shared committed runtime allowlist ────────
-node "$ROOT/scripts/stage-runtime-payload.mjs" \
-  --source "$ROOT" --destination "$APP_DIR" --profile desktop
+if [ -n "$SOURCE_GIT_DIR" ]; then
+  node "$ROOT/scripts/stage-runtime-payload.mjs" \
+    --source "$SOURCE_GIT_DIR" --destination "$APP_DIR" --profile desktop --source-mode git-objects
+else
+  node "$ROOT/scripts/stage-runtime-payload.mjs" \
+    --source "$ROOT" --destination "$APP_DIR" --profile desktop
+fi
 [ "$(cat "$APP_DIR/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
   echo 'Staged source does not match the requested commit.' >&2; exit 1;
 }
