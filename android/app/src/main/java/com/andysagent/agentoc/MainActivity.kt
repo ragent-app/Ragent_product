@@ -903,13 +903,19 @@ class MainActivity : ComponentActivity() {
                     val separator = if (currentDraft.isBlank() || currentDraft.last().isWhitespace()) "" else " "
                     chat.onEvent(ChatEvent.ComposerChanged(currentDraft + separator + transcript.trim()))
                 }
+                val startVoiceCapture: () -> Unit = {
+                    val sessionAtStart = chat.state.value.sessionId
+                    voiceController.startVoiceInput { transcript ->
+                        if (chat.state.value.sessionId == sessionAtStart) appendVoiceTranscript(transcript)
+                    }
+                }
                 var voicePermissionPending by remember { mutableStateOf(false) }
                 val voicePermissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) { granted ->
                     voicePermissionPending = false
                     if (granted) {
-                        voiceController.startVoiceInput(appendVoiceTranscript)
+                        startVoiceCapture()
                     } else {
                         voiceController.setMessage(getString(WorkbenchR.string.voice_error_microphone_permission))
                     }
@@ -1504,7 +1510,7 @@ class MainActivity : ComponentActivity() {
                                         this@MainActivity,
                                         Manifest.permission.RECORD_AUDIO,
                                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                    voiceController.startVoiceInput(appendVoiceTranscript)
+                                    startVoiceCapture()
                                 } else if (!voicePermissionPending) {
                                     voicePermissionPending = true
                                     voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
