@@ -47,7 +47,7 @@ const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === '
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
 const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
-if (readCase && (!['numbered', 'relative', 'relative-cd', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+if (readCase && (!['numbered', 'relative', 'relative-cd', 'cwd-change', 'relative-write', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'conditional'].includes(readCase) || (readCase === 'conditional' && !nativePowerShell) || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
 if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
 const safeDeleteHelper = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
@@ -77,6 +77,7 @@ const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
 if (readCase) await writeFile(artifact, readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
 if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); }
 if (readCase === 'npm-task') await writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { 'qa-fixture': 'echo safe-task-fixture' } }));
+if (readCase === 'cwd-change') { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
 if (readCase === 'git-status') execFileSync('git', ['init', '-q'], { cwd: root, windowsHide: true });
 const bashArtifact = artifact.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
@@ -93,7 +94,7 @@ const guidanceAction = process.env.AGENTOC_QA_CLAUDE_ELEVATION_REGISTRY === '1'
 const guidanceScript = `${guidanceAction}; [System.IO.File]::WriteAllText('${guidanceMarker.replaceAll("'", "''")}', 'unexpected')`;
 const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(guidanceScript)}`;
 let requests = 0;
-let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false;
+let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
 const server = createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/fixture/read') { res.writeHead(200).end('local read fixture'); return; }
   let body = ''; req.setEncoding('utf8');
@@ -112,13 +113,18 @@ const server = createServer((req, res) => {
       const last = request.messages?.at(-1);
       process.stderr.write(`[fixture] model request ${requests}: ${JSON.stringify({ url: req.url, lastRole: last?.role, lastContentTypes: Array.isArray(last?.content) ? last.content.map(item => item.type) : [], toolNames: (request.tools || []).map(item => item.name), toolChoice: request.tool_choice })}\n`);
     }
-    const tool = requests === 1;
+    const tool = requests === 1 || (readCase === 'cwd-change' && requests === 2);
     const toolName = readCase === 'glob' ? 'Glob' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write';
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
-    if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : readCase === 'rg-text' ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-cd', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
+    if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(readCase === 'cwd-change' ? 'CHILD_MARKER' : readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : readCase === 'rg-text' ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-cd', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
+    if (!tool && readCase === 'cwd-change') {
+      const messages = JSON.stringify(request.messages || []);
+      cwdMarkerCount = (messages.match(/CHILD_MARKER/g) || []).length;
+      rootMarkerCount = (messages.match(/local read fixture/g) || []).length;
+    }
     if (!tool && readCase === 'rg-text') privateSearchObserved ||= JSON.stringify(request.messages || []).includes('SEARCH_TOKEN=private');
     const message = { id: `msg_fixture_${requests}`, type: 'message', role: 'assistant', content: [], model: 'claude-sonnet-4-5', stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
     const events = [{ type: 'message_start', message }];
@@ -128,7 +134,7 @@ const server = createServer((req, res) => {
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
         : dotnetCase ? { command: dotnetCommand, description: 'Write isolated fixture' }
         : guidanceCase ? { command: guidanceCommand, description: 'Administrative fixture' }
-        : readCase === 'glob' ? { pattern: 'fixture.md' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
+        : readCase === 'glob' ? { pattern: 'fixture.md' } : readCase === 'cwd-change' ? { command: requests === 1 ? 'cd child && cat fixture.md' : 'cat fixture.md', description: 'Read isolated fixture' } : readCase ? { command: readCommand, description: 'Read isolated fixture' } : { file_path: artifact, content: 'local fixture\n' });
       events.push({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: `toolu_fixture_${requests}`, name: toolName, input: {} } },
         { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: input } });
     } else events.push({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
@@ -169,7 +175,7 @@ if (installCase) {
   gateState.windowsManagedActionChannel = true;
   gateState.windowsManagedActionBinding = { endpoint, token: 'fixture-token', sessionId: 'claude-local-fixture', runId: run.id, turnId: 'fixture-turn' };
 }
-const spawnSpec = buildPlatformSpawnSpec(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: 2, forceClaudeCommandGate: askAll }), { cwd: root, env });
+const spawnSpec = buildPlatformSpawnSpec(binary, buildClaudeBidiArgs({ permissionMode: 'default', model: 'claude-sonnet-4-5', maxTurns: readCase === 'cwd-change' ? 3 : 2, forceClaudeCommandGate: askAll }), { cwd: root, env });
 const child = spawn(spawnSpec.file, spawnSpec.args, {
   cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
   ...(spawnSpec.windowsVerbatimArguments === undefined ? {} : { windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments }),
@@ -220,7 +226,7 @@ try {
   const code = await completed;
   if (handlerFailure) throw handlerFailure;
   assert.equal(code, 0, `Claude exited unexpectedly: ${errors}`);
-  if (readCase) assert.ok(approvals <= 1, 'read fixture must not emit multiple approvals');
+  if (readCase) assert.ok(approvals <= (readCase === 'cwd-change' ? 2 : 1), 'read fixture must not emit unnecessary approvals');
   else assert.equal(approvals, 1, 'real Claude must emit the expected approval requests');
   assert.ok(terminal && !terminal.is_error, 'Claude must finish the turn');
   if (installCase) {
@@ -242,6 +248,7 @@ try {
     if (readCase === 'relative-write') assert.equal(approvals, 1, 'real Claude must exercise the relative-operation approval callback');
     if (readCase === 'rg-text' && askAll) assert.equal(approvals, 1, 'ask rule must route the search through Ragent');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
+    if (readCase === 'cwd-change') assert.ok(cwdMarkerCount >= 1 && rootMarkerCount >= 1, 'the changed-directory command and subsequent session-directory command must both succeed');
     if (readCase === 'git-status') assert.equal(approvals, 0, 'Claude Code should not emit an approval request for read-only git status');
   } else if (protectedCase || conservativeOutside || uninstallCase) await assert.rejects(access(artifact), { code: 'ENOENT' });
   else assert.equal((await readFile(artifact, 'utf8')).replace(/^\uFEFF/, ''), dotnetCase ? 'dotnet fixture' : 'local fixture\n');
