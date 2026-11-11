@@ -16,6 +16,8 @@ import { join } from 'node:path';
 
 import {
   buildSandboxedSpawn,
+  isBwrapPresent,
+  TRUSTED_BWRAP_PATH,
   isSandboxAvailable,
   isSandboxRequested,
   requireSandboxAvailability,
@@ -46,7 +48,7 @@ async function main() {
         hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
         mkdtemp: () => emptyDir,
       });
-      assert.equal(sb.command, 'bwrap');
+      assert.equal(sb.command, TRUSTED_BWRAP_PATH);
       assert.equal(sb.sandboxed, true);
       const a = sb.args;
       assert.ok(a.includes('--ro-bind') && a.includes('/') && a[a.indexOf('--ro-bind') + 1] === '/', 'ro-root');
@@ -105,6 +107,15 @@ async function main() {
         false,
         'unset flag means sandbox off by default',
       );
+      const safeStat = (name) => ({ uid: 0, mode: 0o755,
+        isSymbolicLink: () => false, isDirectory: () => name !== TRUSTED_BWRAP_PATH,
+        isFile: () => name === TRUSTED_BWRAP_PATH });
+      let probed = '';
+      assert.equal(isBwrapPresent({ stat: safeStat, exec: (file) => { probed = file; } }), true);
+      assert.equal(probed, TRUSTED_BWRAP_PATH, 'probe must not resolve through a writable PATH');
+      assert.equal(isBwrapPresent({ stat: (name) => ({ ...safeStat(name), uid: name === TRUSTED_BWRAP_PATH ? 1000 : 0 }), exec: () => { throw Error('must not execute'); } }), false);
+      assert.equal(isBwrapPresent({ stat: (name) => ({ ...safeStat(name), mode: name === '/usr/bin' ? 0o777 : 0o755 }), exec: () => { throw Error('must not execute'); } }), false);
+      assert.equal(isBwrapPresent({ stat: (name) => ({ ...safeStat(name), isSymbolicLink: () => name === TRUSTED_BWRAP_PATH }), exec: () => { throw Error('must not execute'); } }), false);
       assert.equal(isSandboxRequested({ env: { AGENTOC_RUN_SANDBOX: 'off' } }), false);
       assert.equal(requireSandboxAvailability({ platform: 'darwin', env: {} }), false);
       assert.throws(() => requireSandboxAvailability({ platform: 'darwin', env: { AGENTOC_RUN_SANDBOX: '1' } }),

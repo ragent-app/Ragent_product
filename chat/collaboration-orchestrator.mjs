@@ -243,7 +243,7 @@ function buildDefaultDependencies(overrides = {}) {
     // builder (or a failing one) via overrides.
     buildReviewerSandbox: (context) => {
       if (!isBwrapPresent()) {
-        throw new Error('bwrap is not available on PATH; read-only reviewer sandbox cannot be built');
+        throw new Error('trusted system bwrap is unavailable; read-only reviewer sandbox cannot be built');
       }
       return buildReviewerReadOnlySandbox(context);
     },

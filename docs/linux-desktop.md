@@ -32,6 +32,14 @@ establish that identity; otherwise it uses the `agentoc` system account. Runs
 have the configured service user's ordinary file access. Check
 `/etc/agentoc/service-user` before relying on access to an existing workspace.
 
+## Optional runner sandbox
+
+When `AGENTOC_RUN_SANDBOX=1` is configured, Runs require the root-owned system
+binary at `/usr/bin/bwrap` and safe ownership and permissions on its parent
+directories. A missing or untrusted binary refuses the Run instead of silently
+running without the requested isolation. Without this option, the product does
+not claim that this bubblewrap boundary is active.
+
 ## Maintain and remove
 
 - `systemctl status agentoc.service` shows the service state.
