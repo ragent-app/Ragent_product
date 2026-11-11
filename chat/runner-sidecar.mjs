@@ -1858,6 +1858,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     interactionMode: state.interactionMode,
     permissionMode: state.permissionMode,
     agentocApprovalGate: state.agentocApprovalGate,
+    threadMcpConfig: state.threadMcpConfig,
   }));
   if (written) state.threadRequestSent = true;
   return written;

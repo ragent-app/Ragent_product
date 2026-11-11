@@ -113,6 +113,7 @@ export function buildCodexAppServerThreadOptions({
   interactionMode,
   permissionMode,
   agentocApprovalGate,
+  threadMcpConfig,
 } = {}) {
   const permissionPolicy = resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode });
   const projectRoot = typeof cwd === 'string' ? cwd.trim() : '';
@@ -126,7 +127,8 @@ export function buildCodexAppServerThreadOptions({
     ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
     ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
     sandbox: permissionPolicy.sandbox || 'danger-full-access',
-    config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust },
+    config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
+      ...(threadMcpConfig?.mcp_servers ? { mcp_servers: threadMcpConfig.mcp_servers } : {}) },
     ...(typeof developerInstructions === 'string' && developerInstructions.trim()
       ? { developerInstructions: developerInstructions.trim() }
       : {}),

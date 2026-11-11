@@ -235,6 +235,12 @@ const executeThreadResume = buildCodexAppServerThreadMessage({
   useResume: true,
   interactionMode: 'agent',
 });
+const scopedMcp = { mcp_servers: { fixture: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'fixture' } } } };
+for (const useResume of [false, true]) {
+  const scopedThread = buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume, interactionMode: 'plan', threadMcpConfig: scopedMcp });
+  assert.deepEqual(scopedThread.params.config.mcp_servers, scopedMcp.mcp_servers);
+  assert.equal(scopedThread.params.config.mode, 'plan');
+}
 assert.equal(executeThreadResume.method, 'thread/resume');
 assert.equal(executeThreadResume.params.threadId, 'thread-123');
 assert.equal(executeThreadResume.params.sandbox, 'danger-full-access');
