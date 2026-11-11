@@ -5,6 +5,16 @@ import { systemPathRootsForPlatform } from './risk-policy.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 const win = path.win32;
+const VERSION_PROGRAMS = new Set(['python', 'python3', 'node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'pip', 'pip3', 'git', 'go', 'cargo', 'rustc', 'dotnet', 'java', 'javac', 'gh']);
+export function analyzeWindowsVersion(programName, args) {
+  const program = String(programName || '').toLowerCase().replace(/\.(?:exe|cmd)$/, '');
+  if (!VERSION_PROGRAMS.has(program) || !Array.isArray(args) || args.length !== 1) return null;
+  const flag = args[0];
+  if (flag !== '--version' && !(flag === '-V' && ['python', 'python3', 'pip', 'pip3'].includes(program))
+      && !(flag === '-version' && ['java', 'javac'].includes(program))
+      && !(flag === 'version' && program === 'go')) return null;
+  return { kind: 'read', program: `${program} version`, target: null };
+}
 const FILE_COMMANDS = new Map([
   ['get-content', 'read'], ['get-item', 'read'], ['get-childitem', 'read'], ['get-filehash', 'read'], ['test-path', 'read'], ['resolve-path', 'read'],
   ['set-content', 'write'], ['add-content', 'write'], ['clear-content', 'write'], ['new-item', 'write'], ['out-file', 'write'], ['remove-item', 'delete'],
@@ -482,6 +492,9 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     }
     const redirectionReason = await appendRedirects(entry, program);
     if (redirectionReason) return { complete: false, actions, reason: redirectionReason };
+    const versionArgs = staticExternalArguments(entry.elements);
+    const version = entry.pipelineInput === false && versionArgs && analyzeWindowsVersion(entry.name, versionArgs);
+    if (version) { actions.push(version); continue; }
     const ripgrep = await analyzeRipgrepCommand(entry, context, fsApi);
     if (ripgrep) {
       if (!ripgrep.complete) return { ...ripgrep, actions: [...actions, ...ripgrep.actions] };

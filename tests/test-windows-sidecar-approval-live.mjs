@@ -293,6 +293,9 @@ for (const mode of ['recommended', 'full-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, request('npm-dev', 'npm run dev'), proc);
   assert.equal(sent[2]?.response?.response?.behavior, 'allow');
   assert.match(sent[2]?.response?.response?.updatedInput?.command || '', /CurrentLocation/);
+  await trackClaudeBidiApprovalRequest(run.id, state, request('git-diff', 'git diff'), proc);
+  assert.equal(sent[3]?.response?.response?.behavior, 'allow');
+  assert.match(sent[3]?.response?.response?.updatedInput?.command || '', /--no-ext-diff --no-textconv/);
 }
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);

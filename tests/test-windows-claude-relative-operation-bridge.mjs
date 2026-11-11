@@ -68,6 +68,9 @@ for (const riskMode of ['recommended', 'full-auto']) {
       const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: make(command), state: outsideCwd });
       assert.ok(bridge, `${riskMode}: ${tool} outside workspace: ${command}`);
     }
+    const diff = await buildClaudeWindowsRelativeOperationBridge({ approval: make('git diff --cached'), state: outsideCwd });
+    assert.ok(diff);
+    assert.match(diff.updatedInput.command, /git diff --no-ext-diff --no-textconv --cached/);
   }
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const psOptions = { cwd: workspace, encoding: 'utf8', windowsHide: true };

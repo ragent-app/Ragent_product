@@ -2884,7 +2884,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
   const relativeOperationBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !deleteBridge
-    && ['working directory is not attested', 'ripgrep configuration is not disabled', 'ripgrep path cannot be resolved'].includes(gateDecision.reason)
+    && ['working directory is not attested', 'ripgrep configuration is not disabled', 'ripgrep path cannot be resolved', 'Git command is not on the read-only allowlist'].includes(gateDecision.reason)
     ? await buildClaudeWindowsRelativeOperationBridge({ approval, state }) : null;
   if (relativeOperationBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: relativeOperationBridge.updatedInput });

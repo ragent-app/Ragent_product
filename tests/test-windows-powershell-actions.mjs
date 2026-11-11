@@ -104,6 +104,7 @@ for (const command of ['git status --short', 'git status -sb --ignored=matching'
   assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
 }
 for (const command of ['git add .', 'git commit -m test']) assert.equal((await inspect(command)).decision, 'allow');
+for (const command of ['python --version', 'node --version', 'go version', 'java -version']) assert.equal((await inspect(command)).decision, 'allow');
 for (const command of ['git diff', 'git status --ignored=bogus']) {
   assert.equal((await inspect(command)).decision, 'review', `${command} is not on the read-only Git allowlist`);
 }
