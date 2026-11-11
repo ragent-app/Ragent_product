@@ -389,6 +389,35 @@ function envPairsFor(server, spawnEnv) {
     .map((key) => `${key} = ${tomlString(spawnEnv[key])}`);
 }
 
+// Build the per-thread Codex config without copying CODEX_HOME or its OAuth
+// credentials. These bindings are private run capabilities and must never be
+// included in logs or persisted by the caller.
+export async function prepareCodexThreadMcp({ runId = '', spawnEnv = {}, servers = [] } = {}) {
+  const normalizedServers = normalizeServers(servers);
+  if (!normalizedServers.length) return null;
+  await preflightManagedMcpOverlay({
+    family: CODEX_RUNTIME,
+    sourceHome: trimString(spawnEnv.CODEX_HOME),
+    servers: normalizedServers,
+    attempt: 1,
+    maxAttempts: 1,
+  });
+  const mcpServers = {};
+  const serverNames = [];
+  for (const server of normalizedServers) {
+    const name = safeServerName(runId, server.kind);
+    serverNames.push(name);
+    mcpServers[name] = {
+      command: process.execPath,
+      args: [server.scriptPath],
+      env: Object.fromEntries(server.envKeys
+        .filter(key => typeof spawnEnv[key] === 'string' && spawnEnv[key].length > 0)
+        .map(key => [key, spawnEnv[key]])),
+    };
+  }
+  return { serverNames, config: { mcp_servers: mcpServers } };
+}
+
 async function prepareCodexOverlay({ root, sourceHome, servers, runId, spawnEnv = {}, codexWindowsApprovalGate = false, codexWindowsInstallHook = '' }) {
   const config = await readFile(join(sourceHome, 'config.toml'), 'utf8').catch((error) => {
     if (error?.code === 'ENOENT') return '';

@@ -10,6 +10,7 @@ import { createInterface } from 'node:readline';
 import {
   prepareApprovedActionMcpOverlay,
   prepareManagedMcpOverlay,
+  prepareCodexThreadMcp,
 } from '../chat/approved-action-mcp-overlay.mjs';
 import { buildClaudeBidiArgs } from '../chat/adapters/claude-bidi.mjs';
 
@@ -208,6 +209,14 @@ const { mkdir, writeFile } = await import('node:fs/promises');
 await mkdir(codexSource, { recursive: true });
 await writeFile(join(codexSource, 'config.toml'), '[mcp_servers.user_tool]\ncommand = "user-mcp"\n');
 await writeFile(join(codexSource, 'auth.json'), '{"access_token":"fixture"}\n');
+const threadMcp = await prepareCodexThreadMcp({ runId: 'r_fixture', spawnEnv: {
+  CODEX_HOME: codexSource, AGENTOC_APPROVED_ACTIONS_ENABLED: '1', AGENTOC_APPROVED_ACTIONS_TOKEN: 'thread-token', UNRELATED_SECRET: 'not-projected',
+}, servers: [{ kind: 'actions', scriptPath }] });
+assert.equal(threadMcp.serverNames.length, 1);
+const threadServer = threadMcp.config.mcp_servers[threadMcp.serverNames[0]];
+assert.equal(threadServer.env.AGENTOC_APPROVED_ACTIONS_TOKEN, 'thread-token');
+assert.equal(threadServer.env.UNRELATED_SECRET, undefined);
+assert.deepEqual(threadServer.args, [scriptPath]);
 await mkdir(join(codexSource, 'rules'));
 const ownerRule = 'prefix_rule(pattern=["dangerous-tool"], decision="forbidden")\n';
 await writeFile(join(codexSource, 'rules', 'owner.rules'), ownerRule);
