@@ -34,6 +34,14 @@ registration, service health, process termination and automatic recovery,
 and unregistration with configuration retained. Actual logout/login and
 upgrades still require acceptance using the final installed app.
 
+## Runner isolation
+
+The optional `AGENTOC_RUN_SANDBOX=1` setting currently requires the Linux
+bubblewrap implementation. If explicitly enabled on macOS, Runs fail instead
+of silently starting without that isolation. Leaving the setting unset does
+not provide a macOS product sandbox; platform-specific isolation still needs
+to be implemented and validated.
+
 ## Approval limitation
 
 The semantic approval compiler can recognize a small set of macOS commands

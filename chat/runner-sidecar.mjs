@@ -39,7 +39,7 @@ import {
 } from './adapters/acp-stdio.mjs';
 import { parseScopedCodexModel, readPreferredCodexModelFromConfig } from './models.mjs';
 import { access, lstat, open, readFile, realpath } from 'fs/promises';
-import { buildSandboxedSpawn, isSandboxAvailable } from '../lib/runner-sandbox.mjs';
+import { buildSandboxedSpawn, requireSandboxAvailability } from '../lib/runner-sandbox.mjs';
 import { createFileChangeStatsTracker } from './file-change-stats.mjs';
 import {
   FILE_ASSET_ID_PATTERN,
@@ -3973,11 +3973,10 @@ async function main() {
       env: browserEnv,
     }];
   }
-  // P2-B: opt-in bubblewrap sandbox (AGENTOC_RUN_SANDBOX).  OFF by default; when
-  // enabled and bwrap is present, the tool process runs in a mount/pid
-  // namespace with a read-only root, the workspace + runner home bound RW, and
-  // the control-plane config + /etc/agentoc hidden.  Any failure falls back to
-  // the unsandboxed launch.
+  // An explicitly requested sandbox is a requirement, not a best-effort
+  // preference. Consult only the trusted sidecar environment and never launch
+  // a provider unsandboxed if the platform or sandbox setup cannot support it.
+  const sandboxRequired = requireSandboxAvailability();
   let resolvedCommand = await resolveCommandSpawnSpec(initialCommand, args, {
     cwd: resolvedFolder.cwd,
     env: spawnEnv,
@@ -4011,7 +4010,7 @@ async function main() {
     && (Boolean(managedMcpOverlay) || appServerState?.agentocApprovalGate === true);
   let codexAppServerBrokered = false;
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
-      && !isSandboxAvailable({ env: spawnEnv })) {
+      && !sandboxRequired) {
     const brokerSocketPath = codexAppServerBrokerSocketPath(runnerCodexHomeDir);
     try {
       await ensureCodexAppServerBroker({
@@ -4066,12 +4065,12 @@ async function main() {
   // command would bypass the broker and reintroduce duplicate refresh-token
   // writers. Brokered Codex runs therefore keep the broker boundary intact;
   // the non-brokered MCP/sandbox path retains its existing sandbox behavior.
-  if (isSandboxAvailable() && !codexAppServerBrokered) {
+  const wrapRequiredSandbox = (command, commandArgs, environment) => {
     try {
-      const guiEnvironment = pickRunnerGuiEnvironment(spawnEnv);
-      const sandbox = buildSandboxedSpawn({
-        command: resolvedCommand.file,
-        args: resolvedCommand.args,
+      const guiEnvironment = pickRunnerGuiEnvironment(environment);
+      return buildSandboxedSpawn({
+        command,
+        args: commandArgs,
         cwd: resolvedFolder.cwd,
         runnerHome: process.env.HOME,
         hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
@@ -4081,16 +4080,20 @@ async function main() {
         ],
         exposeHostDevices: Boolean(guiEnvironment.DISPLAY),
       });
-      spawnCommand = sandbox.command;
+    } catch (error) {
+      throw Object.assign(new Error(`Runner sandbox setup failed; refusing an unsandboxed run: ${normalizeErrorMessage(error)}`), {
+        code: 'RUNNER_SANDBOX_SETUP_FAILED',
+        cause: error,
+      });
+    }
+  };
+  if (sandboxRequired && !codexAppServerBrokered) {
+    const sandbox = wrapRequiredSandbox(resolvedCommand.file, resolvedCommand.args, spawnEnv);
+    spawnCommand = sandbox.command;
     spawnArgs = sandbox.args;
     spawnShell = false;
     spawnWindowsVerbatimArguments = false;
-      sandboxEmptyDir = sandbox.emptyDir;
-    } catch (error) {
-      await logSidecarDiagnostic(runId, 'Runner sandbox unavailable; running unsandboxed', {
-        error: normalizeErrorMessage(error),
-      });
-    }
+    sandboxEmptyDir = sandbox.emptyDir;
   }
   const managedStdin = isClaudeFamily || isCodexAppServerFamily || isAgyFamily || isPiFamily || acp === true;
   const windowsJob = assertWindowsManagedJob(await createWindowsJobObject());
@@ -4134,7 +4137,7 @@ async function main() {
     });
   }
   if (sandboxEmptyDir) {
-    proc.once('exit', () => {
+    proc.once('close', () => {
       try { rmSync(sandboxEmptyDir, { recursive: true, force: true }); } catch {}
     });
   }
@@ -5485,21 +5488,34 @@ async function main() {
       cwd: resolvedFolder.cwd,
       env: fallbackEnv,
     });
+    let fallbackCommand = fallbackSpec.file;
+    let fallbackArgs = fallbackSpec.args;
+    let fallbackShell = fallbackSpec.shell;
+    let fallbackVerbatim = fallbackSpec.windowsVerbatimArguments === true;
+    let fallbackSandboxDir = null;
+    if (sandboxRequired) {
+      const sandbox = wrapRequiredSandbox(fallbackCommand, fallbackArgs, fallbackEnv);
+      fallbackCommand = sandbox.command;
+      fallbackArgs = sandbox.args;
+      fallbackShell = false;
+      fallbackVerbatim = false;
+      fallbackSandboxDir = sandbox.emptyDir;
+    }
     const fallbackJob = assertWindowsManagedJob(await createWindowsJobObject());
     let fallbackProc;
     if (fallbackJob) {
-      if (fallbackSpec.shell === true) {
+      if (fallbackShell === true) {
         await fallbackJob.close();
         throw new Error('Windows managed Claude fallback refuses shell:true');
       }
       try {
         await assertRunLaunchBoundary(runId);
         fallbackProc = await fallbackJob.createProcess({
-          file: fallbackSpec.file,
-          args: fallbackSpec.args,
+          file: fallbackCommand,
+          args: fallbackArgs,
           cwd: resolvedFolder.cwd,
           env: fallbackEnv,
-          windowsVerbatimArguments: fallbackSpec.windowsVerbatimArguments === true,
+          windowsVerbatimArguments: fallbackVerbatim,
           stdin: true,
           stdout: true,
           stderr: true,
@@ -5511,13 +5527,18 @@ async function main() {
       }
     } else {
       await assertRunLaunchBoundary(runId);
-      fallbackProc = spawn(fallbackSpec.file, fallbackSpec.args, {
+      fallbackProc = spawn(fallbackCommand, fallbackArgs, {
         cwd: resolvedFolder.cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: fallbackEnv,
-        shell: fallbackSpec.shell,
-        windowsVerbatimArguments: fallbackSpec.windowsVerbatimArguments,
+        shell: fallbackShell,
+        windowsVerbatimArguments: fallbackVerbatim,
         ...(process.platform !== 'win32' ? { detached: true } : {}),
+      });
+    }
+    if (fallbackSandboxDir) {
+      fallbackProc.once('close', () => {
+        try { rmSync(fallbackSandboxDir, { recursive: true, force: true }); } catch {}
       });
     }
     fallbackProc.stdin?.on('error', (error) => {

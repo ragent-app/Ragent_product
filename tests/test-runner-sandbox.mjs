@@ -17,6 +17,8 @@ import { join } from 'node:path';
 import {
   buildSandboxedSpawn,
   isSandboxAvailable,
+  isSandboxRequested,
+  requireSandboxAvailability,
 } from '../lib/runner-sandbox.mjs';
 
 function haveBwrap() {
@@ -82,7 +84,6 @@ async function main() {
 
     // ── 2) availability gate ───────────────────────────────────────────────
     {
-      const on = { platform: 'linux', env: { [process.platform === 'linux' ? 'AGENTOC_RUN_SANDBOX' : 'x']: '1' } };
       // The gate checks bwrap presence too; assert flag parsing via a fake env.
       assert.equal(
         isSandboxAvailable({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' } }),
@@ -104,6 +105,14 @@ async function main() {
         false,
         'unset flag means sandbox off by default',
       );
+      assert.equal(isSandboxRequested({ env: { AGENTOC_RUN_SANDBOX: 'off' } }), false);
+      assert.equal(requireSandboxAvailability({ platform: 'darwin', env: {} }), false);
+      assert.throws(() => requireSandboxAvailability({ platform: 'darwin', env: { AGENTOC_RUN_SANDBOX: '1' } }),
+        (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
+      assert.throws(() => requireSandboxAvailability({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' }, bwrapPresent: () => false }),
+        (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
+      assert.equal(requireSandboxAvailability({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' }, bwrapPresent: () => true }), true);
+
     }
 
     // ── 3) real bwrap smoke ────────────────────────────────────────────────

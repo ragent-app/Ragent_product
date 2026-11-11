@@ -29,7 +29,7 @@ const touchedKeys = [
   'AGENTOC_CONTROL_SOCKET', 'AGENTOC_PUBLIC_BASE_URL', 'AGENTOC_NODE_RUNTIME',
   'AGENTOC_RUNNER_USER', 'MY_SERVICE_TOKEN', 'SOME_API_KEY', 'COOKIE_SESSION',
   'AGENTOC_USER_SHELL_ENV_B64', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR',
-  'AGENTOC_RUN_IDLE_TIMEOUT_MS', 'AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS',
+  'AGENTOC_RUN_SANDBOX', 'AGENTOC_RUN_IDLE_TIMEOUT_MS', 'AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS',
   'AGENTOC_CODEX_TOOL_IDLE_TIMEOUT_MS', 'AGENTOC_CODEX_TURN_IDLE_TIMEOUT_MS', 'AGENTOC_CODEX_IDLE_INTERRUPT_GRACE_MS', 'AGENTOC_CODEX_APP_SERVER_STARTUP_TIMEOUT_MS',
   'AGENTOC_RUN_STDOUT_QUEUE_MAX_LINES', 'AGENTOC_RUN_STDOUT_QUEUE_MAX_BYTES', 'AGENTOC_RUN_STDOUT_LINE_MAX_BYTES',
   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
@@ -93,6 +93,7 @@ try {
   // shared allowlist.
   delete process.env.AGENTOC_RUN_SPOOL_DIR;
   process.env.AGENTOC_PROVIDER_HOMES_DIR = fixtureProviderHomes;
+  process.env.AGENTOC_RUN_SANDBOX = '1';
   process.env.AGENTOC_RUN_IDLE_TIMEOUT_MS = '120000';
   process.env.AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS = '30000';
   process.env.AGENTOC_CODEX_TOOL_IDLE_TIMEOUT_MS = '600000';
@@ -188,6 +189,7 @@ try {
   // Environment uses os.homedir()), so it never leaks a hostile value.
   assert.equal(env.HOME, fixtureHome, 'HOME must be the current process home (matches the user running the sidecar)');
   assert.equal(env.AGENTOC_WORK_ROOT_DIR, undefined, 'production AGENTOC_WORK_ROOT_DIR must not be inherited');
+  assert.equal(env.AGENTOC_RUN_SANDBOX, '1', 'operator sandbox requirement must reach the sidecar');
   assert.equal(env.HTTPS_PROXY, 'http://127.0.0.1:7890', 'safe proxy environment must reach the Run');
   assert.ok(
     Object.keys(env).every((key) => RUNNER_ENV_ALLOWLIST.includes(key) || key.startsWith('AGENTOC_TEST_')),

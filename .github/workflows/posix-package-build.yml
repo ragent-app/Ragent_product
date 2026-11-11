@@ -48,6 +48,7 @@ jobs:
           node tests/test-frozen-source-guards.mjs
           node tests/test-semantic-darwin-preview.mjs
           if [ "$PLATFORM" = linux ]; then
+            node tests/test-runner-sandbox.mjs
             node tests/test-semantic-operation.mjs
             node tests/test-semantic-compiler.mjs
             node tests/test-semantic-policy.mjs
