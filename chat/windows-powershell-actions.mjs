@@ -2,7 +2,7 @@ import path from 'node:path';
 import { lstat, realpath, readdir } from 'node:fs/promises';
 import { parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
 import { systemPathRootsForPlatform } from './risk-policy.mjs';
-import { analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
+import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 const win = path.win32;
 const FILE_COMMANDS = new Map([
@@ -500,7 +500,9 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
         return { complete: false, actions, reason: 'Git arguments are dynamic or come from pipeline input' };
       }
       const args = staticExternalArguments(entry.elements);
-      const git = args && analyzeWindowsReadOnlyGit([entry.name, ...args]);
+      const local = args && analyzeWindowsLocalGit([entry.name, ...args]);
+      if (local && context.requireAbsolutePaths) return { complete: false, actions, reason: 'working directory is not attested' };
+      const git = local || (args && analyzeWindowsReadOnlyGit([entry.name, ...args]));
       if (!git) return { complete: false, actions, reason: 'Git command is not on the read-only allowlist' };
       actions.push(...git.actions);
       continue;

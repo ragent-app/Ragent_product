@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { analyzeWindowsReadOnlyGit } from '../chat/windows-readonly-git.mjs';
+import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from '../chat/windows-readonly-git.mjs';
 
 for (const argv of [
   ['git', 'status'],
@@ -39,3 +39,5 @@ for (const argv of [
 }
 
 console.log('windows-readonly-git: literal read-only allowlist checks passed');
+for (const argv of [['git', 'add', '.'], ['git', 'add', '-A'], ['git', 'commit', '-m', 'message']]) assert.equal(analyzeWindowsLocalGit(argv)?.complete, true);
+for (const argv of [['git', 'push'], ['git', 'push', '--force'], ['git', 'reset', '--hard'], ['git', 'commit', '--amend', '-m', 'x']]) assert.equal(analyzeWindowsLocalGit(argv), null);

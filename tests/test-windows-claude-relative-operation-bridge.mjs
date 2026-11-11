@@ -64,7 +64,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const psApproval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'PowerShell', input: { command } } });
   for (const tool of ['Bash', 'PowerShell']) {
     const make = tool === 'Bash' ? approval : psApproval;
-    for (const command of ['npm install', 'npm ci', 'npm run dev', 'npm run custom-task']) {
+    for (const command of ['npm install', 'npm ci', 'npm run dev', 'npm run custom-task', 'git add .', "git commit -m 'message'"]) {
       const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: make(command), state: outsideCwd });
       assert.ok(bridge, `${riskMode}: ${tool} outside workspace: ${command}`);
     }

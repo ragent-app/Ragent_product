@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsWorkspaceScriptTask } from './windows-powershell-actions.mjs';
-import { analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
+import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 // Parse a literal simple command only. Anything requiring shell expansion,
 // substitutions, redirection, operators, or comments is left for review.
@@ -223,7 +223,9 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     return withOutput({ complete: true, actions: [workspaceTask] });
   }
   if (['git', 'git.exe'].includes(String(program).toLowerCase())) {
-    const analyzed = analyzeWindowsReadOnlyGit(words);
+    const local = analyzeWindowsLocalGit(words);
+    if (local && context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
+    const analyzed = local || analyzeWindowsReadOnlyGit(words);
     return analyzed
       ? withOutput(analyzed)
       : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };

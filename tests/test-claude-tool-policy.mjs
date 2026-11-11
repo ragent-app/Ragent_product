@@ -26,6 +26,10 @@ assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js doc
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js docs' }), { riskMode: 'conservative-auto' }).decision, 'prompt');
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'Node.js docs' }), { riskMode: 'safe' }).decision, 'prompt');
 assert.equal(decideClaudeToolApproval(request('WebSearch', { query: 'x', arbitrary: true }), { riskMode: 'recommended' }).decision, 'prompt');
+for (const mode of ['recommended', 'full-auto']) {
+  assert.equal(decideClaudeToolApproval(request('WebFetch', { url: 'https://example.org/docs', prompt: 'Read this page' }), { riskMode: mode }).decision, 'auto-allow');
+  assert.equal(decideClaudeToolApproval(request('WebFetch', { url: 'file:///secret', prompt: 'Read this file' }), { riskMode: mode }).decision, 'prompt');
+}
 assert.equal(decideClaudeToolApproval(request('TodoWrite', {}), { riskMode: 'recommended' }).decision, 'prompt');
 
 for (const tool of ['Task', 'Bash', 'PowerShell', 'AskUserQuestion', 'ExitPlanMode', 'mcp__foreign__tool', 'FutureTool']) {

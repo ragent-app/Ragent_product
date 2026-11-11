@@ -12,6 +12,7 @@ const SAFE_TOOLS = new Map([
 
 const CAUTION_TOOLS = new Map([
   ['WebSearch', 'send a read-only query to the web search service'],
+  ['WebFetch', 'fetch a web page'],
 ]);
 
 const FILE_TOOLS = new Set([
@@ -42,6 +43,12 @@ function validateSearchInput(input) {
 function validateKnownInput(toolName, input) {
   if (!input || !boundedJson(input)) return false;
   if (toolName === 'WebSearch') return validateSearchInput(input);
+  if (toolName === 'WebFetch') {
+    if (Object.keys(input).some(key => !['url', 'prompt'].includes(key)) || typeof input.url !== 'string'
+        || input.url.length > 8192 || typeof input.prompt !== 'string' || input.prompt.length > 32768) return false;
+    try { const url = new URL(input.url); return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password; }
+    catch { return false; }
+  }
   if (toolName === 'Skill') return typeof input.skill === 'string' && input.skill.trim().length > 0 && input.skill.length <= 128
     && Object.keys(input).every((key) => ['skill', 'args'].includes(key))
     && (input.args === undefined || (typeof input.args === 'string' && input.args.length <= 4096));

@@ -59,3 +59,26 @@ export function analyzeWindowsReadOnlyGit(argv) {
   }
   return null;
 }
+
+// Local staging and commits are ordinary development work. Git hooks may
+// execute project code, just as an approved project build or test can.
+export function analyzeWindowsLocalGit(argv) {
+  if (!Array.isArray(argv) || argv.length < 3 || !['git', 'git.exe'].includes(String(argv[0]).toLowerCase())
+      || argv.some(value => typeof value !== 'string' || value.includes('\0'))) return null;
+  const subcommand = argv[1].toLowerCase();
+  const args = argv.slice(2);
+  let allowed = false;
+  if (subcommand === 'add') {
+    allowed = args.length > 0 && args.every(arg => !arg.startsWith('-') || ['-A', '--all', '-u', '--update', '--'].includes(arg));
+  } else if (subcommand === 'commit') {
+    let message = false;
+    allowed = true;
+    for (let i = 0; i < args.length; i += 1) {
+      if (args[i] === '-m' || args[i] === '--message') { if (!args[++i]) { allowed = false; break; } message = true; continue; }
+      if (['-a', '--all', '--no-verify', '--allow-empty'].includes(args[i])) continue;
+      allowed = false; break;
+    }
+    allowed &&= message;
+  }
+  return allowed ? { complete: true, actions: [{ kind: 'write', program: `git ${subcommand}`, target: null, caution: true }] } : null;
+}
