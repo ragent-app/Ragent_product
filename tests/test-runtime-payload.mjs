@@ -22,6 +22,7 @@ function fixture(extra = {}) {
     'package.json': '{"name":"desktop-fixture"}', 'package-lock.json': '{}',
     'chat-server.mjs': 'console.log("server")\n', 'cli.js': 'console.log("cli")\n',
     'lib/runtime.mjs': 'export const fixture = true;\n', 'static/chat/ui.js': 'export {};\n',
+    'shared/whisper-languages.json': '{}\n',
     'templates/chat.html': '<html></html>', '.gitignore': '*.local-secret.json\n',
     'accounts/package.json': '{"name":"accounts-fixture"}', 'accounts/package-lock.json': '{}',
     'accounts/server.mjs': 'export {};\n', 'scripts/accounts-migrate.mjs': 'export {};\n',
