@@ -1,7 +1,10 @@
 import importlib.util
+import base64
+import io
 import pathlib
 import tempfile
 import unittest
+import wave
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,6 +16,33 @@ SPEC.loader.exec_module(HELPER)
 
 
 class AdminHelperValidationTests(unittest.TestCase):
+    def test_asr_provider_test_is_bounded_authorized_and_does_not_log_audio_or_key(self):
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
+            wav.writeframes(bytes(16000))
+        encoded = base64.b64encode(buffer.getvalue()).decode()
+        class Connection:
+            def request(self, method, path, body, headers):
+                self.request_args = (method, path, body, headers)
+            def getresponse(self):
+                return SimpleNamespace(status=200, read=lambda _limit: b'{"text":"hello"}')
+            def close(self): pass
+        connection = Connection()
+        with patch.object(HELPER, "read_env", return_value={"OPENAI_API_KEY": "private-key", "AGENTOC_ACCOUNTS_ASR_ENABLED": "1"}), \
+             patch.object(HELPER.http.client, "HTTPSConnection", return_value=connection) as connect, \
+             patch.object(HELPER, "_audit") as audit:
+            with self.assertRaises(HELPER.AdminError):
+                HELPER._test_asr_transcription("owner", {"confirmed": False, "audioBase64": encoded})
+            with self.assertRaises(HELPER.AdminError):
+                HELPER._test_asr_transcription("owner", {"confirmed": True, "audioBase64": "not base64"})
+            self.assertFalse(connect.called)
+            result = HELPER._test_asr_transcription("owner", {"confirmed": True, "audioBase64": encoded})
+            self.assertEqual(result, {"text": "hello", "durationMs": 500, "scope": "provider-only"})
+            connect.assert_called_once_with("api.openai.com", 443, timeout=30)
+            self.assertEqual(connection.request_args[0:2], ("POST", "/v1/audio/transcriptions"))
+            self.assertEqual(audit.call_args.args, ("owner", "speech.cloud.test", "provider", "success"))
+
     def test_env_parser_keeps_equals_in_secret_and_ignores_comments(self):
         parsed = HELPER.parse_env_text("# private\nOPENAI_API_KEY=sk-test=part\nPORT=7700\n")
         self.assertEqual(parsed["OPENAI_API_KEY"], "sk-test=part")

@@ -19,6 +19,7 @@
   const actionLabels = {
     'secret.rotate': '轮换服务凭据',
     'speech.cloud.toggle': '更改云端语音识别状态',
+    'speech.cloud.test': '测试云端语音供应商',
     'database.password.rotate': '轮换数据库密码',
     'database.backup.create': '创建数据库备份',
     'database.restore': '恢复数据库备份',
@@ -40,12 +41,15 @@
     OPENAI_KEY_REQUIRED: '请先保存 OpenAI API key，再启用云端语音识别。',
     PROVIDER_REVIEW_REQUIRED: '启用前请确认已检查 OpenAI API 数据控制和隐私说明。',
     ASR_MIGRATION_REQUIRED: '数据库还没有应用语音识别所需的迁移。',
+    ASR_TEST_AUDIO_INVALID: '请选择不超过 20 秒的 16 kHz 单声道 16 位 WAV 音频。',
+    ASR_TEST_UNAVAILABLE: '请先配置并开启云端语音服务。',
+    ASR_TEST_PROVIDER_FAILED: '供应商转写失败，请检查凭据、模型权限和供应商状态。',
     SERVICE_RESTART_FAILED: '配置已写入，但服务重启未成功。请检查中心服务状态。',
     MIGRATION_FAILED: '数据库迁移执行失败，服务数据未在页面中展示。',
     RESTORE_FAILED: '备份恢复失败；恢复操作使用事务，现有数据库未被部分覆盖。',
   };
 
-  const state = { view: 'overview', overview: null, secrets: null, database: null, audit: null, diagnostics: null, busy: false };
+  const state = { view: 'overview', overview: null, secrets: null, database: null, audit: null, diagnostics: null, asrTest: null, busy: false };
   const root = document.getElementById('viewRoot');
   const flash = document.getElementById('flash');
   const title = document.getElementById('pageTitle');
@@ -316,11 +320,12 @@
 
   function renderDiagnostics() {
     const result = state.diagnostics;
-    if (!result) return `<section class="panel-card diagnostics-intro"><div><h2>中心服务功能有效性检查</h2><p>运行只读的本机服务健康接口、数据库查询、公钥发现和 Caddy 配置校验。</p><button class="btn btn-primary" data-action="run-diagnostics">运行检查</button></div><div class="security-callout"><span>i</span><div><strong>安全范围</strong>检查不会发送 FCM 推送、上传语音、调用计费转写，也不会执行真实设备配对或改变数据库。</div></div></section>`;
+    const asrProbe = `<section class="panel-card"><h2>语音供应商实际转写</h2><p>选择不超过 20 秒的 16 kHz、单声道、16 位 WAV 文件。此测试会发送音频至 OpenAI 并可能产生费用，不计入用户用量，也不验证手机账号链路。</p><input id="asrTestAudio" type="file" accept="audio/wav,.wav"><button class="btn btn-outline-secondary btn-sm" data-action="test-asr">测试转写</button>${state.asrTest ? `<p>识别结果：${esc(state.asrTest.text)}</p>` : ''}</section>`;
+    if (!result) return `<div class="section-stack"><section class="panel-card diagnostics-intro"><div><h2>中心服务功能有效性检查</h2><p>运行只读的本机服务健康接口、数据库查询、公钥发现和 Caddy 配置校验。</p><button class="btn btn-primary" data-action="run-diagnostics">运行检查</button></div><div class="security-callout"><span>i</span><div><strong>安全范围</strong>常规检查不会调用计费接口或改变数据库。</div></div></section>${asrProbe}</div>`;
     const labels = { pass: '通过', fail: '失败', warn: '需关注', skipped: '未执行' };
     const tones = { pass: 'good', fail: 'bad', warn: 'warn', skipped: 'neutral' };
     const summary = result.summary || {};
-    return `<div class="section-stack"><section class="panel-card"><div class="panel-title-row"><div><h2>最近一次检查</h2><p>${date(result.performedAt)} · 检查不会执行真实推送、音频转写或终端配对。</p></div><button class="btn btn-primary btn-sm" data-action="run-diagnostics">重新运行</button></div><div class="diagnostic-summary">${['pass', 'fail', 'warn', 'skipped'].map((key) => `<span class="state-pill" data-state="${tones[key]}">${labels[key]} ${Number(summary[key] || 0)}</span>`).join('')}</div></section><section class="panel-card"><div class="diagnostic-list">${(result.checks || []).map((check) => `<article class="diagnostic-row"><div><strong>${esc(check.label)}</strong><small>${esc(check.detail)}</small></div><span class="state-pill" data-state="${tones[check.status] || 'neutral'}">${labels[check.status] || '未知'}</span><time>${Number(check.durationMs || 0)} ms</time></article>`).join('')}</div></section><div class="security-callout"><span>i</span><div><strong>端到端验证边界</strong>“通过”表示中心服务器本机接口和配置检查通过。FCM 实际投递、真实音频转写与手机/电脑配对列为未执行，因为它们会发送外部请求、产生费用或需要真实设备。</div></div></div>`;
+    return `<div class="section-stack"><section class="panel-card"><div class="panel-title-row"><div><h2>最近一次检查</h2><p>${date(result.performedAt)} · 常规检查不会执行真实推送、音频转写或终端配对。</p></div><button class="btn btn-primary btn-sm" data-action="run-diagnostics">重新运行</button></div><div class="diagnostic-summary">${['pass', 'fail', 'warn', 'skipped'].map((key) => `<span class="state-pill" data-state="${tones[key]}">${labels[key]} ${Number(summary[key] || 0)}</span>`).join('')}</div></section><section class="panel-card"><div class="diagnostic-list">${(result.checks || []).map((check) => `<article class="diagnostic-row"><div><strong>${esc(check.label)}</strong><small>${esc(check.detail)}</small></div><span class="state-pill" data-state="${tones[check.status] || 'neutral'}">${labels[check.status] || '未知'}</span><time>${Number(check.durationMs || 0)} ms</time></article>`).join('')}</div></section>${asrProbe}<div class="security-callout"><span>i</span><div><strong>端到端验证边界</strong>常规检查不验证真实推送或手机账号链路；供应商测试只检查 OpenAI 转写，不代表手机端到端测试通过。</div></div></div>`;
   }
 
   function renderMigrations(migrations) {
@@ -502,6 +507,17 @@
       } catch {
         // The shared action handler already presents a safe error message.
       }
+    } else if (actionName === 'test-asr') {
+      const file = document.getElementById('asrTestAudio')?.files?.[0];
+      if (!file || file.size > 650000) { showFlash(errorMessages.ASR_TEST_AUDIO_INVALID, 'error'); return; }
+      if (!window.confirm('音频将发送给 OpenAI，可能产生费用。继续测试？')) return;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+      try {
+        state.asrTest = await action('/api/diagnostics/asr-transcription', { confirmed: true, audioBase64: btoa(binary) }, '供应商已返回转写结果。', false);
+        await refreshCurrent();
+      } catch { /* The action handler presents the error. */ }
     }
   });
 

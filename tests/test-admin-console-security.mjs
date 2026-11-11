@@ -109,6 +109,21 @@ async function main() {
     assert.equal(seen.at(-1).actor, ownerEmail);
     assert.deepEqual(seen.at(-1).data, {}, 'the request cannot provide commands or diagnostic targets');
 
+    const probe = await fetch(`${base}/api/diagnostics/asr-transcription`, {
+      method: 'POST',
+      headers: { 'cf-access-jwt-assertion': token(), Origin: 'https://ops.agentoncloud.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, audioBase64: 'AA==' }),
+    });
+    assert.equal(probe.status, 200);
+    assert.equal(seen.at(-1).op, 'test_asr_transcription');
+    assert.equal(seen.at(-1).actor, ownerEmail);
+
+    const deniedProbe = await fetch(`${base}/api/diagnostics/asr-transcription`, {
+      method: 'POST', headers: { 'cf-access-jwt-assertion': token(), Origin: 'https://attacker.example', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, audioBase64: 'AA==' }),
+    });
+    assert.equal(deniedProbe.status, 403);
+
     const direct = await fetch(`${base}/`);
     assert.equal(direct.status, 401, 'the page itself is denied without Cloudflare Access');
   } finally {

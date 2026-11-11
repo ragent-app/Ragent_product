@@ -2,7 +2,10 @@
 """Narrow privileged helper for the owner-only AgentoC control panel."""
 
 import datetime as dt
+import base64
+import binascii
 import http.client
+import io
 import ipaddress
 import json
 import os
@@ -16,6 +19,7 @@ import tempfile
 import time
 import shutil
 import urllib.parse
+import wave
 
 try:
     import grp
@@ -1069,6 +1073,58 @@ def _update_asr(actor, data):
     return {"enabled": enabled}
 
 
+def _test_asr_transcription(actor, data):
+    """An explicitly billed provider probe; it does not impersonate a user."""
+    if data.get("confirmed") is not True:
+        raise AdminError("ASR_TEST_CONFIRMATION_REQUIRED")
+    encoded = data.get("audioBase64")
+    if not isinstance(encoded, str) or len(encoded) > 900000:
+        raise AdminError("ASR_TEST_AUDIO_INVALID")
+    try:
+        audio = base64.b64decode(encoded, validate=True)
+        if len(audio) > 650000:
+            raise ValueError("audio too large")
+        with wave.open(io.BytesIO(audio), "rb") as wav:
+            rate, frames = wav.getframerate(), wav.getnframes()
+            if wav.getnchannels() != 1 or wav.getsampwidth() != 2 or rate != 16000 or not 4000 <= frames <= 320000:
+                raise ValueError("unsupported audio")
+            if len(wav.readframes(frames)) != frames * 2:
+                raise ValueError("truncated audio")
+    except (binascii.Error, ValueError, EOFError, wave.Error):
+        raise AdminError("ASR_TEST_AUDIO_INVALID")
+    accounts = read_env(ACCOUNTS_ENV)
+    if accounts.get("AGENTOC_ACCOUNTS_ASR_ENABLED") != "1" or not accounts.get("OPENAI_API_KEY"):
+        raise AdminError("ASR_TEST_UNAVAILABLE")
+    boundary = "agentoc-asr-" + secrets.token_hex(16)
+    payload = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-transcribe\r\n"
+               f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n"
+               "Content-Type: audio/wav\r\n\r\n").encode() + audio + f"\r\n--{boundary}--\r\n".encode()
+    connection = http.client.HTTPSConnection("api.openai.com", 443, timeout=30)
+    try:
+        connection.request("POST", "/v1/audio/transcriptions", body=payload, headers={
+            "Authorization": "Bearer " + accounts["OPENAI_API_KEY"],
+            "Content-Type": "multipart/form-data; boundary=" + boundary,
+        })
+        response = connection.getresponse()
+        body = response.read(256 * 1024 + 1)
+        if response.status != 200 or len(body) > 256 * 1024:
+            raise AdminError("ASR_TEST_PROVIDER_FAILED")
+        result = json.loads(body)
+        transcript = result.get("text") if isinstance(result, dict) else None
+        if not isinstance(transcript, str) or not transcript.strip() or len(transcript) > 20000:
+            raise AdminError("ASR_TEST_PROVIDER_FAILED")
+    except (OSError, http.client.HTTPException, ValueError, json.JSONDecodeError) as exc:
+        _audit(actor, "speech.cloud.test", "provider", "failed")
+        raise AdminError("ASR_TEST_PROVIDER_FAILED") from exc
+    except AdminError:
+        _audit(actor, "speech.cloud.test", "provider", "failed")
+        raise
+    finally:
+        connection.close()
+    _audit(actor, "speech.cloud.test", "provider", "success")
+    return {"text": transcript.strip(), "durationMs": (frames * 1000) // rate, "scope": "provider-only"}
+
+
 def _validate_secret(secret_id, value):
     if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 1024 * 1024:
         raise AdminError("INVALID_SECRET")
@@ -1237,6 +1293,8 @@ def handle_operation(request):
         return _set_secret(actor, data)
     if op == "set_asr":
         return _update_asr(actor, data)
+    if op == "test_asr_transcription":
+        return _test_asr_transcription(actor, data)
     if op == "rotate_database_password":
         return _rotate_database_password(actor)
     if op == "restart_service":
