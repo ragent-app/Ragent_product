@@ -15,6 +15,19 @@ user's `~/.config/agentoc/owner-credentials.txt` with owner-only permissions.
 After recording it and changing the password in Settings, delete that file.
 The configuration directory and existing credentials are retained on upgrade.
 
+## Login startup
+
+Login startup is opt-in. Stop an existing Ragent service first, then run
+`/Applications/AgentoC.app/Contents/Resources/agentoc-login enable` in Terminal.
+Use the same command with `status` to inspect it or `disable` to stop and
+unregister it. The tool leaves configuration, credentials, workspaces and
+logs in place. It will not overwrite a different LaunchAgent or unload another
+job with the same label. Disable it before moving the app, then enable it from
+the new location. A pre-existing manually installed job must be reviewed and
+removed separately. Native tests have exercised registration and removal with
+an isolated stub service; actual login, recovery and upgrades still require
+acceptance using the final installed app.
+
 ## Approval limitation
 
 The semantic approval compiler and permission target validator currently model

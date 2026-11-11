@@ -426,6 +426,8 @@ install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/AgentoC"
 install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/agentoc-service"
 install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/agentoc-stop"
 install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/Resources/agentoc-cli"
+install -m 0755 "$ROOT/packaging/macos/agentoc-login" "$CONTENTS/Resources/agentoc-login"
+install -m 0644 "$ROOT/packaging/macos/agentoc-login.cjs" "$CONTENTS/Resources/agentoc-login.cjs"
 install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/Resources/agentoc-env.sh"
 install -m 0644 "$ROOT/packaging/macos/com.agentoc.agentoc.plist" "$CONTENTS/Resources/com.agentoc.agentoc.plist"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$CONTENTS/Resources/README.txt"
@@ -513,7 +515,7 @@ BUNDLED_NODE_VERSION="$("$CONTENTS/Resources/runtime/node" --version)"
   echo "Bundled Node reports $BUNDLED_NODE_VERSION, expected $NODE_VERSION" >&2
   exit 1
 }
-for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/Resources/agentoc-service" "$CONTENTS/Resources/agentoc-stop" "$CONTENTS/Resources/agentoc-cli" "$CONTENTS/Resources/agentoc-env.sh"; do
+for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/Resources/agentoc-service" "$CONTENTS/Resources/agentoc-stop" "$CONTENTS/Resources/agentoc-cli" "$CONTENTS/Resources/agentoc-login" "$CONTENTS/Resources/agentoc-env.sh"; do
   bash -n "$script" || { echo "Launcher syntax error: $script" >&2; exit 1; }
 done
 for required in \

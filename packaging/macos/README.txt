@@ -20,15 +20,15 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 
 可选：登录时自动启动（手机随时可连的前提）
 ------------------------------------------
-APP="/Applications/AgentoC.app"
-mkdir -p ~/Library/LaunchAgents
-sed -e "s|{{APP_PATH}}|$APP|g" -e "s|{{HOME}}|$HOME|g" \
-  "$APP/Contents/Resources/com.agentoc.agentoc.plist" \
-  > ~/Library/LaunchAgents/cloud.agenton.agentoc.plist
-launchctl load ~/Library/LaunchAgents/cloud.agenton.agentoc.plist
-# 卸载：launchctl unload ~/Library/LaunchAgents/cloud.agenton.agentoc.plist && rm 该文件
-# 注意：使用自启动后无需再双击 App；停止服务用 agentoc-stop（LaunchAgent 会自动拉起，
-# 彻底停用请先 launchctl unload）。
+先停止正在运行的 Ragent 服务，然后在终端中运行：
+"/Applications/AgentoC.app/Contents/Resources/agentoc-login" enable
+查询状态："/Applications/AgentoC.app/Contents/Resources/agentoc-login" status
+停用并停止登录服务："/Applications/AgentoC.app/Contents/Resources/agentoc-login" disable
+停用不会删除配置、凭据、工作区或日志。启用后服务在登录时启动并在异常
+退出后重启；正常退出服务前请先停用自启动。若已有同名的手工配置，本工具
+不会覆盖或卸载它，请先自行检查和移除旧配置。移动应用前请先停用，移动后
+再从新位置启用。服务日志位于配置目录下 launch-agent.stdout.log 和
+launch-agent.stderr.log，要求仅当前用户可读写。
 
 手机连接（TURN + P2P）
 ----------------------
