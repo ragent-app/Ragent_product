@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { actionTool, agentCreateTool, handleRequest } from '../scripts/agentoc-approved-actions-mcp.mjs';
+import { codexApprovedActionTools, handleCodexApprovedActionCall } from '../chat/codex-approved-action-dynamic-tools.mjs';
 
 // Both calls use the same imported handler, but distinct run-bound credentials.
 // Responses arrive out of order to detect accidental process-global state.
@@ -36,6 +37,16 @@ try {
   assert.equal(agentCreateTool().name, 'agentoc_create_agent');
   const denied = await handleRequest(request('a'), { ...config('a'), enabled: false });
   assert.equal(denied.result.isError, true);
+  assert.deepEqual(codexApprovedActionTools(config('a')).map(tool => tool.name), ['agentoc_request_actions', 'agentoc_create_agent']);
+  const call = { id: 'server-request', method: 'item/tool/call', params: { threadId: 'codex-thread-a', turnId: 'codex-turn-a', callId: 'call-a', tool: 'agentoc_request_actions', arguments: { actions: [{ command: 'operation-a' }] } } };
+  const binding = { active: true, threadId: 'codex-thread-a', turnId: 'codex-turn-a', config: config('a') };
+  const response = await handleCodexApprovedActionCall(call, binding);
+  assert.equal(response.result.success, true);
+  assert.equal(JSON.parse(response.result.contentItems[0].text).batchId, 'batch-run-a');
+  for (const badBinding of [{ ...binding, threadId: 'other' }, { ...binding, turnId: 'other' }, { ...binding, active: false }]) {
+    assert.equal((await handleCodexApprovedActionCall(call, badBinding)).error.code, -32003);
+  }
+  assert.equal((await handleCodexApprovedActionCall({ ...call, params: { ...call.params, namespace: 'other' } }, binding)).error.code, -32003);
   console.log('test-approved-action-shared-handler: concurrent calls retain run bindings');
 } finally {
   await new Promise(resolve => server.close(resolve));
