@@ -52,6 +52,18 @@ async function fixture(mode) {
 }
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
+  state.turnActive = true;
+  const request = { type: 'control_request', request_id: `fallback-danger-${mode}`, request: {
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'grep missing readme.txt 2>/dev/null || rm -rf /c/Windows' },
+  } };
+  await trackClaudeBidiApprovalRequest(run.id, state, request, proc);
+  if (mode === 'recommended') {
+    assert.equal(sent.length, 0);
+    assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:fallback-danger-${mode}`));
+  } else assert.equal(sent[0]?.response?.response?.behavior, 'deny');
+}
+for (const mode of ['recommended', 'full-auto']) {
+  const { run, state, sent, proc } = await fixture(mode);
   state.riskContextValid = false;
   const request = { type: 'control_request', request_id: 'unverified-system-roots', request: {
     subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: path.join(workspace, 'unverified.md') },
@@ -105,7 +117,7 @@ for (const mode of ['recommended', 'full-auto']) {
   const request = (id, command) => ({ type: 'control_request', request_id: id, request: {
     subtype: 'can_use_tool', tool_name: 'Bash', input: { command, description: 'read fixture' },
   } });
-  const ordinaryCommands = ['cat readme.txt', "sed -n '1,10p' readme.txt", 'ls -la', 'rg --files', 'rg --files .', 'cat ../outside-visible.txt'];
+  const ordinaryCommands = ['cat readme.txt', "sed -n '1,10p' readme.txt", 'ls -la', 'rg --files', 'rg --files .', 'cat ../outside-visible.txt', 'grep missing readme.txt 2>/dev/null || cat readme.txt'];
   for (const [index, command] of ordinaryCommands.entries()) {
     await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-${mode}-${index}`, command), proc);
     const response = sent[index]?.response?.response;

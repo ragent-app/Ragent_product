@@ -88,8 +88,31 @@ function readUtilityOperands(program, args) {
 
 // Recognize only a single trailing stdout redirection to one literal path.
 // Leave descriptor manipulation, shell control syntax and expansion to review.
+function stripLiteralNullStderr(command) {
+  let result = ''; let quote = '';
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    if (quote === "'") { result += c; if (c === "'") quote = ''; continue; }
+    if (quote === '"') {
+      result += c;
+      if (c === '"') quote = '';
+      else if (c === '\\' && i + 1 < command.length) result += command[++i];
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; result += c; continue; }
+    if (c === '\\' && i + 1 < command.length) { result += c + command[++i]; continue; }
+    if (c === '2' && (i === 0 || /\s/.test(command[i - 1]))) {
+      const match = command.slice(i).match(/^2>[ \t]*\/dev\/null(?=[ \t]|$)/);
+      if (match) { result += ' '; i += match[0].length - 1; continue; }
+    }
+    result += c;
+  }
+  return result;
+}
+
 function splitLiteralOutput(command) {
   if (typeof command !== 'string' || !command.trim() || command.length > 128 * 1024 || /[\r\n\0]/.test(command)) return null;
+  command = stripLiteralNullStderr(command);
   let quote = ''; let offset = -1; let width = 0;
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
@@ -131,8 +154,8 @@ export function splitLiteralCompound(command) {
     if (c === '\\') { i += 1; continue; }
     if (!['|', '&', ';'].includes(c)) continue;
     let operator = c;
-    if (c === '&' && command[i + 1] === '&') { operator = '&&'; i += 1; }
-    else if (c === '&' || (c === '|' && ['|', '&'].includes(command[i + 1]))) return null;
+    if ((c === '&' && command[i + 1] === '&') || (c === '|' && command[i + 1] === '|')) { operator = c + c; i += 1; }
+    else if (c === '&' || (c === '|' && command[i + 1] === '&')) return null;
     const segment = command.slice(start, i + 1 - operator.length).trim();
     if (!segment) return null;
     segments.push(segment); operators.push(operator); start = i + 1;
@@ -195,7 +218,10 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
       const next = await analyzeWindowsBash(tail, { ...context, cwd: action.target.actual }, { analyzeFiles });
       if (!next.complete || !next.actions.length) return { ...next, actions: [...directory.actions, ...(next.actions || [])] };
       const absolute = action.target.lexical.replaceAll('\\', '/').replaceAll("'", "'\\''");
-      return { complete: true, actions: [...directory.actions, ...next.actions], rewrittenCommand: `builtin cd -- '${absolute}' && ${next.rewrittenCommand || tail}` };
+      // Keep every classified tail segment behind the successful directory
+      // change, including || and ; branches, so a failed cd cannot execute a
+      // path checked against the destination from the original directory.
+      return { complete: true, actions: [...directory.actions, ...next.actions], rewrittenCommand: `builtin cd -- '${absolute}' && { ${next.rewrittenCommand || tail}; }` };
     }
     const actions = []; let pipeInput = false;
     for (let i = 0; i < compound.segments.length; i += 1) {
@@ -281,7 +307,7 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
       ? withOutput(analyzed)
       : { complete: false, actions: [], reason: 'Git command is not on the read-only allowlist' };
   }
-  if ((program === 'pwd' && words.length === 1) || program === 'echo') {
+  if ((['pwd', 'true', 'false', ':'].includes(program) && words.length === 1) || program === 'echo') {
     return outputEntry.length ? analyzeFiles(outputEntry, context) : { complete: true, actions: [{ kind: 'read', program, target: null }] };
   }
   if (['head', 'tail', 'wc', 'grep', 'sed'].includes(program)) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { link, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { access, link, mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { analyzeWindowsBash, parseLiteralBashWords } from '../chat/windows-bash-actions.mjs';
@@ -46,6 +46,16 @@ if (process.platform === 'win32') {
     assert.equal((await inspect(command)).decision, 'review', command);
   }
   assert.equal((await inspect('ls -la')).decision, 'allow');
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    await mkdir(path.join(workspace, 'transient'));
+    await writeFile(path.join(workspace, 'transient', 'readme.txt'), 'fixture');
+    const transition = await analyzeWindowsBash('cd transient && cat readme.txt || echo changed > marker.txt', { ...context, allowCwdRewrite: true });
+    assert.equal(decideWindowsPowerShellActions(transition).decision, 'allow');
+    await rename(path.join(workspace, 'transient'), path.join(workspace, 'moved-transient'));
+    const result = spawnSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', transition.rewrittenCommand], { cwd: workspace, windowsHide: true });
+    assert.notEqual(result.status, 0);
+    await assert.rejects(access(path.join(workspace, 'marker.txt')), { code: 'ENOENT' });
+  }
   for (const command of [`rg ${ripgrepSafePrefix()} --files .`, `rg ${ripgrepSafePrefix()} --files -g '!*.txt' .`, "rg --no-config -S --max-count 2 -e fixture '中文 文件.md'"]) {
     assert.equal((await inspect(command)).decision, 'allow', `safe ripgrep request: ${command}`);
   }
@@ -59,6 +69,11 @@ if (process.platform === 'win32') {
     "cat '中文 文件.md' | sed -n '1,100p'",
     'git status --short && git branch --show-current',
     'git status --short; git branch --show-current',
+    "grep missing '中文 文件.md' || true",
+    "cat '中文 文件.md' || false",
+    "cat '中文 文件.md' | grep fixture || :",
+    "grep missing '中文 文件.md' 2>/dev/null || true",
+    "cat '中文 文件.md' 2> /dev/null",
   ]) assert.equal((await inspect(command)).decision, 'allow', `ordinary compound read: ${command}`);
   for (const command of [
     "cat '中文 文件.md' | bash -c 'rm -rf ordinary'",
@@ -66,6 +81,9 @@ if (process.platform === 'win32') {
     "cat '中文 文件.md' | head secret/.ssh/fixture-key",
     "cat '中文 文件.md' | head -n $(whoami)",
     "cat '中文 文件.md' || rm -rf ordinary",
+    "false || cat secret/.ssh/fixture-key",
+    "cat '中文 文件.md' 2> secret/.ssh/key || true",
+    "cat '中文 文件.md' 2>/dev/nullx || true",
     "cat '中文 文件.md' && rm -rf secret",
     "echo fixture > ordinary-link | head",
     "cat '中文 文件.md' | head > secret/.ssh/key",
