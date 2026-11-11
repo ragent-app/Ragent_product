@@ -17,6 +17,8 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>Umask</key>
+    <integer>63</integer>
     <key>WorkingDirectory</key>
     <string>{{HOME}}</string>
     <key>StandardOutPath</key>

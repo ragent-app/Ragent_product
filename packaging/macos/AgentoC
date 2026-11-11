@@ -50,7 +50,14 @@ if lsof -ti ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 fi
 
-nohup "$AGENTOC_NODE_BIN" "$AGENTOC_APP_DIR/chat-server.mjs" >>"$AGENTOC_RUN_LOG" 2>&1 &
+(
+  # The service log can contain workspace and session details. Protect a new
+  # file from creation and tighten an existing file before opening it.
+  umask 077
+  touch "$AGENTOC_RUN_LOG"
+  chmod 600 "$AGENTOC_RUN_LOG"
+  exec nohup "$AGENTOC_NODE_BIN" "$AGENTOC_APP_DIR/chat-server.mjs" >>"$AGENTOC_RUN_LOG" 2>&1
+) &
 echo $! > "$AGENTOC_PID_FILE"
 
 ready=0

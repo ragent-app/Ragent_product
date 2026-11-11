@@ -41,6 +41,7 @@ export CHAT_PORT="$port"
 server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
 kill -0 "$server_pid"
 curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
+node -e 'const fs=require("fs");if((fs.statSync(process.argv[1]).mode & 0o777)!==0o600)process.exit(1)' "$AGENTOC_CONFIG_DIR/chat-server.log"
 "$contents/MacOS/AgentoC"
 [ "$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")" = "$server_pid" ]
 "$contents/MacOS/agentoc-stop"
