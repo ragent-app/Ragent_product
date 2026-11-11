@@ -219,6 +219,15 @@ try {
   );
   assert.deepEqual(ownershipCalls.map(({ args }) => args[0]), ['passwd', 'group']);
 
+  for (const uid of [0, null]) {
+    await assert.rejects(() => launchLifecycleRunner('run_badidentity', {
+      serviceUser: 'svc', serviceGroup: 'svc',
+      readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
+      resolveRunnerOwnershipImpl: async () => ({ uid, gid: 1234 }),
+      execFileImpl: async () => { throw new Error('runner must not launch'); },
+    }), error => error.code === 'RUNNER_IDENTITY_INVALID');
+  }
+
   await assert.rejects(
     () => launchDetachedRunnerViaLifecycleBroker('not-a-run', { socketPath }),
     /Runner lifecycle broker rejected launch request|Invalid runner launch request/,
@@ -310,6 +319,7 @@ try {
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
     controlUser: 'owner',
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
     environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
     readManifestImpl: async () => ({
       executionScope: { cwd: { realPath: '/srv/work/app' }, workspaceRoot: { realPath: '/srv/work' } },
@@ -332,6 +342,7 @@ try {
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
     controlUser: 'owner',
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
     environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
     readManifestImpl: async () => ({
       executionScope: { cwd: { realPath: '/srv/work/app' } },
@@ -362,7 +373,7 @@ try {
       AGENTOC_RUN_SPOOL_DIR: join(root, 'run-results'),
       AGENTOC_RUNNER_INHERITED_GROUPS: 'owner',
     },
-    resolveRunnerOwnershipImpl: async () => ({ uid: null, gid: null }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
     readManifestImpl: async () => ({ tool: 'agy', executionScope: { accessMode: 'read' }, options: { runtimeFamily: 'agy-json' } }),
     prepareNativeRunProviderHomeImpl: async (runId, manifest, options) => {
       agyPrepareCalls.push({ runId, manifest, options });
@@ -403,6 +414,7 @@ try {
       serviceUser: 'svc',
       serviceGroup: 'svc',
       serviceHome: '/home/svc',
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
       readManifestImpl: async () => ({ executionScope: { cwd: { realPath: '/srv/work/app' } } }),
       grantWorkspaceAccessImpl: grantImpl,
       revokeWorkspaceAccessImpl: async (options) => {
@@ -425,6 +437,7 @@ try {
       serviceUser: 'svc',
       serviceGroup: 'svc',
       serviceHome: '/home/svc',
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
       launchAttempt: 2,
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       readManifestImpl: async () => ({ executionScope: { cwd: { realPath: '/srv/work/app' } } }),
@@ -468,7 +481,7 @@ try {
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
     launchAttempt: 3,
-    resolveRunnerOwnershipImpl: async () => ({ uid: null, gid: null }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
     resolveInheritedGroupsImpl: async () => [],
     readManifestImpl: async () => ({}),
     readUnitStateImpl: async () => {

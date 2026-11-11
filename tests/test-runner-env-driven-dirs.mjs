@@ -89,7 +89,7 @@ async function main() {
       serviceUser: currentUser,
       serviceGroup: currentUser,
       serviceHome: join(tmp, 'runner-home'),
-      resolveRunnerOwnershipImpl: async () => ({ uid: null, gid: null }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
       environment: {
         PATH: '/usr/bin',
         AGENTOC_RUN_SPOOL_DIR: spoolRoot,
@@ -128,7 +128,7 @@ async function main() {
       serviceUser: currentUser,
       serviceGroup: currentUser,
       serviceHome: join(tmp, 'runner-home'),
-      resolveRunnerOwnershipImpl: async () => ({ uid: null, gid: null }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
       environment: {
         PATH: '/usr/bin',
         AGENTOC_RUN_SPOOL_DIR: spoolRoot,

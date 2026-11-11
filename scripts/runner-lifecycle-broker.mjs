@@ -528,6 +528,11 @@ async function launchLifecycleRunnerUnlocked(runId, {
   const resolvedServiceUser = serviceUser || await resolveRunnerUser();
   const resolvedServiceGroup = serviceGroup || await resolveRunnerGroup(resolvedServiceUser);
   const runnerOwnership = await resolveRunnerOwnershipImpl(resolvedServiceUser, resolvedServiceGroup);
+  if (!Number.isSafeInteger(runnerOwnership?.uid) || runnerOwnership.uid <= 0) {
+    const error = new Error('Cannot launch a Run without a verified non-root runner identity');
+    error.code = 'RUNNER_IDENTITY_INVALID';
+    throw error;
+  }
   const resolvedServiceHome = serviceHome || await resolveServiceHome(resolvedServiceUser);
   // Same-user is intentional: it restores owner permissions for existing user
   // worktrees and home files. Supplementary groups still come from the trusted

@@ -34,6 +34,7 @@ const preinst = read('packaging/deb/preinst');
 const postinst = read('packaging/deb/postinst');
 const prerm = read('packaging/deb/prerm');
 const postrm = read('packaging/deb/postrm');
+const runAsServiceUser = read('packaging/deb/run-as-service-user');
 const legacyCcSwitchRetirement = read('packaging/deb/retire-legacy-cc-switch');
 const repairStateAccess = read('packaging/deb/repair-state-access');
 const packageJson = JSON.parse(read('package.json'));
@@ -129,6 +130,23 @@ if (process.platform !== 'win32') {
       env: { ...process.env, STOP_RESULT: stopResult, REPORTED_STATE: reportedState }, encoding: 'utf8',
     });
     assert.equal(result.status, expectedStatus, `stop=${stopResult} state=${reportedState}`);
+  }
+  for (const [source, endMarker] of [[postinst, '\nuser_home() {'], [runAsServiceUser, '\nservice_user="$(resolve_service_user)"']]) {
+    const userGuard = source.slice(source.indexOf('trim_service_user() {'), source.indexOf(endMarker));
+    assert.ok(userGuard.startsWith('trim_service_user() {'));
+    for (const [entry, expectedStatus] of [
+      ['service:x:1001:1001::/home/service:/bin/sh', 0],
+      ['service:x:0:0::/root:/bin/sh', 1],
+      ['service:x:0000:0::/root:/bin/sh', 1],
+      ['service:x:not-a-uid:0::/root:/bin/sh', 1],
+      ['', 1],
+    ]) {
+      const script = `getent() { printf '%s\\n' "$PASSWD_ENTRY"; }\n${userGuard}\nresolve_service_user`;
+      const result = spawnSync('sh', ['-c', script], {
+        env: { ...process.env, AGENTOC_SERVICE_USER: 'service', PASSWD_ENTRY: entry }, encoding: 'utf8',
+      });
+      assert.equal(result.status, expectedStatus, `service user entry ${entry}`);
+    }
   }
 }
 assert.match(postrm, /! -name accounts/);

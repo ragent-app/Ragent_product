@@ -52,10 +52,24 @@ resolve_service_user() {
       exit 1
       ;;
   esac
-  if ! getent passwd "$user" >/dev/null 2>&1; then
+  user_entry="$(getent passwd "$user" || true)"
+  if [ -z "$user_entry" ]; then
     echo "AgentoC service user does not exist: $user" >&2
     exit 1
   fi
+  user_uid="$(printf '%s\n' "$user_entry" | awk -F: '{ print $3 }')"
+  case "$user_uid" in
+    ''|*[!0-9]*)
+      echo "Cannot verify AgentoC service user identity: $user" >&2
+      exit 1
+      ;;
+    *)
+      if ! [ "$user_uid" -gt 0 ] 2>/dev/null; then
+        echo "AgentoC service user must be a non-root local user." >&2
+        exit 1
+      fi
+      ;;
+  esac
   printf '%s\n' "$user"
 }
 
