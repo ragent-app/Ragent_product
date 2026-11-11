@@ -13,6 +13,7 @@ const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-approval-sidecar-'));
 const workspace = path.join(root, 'instance', 'workspace');
 await mkdir(workspace, { recursive: true });
 await writeFile(path.join(workspace, 'readme.txt'), 'fixture');
+await writeFile(path.join(workspace, '..', 'outside-visible.txt'), 'ordinary outside fixture');
 const psPath = (name) => `'${path.join(workspace, name).replace(/'/g, "''")}'`;
 const bashPath = (name) => {
   const absolute = path.join(workspace, name);
@@ -88,6 +89,52 @@ for (const mode of ['recommended', 'full-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-sensitive-${mode}`, `rg --files -g '*' ${rgBashPath}`), proc);
   if (mode === 'recommended') assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === `claude:rg-sensitive-${mode}`));
   else assert.equal(sent[1]?.response?.response?.behavior, 'deny');
+}
+for (const mode of ['recommended', 'full-auto']) {
+  const { run, state, sent, proc } = await fixture(mode);
+  state.turnActive = true;
+  const request = (id, command) => ({ type: 'control_request', request_id: id, request: {
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command, description: 'read fixture' },
+  } });
+  const ordinaryCommands = ['cat readme.txt', "sed -n '1,10p' readme.txt", 'ls -la', 'rg --files', 'rg --files .', 'cat ../outside-visible.txt'];
+  for (const [index, command] of ordinaryCommands.entries()) {
+    await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-${mode}-${index}`, command), proc);
+    const response = sent[index]?.response?.response;
+    assert.equal(response?.behavior, 'allow', `${mode}: ${command} should not ask or deny`);
+    assert.equal(response.updatedInput?.description, 'read fixture');
+    assert.match(response.updatedInput?.command || '', /\/proc\/self\/cwd -ef/);
+    if (process.env.AGENTOC_TEST_BASH_BINARY) {
+      const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
+        cwd: workspace, encoding: 'utf8', windowsHide: true,
+      });
+      assert.match(output, command.startsWith('rg ') || command.startsWith('ls ') ? /readme\.txt/ : /fixture/);
+    }
+  }
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-write-${mode}`, `echo safe > created-${mode}.txt`), proc);
+  const write = sent[ordinaryCommands.length]?.response?.response;
+  assert.equal(write?.behavior, 'allow', `${mode}: ordinary workspace write should not ask or deny`);
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', write.updatedInput.command], {
+      cwd: workspace, encoding: 'utf8', windowsHide: true,
+    });
+  }
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-outside-write-${mode}`, `echo safe > ../outside-created-${mode}.txt`), proc);
+  const outsideWrite = sent[ordinaryCommands.length + 1]?.response?.response;
+  assert.equal(outsideWrite?.behavior, 'allow', `${mode}: ordinary outside-workspace write should not ask or deny`);
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideWrite.updatedInput.command], {
+      cwd: workspace, encoding: 'utf8', windowsHide: true,
+    });
+  } else await writeFile(path.join(workspace, '..', `outside-created-${mode}.txt`), 'safe');
+  await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-outside-delete-${mode}`, `rm ../outside-created-${mode}.txt`), proc);
+  const outsideDelete = sent[ordinaryCommands.length + 2]?.response?.response;
+  assert.equal(outsideDelete?.behavior, 'allow', `${mode}: ordinary outside-workspace file deletion should not ask or deny`);
+  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+    execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideDelete.updatedInput.command], {
+      cwd: workspace, encoding: 'utf8', windowsHide: true,
+    });
+  }
+  assert.equal((await getRun(run.id)).appServerPendingApprovals?.length || 0, 0);
 }
 for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
@@ -239,8 +286,8 @@ for (const mode of ['recommended', 'full-auto']) {
   state.turnActive = true;
   const request = (id, command) => ({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command } } });
   await trackClaudeBidiApprovalRequest(run.id, state, request('relative-write', 'Set-Content -Path output.md -Value hello'), proc);
-  assert.equal(sent[0]?.response?.response?.behavior, 'deny');
-  assert.match(sent[0]?.response?.response?.message || '', /absolute paths/);
+  assert.equal(sent[0]?.response?.response?.behavior, 'allow');
+  assert.match(sent[0]?.response?.response?.updatedInput?.command || '', /CurrentLocation/);
   await trackClaudeBidiApprovalRequest(run.id, state, request('absolute-write', `Set-Content -Path ${psPath('output.md')} -Value hello`), proc);
   assert.equal(sent[1]?.response?.response?.behavior, 'allow');
 }

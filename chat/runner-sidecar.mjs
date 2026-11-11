@@ -112,12 +112,13 @@ import {
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
 import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
+import { buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
 import { verifyCodexWindowsInstallBridgeApproval } from './codex-windows-install-hook.mjs';
 import { createCodexManagedHookSetup } from './codex-managed-hook-setup.mjs';
-import { buildWindowsSafeDeleteBridge, needsClaudeAbsoluteDeleteRetry } from './windows-safe-delete-bridge.mjs';
+import { buildWindowsSafeDeleteBridge } from './windows-safe-delete-bridge.mjs';
 import { verifyCodexWindowsSafeDeleteApproval } from './codex-windows-safe-delete-hook.mjs';
 import { buildPrivilegedBatch } from './privileged-ops.mjs';
 import {
@@ -2882,20 +2883,21 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     if (record) state.pendingApprovals.set(approval.approvalId, record);
     return record;
   }
-  const relativeRetry = gateDecision.reason === 'working directory is not attested' && approval.kind === 'command' &&
-    ['PowerShell', 'Bash'].includes(approval.params?.tool_name) && state.turnActive === true && state.riskContextValid === true &&
-    ['recommended', 'full-auto'].includes(state.riskMode) && state.interactionMode !== 'plan' && state.permissionMode !== 'plan';
-  if (process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !deleteBridge &&
-      (relativeRetry || await needsClaudeAbsoluteDeleteRetry({ approval, state, helperPath: safeDeleteHelperPath }))) {
-    const reason = 'For this Windows operation, resolve each target against the command working directory and retry the same command using absolute paths and the same options.';
-    const message = buildClaudeBidiApprovalResponseMessage(approval, 'deny', null, { message: reason });
-    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to request an absolute deletion target');
-    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: { type: 'agentoc.approval_response',
-      approvalId: approval.approvalId, provider: 'claude', decision: 'denied', status: 'denied', autoDenied: true,
-      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '', reason } });
-    return null;
+  const relativeOperationBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !deleteBridge
+    && ['working directory is not attested', 'ripgrep configuration is not disabled', 'ripgrep path cannot be resolved'].includes(gateDecision.reason)
+    ? await buildClaudeWindowsRelativeOperationBridge({ approval, state }) : null;
+  if (relativeOperationBridge) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: relativeOperationBridge.updatedInput });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send working-directory-bound operation response');
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'operation bound to execution working directory', ...riskAuditFields(relativeOperationBridge.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, relativeOperationBridge.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
   }
-
   if (deleteBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: deleteBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled deletion response');

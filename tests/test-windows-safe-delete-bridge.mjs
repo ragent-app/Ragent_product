@@ -156,8 +156,10 @@ for (const mode of ['recommended', 'full-auto']) {
       request: { subtype: 'can_use_tool', tool_name: shell, input: { command } } });
     const relative = shell === 'PowerShell' ? "Remove-Item -LiteralPath '.ssh' -Recurse -Force" : "rm -rf '.ssh'";
     await trackClaudeBidiApprovalRequest(run.id, state, makeRequest('relative-sensitive', relative), proc, { safeDeleteHelperPath: helperPath });
-    assert.equal(sent.at(-1)?.response?.response?.behavior, 'deny');
-    assert.match(sent.at(-1)?.response?.response?.message || '', /absolute path/);
+    if (mode === 'recommended') {
+      assert.equal(sent.length, 0);
+      assert.ok((await getRun(run.id)).appServerPendingApprovals?.some((entry) => entry.approvalId === 'claude:relative-sensitive'));
+    } else assert.equal(sent.at(-1)?.response?.response?.behavior, 'deny');
     const bashTarget = `/${target[0].toLowerCase()}${target.slice(2).replaceAll('\\', '/')}`;
     const absolute = shell === 'PowerShell'
       ? `Remove-Item -LiteralPath '${target.replace(/'/g, "''")}' -Recurse -Force`

@@ -177,9 +177,6 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
       : filePath ? [{ path: filePath, kind: ['Read', 'Glob', 'Grep', 'LS', 'List'].includes(toolName) ? 'read' : 'write' }]
         : [];
     if (entries.length > 10000 || entries.some((entry) => !entry.path || entry.kind === 'unknown')) return promptWindowsApproval('file change details are incomplete or too large');
-    if (approval?.providerMethod === 'item/fileChange/requestApproval' && entries.some((entry) => entry.kind === 'delete')) {
-      return promptWindowsApproval('Codex file deletion requires owner review', 'windows_file_deletion_review', 'danger');
-    }
     result = await analyzeFiles(entries, context);
   } else {
     if (approval?.kind !== 'command') return promptWindowsApproval('non-command request requires owner decision', 'windows_unrecognized_request');

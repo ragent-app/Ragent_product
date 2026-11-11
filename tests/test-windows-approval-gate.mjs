@@ -68,9 +68,9 @@ assert.equal((await decideWindowsApproval({ ...observed, params: { ...observed.p
 assert.equal((await decideWindowsApproval({ ...observed, params: { itemId: 'item-1' } }, {
   ...observedState,
   activeItems: new Map([['item-1', { type: 'fileChange', changes: [{ path: 'C:\\work\\a', kind: { type: 'delete' } }] }]]),
-}, { analyzeFiles: safe })).decision, 'prompt');
+}, { analyzeFiles: safe })).decision, 'auto-allow');
 const moveState = { ...state, activeItems: new Map([['item-1', { type: 'fileChange', changes: [{ path: 'C:\\work\\a', kind: { type: 'update', move_path: 'C:\\other\\b' } }] }]]) };
-assert.equal((await decideWindowsApproval(observed, moveState, { analyzeFiles: safe })).decision, 'prompt', 'a Codex move includes a deletion and requires owner review');
+assert.equal((await decideWindowsApproval(observed, moveState, { analyzeFiles: safe })).decision, 'auto-allow', 'ordinary moves follow the same analyzed file policy');
 assert.equal((await decideWindowsApproval(command, { ...state, riskContextValid: false })).decision, 'prompt');
 assert.equal((await decideWindowsApproval(command, { ...state, riskContextValid: false })).risk.reasons[0].code, 'windows_context_unverified');
 for (const extra of [

@@ -7,6 +7,7 @@
 - 三星 SM-S9060、Android 16 上，审批界面和事件重放合计 18 项全部通过。该测试使用设备上的合成数据，不能证明手机经真实服务提交审批的链路已经通过。
 - 使用 USB 反向端口、本机测试 HTTP 适配器和真实 Windows 审批分类及响应队列，三星点击拒绝后成功在 Windows 队列生成一条对应的 `deny`。首轮测试夹具误把内部决策名称写成 `decline` 导致断言失败，修正夹具后复测通过。该测试未覆盖正式服务的身份认证、配对、网络传输及 provider 收到响应；执行时共享工作区包含其他任务的未提交修改。
 - 同一 Codex 轮次内，工作目录、命令、其他请求字段和风险判定均一致的危险或未知命令请求，可以复用已写入历史的审批卡；用户决定在 Run 锁内分别排入每个原始请求的响应队列。不同轮次、目录、权限授予及决定后才到达的请求保持独立。三星通过本机测试通道点击一次拒绝，Windows 对两个实际 Codex 请求分别排入拒绝；本机测试还覆盖跨刷新、并发决定及终态回放。该范围不包括 Claude 请求或网络授权合并。
+- [OpenAI 官方 App Server 文档](https://developers.openai.com/codex/app-server/)说明 Codex 对并发网络审批按目标主机、协议和端口聚合，但客户端当前网络审批上下文只公开主机与协议。本机 Codex 生成的实验协议类型也只有 `host` 和 `protocol`，无法据此证明端口一致；Ragent 不在客户端按主机盲目合并不同网络授权，已支持的上游聚合由 Codex 处理。文档所述行为尚需按实际安装版本验证。
 - 三星事件重放中，没有 `riskCode` 的合成事件最初在目标摘要断言处失败。界面现对含操作信息的解释显示本地化目标摘要；修复后原失败输入和新增用例均在三星上通过。失败记录保留在 G 盘任务目录。
 - 对真实本地 Codex Hook 的工作目录试验表明：请求指定另一工作目录时，Hook 事件只暴露会话目录和命令，不暴露该工作目录。因此不能把 Hook 的会话目录当作相对路径的实际执行目录。
 - Claude 和网络授权的不同请求 ID 合并、完整手机到 Windows 服务往返、代表性工作负载的审批频率及 Linux/macOS 原生验收仍待完成。不能据此声称达到 99% 自动通过。
@@ -149,6 +150,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 验收指标：安全只读用例人工审批数为 `0`；已知危险动作自动放行数为 `0`；每个必须用户决策的操作最多一张 owner 卡；对每张卡可从日志追溯到一个明确 risk reason；对已拒绝动作确认没有对应副作用。
 
 ## 当前证据与未决项
+
+- Claude Windows 的 Bash 和 PowerShell 普通相对路径读取、写入及单文件删除，现在会先按统一风险规则分析，再在执行时核对工作目录；目标或工作目录位于工作区外本身不会触发审批。执行目录不一致时停止，敏感目标和无法确认的操作仍交给原策略。请求审批与 full-auto 的自动通过标准相同。真实 Windows Bash、PowerShell 与 sidecar fixture 已验证；此方案没有固定目录句柄，分析与执行间目录被替换仍存在竞态。
 
 - 本机 Windows Codex CLI `0.147.0` 与隔离安装的 `0.167.0`：真实 App Server 启动时只设置当前 cwd 项目 trust，不发送已退役的审批枚举；返回有效 `approvalPolicy=untrusted`、reviewer=user、sandbox 和 workspace root。0.167.0 使用本机 fake Responses provider、隔离 `CODEX_HOME` 和测试 key，命令级 owner prompt、无害命令自动批准、full-auto 危险命令拒绝均通过；没有使用 Codex 账号或官方模型额度。
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
