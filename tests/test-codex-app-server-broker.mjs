@@ -102,9 +102,17 @@ const fakeUpstream = `
             };
         process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
       } else if (message.method === 'thread/start') {
+        if (message.params.cwd === 'reject-thread') {
+          setTimeout(() => process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32001, message: 'fixture rejection' } }) + '\\n'), 50);
+          continue;
+        }
         const id = 'broker-thread-' + (++nextThread);
-        process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
-        process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id } } }) + '\\n');
+        // Without broker serialization the second request completes first,
+        // exposing incorrect FIFO attribution of thread/started notifications.
+        setTimeout(() => {
+          process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
+          process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id } } }) + '\\n');
+        }, nextThread % 2 ? 150 : 5);
       } else if (message.method === 'turn/start') {
         if (message.params.input[0].text === 'approval') {
           // Server request ids may collide with pending client request ids.
@@ -221,6 +229,7 @@ async function runProxy(text) {
   const threadId = first.method === 'thread/started'
     ? first.params.thread.id
     : second.result.thread.id;
+  assert.equal(first.method === 'thread/started' ? second.result.thread.id : second.params.thread.id, threadId);
   assert.equal(threadId.startsWith('broker-thread-'), true);
   proxy.send({
     method: 'turn/start',
@@ -236,6 +245,19 @@ async function runProxy(text) {
 
 await Promise.all([runProxy('one'), runProxy('two')]);
 
+const rejected = startProxy();
+const afterRejection = startProxy();
+for (const proxy of [rejected, afterRejection]) proxy.send({ method: 'initialize', id: 0, params: {} });
+await Promise.all([rejected.next(), afterRejection.next()]);
+rejected.send({ method: 'thread/start', id: 1, params: { cwd: 'reject-thread' } });
+afterRejection.send({ method: 'thread/start', id: 1, params: { cwd: root } });
+assert.equal((await rejected.next()).error.message, 'fixture rejection');
+const recoveredStart = [await afterRejection.next(), await afterRejection.next()];
+assert.equal(recoveredStart.find((message) => message.method === 'thread/started').params.thread.id,
+  recoveredStart.find((message) => message.result?.thread).result.thread.id);
+rejected.child.kill('SIGTERM');
+afterRejection.child.kill('SIGTERM');
+
 async function startApprovalProxy() {
   const proxy = startProxy();
   proxy.send({ method: 'initialize', id: 0, params: {} });
@@ -243,6 +265,7 @@ async function startApprovalProxy() {
   proxy.send({ method: 'thread/start', id: 1, params: { cwd: root } });
   const messages = [await proxy.next(), await proxy.next()];
   const threadId = messages.find((message) => message.method === 'thread/started').params.thread.id;
+  assert.equal(messages.find((message) => message.result?.thread)?.result.thread.id, threadId);
   return { proxy, threadId };
 }
 

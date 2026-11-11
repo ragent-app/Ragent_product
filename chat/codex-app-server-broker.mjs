@@ -306,6 +306,8 @@ function runBroker() {
   // requests. Keep the original upstream id for the eventual response.
   const pendingServerRequests = new Map();
   const pendingThreadClients = [];
+  const threadStartQueue = [];
+  let activeThreadRequestId = null;
   let nextRequestId = 10_000;
   let upstreamReady = false;
   let upstream = null;
@@ -332,7 +334,7 @@ function runBroker() {
     if (message?.method === 'thread/started' && pendingThreadClients.length > 0) {
       const client = pendingThreadClients.shift();
       const startedId = readThreadId(message);
-      if (startedId) threadOwners.set(startedId, client);
+      if (startedId && !client.destroyed) threadOwners.set(startedId, client);
       sendClient(client, message);
       return;
     }
@@ -346,6 +348,23 @@ function runBroker() {
   const removePendingThreadClient = (client) => {
     const index = pendingThreadClients.lastIndexOf(client);
     if (index >= 0) pendingThreadClients.splice(index, 1);
+  };
+
+  // thread/started does not carry the initiating JSON-RPC id. Serialize only
+  // thread creation/resume/fork until its response, so an out-of-order start
+  // cannot assign one client's thread and approvals to another client. Turns
+  // on already-created threads remain concurrent.
+  const sendNextThreadRequest = () => {
+    if (activeThreadRequestId !== null || !upstream?.stdin?.writable) return;
+    while (threadStartQueue.length > 0) {
+      const entry = threadStartQueue.shift();
+      if (entry.client.destroyed) continue;
+      activeThreadRequestId = entry.id;
+      pending.set(entry.id, { client: entry.client, clientId: entry.clientId });
+      pendingThreadClients.push(entry.client);
+      try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch {}
+      return;
+    }
   };
 
   const handleUpstreamMessage = (message) => {
@@ -373,11 +392,16 @@ function runBroker() {
       const request = pending.get(message.id);
       pending.delete(message.id);
       const threadId = readResultThreadId(message);
-      if (threadId) {
+      if (threadId && !request.client.destroyed) {
         threadOwners.set(threadId, request.client);
         removePendingThreadClient(request.client);
       }
       sendClient(request.client, { ...message, id: request.clientId });
+      if (message.id === activeThreadRequestId) {
+        removePendingThreadClient(request.client);
+        activeThreadRequestId = null;
+        sendNextThreadRequest();
+      }
       return;
     }
     routeNotification(message);
@@ -471,13 +495,17 @@ function runBroker() {
     }
     const threadId = readThreadId(message);
     if (threadId) threadOwners.set(threadId, client);
-    if (message.method === 'thread/start' || message.method === 'thread/resume' || message.method === 'thread/fork') {
-      pendingThreadClients.push(client);
-    }
+    const startsThread = message.method === 'thread/start' || message.method === 'thread/resume' || message.method === 'thread/fork';
     const rewritten = { ...message };
     if (isRequest(message)) {
       const upstreamId = nextRequestId;
       nextRequestId += 1;
+      if (startsThread) {
+        rewritten.id = upstreamId;
+        threadStartQueue.push({ client, clientId: message.id, id: upstreamId, message: rewritten });
+        sendNextThreadRequest();
+        return;
+      }
       pending.set(upstreamId, { client, clientId: message.id });
       rewritten.id = upstreamId;
     }
@@ -505,7 +533,10 @@ function runBroker() {
         if (owner === client) threadOwners.delete(threadId);
       }
       for (const [id, request] of pending) {
-        if (request.client === client) pending.delete(id);
+        if (request.client === client && id !== activeThreadRequestId) pending.delete(id);
+      }
+      for (let index = threadStartQueue.length - 1; index >= 0; index -= 1) {
+        if (threadStartQueue[index].client === client) threadStartQueue.splice(index, 1);
       }
       for (const [id, request] of pendingServerRequests) {
         if (request.client !== client) continue;
