@@ -32,20 +32,17 @@ launchctl load ~/Library/LaunchAgents/cloud.agenton.agentoc.plist
 
 手机连接（TURN + P2P）
 ----------------------
-本机保持完全私有：不设任何公网直接访问入口，所有入站流量只经
-Cloudflare Realtime TURN 中转。
-
-中央服务（Accounts / TURN 凭据 / P2P 信令）本包已预置默认地址，
-开箱即用；仅自建中央栈时才需要改 instance.env 中对应变量。
+本机服务默认监听回环地址。手机连接依赖账号、信令和中继服务；
+可用功能和网络路径以对应版本的发行说明及实际验收结果为准。
+默认中央服务地址在 instance.env 中，可由部署方配置。
 
 在本机：
   1. 在浏览器中登录（首次双击 AgentoC.app 自动生成凭据），
      进入 设置 → 设备/账号 绑定 Google 账号
      （手机与 Mac 绑定同一 Google 账号；未绑定的 Mac 通过一次性
      account-claim 二维码由已绑定的手机授权）。
-  2. 手机端打开 Ragent，选择这台 Mac：设备鉴权与引导经 DataChannel
-     完成，连接先经 Cloudflare Realtime TURN 建立，网络允许时自动
-     升级为 P2P 直连并释放 TURN 租约。
+  2. 手机端打开 Ragent，选择这台 Mac。连接可使用中继，网络条件
+     允许时也可能使用直连；实际行为取决于服务和网络配置。
 
 AI 执行引擎
 -----------
@@ -56,5 +53,5 @@ AI 执行引擎
 安全说明
 --------
 - 服务仅监听 127.0.0.1，不经本机对外暴露端口。
-- 手机流量经 Cloudflare Realtime TURN 中转，仅承载加密的应用流量。
+- 中继和直连的可用性取决于账号、服务和网络状态。
 - 凭据与会话数据保存在 ~/.config/agentoc/。

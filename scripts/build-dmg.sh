@@ -14,7 +14,10 @@ set -euo pipefail
 #   AGENTOC_NPM_REGISTRY      npm registry (default: https://registry.npmjs.org)
 #   AGENTOC_CODEX_VERSION     codex version (default: adapter catalog target)
 #   AGENTOC_CLAUDE_VERSION    claude code version (default: adapter catalog target)
-#   AGENTOC_P2P_HOST_BINARY   prebuilt darwin sidecar (skips the Go build)
+#   AGENTOC_P2P_HOST_BINARY   prebuilt darwin sidecar (requires SHA-256 below)
+#   AGENTOC_P2P_HOST_SHA256   expected lowercase SHA-256 for the prebuilt sidecar
+#   AGENTOC_MAC_SIGN_IDENTITY Developer ID Application signing identity
+#   AGENTOC_MAC_NOTARY_PROFILE notarytool keychain profile (submits to Apple)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -53,6 +56,12 @@ NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.12.0}"
 }
 NODE_CACHE_DIR="${AGENTOC_NODE_CACHE_DIR:-$HOME/.cache/agentoc-build/node}"
 NPM_REGISTRY="${AGENTOC_NPM_REGISTRY:-https://registry.npmjs.org}"
+SIGN_IDENTITY="${AGENTOC_MAC_SIGN_IDENTITY:-}"
+NOTARY_PROFILE="${AGENTOC_MAC_NOTARY_PROFILE:-}"
+if [ -n "$NOTARY_PROFILE" ]; then
+  [ -n "$SIGN_IDENTITY" ] || { echo 'Notarization requires a Developer ID signing identity.' >&2; exit 1; }
+  [[ "$NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo 'Invalid notarytool keychain profile name.' >&2; exit 1; }
+fi
 
 PKG_VERSION="$(node -p "require('$ROOT/package.json').version")"
 SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --short=8 HEAD 2>/dev/null || echo nogit)"
@@ -64,6 +73,10 @@ fi
 BUNDLE_VERSION="${VERSION%%+*}"
 [[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo 'macOS bundle version must have three numeric components.' >&2
+  exit 1
+}
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+main\.[a-f0-9]{8}\.[0-9]{12})?$ ]] || {
+  echo 'Invalid macOS package version.' >&2
   exit 1
 }
 
@@ -153,6 +166,7 @@ CONTENTS="$STAGE/AgentoC.app/Contents"
 APP_DIR="$CONTENTS/Resources/app"
 OUTPUT_NAME="agentoc_${VERSION}-darwin-${ARCH}.dmg"
 FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
+DMG_PATH="$WORK_DIR/$OUTPUT_NAME"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$APP_DIR" "$OUTPUT_DIR"
 
 cleanup() { rm -rf "$WORK_DIR"; }
@@ -216,12 +230,18 @@ ACTUAL_SHA="$(shasum -a 256 "$NODE_CACHE_DIR/$NODE_TARBALL" | awk '{ print $1 }'
 mkdir -p "$CONTENTS/Resources/runtime"
 tar -xzf "$NODE_CACHE_DIR/$NODE_TARBALL" -C "$WORK_DIR"
 install -m 0755 "$WORK_DIR/$NODE_DIST/bin/node" "$CONTENTS/Resources/runtime/node"
+lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/node"
+lipo -verify_arch "$ARCH" "$MANAGER/Contents/MacOS/Electron"
 install -m 0755 "$ROOT/packaging/macos/runtime-codex" "$CONTENTS/Resources/runtime/codex"
 install -m 0755 "$ROOT/packaging/macos/runtime-claude" "$CONTENTS/Resources/runtime/claude"
 
 # ── 4. P2P host sidecar (darwin Mach-O) ──────────────────────────────────────
 if [ -n "${AGENTOC_P2P_HOST_BINARY:-}" ]; then
   P2P_HOST_BINARY="$AGENTOC_P2P_HOST_BINARY"
+  P2P_EXPECTED_SHA="${AGENTOC_P2P_HOST_SHA256:-}"
+  [[ "$P2P_EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Prebuilt P2P host requires AGENTOC_P2P_HOST_SHA256.' >&2; exit 1; }
+  [ -f "$P2P_HOST_BINARY" ] || { echo 'Prebuilt P2P host is missing.' >&2; exit 1; }
+  [ "$(shasum -a 256 "$P2P_HOST_BINARY" | awk '{print $1}')" = "$P2P_EXPECTED_SHA" ] || { echo 'Prebuilt P2P host checksum mismatch.' >&2; exit 1; }
 else
   command -v go >/dev/null 2>&1 || {
     echo "Go toolchain is required to build the P2P host sidecar (or set AGENTOC_P2P_HOST_BINARY)" >&2
@@ -236,10 +256,12 @@ case "$P2P_MACHO_MAGIC" in
   cffaedfe|cafebabe|feedfacf) ;;  # MH_MAGIC_64 / FAT / swapped variants
   *) echo "Refusing to package non-Mach-O P2P host sidecar (magic $P2P_MACHO_MAGIC)" >&2; exit 1 ;;
 esac
+lipo -verify_arch "$ARCH" "$P2P_HOST_BINARY"
 mkdir -p "$APP_DIR/bin"
 rm -f "$APP_DIR/bin/agentoc-p2p-host-amd64" "$APP_DIR/bin/agentoc-p2p-host-arm64"
 rm -f "$APP_DIR/bin/agentoc-p2p-host-darwin-arm64" "$APP_DIR/bin/agentoc-p2p-host-darwin-x64"
 install -m 0755 "$P2P_HOST_BINARY" "$APP_DIR/bin/agentoc-p2p-host"
+P2P_BINARY_SHA="$(shasum -a 256 "$APP_DIR/bin/agentoc-p2p-host" | awk '{print $1}')"
 
 # ── 5. Codex engine (launcher + darwin native, same release) ─────────────────
 CODEX_MAIN_TARBALL="codex-${CODEX_VERSION}.tgz"
@@ -262,7 +284,7 @@ mkdir -p "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE"
 tar -xzf "$CODEX_NATIVE_CACHE_PATH" \
   -C "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE" \
   --strip-components=1
-printf 'codex=%s\nclaude=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" > "$CONTENTS/Resources/runtime/provider-versions"
+printf 'codex=%s\nclaude=%s\np2p_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$P2P_BINARY_SHA" > "$CONTENTS/Resources/runtime/provider-versions"
 
 # ── 6. Claude Code native binary ─────────────────────────────────────────────
 CLAUDE_NATIVE_TARBALL="claude-code-${CLAUDE_VERSION}-darwin-${NODE_ARCH}.tgz"
@@ -282,6 +304,7 @@ case "$CLAUDE_MACHO_MAGIC" in
   cffaedfe|cafebabe|feedfacf) ;;
   *) echo "Refusing to package non-Mach-O Claude Code binary (magic $CLAUDE_MACHO_MAGIC)" >&2; exit 1 ;;
 esac
+lipo -verify_arch "$ARCH" "$CLAUDE_EXTRACT_DIR/claude"
 install -m 0755 "$CLAUDE_EXTRACT_DIR/claude" "$APP_DIR/bin/claude"
 [ -s "$CLAUDE_EXTRACT_DIR/LICENSE.md" ] || { echo 'Claude Code license is missing.' >&2; exit 1; }
 mkdir -p "$APP_DIR/third_party_licenses/claude-code"
@@ -315,11 +338,20 @@ if [ -f "$ROOT/static/icon-512.png" ] && command -v iconutil >/dev/null 2>&1 && 
   fi
 fi
 
-# ── 8. Ad-hoc codesign so launchd/Gatekeeper treat the bundle consistently ───
-if command -v codesign >/dev/null 2>&1; then
+# ── 8. Sign the app; ad-hoc candidates are not trusted distribution builds ──
+SIGNING_STATUS=ad-hoc
+if [ -n "$SIGN_IDENTITY" ]; then
+  codesign --force --deep --options runtime --timestamp \
+    --entitlements "$ROOT/packaging/macos/entitlements.plist" \
+    --sign "$SIGN_IDENTITY" "$STAGE/AgentoC.app"
+  codesign --verify --deep --strict "$STAGE/AgentoC.app"
+  SIGNING_STATUS=developer-id
+elif command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "$STAGE/AgentoC.app" 2>/dev/null || {
-    echo "Ad-hoc codesign failed; continuing with an unsigned bundle" >&2
+    echo 'Ad-hoc signing failed.' >&2; exit 1;
   }
+else
+  echo 'codesign is required to build the macOS app.' >&2; exit 1
 fi
 [ "$(shasum -a 256 "$APP_DIR/bin/claude" | awk '{print $1}')" = "$CLAUDE_BINARY_SHA" ] || {
   echo 'Signing changed the bundled Claude Code binary; refusing this package.' >&2; exit 1;
@@ -352,12 +384,23 @@ node "$ROOT/scripts/verify-runtime-payload.mjs" "$CONTENTS"
 chmod -R u+rwX,go+rX "$STAGE/AgentoC.app"
 
 # ── 10. DMG ──────────────────────────────────────────────────────────────────
-hdiutil create -volname AgentoC -srcfolder "$STAGE" -ov -format UDZO "$FINAL_OUTPUT" >/dev/null
+hdiutil create -volname AgentoC -srcfolder "$STAGE" -format UDZO "$DMG_PATH" >/dev/null
+if [ -n "$SIGN_IDENTITY" ]; then
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG_PATH"
+  codesign --verify --strict "$DMG_PATH"
+fi
+if [ -n "$NOTARY_PROFILE" ]; then
+  xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json > "$WORK_DIR/notary-result.json"
+  node -e 'const r=require(process.argv[1]); if(r.status!=="Accepted") { console.error("Apple notarization did not accept the candidate."); process.exit(1); }' "$WORK_DIR/notary-result.json"
+  xcrun stapler staple "$DMG_PATH"
+  xcrun stapler validate "$DMG_PATH"
+  SIGNING_STATUS=developer-id-notarized
+fi
 
 # Mount verification: the .app must be present and launchable-looking.
 MOUNT_DIR="$WORK_DIR/verify-mount"
 mkdir -p "$MOUNT_DIR"
-hdiutil attach "$FINAL_OUTPUT" -readonly -nobrowse -mountpoint "$MOUNT_DIR" >/dev/null
+hdiutil attach "$DMG_PATH" -readonly -nobrowse -mountpoint "$MOUNT_DIR" >/dev/null
 if [ ! -d "$MOUNT_DIR/AgentoC.app/Contents/MacOS" ]; then
   hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
   echo "DMG verification failed: AgentoC.app missing from mounted volume" >&2
@@ -365,4 +408,10 @@ if [ ! -d "$MOUNT_DIR/AgentoC.app/Contents/MacOS" ]; then
 fi
 hdiutil detach "$MOUNT_DIR" >/dev/null
 
+[ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
+mv "$DMG_PATH" "$FINAL_OUTPUT"
+printf '%s\n' "$SIGNING_STATUS" > "$OUTPUT_DIR/${OUTPUT_NAME}.signing-status.txt"
+if [ -n "$NOTARY_PROFILE" ]; then
+  cp "$WORK_DIR/notary-result.json" "$OUTPUT_DIR/${OUTPUT_NAME}.notary-result.json"
+fi
 printf '%s\n' "$FINAL_OUTPUT"

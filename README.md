@@ -66,7 +66,8 @@ See the [architecture overview](docs/architecture.md) for code entry points.
 See [source and release boundaries](docs/source-and-release.md) for what is
 included and what remains to be verified.
 Linux candidate installation and build details are documented in
-[the Linux desktop guide](docs/linux-desktop.md).
+[the Linux desktop guide](docs/linux-desktop.md); macOS candidate and signing
+details are in [the macOS desktop guide](docs/macos-desktop.md).
 
 The current Windows host defaults to the project's hosted account and TURN
 endpoints outside isolated test mode. Publishing their implementation does not
