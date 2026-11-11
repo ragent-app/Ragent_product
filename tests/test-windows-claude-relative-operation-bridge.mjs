@@ -98,13 +98,14 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const psApproval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'PowerShell', input: { command } } });
   for (const tool of ['Bash', 'PowerShell']) {
     const make = tool === 'Bash' ? approval : psApproval;
-    for (const command of ['npm install', 'npm install react', 'pip install requests', 'python -m pip install requests', 'npm ci', 'npm run dev', 'npm run custom-task -- --fix', 'python -m pytest -q', 'node script.js --help', 'git add .', "git commit -m 'message'"]) {
+    for (const command of ['npm install', 'npm install react', 'pip install requests', 'python -m pip install requests', 'npm ci', 'npm run dev', 'npm run custom-task -- --fix', 'python -m pytest -q', 'node script.js --help', 'go test ./...', 'cargo check', 'dotnet build', 'gradle test', 'mvn verify', 'npx tsc --noEmit', 'git add .', "git commit -m 'message'"]) {
       const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: make(command), state: outsideCwd });
       assert.ok(bridge, `${riskMode}: ${tool} outside workspace: ${command}`);
     }
     const diff = await buildClaudeWindowsRelativeOperationBridge({ approval: make('git diff --cached'), state: outsideCwd });
     assert.ok(diff);
     assert.match(diff.updatedInput.command, /git diff --no-ext-diff --no-textconv --cached/);
+    assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: make('go test -exec dangerous ./...'), state: outsideCwd }), null);
   }
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const psOptions = { cwd: workspace, encoding: 'utf8', windowsHide: true };

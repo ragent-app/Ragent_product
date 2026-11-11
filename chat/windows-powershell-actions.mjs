@@ -36,6 +36,11 @@ const SAFE_FILTER_PARAMS = new Set(['first', 'last', 'skip', 'unique', 'property
 const SAFE_FILTER_SWITCHES = new Set(['unique', 'descending', 'noenumerate', 'all', 'listimported', 'includeusername', 'autosize']);
 const WORKSPACE_SCRIPT_TASKS = new Set(['build', 'check', 'format:check', 'format-check', 'lint', 'test', 'test:ci', 'test:unit', 'typecheck', 'type-check']);
 const WORKSPACE_SCRIPT_RUNNERS = new Set(['npm', 'npm.cmd', 'npm.exe', 'pnpm', 'pnpm.cmd', 'pnpm.exe', 'yarn', 'yarn.cmd', 'yarn.exe', 'bun', 'bun.exe']);
+const DEV_TASKS = new Map([
+  ['go', new Set(['build', 'test', 'vet', 'run'])], ['cargo', new Set(['build', 'check', 'test', 'run', 'fmt', 'clippy'])],
+  ['dotnet', new Set(['build', 'test', 'restore', 'run', 'format'])], ['gradle', new Set(['build', 'test', 'assemble', 'check'])],
+  ['mvn', new Set(['test', 'verify', 'package', 'compile'])], ['npx', new Set(['tsc', 'eslint', 'prettier', 'jest', 'vitest', 'vite', 'webpack'])],
+]);
 const GET_COMMAND_TYPES = new Set(['alias', 'function', 'filter', 'cmdlet', 'externalscript', 'application', 'script', 'configuration', 'all']);
 const FILE_PARAMS = new Set(['path', 'literalpath', 'destination', 'value', 'itemtype', 'name', 'recurse', 'force', 'raw', 'encoding', 'filter', 'include', 'exclude', 'confirm']);
 const SWITCHES = new Set(['recurse', 'force', 'raw', 'confirm']);
@@ -191,6 +196,11 @@ export async function analyzeWindowsWorkspaceScriptTask(programName, rawArgs, co
   const program = String(programName || '').toLowerCase();
   const args = Array.isArray(rawArgs) && rawArgs.every((arg) => typeof arg === 'string') ? rawArgs : null;
   if (!args || !win.isAbsolute(context.cwd || '')) return null;
+  const executable = program.replace(/\.(?:exe|cmd|bat)$/, '');
+  if (args.length && DEV_TASKS.get(executable)?.has(args[0].toLowerCase())) {
+    if (executable === 'go' && args.slice(1).some(arg => /^-exec(?:=|$)/i.test(arg))) return null;
+    return { kind: 'read', program: `${executable} ${args[0]}`, target: null, workspace: inside(context.cwd, context.trustedWorkspaceRoot || ''), caution: true };
+  }
   const packageName = value => /^[a-z0-9@][a-z0-9@/_.~^+\-\[\],=<>!]*$/i.test(value);
   const pipArgs = ['pip', 'pip.exe', 'pip3', 'pip3.exe'].includes(program) ? args
     : ['python', 'python.exe', 'python3', 'python3.exe'].includes(program) && args[0] === '-m' && args[1]?.toLowerCase() === 'pip' ? args.slice(2) : null;
