@@ -75,7 +75,7 @@ export function resolveRuntimeReadOnlyCapability({
   runnerId,
   envOverrides,
   runnerUnitScope,
-  platform,
+  platform = process.platform,
 } = {}) {
   const context = { toolId, runnerId, envOverrides, runnerUnitScope, platform };
   for (const entry of registeredAdapters) {
@@ -91,7 +91,7 @@ export function resolveRuntimeReadOnlyCapability({
   // sandbox availability is verified at reviewer admission time and a build
   // failure there refuses the run (READ_ONLY_RUNTIME_REFUSED) rather than
   // downgrading. Explicitly registered adapters above always take precedence.
-  if (REVIEWER_ENABLED && contextMatchesId(context, REVIEWER_RUNTIME_ID)) {
+  if (REVIEWER_ENABLED && platform === 'linux' && contextMatchesId(context, REVIEWER_RUNTIME_ID)) {
     return {
       runtimeId: REVIEWER_RUNTIME_ID,
       supportsReadOnlyFilesystem: true,
@@ -144,7 +144,7 @@ export function registerRuntimeAdapter(predicateOrId, capability) {
  * @param {string} [input.command] probe command placed after the `--` separator
  * @param {string[]} [input.args] tool arguments
  * @param {string} [input.cwd] run workspace (mounted --ro-bind)
- * @param {string} [input.runnerHome] runner private home (mounted read-write)
+ * @param {string} [input.runnerHome] runner private home (kept read-only)
  * @param {string[]} [input.hidePaths] control-plane paths to hide
  * @returns {string[]} bwrap argv with the workspace read-only
  */

@@ -123,6 +123,10 @@ async function main() {
       assert.throws(() => requireSandboxAvailability({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' }, bwrapPresent: () => false }),
         (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
       assert.equal(requireSandboxAvailability({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' }, bwrapPresent: () => true }), true);
+      assert.equal(requireSandboxAvailability({ platform: 'linux', env: {}, required: true, bwrapPresent: () => true }), true);
+      assert.throws(() => requireSandboxAvailability({ platform: 'darwin', env: {}, required: true, bwrapPresent: () => true }),
+        (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
+
 
     }
 

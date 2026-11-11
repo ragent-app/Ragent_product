@@ -4,7 +4,7 @@
 // Covers the reviewer read-only enforcement end to end:
 //   1. bwrap arg construction: readOnly=true mounts the run workspace with
 //      --ro-bind (never --bind RW for it); the default stays RW; the runner
-//      home is always RW (it is a private runtime home, not the workspace).
+//      home stays read-only so aliases cannot reopen workspace files.
 //   2. runtime-adapter certification: only REVIEWER_RUNTIME_ID is certified
 //      while REVIEWER_ENABLED is on; every other runtime keeps the honest
 //      default (supportsReadOnlyFilesystem=false). The off state is verified
@@ -99,7 +99,7 @@ try {
   mkdirSync(hide, { recursive: true });
 
   // readOnly=true: the run workspace is mounted with --ro-bind and never with
-  // a RW --bind; the runner home stays RW (private runtime home).
+  // a RW --bind; the runner home is not reopened writable.
   const roArgs = buildBwrapArgs({
     command: '/bin/true',
     args: ['--flag'],
@@ -108,7 +108,7 @@ try {
     readOnly: true,
   });
   eq(bindModeOf(roArgs, ws), '--ro-bind', 'readOnly=true mounts the workspace with --ro-bind');
-  eq(bindModeOf(roArgs, rh), '--bind', 'runner home stays read-write under readOnly=true');
+  eq(bindModeOf(roArgs, rh), null, 'runner home stays read-only under readOnly=true');
   ok(roArgs.includes('--ro-bind') && roArgs[roArgs.indexOf('--ro-bind') + 1] === '/', 'root stays read-only');
   ok(roArgs[roArgs.indexOf('--') + 1] === '/bin/true', 'command follows the -- separator');
   ok(roArgs.includes('--flag'), 'tool args preserved');
@@ -117,7 +117,7 @@ try {
   // admission path uses; it must produce the same read-only workspace binding.
   const roWrapper = buildReviewerReadOnlySandbox({ command: '/bin/true', cwd: ws, runnerHome: rh });
   eq(bindModeOf(roWrapper, ws), '--ro-bind', 'buildReviewerReadOnlySandbox binds the workspace read-only');
-  eq(bindModeOf(roWrapper, rh), '--bind', 'buildReviewerReadOnlySandbox keeps the runner home read-write');
+  eq(bindModeOf(roWrapper, rh), null, 'buildReviewerReadOnlySandbox does not reopen the runner home');
 
   // default readOnly=false keeps the exact pre-S12 behavior: workspace --bind RW.
   const rwArgs = buildBwrapArgs({ command: '/bin/true', cwd: ws, runnerHome: rh });
@@ -130,7 +130,7 @@ try {
 
   const roSpawn = buildSandboxedSpawn({ command: '/bin/true', cwd: ws, runnerHome: rh, readOnly: true, mkdtemp: () => hide });
   eq(bindModeOf(roSpawn.args, ws), '--ro-bind', 'buildSandboxedSpawn readOnly=true mounts the workspace read-only');
-  eq(bindModeOf(roSpawn.args, rh), '--bind', 'buildSandboxedSpawn readOnly=true keeps the runner home RW');
+  eq(bindModeOf(roSpawn.args, rh), null, 'buildSandboxedSpawn readOnly=true does not reopen the runner home');
 
   finishSection();
 
@@ -141,6 +141,9 @@ try {
     'REVIEWER_RUNTIME_ID is certified while REVIEWER_ENABLED is on');
   eq(resolveRuntimeReadOnlyCapability({ runnerId: REVIEWER_RUNTIME_ID }).enforcement, 'sandbox',
     'certified reviewer runtime enforces a sandbox');
+  eq(resolveRuntimeReadOnlyCapability({ runnerId: REVIEWER_RUNTIME_ID, platform: 'darwin' }).supportsReadOnlyFilesystem, false,
+    'macOS must not claim the Linux-only reviewer sandbox');
+
   eq(resolveRuntimeReadOnlyCapability({ runnerId: 'runner_uncertified' }).supportsReadOnlyFilesystem, false,
     'an unrelated runner keeps the honest uncertified default');
   eq(resolveRuntimeReadOnlyCapability({ toolId: 'codex' }).supportsReadOnlyFilesystem, false,

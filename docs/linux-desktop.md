@@ -40,6 +40,13 @@ directories. A missing or untrusted binary refuses the Run instead of silently
 running without the requested isolation. Without this option, the product does
 not claim that this bubblewrap boundary is active.
 
+Read-only Runs require this sandbox regardless of the optional setting. Their
+host filesystem, including the runner home, is mounted read-only, which may
+prevent providers that need to write to their home from starting. This is a
+filesystem boundary, not a complete network or inter-process isolation claim;
+real provider compatibility and the remaining security boundaries require
+separate acceptance.
+
 ## Maintain and remove
 
 - `systemctl status agentoc.service` shows the service state.

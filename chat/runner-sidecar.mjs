@@ -40,6 +40,7 @@ import {
 import { parseScopedCodexModel, readPreferredCodexModelFromConfig } from './models.mjs';
 import { access, lstat, open, readFile, realpath } from 'fs/promises';
 import { buildSandboxedSpawn, requireSandboxAvailability } from '../lib/runner-sandbox.mjs';
+import { readOnlyWorkspaceForRun } from './read-only-run-sandbox.mjs';
 import { createFileChangeStatsTracker } from './file-change-stats.mjs';
 import {
   FILE_ASSET_ID_PATTERN,
@@ -3520,19 +3521,28 @@ async function main() {
   // ride the same batch → owner-approval → privileged-executor pipeline as the
   // provider-gate path. A channel failure must never break the Run; the shim
   // then fails with a self-describing channel error.
+  const readOnlyRequested = manifest.executionScope?.accessMode === 'read'
+    || manifest.options?.readOnlyRequired === true;
+  if (readOnlyRequested) {
+    for (const key of Object.keys(spawnEnv)) {
+      if (key.startsWith('AGENTOC_APPROVED_ACTIONS_') || key.startsWith('AGENTOC_BROWSER_')) delete spawnEnv[key];
+    }
+  }
   let privilegedShimChannel = null;
-  try {
-    privilegedShimChannel = await startPrivilegedShimChannel({
-      runId,
-      nodePath: process.execPath,
-      commandEntryPath: join(PROJECT_ROOT, 'chat', 'privileged-shim-command.mjs'),
-      log: async (message, details) => logSidecarDiagnostic(runId, message, details),
-    });
-    applyPrivilegedShimSpawnEnv(spawnEnv, privilegedShimChannel);
-  } catch (error) {
-    await logSidecarDiagnostic(runId, 'Privileged shim channel unavailable; sentinel commands will report a channel error', {
-      error: normalizeErrorMessage(error),
-    });
+  if (!readOnlyRequested) {
+    try {
+      privilegedShimChannel = await startPrivilegedShimChannel({
+        runId,
+        nodePath: process.execPath,
+        commandEntryPath: join(PROJECT_ROOT, 'chat', 'privileged-shim-command.mjs'),
+        log: async (message, details) => logSidecarDiagnostic(runId, message, details),
+      });
+      applyPrivilegedShimSpawnEnv(spawnEnv, privilegedShimChannel);
+    } catch (error) {
+      await logSidecarDiagnostic(runId, 'Privileged shim channel unavailable; sentinel commands will report a channel error', {
+        error: normalizeErrorMessage(error),
+      });
+    }
   }
   if (process.platform === 'win32') {
     try {
@@ -3690,14 +3700,14 @@ async function main() {
     }));
   }
   const approvedActionChannel = manifest.options?.approvedActionChannel;
-  const managedActionMcpRequested = Boolean(
+  const managedActionMcpRequested = !readOnlyRequested && Boolean(
     approvedActionChannel?.token && approvedActionChannel?.endpoint,
   );
   const windowsElevationHook = shouldInstallWindowsElevationHook({ platform: process.platform, runtimeFamily,
     interactionMode: manifest.options?.interactionMode, permissionMode: manifest.options?.permissionMode,
     workbenchPolicy: WORKBENCH_EXECUTION_POLICY });
   const windowsBrokerChannel = manifest.options?.windowsBrokerChannel;
-  const windowsBrokerMcpRequested = Boolean(
+  const windowsBrokerMcpRequested = !readOnlyRequested && Boolean(
     windowsBrokerChannel?.token && windowsBrokerChannel?.endpoint,
   );
   // The control-plane feature flag is process-global, but the worker tool is
@@ -3717,7 +3727,7 @@ async function main() {
         protectedRoots: appServerState.riskContext.protectedRoots, systemPathRoots: appServerState.riskContext.systemPathRoots || [] } } });
   }
   const browserChannel = manifest.options?.browserChannel;
-  const browserMcpRequested = Boolean(
+  const browserMcpRequested = !readOnlyRequested && Boolean(
     spawnEnv.AGENTOC_BROWSER_MCP_ENABLED === '1'
     && spawnEnv.AGENTOC_BROWSER_TOKEN
     && supportsBrowserMcpRuntime(runtimeFamily, { acp: acp === true })
@@ -3976,7 +3986,8 @@ async function main() {
   // An explicitly requested sandbox is a requirement, not a best-effort
   // preference. Consult only the trusted sidecar environment and never launch
   // a provider unsandboxed if the platform or sandbox setup cannot support it.
-  const sandboxRequired = requireSandboxAvailability();
+  const readOnlyWorkspace = readOnlyWorkspaceForRun(manifest, resolvedFolder.cwd);
+  const sandboxRequired = requireSandboxAvailability({ required: Boolean(readOnlyWorkspace) });
   let resolvedCommand = await resolveCommandSpawnSpec(initialCommand, args, {
     cwd: resolvedFolder.cwd,
     env: spawnEnv,
@@ -4067,16 +4078,18 @@ async function main() {
   // the non-brokered MCP/sandbox path retains its existing sandbox behavior.
   const wrapRequiredSandbox = (command, commandArgs, environment) => {
     try {
-      const guiEnvironment = pickRunnerGuiEnvironment(environment);
+      const guiEnvironment = readOnlyWorkspace ? {} : pickRunnerGuiEnvironment(environment);
       return buildSandboxedSpawn({
         command,
         args: commandArgs,
         cwd: resolvedFolder.cwd,
         runnerHome: process.env.HOME,
+        readOnly: Boolean(readOnlyWorkspace),
         hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
         bindReadOnlyPaths: [
           ...buildRunnerGuiBindPaths(guiEnvironment),
           ...(privilegedShimChannel?.socketBindDir ? [privilegedShimChannel.socketBindDir] : []),
+          ...(readOnlyWorkspace ? [readOnlyWorkspace] : []),
         ],
         exposeHostDevices: Boolean(guiEnvironment.DISPLAY),
       });
