@@ -18,8 +18,8 @@ Build on a clean committed Apple Silicon Mac with Node 24, the Go version in
 the output directory, and `AGENTOC_NODE_CACHE_DIR` to a writable cache, then run
 `bash scripts/build-dmg.sh`. Set temporary and dependency cache locations for
 the build environment before starting. An optional prebuilt P2P host requires
-both `AGENTOC_P2P_HOST_BINARY` and `AGENTOC_P2P_HOST_SHA256`; its digest is
-recorded with the bundled runtime versions.
+both `AGENTOC_P2P_HOST_BINARY` and `AGENTOC_P2P_HOST_SHA256`; the input digest
+before app signing is recorded with the bundled runtime versions.
 
 Without a signing identity the build is ad-hoc signed and is suitable only for
 controlled testing. For a direct-distribution candidate, set
@@ -31,6 +31,8 @@ and records a signing status and, when applicable, the notary result beside the
 DMG. It fails if signing changes the bundled Claude Code binary. These paths
 still require native build, launch, upgrade, Gatekeeper and device-connection
 acceptance with the actual certificate before they can be treated as a release.
+Use the [desktop release validation checklist](desktop-release-validation.md)
+to record the candidate's evidence and remaining limitations.
 
 The package includes the upstream Claude Code license. Before distribution,
 the release owner must review the applicable

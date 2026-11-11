@@ -56,6 +56,8 @@ It also accepts a committed payload staged by `scripts/stage-runtime-payload.mjs
 with `--source-mode git-objects`. Set `TMPDIR`, npm, Go and Electron caches to
 the intended build storage before starting. The package must still pass native
 installation, upgrade, security and device-connection acceptance before release.
+Use the [desktop release validation checklist](desktop-release-validation.md)
+to record the candidate's evidence and remaining limitations.
 An offline Claude Code binary override also requires its SHA-256 and its
 license file (`AGENTOC_CLAUDE_BINARY_SHA256` and
 `AGENTOC_CLAUDE_LICENSE_SOURCE`). Release owners must review the applicable

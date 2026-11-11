@@ -284,7 +284,7 @@ mkdir -p "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE"
 tar -xzf "$CODEX_NATIVE_CACHE_PATH" \
   -C "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE" \
   --strip-components=1
-printf 'codex=%s\nclaude=%s\np2p_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$P2P_BINARY_SHA" > "$CONTENTS/Resources/runtime/provider-versions"
+printf 'codex=%s\nclaude=%s\np2p_input_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$P2P_BINARY_SHA" > "$CONTENTS/Resources/runtime/provider-versions"
 
 # ── 6. Claude Code native binary ─────────────────────────────────────────────
 CLAUDE_NATIVE_TARBALL="claude-code-${CLAUDE_VERSION}-darwin-${NODE_ARCH}.tgz"
