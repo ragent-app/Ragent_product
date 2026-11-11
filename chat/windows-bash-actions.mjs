@@ -234,13 +234,26 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     const prefix = ['--disable', '--proto', '=http,https', '--proto-redir', '=http,https'];
     const args = words.slice(1);
     if (!prefix.every((arg, index) => args[index] === arg)) return { complete: false, actions: [], reason: 'curl configuration is not disabled' };
-    const rest = args.slice(prefix.length); let urls = 0;
-    for (const arg of rest) {
+    const rest = args.slice(prefix.length); let urls = 0; let outputFile = '';
+    for (let i = 0; i < rest.length; i += 1) {
+      const arg = rest[i];
       if (/^-[fsSLI]+$/.test(arg) || ['--fail', '--silent', '--show-error', '--location', '--head', '--compressed'].includes(arg)) continue;
+      if (arg === '-o' || arg === '--output' || arg.startsWith('--output=')) {
+        if (outputFile) return { complete: false, actions: [], reason: 'curl output needs review' };
+        outputFile = arg.startsWith('--output=') ? arg.slice('--output='.length) : rest[++i];
+        if (!outputFile || outputFile === '-' || outputFile.startsWith('-')) return { complete: false, actions: [], reason: 'curl output needs review' };
+        continue;
+      }
       try { const url = new URL(arg); if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) return { complete: false, actions: [], reason: 'curl target needs review' }; urls += 1; }
       catch { return { complete: false, actions: [], reason: 'curl arguments need review' }; }
     }
     if (urls !== 1) return { complete: false, actions: [], reason: 'curl target needs review' };
+    if (outputFile) {
+      const target = gitBashPath(outputFile);
+      if (!target) return { complete: false, actions: [], reason: 'curl output cannot be resolved' };
+      const output = await analyzeFiles([{ path: target, kind: 'write' }, ...outputEntry], context);
+      return { ...output, actions: [{ kind: 'read', program: 'curl web request', target: null, caution: true }, ...(output.actions || [])] };
+    }
     return withOutput({ complete: true, actions: [{ kind: 'read', program: 'curl web request', target: null, caution: true }] });
   }
   if (['rg', 'rg.exe'].includes(String(program).toLowerCase())) {

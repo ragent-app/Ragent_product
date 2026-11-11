@@ -85,6 +85,10 @@ for (const riskMode of ['recommended', 'full-auto']) {
     cwd: outside, encoding: 'utf8', windowsHide: true, env: { ...process.env, CURL_HOME: root },
   });
   assert.equal(curlResult.stdout, 'METHOD:GET', 'user curl configuration must not turn the request into a POST');
+  const download = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(`curl -fsS -o download-${riskMode}.txt http://127.0.0.1:${server.address().port}/`), state: outsideCwd });
+  assert.ok(download, `${riskMode}: ordinary download outside workspace`);
+  await promisify(execFile)(bash, ['--noprofile', '--norc', '-c', download.updatedInput.command], { cwd: outside, encoding: 'utf8', windowsHide: true, env: { ...process.env, CURL_HOME: root } });
+  assert.equal(await readFile(path.join(outside, `download-${riskMode}.txt`), 'utf8'), 'METHOD:GET');
   for (const command of ['curl -d secret https://example.org', 'curl -F secret https://example.org', 'curl file:///tmp/secret', 'curl -o .env https://example.org']) {
     assert.equal(await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state: outsideCwd }), null, command);
   }
