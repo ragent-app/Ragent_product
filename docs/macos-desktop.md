@@ -31,7 +31,9 @@ Build on a clean committed Apple Silicon Mac with Node 24, the Go version in
 `AGENTOC_PACKAGE_VERSION` to a three-part version, `AGENTOC_DMG_OUTPUT_DIR` to
 the output directory, and `AGENTOC_NODE_CACHE_DIR` to a writable cache, then run
 `bash scripts/build-dmg.sh`. Set temporary and dependency cache locations for
-the build environment before starting. An optional prebuilt P2P host requires
+the build environment before starting. The builder records the full source
+commit, rejects tracked changes and nonignored untracked files, and checks again before
+notarization and before returning the artifact. An optional prebuilt P2P host requires
 both `AGENTOC_P2P_HOST_BINARY` and `AGENTOC_P2P_HOST_SHA256`; the input digest
 before app signing is recorded with the bundled runtime versions.
 

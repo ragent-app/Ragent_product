@@ -63,12 +63,25 @@ if [ -n "$NOTARY_PROFILE" ]; then
   [[ "$NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo 'Invalid notarytool keychain profile name.' >&2; exit 1; }
 fi
 
+SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
+[[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
+  echo 'A full committed source identity is required for macOS packaging.' >&2; exit 1;
+}
+[ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+  echo 'macOS packaging requires a clean committed source tree.' >&2; exit 1;
+}
+SOURCE_SHORT="${SOURCE_COMMIT:0:8}"
 PKG_VERSION="$(node -p "require('$ROOT/package.json').version")"
-SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --short=8 HEAD 2>/dev/null || echo nogit)"
+assert_source_unchanged() {
+  [ "$(git -C "$ROOT" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] &&
+    [ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ] || {
+      echo 'Source changed during macOS packaging; refusing to publish the candidate.' >&2; exit 1;
+    }
+}
 if [ -n "${AGENTOC_PACKAGE_VERSION:-}" ]; then
   VERSION="$AGENTOC_PACKAGE_VERSION"
 else
-  VERSION="$PKG_VERSION+main.$SOURCE_COMMIT.$(date +%Y%m%d%H%M)"
+  VERSION="$PKG_VERSION+main.$SOURCE_SHORT.$(date +%Y%m%d%H%M)"
 fi
 BUNDLE_VERSION="${VERSION%%+*}"
 [[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -175,6 +188,9 @@ trap cleanup EXIT
 # ── 1. Application files from the shared committed runtime allowlist ────────
 node "$ROOT/scripts/stage-runtime-payload.mjs" \
   --source "$ROOT" --destination "$APP_DIR" --profile desktop
+[ "$(cat "$APP_DIR/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
+  echo 'Staged source does not match the requested commit.' >&2; exit 1;
+}
 # Keep the explicit version so frontend asset URLs change per packaged build.
 printf '%s\n' "$VERSION" > "$APP_DIR/.agentoc-package-version"
 # The vendored Codex launcher is assembled from verified downloads below.
@@ -388,6 +404,8 @@ node "$ROOT/scripts/verify-runtime-payload.mjs" "$CONTENTS"
 codesign --verify --deep --strict "$STAGE/AgentoC.app"
 
 # ── 10. DMG ──────────────────────────────────────────────────────────────────
+# Refuse a mixed-source bundle before optional notarization submits it.
+assert_source_unchanged
 hdiutil create -volname AgentoC -srcfolder "$STAGE" -format UDZO "$DMG_PATH" >/dev/null
 if [ -n "$SIGN_IDENTITY" ]; then
   codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG_PATH"
@@ -412,6 +430,7 @@ if [ ! -d "$MOUNT_DIR/AgentoC.app/Contents/MacOS" ]; then
 fi
 hdiutil detach "$MOUNT_DIR" >/dev/null
 
+assert_source_unchanged
 [ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
 mv "$DMG_PATH" "$FINAL_OUTPUT"
 printf '%s\n' "$SIGNING_STATUS" > "$OUTPUT_DIR/${OUTPUT_NAME}.signing-status.txt"
