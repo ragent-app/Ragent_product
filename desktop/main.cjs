@@ -176,7 +176,7 @@ function createMainWindow() {
   ipcMain.handle("desktop:update-get", (event) => event.sender === mainWindow?.webContents ? updateState : { status: "error" });
   ipcMain.handle("desktop:update-check", (event) => event.sender === mainWindow?.webContents ? refreshUpdate() : { status: "error" });
   ipcMain.handle("desktop:update-open", async (event) => {
-    if (event.sender !== mainWindow?.webContents || !updateState.updateAvailable || !updateCheck.windowsAssetUrl(updateState.downloadUrl)) return false;
+    if (event.sender !== mainWindow?.webContents || !updateState.updateAvailable || !updateCheck.releaseAssetUrl(updateState.downloadUrl)) return false;
     try { await shell.openExternal(updateState.downloadUrl); return true; } catch { return false; }
   });
   ipcMain.handle("desktop:write-text", (event, value) => {

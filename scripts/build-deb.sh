@@ -204,7 +204,7 @@ if [ "$CLAUDE_ADAPTER_COMPATIBLE" != "yes" ]; then
 fi
 printf 'Bundling Codex %s and Claude Code %s from %s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$NPM_REGISTRY"
 
-WORK_DIR="$(mktemp -d /tmp/agentoc-deb.XXXXXX)"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb.XXXXXX")"
 STAGE="$WORK_DIR/stage"
 APP_DIR="$STAGE/opt/agentoc/app"
 OUTPUT_NAME="agentoc_${VERSION}_${ARCH}.deb"

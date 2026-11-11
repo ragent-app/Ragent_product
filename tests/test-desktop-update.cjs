@@ -1,6 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
-const { check, version, compare, windowsAsset, windowsAssetUrl } = require("../desktop/update-check.cjs");
+const { check: checkPlatform, version, compare, windowsAsset, windowsAssetUrl, releaseAsset, releaseAssetUrl } = require("../desktop/update-check.cjs");
+const check = (version, fetcher, options = {}) => checkPlatform(version, fetcher, { platform: "win32", arch: "x64", ...options });
 const url = "https://github.com/ragent-app/Ragent_product/releases/download/v1.2.3/Ragent-1.2.3-windows-x64-setup.exe";
 const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url: url };
 (async () => {
@@ -16,6 +17,22 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert(!windowsAssetUrl(url.replace("setup.exe", "payload.exe")));
   assert(!windowsAsset({ ...asset, browser_download_url: "https://evil.example/releases/download/x" }));
   assert(!windowsAsset({ ...asset, name: "agentoc-arm64.msi" }));
+  for (const [platform, arch, name] of [
+    ["linux", "x64", "Ragent-1.2.3-linux-x64.deb"],
+    ["darwin", "arm64", "Ragent-1.2.3-macos-arm64.dmg"],
+  ]) {
+    const platformUrl = `https://github.com/ragent-app/Ragent_product/releases/download/v1.2.3/${name}`;
+    const platformAsset = { name, browser_download_url: platformUrl };
+    assert(releaseAsset(platformAsset, platform, arch));
+    assert(releaseAssetUrl(platformUrl, platform, arch));
+    assert(!releaseAssetUrl(platformUrl + "?redirect=evil", platform, arch));
+    assert(!releaseAsset(platformAsset, platform, "unsupported"));
+    assert(!releaseAsset(asset, platform, arch));
+    const platformFetch = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", assets: [asset, platformAsset] }] });
+    const result = await checkPlatform("1.2.2", platformFetch, { platform, arch });
+    assert.equal(result.downloadUrl, platformUrl);
+    assert.equal(result.updateAvailable, true);
+  }
   const releases = [
     { tag_name: "v9.0.0", prerelease: true, assets: [asset] },
     { tag_name: "v1.2.3", assets: [asset] },

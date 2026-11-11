@@ -6,8 +6,8 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
 
-agentoc_source_instance_env
 agentoc_first_run_bootstrap
+agentoc_source_instance_env
 agentoc_ensure_runtime_shims
 
 PORT="${CHAT_PORT:-7690}"
@@ -23,11 +23,20 @@ fi
 nohup "$AGENTOC_NODE_BIN" "$AGENTOC_APP_DIR/chat-server.mjs" >>"$AGENTOC_RUN_LOG" 2>&1 &
 echo $! > "$AGENTOC_PID_FILE"
 
+ready=0
 for _ in $(seq 1 60); do
   if curl -sf -o /dev/null --max-time 1 "$BASE_URL/healthz" 2>/dev/null; then
+    ready=1
+    break
+  fi
+  if ! kill -0 "$(cat "$AGENTOC_PID_FILE")" 2>/dev/null; then
     break
   fi
   sleep 0.5
 done
 
+if [ "$ready" -ne 1 ]; then
+  agentoc_log "Service did not start; inspect $AGENTOC_RUN_LOG"
+  exit 1
+fi
 open "$BASE_URL"

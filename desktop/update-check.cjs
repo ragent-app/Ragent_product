@@ -23,23 +23,31 @@ function releaseBuildInfo(release, asset) {
   const build = match && version(match[1]);
   return build ? { build, commit: match[2] } : null;
 }
-function windowsAsset(asset) {
+function releaseAsset(asset, platform = process.platform, arch = process.arch) {
   if (!asset || typeof asset.name !== "string") return false;
-  if (!/^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-windows-x64-setup\.exe|(?:Ragent|AgentoC)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i.test(asset.name)) return false;
+  const patterns = {
+    "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-windows-x64-setup\.exe|(?:Ragent|AgentoC)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
+    "linux-x64": /^Ragent-[0-9]+(?:\.[0-9]+){2,3}-linux-x64\.deb$/i,
+    "darwin-arm64": /^Ragent-[0-9]+(?:\.[0-9]+){2,3}-macos-arm64\.dmg$/i,
+  };
+  const pattern = patterns[`${platform}-${arch}`];
+  if (!pattern || !pattern.test(asset.name)) return false;
   try {
     const url = new URL(asset.browser_download_url);
     const suffix = url.pathname.slice(DOWNLOAD_PREFIX.length).split("/");
     return url.protocol === "https:" && url.hostname === "github.com" && !url.port && !url.username && !url.password && !url.search && !url.hash && url.pathname.startsWith(DOWNLOAD_PREFIX) && suffix.length === 2 && !!suffix[0] && suffix[1] === encodeURIComponent(asset.name);
   } catch { return false; }
 }
-function windowsAssetUrl(value) {
+function releaseAssetUrl(value, platform = process.platform, arch = process.arch) {
   try {
     const url = new URL(value);
-    return windowsAsset({ name: decodeURIComponent(url.pathname.split("/").pop()), browser_download_url: value });
+    return releaseAsset({ name: decodeURIComponent(url.pathname.split("/").pop()), browser_download_url: value }, platform, arch);
   } catch { return false; }
 }
+const windowsAsset = (asset) => releaseAsset(asset, "win32", "x64");
+const windowsAssetUrl = (value) => releaseAssetUrl(value, "win32", "x64");
 
-async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", currentBuild = "" } = {}) {
+async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", currentBuild = "", platform = process.platform, arch = process.arch } = {}) {
   const installed = version(currentVersion);
   if (!installed) throw new Error("invalid-current-version");
   let newest = null;
@@ -51,13 +59,13 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
     for (const release of releases) {
       if (!release || release.draft || release.prerelease) continue;
       const parsed = version(release.tag_name);
-      const asset = Array.isArray(release.assets) && release.assets.find(windowsAsset);
-      if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, buildInfo: releaseBuildInfo(release, asset) };
+      const asset = Array.isArray(release.assets) && release.assets.find((candidate) => releaseAsset(candidate, platform, arch));
+      if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, buildInfo: platform === "win32" ? releaseBuildInfo(release, asset) : null };
     }
     if (releases.length < 100) break;
     if (page === 10) throw new Error("release-list-too-long");
   }
-  if (!newest) throw new Error("no-windows-release");
+  if (!newest) throw new Error(platform === "win32" ? "no-windows-release" : "no-platform-release");
   const versionOrder = compare(newest.parsed, installed);
   const installedCommit = sourceCommit(currentCommit);
   const installedBuild = version(currentBuild);
@@ -74,4 +82,4 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
     downloadUrl: newest.url, ...(buildChanged ? { buildChanged: true } : {}),
     ...(buildIdentityUnavailable ? { buildIdentityUnavailable: true } : {}) };
 }
-module.exports = { check, version, compare, windowsAsset, windowsAssetUrl, sourceCommit, releaseBuildInfo };
+module.exports = { check, version, compare, windowsAsset, windowsAssetUrl, releaseAsset, releaseAssetUrl, sourceCommit, releaseBuildInfo };

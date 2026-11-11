@@ -1,0 +1,8 @@
+#!/bin/bash
+# LaunchAgent entry point: use the same initialization and environment as the app.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
+agentoc_first_run_bootstrap
+agentoc_source_instance_env
+agentoc_ensure_runtime_shims
+exec "$AGENTOC_NODE_BIN" "$AGENTOC_APP_DIR/chat-server.mjs"

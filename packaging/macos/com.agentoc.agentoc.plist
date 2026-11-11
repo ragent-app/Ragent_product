@@ -6,8 +6,7 @@
     <string>cloud.agenton.agentoc</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{APP_PATH}}/Contents/Resources/runtime/node</string>
-        <string>{{APP_PATH}}/Contents/Resources/app/chat-server.mjs</string>
+        <string>{{APP_PATH}}/Contents/MacOS/agentoc-service</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
