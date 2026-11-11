@@ -457,8 +457,11 @@ export async function readLifecycleSystemdUnitState(unitName, { execFileImpl = e
       pid: Number.isInteger(pid) && pid > 0 ? pid : null,
       user: values.User || '',
     };
-  } catch {
-    return { loadState: 'not-found', activeState: 'inactive', pid: null };
+  } catch (cause) {
+    const error = new Error('Cannot inspect the existing runner unit');
+    error.code = 'RUNNER_UNIT_STATUS_UNAVAILABLE';
+    error.cause = cause;
+    throw error;
   }
 }
 
@@ -513,6 +516,13 @@ async function launchLifecycleRunnerUnlocked(runId, {
     throw error;
   }
   const existingUnit = await readUnitStateImpl(resolvedUnitName, { execFileImpl });
+  if (!['loaded', 'not-found'].includes(existingUnit?.loadState)
+      || !['active', 'activating', 'reloading', 'deactivating', 'inactive', 'failed'].includes(existingUnit?.activeState)
+      || (existingUnit.loadState === 'not-found' && existingUnit.activeState !== 'inactive')) {
+    const error = new Error('Cannot confirm the existing runner unit state');
+    error.code = 'RUNNER_UNIT_STATUS_UNAVAILABLE';
+    throw error;
+  }
   if (['active', 'activating', 'reloading'].includes(existingUnit.activeState)) {
     if (trimString(existingUnit.user) !== resolvedServiceUser) {
       const error = new Error('Cannot reuse a Run owned by a different or unknown systemd user');

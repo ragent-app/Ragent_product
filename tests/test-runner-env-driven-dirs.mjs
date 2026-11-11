@@ -90,6 +90,7 @@ async function main() {
       serviceGroup: currentUser,
       serviceHome: join(tmp, 'runner-home'),
       resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       environment: {
         PATH: '/usr/bin',
         AGENTOC_RUN_SPOOL_DIR: spoolRoot,
@@ -129,6 +130,7 @@ async function main() {
       serviceGroup: currentUser,
       serviceHome: join(tmp, 'runner-home'),
       resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       environment: {
         PATH: '/usr/bin',
         AGENTOC_RUN_SPOOL_DIR: spoolRoot,

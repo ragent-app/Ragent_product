@@ -893,6 +893,10 @@ export function createDetachedRunnerSpawner({
       try {
         return await launchDetachedRunnerViaLifecycleBroker(runId, { connectImpl, launchAttempt });
       } catch (error) {
+        // These are authoritative safety refusals, not transport outages.
+        // Retrying through another launcher could bypass identity checks or
+        // start a second copy while a previous unit is still draining.
+        if (['RUNNER_IDENTITY_INVALID', 'RUNNER_UNIT_STATUS_UNAVAILABLE', 'RUNNER_UNIT_DRAINING'].includes(error?.code)) throw error;
         if (process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED === '1') {
           if (error?.code !== 'RUNNER_BROKER_UNAVAILABLE') throw error;
           const unavailable = new Error(`Required runner lifecycle broker is unavailable: ${error?.message || String(error)}`);

@@ -8,6 +8,7 @@ import {
   buildLifecycleSystemdArgs,
   createRunnerLifecycleServer,
   launchLifecycleRunner,
+  readLifecycleSystemdUnitState,
   readWorkspaceAccessScope,
   resolveRunnerResourceProfile,
   resolveRunnerOwnership,
@@ -15,6 +16,7 @@ import {
 } from '../scripts/runner-lifecycle-broker.mjs';
 import {
   DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
+  createDetachedRunnerSpawner,
   launchDetachedRunnerViaLifecycleBroker,
 } from '../chat/run-launcher.mjs';
 
@@ -39,6 +41,34 @@ const server = await createRunnerLifecycleServer({
 });
 
 try {
+  // An optional broker can fall back after an outage, but a definite safety
+  // refusal must never be bypassed by launching through a different path.
+  const refusalSocket = join(root, 'refusal.sock');
+  let refusalCode = '';
+  const refusalServer = await createRunnerLifecycleServer({
+    socketPath: refusalSocket, serviceUser: 'svc', serviceGroup: 'svc', controlUser: 'example',
+    chownImpl: async () => {}, launchRunner: async () => { throw Object.assign(new Error('refused'), { code: refusalCode }); },
+  });
+  const oldLifecycleSocket = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
+  const oldLifecycleRequired = process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
+  try {
+    process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = refusalSocket;
+    delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
+    const spawner = createDetachedRunnerSpawner({
+      assertExecutionBoundaryImpl: async () => {}, getScopeImpl: () => null,
+      spawnImpl: () => { throw new Error('unsafe fallback reached'); },
+    });
+    for (const code of ['RUNNER_IDENTITY_INVALID', 'RUNNER_UNIT_STATUS_UNAVAILABLE', 'RUNNER_UNIT_DRAINING']) {
+      refusalCode = code;
+      await assert.rejects(() => spawner('run_refused123'), error => error.code === code);
+    }
+  } finally {
+    if (oldLifecycleSocket === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
+    else process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = oldLifecycleSocket;
+    if (oldLifecycleRequired === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
+    else process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = oldLifecycleRequired;
+    await refusalServer.close();
+  }
   const args = buildLifecycleSystemdArgs('run_abc12345', {
     projectRoot: '/opt/agentoc/app',
     runnerEntry: '/opt/agentoc/app/chat/runner-sidecar.mjs',
@@ -219,6 +249,16 @@ try {
   );
   assert.deepEqual(ownershipCalls.map(({ args }) => args[0]), ['passwd', 'group']);
 
+  await assert.rejects(() => readLifecycleSystemdUnitState('agentoc-runner-example', {
+    execFileImpl: async () => { throw new Error('systemd unavailable'); },
+  }), error => error.code === 'RUNNER_UNIT_STATUS_UNAVAILABLE');
+  await assert.rejects(() => launchLifecycleRunner('run_unknownstate', {
+    serviceUser: 'svc', serviceGroup: 'svc',
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    readUnitStateImpl: async () => ({ loadState: 'unknown', activeState: 'unknown' }),
+    execFileImpl: async () => { throw new Error('runner must not launch'); },
+  }), error => error.code === 'RUNNER_UNIT_STATUS_UNAVAILABLE');
+
   for (const uid of [0, null]) {
     await assert.rejects(() => launchLifecycleRunner('run_badidentity', {
       serviceUser: 'svc', serviceGroup: 'svc',
@@ -320,6 +360,7 @@ try {
     serviceHome: '/home/svc',
     controlUser: 'owner',
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
     environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
     readManifestImpl: async () => ({
       executionScope: { cwd: { realPath: '/srv/work/app' }, workspaceRoot: { realPath: '/srv/work' } },
@@ -343,6 +384,7 @@ try {
     serviceHome: '/home/svc',
     controlUser: 'owner',
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
     environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
     readManifestImpl: async () => ({
       executionScope: { cwd: { realPath: '/srv/work/app' } },
@@ -374,6 +416,7 @@ try {
       AGENTOC_RUNNER_INHERITED_GROUPS: 'owner',
     },
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
     readManifestImpl: async () => ({ tool: 'agy', executionScope: { accessMode: 'read' }, options: { runtimeFamily: 'agy-json' } }),
     prepareNativeRunProviderHomeImpl: async (runId, manifest, options) => {
       agyPrepareCalls.push({ runId, manifest, options });
@@ -415,6 +458,7 @@ try {
       serviceGroup: 'svc',
       serviceHome: '/home/svc',
       resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       readManifestImpl: async () => ({ executionScope: { cwd: { realPath: '/srv/work/app' } } }),
       grantWorkspaceAccessImpl: grantImpl,
       revokeWorkspaceAccessImpl: async (options) => {
