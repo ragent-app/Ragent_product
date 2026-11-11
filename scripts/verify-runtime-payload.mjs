@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 export function secretKinds(text) {
   const kinds = [];
   if (/-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]{24,16384}?-----END (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(text)) kinds.push('private-key');
-  if (/\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{24,}/.test(text)) kinds.push('provider-secret');
+  // A key must start at a token boundary. `\b` also treats a hyphen inside
+  // a longer identifier as a boundary, producing false positives in vendor
+  // binaries while a standalone key remains detectable.
+  if (/(?<![A-Za-z0-9_-])sk-(?:proj-|ant-)?[A-Za-z0-9_-]{24,}/.test(text)) kinds.push('provider-secret');
   if (/"client_secret"\s*:\s*"[A-Za-z0-9_-]{24,}"/.test(text)) kinds.push('oauth-client-secret');
   return kinds;
 }
@@ -39,11 +42,14 @@ export async function scanRuntimePayload(root) {
       // Stream binaries as well: embedded text in an executable/archive is not
       // exempt. Nested compressed archives still require extracted-artifact QA.
       let overlap = '';
+      let preceding = '';
       const found = new Set();
       for await (const chunk of createReadStream(path, { encoding: 'utf8', highWaterMark: 64 * 1024 })) {
-        const text = overlap + chunk;
+        const text = preceding + overlap + chunk;
         for (const kind of secretKinds(text)) found.add(kind);
-        overlap = text.slice(-32768);
+        const nextStart = Math.max(0, text.length - 32768);
+        preceding = nextStart ? text[nextStart - 1] : '';
+        overlap = text.slice(nextStart);
       }
       for (const kind of found) findings.push({ path: name, kind });
     }
