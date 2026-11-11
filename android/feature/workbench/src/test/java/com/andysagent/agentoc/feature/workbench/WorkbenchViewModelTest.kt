@@ -1114,6 +1114,33 @@ class WorkbenchViewModelTest {
         }
     }
 
+    @Test
+    fun `first turn keeps its selected session when a refresh temporarily omits it`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val repository = FakeSessionRepository(
+                sessions = listOf(Session("history", "Older session")),
+                connection = RuntimeConnectionState.Connected,
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.CreateSession())
+            viewModel.onEvent(ChatEvent.ComposerChanged("first message"))
+            viewModel.onEvent(ChatEvent.SendMessage)
+            advanceUntilIdle()
+            assertEquals("session-created", viewModel.state.value.sessionId)
+            assertTrue(viewModel.state.value.acceptedTurns.isNotEmpty())
+
+            repository.setSessions(listOf(Session("history", "Older session")))
+            advanceUntilIdle()
+            assertEquals("session-created", viewModel.state.value.sessionId)
+            assertEquals("New session", viewModel.state.value.sessionTitle)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test fun `listed session actions target the long pressed session without selecting it`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
@@ -1687,6 +1714,35 @@ class WorkbenchViewModelTest {
     }
 
     @Test
+    fun `accepted first turn stays in the project list while the canonical list catches up`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val firstTurn = Session("new-session", "New session", "project-1", SessionStatus.Idle, latestSeq = 0)
+            val repository = FakeSessionRepository(sessions = listOf(firstTurn))
+            repository.setProjects(listOf(Project("project-1", "Operations", "/work/operations")))
+            val viewModel = ProjectsViewModel(repository)
+            advanceUntilIdle()
+            assertTrue(viewModel.state.value.sessions.isEmpty(), "an empty session is hidden until its first message is accepted")
+
+            repository.acceptFirstTurn("new-session")
+            advanceUntilIdle()
+            assertEquals(listOf("new-session"), viewModel.state.value.sessions.map { it.id })
+
+            repository.setSessions(emptyList())
+            advanceUntilIdle()
+            assertEquals(listOf("new-session"), viewModel.state.value.sessions.map { it.id })
+
+            repository.setSessions(listOf(firstTurn.copy(status = SessionStatus.Completed, latestSeq = 1)))
+            repository.clearAcceptedFirstTurn("new-session")
+            advanceUntilIdle()
+            assertEquals(listOf("new-session"), viewModel.state.value.sessions.map { it.id })
+            assertEquals(SessionStatus.Completed, viewModel.state.value.sessions.single().status)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `manual project refresh keeps cached state and reloads both catalogs`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
@@ -1734,6 +1790,7 @@ private class FakeSessionRepository(
     override val connectionState: StateFlow<RuntimeConnectionState> = connectionStateValue.asStateFlow()
     override val invalidations: Flow<SessionInvalidation> = MutableSharedFlow()
     private val sessionState = MutableStateFlow(sessions)
+    private val acceptedFirstTurnIds = MutableStateFlow<Set<String>>(emptySet())
     private val computerState = MutableStateFlow<List<Computer>>(emptyList())
     private val projectState = MutableStateFlow<List<Project>>(emptyList())
     private val messageState = MutableStateFlow<List<Message>>(emptyList())
@@ -1784,6 +1841,8 @@ private class FakeSessionRepository(
     }
 
     fun setSessions(sessions: List<Session>) { sessionState.value = sessions }
+    fun acceptFirstTurn(sessionId: String) { acceptedFirstTurnIds.value = acceptedFirstTurnIds.value + sessionId }
+    fun clearAcceptedFirstTurn(sessionId: String) { acceptedFirstTurnIds.value = acceptedFirstTurnIds.value - sessionId }
     fun setTimeline(id: String, items: List<TimelineItem>) { timelineStates.getOrPut(id) { MutableStateFlow(emptyList()) }.value = items }
 
     fun setConnection(connection: RuntimeConnectionState) {
@@ -1793,6 +1852,7 @@ private class FakeSessionRepository(
     override fun observeComputers(): Flow<List<Computer>> = computerState
     override fun observeProjects(): Flow<List<Project>> = projectState
     override fun observeSessions(): Flow<List<Session>> = sessionState
+    override fun observeAcceptedFirstTurnSessionIds(): Flow<Set<String>> = acceptedFirstTurnIds
     override fun observeSession(sessionId: String): Flow<Session?> = MutableStateFlow(sessionState.value.firstOrNull { it.id == sessionId })
     override fun observeMessages(sessionId: String): Flow<List<Message>> = messageState
     override fun observeTimeline(sessionId: String): Flow<List<TimelineItem>> = timelineStates.getOrPut(sessionId) { MutableStateFlow(emptyList()) }

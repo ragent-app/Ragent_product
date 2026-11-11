@@ -137,6 +137,8 @@ interface SessionRepository {
     fun observeComputers(): Flow<List<Computer>>
     fun observeProjects(): Flow<List<Project>>
     fun observeSessions(): Flow<List<Session>>
+    /** Session ids whose first message was accepted while canonical history catches up. */
+    fun observeAcceptedFirstTurnSessionIds(): Flow<Set<String>> = kotlinx.coroutines.flow.flowOf(emptySet())
     fun observeSession(sessionId: String): Flow<Session?>
     fun observeMessages(sessionId: String): Flow<List<Message>>
     fun observeTimeline(sessionId: String): Flow<List<TimelineItem>>

@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -856,8 +857,19 @@ class ChatViewModel(
                 }.forEach { stopRequests.remove(fixed to it.id) }
                 knownSessionsRepository = fixed
                 val currentId = mutableState.value.sessionId
-                if (preserveSelectedSessionOnRefresh && fixed === selectedRepository && currentId != null &&
-                    sessions.none { it.id == currentId }) return@collectLatest
+                val currentState = mutableState.value
+                val serverActivity = currentState.serverRunActivity?.get("state")?.jsonPrimitive?.contentOrNull?.lowercase()
+                val selectedTurnInFlight = currentState.pendingTurn != null ||
+                    currentState.acceptedTurns.isNotEmpty() ||
+                    currentState.runStatus in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) ||
+                    serverActivity in setOf("starting", "queued", "working", "running", "waiting_approval", "awaiting_decision") ||
+                    (currentId != null && (
+                        sessionPendingTurns.containsKey(fixed to currentId) ||
+                            sessionAcceptedTurns[fixed to currentId].orEmpty().isNotEmpty() ||
+                            uncommittedNewSessions.containsKey(fixed to currentId)
+                        ))
+                if (fixed === selectedRepository && currentId != null && sessions.none { it.id == currentId } &&
+                    (preserveSelectedSessionOnRefresh || selectedTurnInFlight)) return@collectLatest
                 val selected = sessions.firstOrNull { it.id == currentId }
                     ?: sessions.firstOrNull().takeUnless { newSessionRequested && fixed === selectedRepository }
                 if (selected != null && (selected.id != currentId || fixed !== selectedRepository)) selectSession(selected.id)
@@ -3325,6 +3337,7 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
     private var sessionsHydrated = false
     private var projectFolderRequestId = 0L
     private var refreshError: String? = null
+    private val sessionSnapshots = mutableMapOf<String, Session>()
 
     init {
         viewModelScope.launch {
@@ -3341,13 +3354,19 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
             }
         }
         viewModelScope.launch {
-            repository.observeSessions().collectLatest { sessions ->
+            combine(
+                repository.observeSessions(),
+                repository.observeAcceptedFirstTurnSessionIds(),
+            ) { sessions, acceptedIds -> sessions to acceptedIds }.collectLatest { (sessions, acceptedIds) ->
                 sessionsHydrated = true
-                // A first-turn session is created immediately before its message POST.
-                // Keep that provisional empty record out of the picker until the
-                // computer has accepted a message (or started processing it).
-                val listedSessions = sessions.filter {
-                    it.latestSeq > 0L || it.status in setOf(SessionStatus.Working, SessionStatus.WaitingApproval)
+                sessions.forEach { sessionSnapshots[it.id] = it }
+                val presentIds = sessions.mapTo(mutableSetOf()) { it.id }
+                val retainedAccepted = acceptedIds.mapNotNull { id ->
+                    if (id in presentIds) null else sessionSnapshots[id]
+                }
+                sessionSnapshots.keys.retainAll(presentIds + acceptedIds)
+                val listedSessions = (sessions + retainedAccepted).distinctBy { it.id }.filter {
+                    it.latestSeq > 0L || it.status != SessionStatus.Idle || it.id in acceptedIds
                 }
                 updateState {
                     copy(

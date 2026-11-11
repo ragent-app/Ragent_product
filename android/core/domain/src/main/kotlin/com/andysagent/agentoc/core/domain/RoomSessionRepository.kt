@@ -218,6 +218,9 @@ class RoomSessionRepository(
     private val liveFeedCursors = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private val liveFeedMuted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val liveFeedCapable = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val firstTurnCandidates = java.util.concurrent.ConcurrentHashMap<String, SessionEntity>()
+    private val acceptedFirstTurnSnapshots = java.util.concurrent.ConcurrentHashMap<String, SessionEntity>()
+    private val acceptedFirstTurnSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private val approvalRecoveryAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val terminalApprovalRecoveryAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val terminalApprovalRecoveryOffsets = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -248,6 +251,7 @@ class RoomSessionRepository(
 
     override val connectionState = transport.connectionState
     override val invalidations = transport.invalidations.map { SessionInvalidation(it.type, it.sessionId, it.events) }
+    override fun observeAcceptedFirstTurnSessionIds(): Flow<Set<String>> = acceptedFirstTurnSessionIds
     override val requiresLiveSync: Boolean
         get() = transport.requiresEventPolling
 
@@ -459,7 +463,16 @@ class RoomSessionRepository(
 
     override fun observeProjects(): Flow<List<Project>> = observeRows(dao.observeProjects()).map { items -> items.map(::toDomain) }
 
-    override fun observeSessions(): Flow<List<Session>> = observeRows(dao.observeSessions()).map { items -> items.map(::toDomain) }
+    override fun observeSessions(): Flow<List<Session>> = combine(
+        observeRows(dao.observeSessions()),
+        acceptedFirstTurnSessionIds,
+    ) { items, acceptedIds ->
+        val existingIds = items.mapTo(mutableSetOf()) { it.id }
+        val retained = acceptedIds.mapNotNull { id ->
+            if (id in existingIds) null else acceptedFirstTurnSnapshots[id]
+        }
+        (items + retained).map(::toDomain)
+    }
 
     override fun observeSession(sessionId: String): Flow<Session?> = observeRows(dao.observeSessions()).map { items -> items.firstOrNull { it.id == sessionId }?.let(::toDomain) }
 
@@ -819,6 +832,7 @@ class RoomSessionRepository(
             waitingAction = item.string("waitingAction") ?: item.string("attentionKind"),
         )
         dao.upsertSessions(listOf(session))
+        if (session.latestSeq == 0L) firstTurnCandidates[session.id] = session
         return toDomain(session)
     }
 
@@ -859,6 +873,9 @@ class RoomSessionRepository(
 
     override suspend fun deleteSession(sessionId: String) {
         execute(ApiRequest("DELETE", "/api/sessions/${encode(sessionId)}"))
+        firstTurnCandidates.remove(sessionId)
+        acceptedFirstTurnSnapshots.remove(sessionId)
+        acceptedFirstTurnSessionIds.update { it - sessionId }
         dao.deleteRunDurations(sessionId)
         refreshSessions()
     }
@@ -1055,7 +1072,7 @@ class RoomSessionRepository(
         val response = requestSessionList()
         val payload = codec.decode(serializer<SessionListResponseDto>(), response.body)
         val now = System.currentTimeMillis()
-        dao.replaceSessions(payload.sessions.map { item ->
+        val canonical = payload.sessions.map { item ->
             val existing = item.string("id")?.let { dao.getSession(it) }
             val activity = item["activity"]?.jsonObject
             val run = activity?.get("run")?.jsonObject
@@ -1090,7 +1107,27 @@ class RoomSessionRepository(
             timelineProjectionVersion = existing?.timelineProjectionVersion ?: 2,
                 pinned = (item["pinned"] as? JsonPrimitive)?.booleanOrNull == true,
             )
-        }.filter { it.id.isNotBlank() })
+        }.filter { it.id.isNotBlank() }
+        val canonicalById = canonical.associateBy { it.id }
+        val acceptedIds = acceptedFirstTurnSessionIds.value
+        val completedFirstTurns = mutableSetOf<String>()
+        val reconciled = canonical.map { session ->
+            if (session.id !in acceptedIds) return@map session
+            val terminal = session.status.lowercase() in setOf("completed", "failed", "cancelled", "canceled")
+            if (session.latestSeq > 0L || terminal) {
+                completedFirstTurns += session.id
+                return@map session
+            }
+            session.copy(status = "working").also { acceptedFirstTurnSnapshots[session.id] = it }
+        }.toMutableList()
+        for (sessionId in acceptedIds - canonicalById.keys) {
+            acceptedFirstTurnSnapshots[sessionId]?.let(reconciled::add)
+        }
+        dao.replaceSessions(reconciled)
+        if (completedFirstTurns.isNotEmpty()) {
+            completedFirstTurns.forEach(acceptedFirstTurnSnapshots::remove)
+            acceptedFirstTurnSessionIds.update { it - completedFirstTurns }
+        }
     }
 
     override suspend fun readSessionMetadataList(): List<SessionMetadataSnapshot> {
@@ -1758,6 +1795,7 @@ class RoomSessionRepository(
         executePending(sessionId, requestId, "send_message", path, body) {
             execute(ApiRequest("POST", path, body, requestId, requestId))
         }
+        markFirstTurnAccepted(sessionId)
         refreshSessionDetail(sessionId)
     }
 
@@ -1783,6 +1821,7 @@ class RoomSessionRepository(
             executePending(sessionId, requestId, "send_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
             }
+            markFirstTurnAccepted(sessionId)
             refreshSessionDetail(sessionId)
             return
         }
@@ -1817,12 +1856,24 @@ class RoomSessionRepository(
             dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
             execute(ApiRequest("POST", path, body, requestId, requestId))
             dao.deleteOperation(requestId)
+            markFirstTurnAccepted(sessionId)
         } catch (error: Throwable) {
             val recoverable = dao.getPendingOperation(requestId) ?: operation
             dao.upsertOperation(recoverable.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
             throw error
         }
         runCatching { refreshSessionDetail(sessionId) }
+    }
+
+    private suspend fun markFirstTurnAccepted(sessionId: String) {
+        val candidate = firstTurnCandidates.remove(sessionId) ?: return
+        val current = dao.getSession(sessionId) ?: candidate
+        val retained = if (current.latestSeq == 0L && current.status.equals("idle", ignoreCase = true)) {
+            current.copy(status = "working")
+        } else current
+        acceptedFirstTurnSnapshots[sessionId] = retained
+        acceptedFirstTurnSessionIds.update { it + sessionId }
+        dao.upsertSessions(listOf(retained))
     }
 
     override suspend fun updateQueuedFollowUp(
