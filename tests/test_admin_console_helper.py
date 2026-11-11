@@ -2,7 +2,9 @@ import importlib.util
 import base64
 import io
 import pathlib
+import signal
 import tempfile
+import time
 import unittest
 import wave
 from types import SimpleNamespace
@@ -16,6 +18,26 @@ SPEC.loader.exec_module(HELPER)
 
 
 class AdminHelperValidationTests(unittest.TestCase):
+    @unittest.skipUnless(hasattr(signal, "SIGALRM"), "provider deadline requires Unix signals")
+    def test_asr_provider_probe_has_a_hard_deadline(self):
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
+            wav.writeframes(bytes(16000))
+        class Slow:
+            def request(self, *_args, **_kwargs): time.sleep(5)
+            def close(self): pass
+        original_timer = signal.setitimer
+        def short_timer(which, seconds, *args): return original_timer(which, 0.1 if seconds else 0, *args)
+        with patch.object(HELPER, "read_env", return_value={"OPENAI_API_KEY": "test", "AGENTOC_ACCOUNTS_ASR_ENABLED": "1"}), \
+             patch.object(HELPER.http.client, "HTTPSConnection", return_value=Slow()), \
+             patch.object(HELPER, "_audit"), patch.object(signal, "setitimer", side_effect=short_timer):
+            start = time.monotonic()
+            with self.assertRaises(HELPER.AdminError) as error:
+                HELPER._test_asr_transcription("owner", {"confirmed": True, "audioBase64": base64.b64encode(buffer.getvalue()).decode()})
+            self.assertEqual(error.exception.code, "ASR_TEST_PROVIDER_FAILED")
+            self.assertLess(time.monotonic()-start, 2)
+
     def test_asr_settings_are_validated_and_reverted_if_restart_fails(self):
         folder = pathlib.Path("G:/AgentoC/.tmp/admin-console")
         folder.mkdir(parents=True, exist_ok=True)
