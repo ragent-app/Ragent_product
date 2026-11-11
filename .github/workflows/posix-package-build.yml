@@ -47,6 +47,11 @@ jobs:
           node tests/test-runtime-payload-secret-scan.mjs
           node tests/test-frozen-source-guards.mjs
           if [ "$PLATFORM" = linux ]; then
+            node tests/test-semantic-operation.mjs
+            node tests/test-semantic-compiler.mjs
+            node tests/test-semantic-policy.mjs
+            node tests/test-semantic-approval.mjs
+            node tests/test-semantic-capability.mjs
             node tests/test-deb-packaging.mjs
             sudo env "PATH=$PATH" "TMPDIR=$RUNNER_TEMP" node tests/test-linux-run-status-ownership.mjs
             bash scripts/build-deb.sh
