@@ -338,6 +338,10 @@ if [ -f "$ROOT/static/icon-512.png" ] && command -v iconutil >/dev/null 2>&1 && 
   fi
 fi
 
+# Set the final bundle permissions before signing. Do not change the signed
+# app's resources or executable bits after the signature has been verified.
+chmod -R u+rwX,go+rX "$STAGE/AgentoC.app"
+
 # ── 8. Sign the app; ad-hoc candidates are not trusted distribution builds ──
 SIGNING_STATUS=ad-hoc
 if [ -n "$SIGN_IDENTITY" ]; then
@@ -381,7 +385,7 @@ do
   [ -e "$required" ] || { echo "Built bundle is missing $required" >&2; exit 1; }
 done
 node "$ROOT/scripts/verify-runtime-payload.mjs" "$CONTENTS"
-chmod -R u+rwX,go+rX "$STAGE/AgentoC.app"
+codesign --verify --deep --strict "$STAGE/AgentoC.app"
 
 # ── 10. DMG ──────────────────────────────────────────────────────────────────
 hdiutil create -volname AgentoC -srcfolder "$STAGE" -format UDZO "$DMG_PATH" >/dev/null
