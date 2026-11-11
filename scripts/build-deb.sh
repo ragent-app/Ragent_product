@@ -3,6 +3,46 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# A source archive's commit marker alone does not prove its contents. For
+# archive builds, require the committed Git objects and stage a fresh,
+# allowlisted source tree; this does not create a Git worktree.
+SOURCE_GIT_DIR="${AGENTOC_SOURCE_GIT_DIR:-}"
+FROZEN_WORK_DIR=''
+if [ -n "$SOURCE_GIT_DIR" ]; then
+  SOURCE_GIT_DIR="$(cd "$SOURCE_GIT_DIR" && pwd -P)"
+  export GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+  [ ! -e "$SOURCE_GIT_DIR/objects/info/alternates" ] &&
+    [ ! -e "$SOURCE_GIT_DIR/objects/info/http-alternates" ] || {
+      echo 'Frozen source Git directory must not use alternate object stores.' >&2; exit 1;
+    }
+  [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --is-bare-repository)" = true ] || {
+    echo 'Frozen source Git directory must be bare.' >&2; exit 1;
+  }
+  SOURCE_COMMIT="${AGENTOC_SOURCE_COMMIT:-}"
+  [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] &&
+    [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] || {
+      echo 'Frozen source requires the expected full commit ID at bare HEAD.' >&2; exit 1;
+    }
+  FROZEN_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb-source.XXXXXX")"
+  trap 'rm -rf "$FROZEN_WORK_DIR"' EXIT
+  for input in scripts/build-deb.sh scripts/stage-runtime-payload.mjs scripts/verify-runtime-payload.mjs; do
+    git -C "$SOURCE_GIT_DIR" show "$SOURCE_COMMIT:$input" > "$FROZEN_WORK_DIR/bootstrap-input" || exit 1
+    cmp -s "$ROOT/$input" "$FROZEN_WORK_DIR/bootstrap-input" || {
+      echo "Frozen source bootstrap differs from the specified commit: $input" >&2; exit 1;
+    }
+  done
+  node "$ROOT/scripts/stage-runtime-payload.mjs" --source "$SOURCE_GIT_DIR" \
+    --destination "$FROZEN_WORK_DIR/source" --profile desktop --source-mode git-objects
+  ROOT="$FROZEN_WORK_DIR/source"
+  [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
+    echo 'Frozen source staging returned a different commit.' >&2; exit 1;
+  }
+  FROZEN_MANIFEST_SHA="$(sha256sum "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')"
+elif [ ! -e "$ROOT/.git" ]; then
+  echo 'A source archive requires AGENTOC_SOURCE_GIT_DIR and AGENTOC_SOURCE_COMMIT.' >&2
+  exit 1
+fi
+
 # DS-01 parity preflight (off by default; enable with AGENTOC_PARITY_GATE=1).
 # Compares the source tree against itself: fails on uncommitted changes to
 # shipped artifacts or drift from the recorded package manifest. Never touches
@@ -235,6 +275,7 @@ FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 
 cleanup() {
   rm -rf "$WORK_DIR"
+  if [ -n "$FROZEN_WORK_DIR" ]; then rm -rf "$FROZEN_WORK_DIR"; fi
 }
 trap cleanup EXIT
 
@@ -584,7 +625,39 @@ while IFS= read -r package_name; do
   fi
 done < "$PROD_DIRECT_DEPENDENCY_LIST"
 
-if [ -e "$ROOT/.git" ]; then
+if [ -n "$SOURCE_GIT_DIR" ]; then
+  [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] &&
+    [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] &&
+    [ "$(sha256sum "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')" = "$FROZEN_MANIFEST_SHA" ] || {
+      echo 'Frozen source identity changed during Debian packaging.' >&2; exit 1;
+    }
+  node --input-type=module - "$ROOT" <<'NODE'
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+const root = process.argv[2];
+const manifest = JSON.parse(readFileSync(join(root, 'runtime-payload-manifest.json'), 'utf8'));
+const expected = new Map(manifest.files.map(({ path, sha256 }) => [path, sha256]));
+const found = new Set();
+function walk(dir, prefix = '') {
+  for (const name of readdirSync(dir)) {
+    const rel = prefix ? `${prefix}/${name}` : name;
+    const file = join(dir, name);
+    const st = lstatSync(file);
+    if (st.isSymbolicLink()) throw new Error(`Frozen source contains a symlink: ${rel}`);
+    if (st.isDirectory()) { walk(file, rel); continue; }
+    if (!st.isFile()) throw new Error(`Frozen source contains a non-file: ${rel}`);
+    if (!prefix && ['.agentoc-source-commit', 'runtime-payload-manifest.json'].includes(name)) continue;
+    if (!expected.has(rel) || createHash('sha256').update(readFileSync(file)).digest('hex') !== expected.get(rel)) {
+      throw new Error(`Frozen source changed: ${rel}`);
+    }
+    found.add(rel);
+  }
+}
+walk(root);
+if (found.size !== expected.size) throw new Error('Frozen source is incomplete');
+NODE
+elif [ -e "$ROOT/.git" ]; then
   FINAL_SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)" || {
     echo 'Unable to verify Debian source commit.' >&2; exit 1;
   }
@@ -595,5 +668,7 @@ if [ -e "$ROOT/.git" ]; then
       echo 'Source changed during packaging; refusing to publish the candidate.' >&2; exit 1;
     }
 fi
-mv -f "$OUTPUT" "$FINAL_OUTPUT"
+[ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
+mv -n "$OUTPUT" "$FINAL_OUTPUT"
+[ ! -e "$OUTPUT" ] || { echo 'Candidate output appeared during publishing; refusing to overwrite it.' >&2; exit 1; }
 printf '%s\n' "$FINAL_OUTPUT"

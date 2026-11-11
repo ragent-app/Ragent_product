@@ -54,9 +54,16 @@ the Debian packaging tools, a C compiler and the native architecture. Set
 `AGENTOC_DEB_OUTPUT_DIR` to the output directory, and `AGENTOC_NODE_CACHE_DIR`
 to an existing writable cache directory before running `bash scripts/build-deb.sh`.
 The builder records the full source commit and rejects a dirty checkout.
-It also accepts a committed payload staged by `scripts/stage-runtime-payload.mjs`
-with `--source-mode git-objects`. Set `TMPDIR`, npm, Go and Electron caches to
-the intended build storage before starting. The package must still pass native
+For an archive build without a second checkout or worktree, set
+`AGENTOC_SOURCE_GIT_DIR` to a bare Git object store and
+`AGENTOC_SOURCE_COMMIT` to its full expected HEAD commit. Invoke the build and
+staging scripts from exact copies of that commit. The builder checks those
+scripts against Git, stages the desktop allowlist from committed objects, and
+rechecks the staged files before publishing the package. A commit marker in an
+archive alone is not sufficient proof of the archive's contents. The object
+store must contain all objects needed by the desktop payload and must not
+depend on external alternate stores. Set `TMPDIR`, npm, Go and Electron caches
+to the intended build storage before starting. The package must still pass native
 installation, upgrade, security and device-connection acceptance before release.
 Use the [desktop release validation checklist](desktop-release-validation.md)
 to record the candidate's evidence and remaining limitations.

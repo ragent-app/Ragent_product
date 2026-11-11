@@ -7,13 +7,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HEAD_HASH="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
+SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
+[[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
+  echo 'A full committed source identity is required.' >&2; exit 1;
+}
+HEAD_HASH="${SOURCE_COMMIT:0:8}"
 OUTPUT_DIR="${AGENTOC_SRC_TAR_OUTPUT_DIR:-/tmp}"
 OUTPUT="${AGENTOC_SRC_TAR:-$OUTPUT_DIR/agentoc-src-main-$HEAD_HASH.tar}"
+[ ! -e "$OUTPUT" ] || { echo 'Source archive already exists; refusing to overwrite it.' >&2; exit 1; }
 
 git -C "$ROOT" archive --format=tar \
   --output="$OUTPUT" \
-  HEAD \
+  "$SOURCE_COMMIT" \
   -- . \
     ':(exclude)android' \
     ':(exclude)design' \
@@ -33,18 +38,14 @@ git -C "$ROOT" archive --format=tar \
 # archives (no .git), and build-deb.sh uses this marker to keep the commit in
 # the generated package version.
 META_DIR="$(mktemp -d)"
-printf '%s\n' "$(git -C "$ROOT" rev-parse HEAD)" > "$META_DIR/.agentoc-source-commit"
+printf '%s\n' "$SOURCE_COMMIT" > "$META_DIR/.agentoc-source-commit"
 tar --append --file="$OUTPUT" --directory="$META_DIR" .agentoc-source-commit
 rm -rf "$META_DIR"
 
-# Packaging-script currency: git archive only snapshots committed content, but
-# the deb build must always run the live packaging logic. Replace those members
-# with the working-tree copies.
-for packaged_script in scripts/build-deb.sh scripts/build-source-tar.sh; do
-  [ -f "$ROOT/$packaged_script" ] || continue
-  tar --delete --file="$OUTPUT" "$packaged_script" 2>/dev/null || true
-  tar --append --file="$OUTPUT" --directory="$ROOT" "$packaged_script"
-done
+# Do not mix live working-tree files into an archive attributed to a commit.
+[ "$(git -C "$ROOT" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] || {
+  echo 'Source commit changed during archiving; discard this archive.' >&2; exit 1;
+}
 
 printf '%s\n' "$OUTPUT"
 du -h "$OUTPUT" | cut -f1
