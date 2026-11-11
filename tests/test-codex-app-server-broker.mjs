@@ -270,6 +270,8 @@ async function startApprovalProxy() {
 }
 
 const [left, right] = await Promise.all([startApprovalProxy(), startApprovalProxy()]);
+right.proxy.send({ method: 'turn/start', id: 99, params: { threadId: left.threadId, input: [{ type: 'text', text: 'approval' }] } });
+assert.equal((await right.proxy.next()).error.code, -32004);
 for (const item of [left, right]) item.proxy.send({ method: 'turn/start', id: 2, params: { threadId: item.threadId, input: [{ type: 'text', text: 'approval' }] } });
 const [leftMessages, rightMessages] = await Promise.all([
   Promise.all([left.proxy.next(), left.proxy.next()]),

@@ -494,7 +494,14 @@ function runBroker() {
       return;
     }
     const threadId = readThreadId(message);
-    if (threadId) threadOwners.set(threadId, client);
+    const owner = threadId && threadOwners.get(threadId);
+    if (owner && owner !== client && !owner.destroyed && message.method !== 'thread/fork') {
+      if (isRequest(message)) sendClient(client, { id: message.id, error: { code: -32004, message: 'Codex thread is owned by another connected client' } });
+      return;
+    }
+    // A fork reads its source thread; it must not take ownership of that
+    // source. Ownership of the newly created thread comes from its response.
+    if (threadId && message.method !== 'thread/fork') threadOwners.set(threadId, client);
     const startsThread = message.method === 'thread/start' || message.method === 'thread/resume' || message.method === 'thread/fork';
     const rewritten = { ...message };
     if (isRequest(message)) {
