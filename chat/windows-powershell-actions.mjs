@@ -126,6 +126,7 @@ export function readOnlyRipgrepArgs(rawArgs) {
     if (arg === '--') { positional.push(...args.slice(index + 1)); break; }
     if (arg === '--files') { filesOnly = true; continue; }
     if (arg === '--no-config') { configDisabled = true; continue; }
+    if (['--hidden', '--no-ignore', '--no-ignore-vcs', '--no-ignore-dot', '--no-ignore-parent', '--no-ignore-global', '--no-ignore-exclude', '-u', '-uu'].includes(arg)) continue;
     if (['-n', '--line-number', '-i', '--ignore-case', '-S', '--smart-case', '-s', '--case-sensitive', '-F', '--fixed-strings', '-l', '--files-with-matches', '-c', '--count', '-w', '--word-regexp', '-o', '--only-matching', '-H', '--with-filename', '-I', '--no-filename', '--no-heading', '--color=never'].includes(arg)) continue;
     if (['-e', '--regexp'].includes(arg)) {
       const pattern = args[++index];

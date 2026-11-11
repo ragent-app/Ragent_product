@@ -10,6 +10,7 @@ const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-posix-rg-'));
 const workspace = path.join(root, 'workspace'); const outside = path.join(root, 'outside'); const protectedRoot = path.join(root, 'protected');
 await mkdir(workspace); await mkdir(outside); await mkdir(protectedRoot);
 await writeFile(path.join(outside, 'readme.txt'), 'SEARCH_TOKEN=public\n');
+await writeFile(path.join(outside, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n');
 await writeFile(path.join(outside, '.env'), 'SEARCH_TOKEN=private\n');
 await writeFile(path.join(outside, '.ignore'), '!.env\n');
 await writeFile(path.join(root, 'rg-config'), '--hidden\n');
@@ -45,17 +46,18 @@ try {
     await observeClaudePosixCwdResult(tracking, { type: 'user', tool_use_result: { interrupted: false }, message: { content: [{ type: 'tool_result', tool_use_id: 'cd-id', is_error: false }] } });
     assert.equal(tracking.cwd, await realpath(outside));
     assert.equal((await buildClaudePosixCwdTransition({ approval: cdApproval('cd ../outside && cat .env'), state }))?.review, true);
-    for (const command of ['rg -n SEARCH_TOKEN ../outside', "rg -g '*' -n SEARCH_TOKEN ../outside", 'rg -n -- SEARCH_TOKEN ../outside']) {
+    for (const command of ['rg -n SEARCH_TOKEN ../outside', "rg -g '*' -n SEARCH_TOKEN ../outside", 'rg -n -- SEARCH_TOKEN ../outside', 'rg --hidden -n SEARCH_TOKEN ../outside', 'rg -uu -n SEARCH_TOKEN ../outside']) {
       const bridge = await buildClaudePosixRipgrepBridge({ approval: approval(command), state });
       assert.ok(bridge && !bridge.review, `${riskMode}: ${command}`);
       const env = { ...process.env, RIPGREP_CONFIG_PATH: path.join(root, 'rg-config') };
       const output = execFileSync('/bin/bash', ['--noprofile', '--norc', '-c', bridge.updatedInput.command], { cwd: workspace, env, encoding: 'utf8' });
       assert.match(output, /SEARCH_TOKEN=public/);
+      if (command.includes('--hidden') || command.includes('-uu')) assert.match(output, /SEARCH_TOKEN=hidden-public/);
       assert.doesNotMatch(output, /SEARCH_TOKEN=private|\.env/);
       assert.notEqual(spawnSync('/bin/bash', ['--noprofile', '--norc', '-c', bridge.updatedInput.command], { cwd: outside, env }).status, 0);
     }
-    for (const command of ['rg SEARCH_TOKEN ../outside/.env', 'rg SEARCH_TOKEN ../protected', 'rg --hidden SEARCH_TOKEN ../outside',
-      'rg --follow SEARCH_TOKEN ../outside', 'rg -uu SEARCH_TOKEN ../outside', 'rg --pre=cat SEARCH_TOKEN ../outside']) {
+    for (const command of ['rg SEARCH_TOKEN ../outside/.env', 'rg SEARCH_TOKEN ../protected',
+      'rg --follow SEARCH_TOKEN ../outside', 'rg --pre=cat SEARCH_TOKEN ../outside']) {
       assert.equal((await buildClaudePosixRipgrepBridge({ approval: approval(command), state }))?.review, true, command);
     }
     const list = await buildClaudePosixRipgrepBridge({ approval: approval('rg --files ../outside'), state });
@@ -82,8 +84,8 @@ try {
     else assert.equal(sent[1]?.response?.response?.behavior, 'deny');
     const beforeHidden = sent.length;
     await trackClaudeBidiApprovalRequest(run.id, state, request('hidden-rg', 'rg --hidden SEARCH_TOKEN ../outside'), proc);
-    if (riskMode === 'recommended') assert.ok((await getRun(run.id)).appServerPendingApprovals.some(entry => entry.approvalId === 'claude:hidden-rg'));
-    else assert.equal(sent[beforeHidden]?.response?.response?.behavior, 'deny');
+    assert.equal(sent[beforeHidden]?.response?.response?.behavior, 'allow');
+    assert.match(sent[beforeHidden]?.response?.response?.updatedInput?.command || '', /--iglob/);
   }
   assert.equal(await readFile(path.join(outside, '.env'), 'utf8'), 'SEARCH_TOKEN=private\n');
   console.log('claude-posix-ripgrep: real Linux shell and approval routes passed');

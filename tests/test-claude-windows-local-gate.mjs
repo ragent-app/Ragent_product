@@ -81,7 +81,7 @@ const deleteCommand = nativePowerShell
 const artifact = path.join(outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
 const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
 if (readCase) await writeFile(artifact, readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
-if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); }
+if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); if (process.env.AGENTOC_QA_RG_HIDDEN === '1') await writeFile(path.join(root, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n'); }
 if (readCase === 'npm-task') await writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { 'qa-fixture': 'echo safe-task-fixture' } }));
 if (cwdChangeCase) { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
 if (readCase === 'cwd-change-rg') { await writeFile(path.join(root, 'child', '.env'), 'CHILD_MARKER_PRIVATE\n'); await writeFile(path.join(root, 'child', '.ignore'), '!.env\n'); }
@@ -100,7 +100,7 @@ const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerC
 const bashGitRoot = outsideGitRoot.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 let readCommand = readCase === 'conditional'
   ? `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
-  : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'fallback' ? 'grep missing fixture.md 2>/dev/null || cat fixture.md' : readCase === 'cd-rg' ? 'cd child && rg -n SEARCH_TOKEN .' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? 'rg -n SEARCH_TOKEN .' : readCase === 'git-status' ? 'git status --short' : readCase === 'git-show' ? 'git show --stat HEAD' : readCase === 'git-diff-file' ? 'git diff HEAD -- fixture.md' : readCase === 'git-c-outside' ? `git -C ${bashQuote(bashGitRoot)} status --short` : `ls -lah ${bashQuote(bashRoot)}`;
+  : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'fallback' ? 'grep missing fixture.md 2>/dev/null || cat fixture.md' : readCase === 'cd-rg' ? 'cd child && rg -n SEARCH_TOKEN .' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? `rg ${process.env.AGENTOC_QA_RG_HIDDEN === '1' ? '-uu ' : ''}-n SEARCH_TOKEN .` : readCase === 'git-status' ? 'git status --short' : readCase === 'git-show' ? 'git show --stat HEAD' : readCase === 'git-diff-file' ? 'git diff HEAD -- fixture.md' : readCase === 'git-c-outside' ? `git -C ${bashQuote(bashGitRoot)} status --short` : `ls -lah ${bashQuote(bashRoot)}`;
 const powershell = process.platform === 'win32' ? path.join(process.env.SystemRoot || process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : '/usr/bin/unused-powershell';
 const dotnetScript = `[System.IO.File]::WriteAllText('${artifact.replaceAll("'", "''")}', 'dotnet fixture'${process.env.AGENTOC_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`;
 const dotnetCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(dotnetScript)}`;
@@ -111,7 +111,7 @@ const guidanceAction = process.env.AGENTOC_QA_CLAUDE_ELEVATION_REGISTRY === '1'
 const guidanceScript = `${guidanceAction}; [System.IO.File]::WriteAllText('${guidanceMarker.replaceAll("'", "''")}', 'unexpected')`;
 const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(guidanceScript)}`;
 let requests = 0;
-let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
+let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
 const server = createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/fixture/read') { res.writeHead(200).end('local read fixture'); return; }
   let body = ''; req.setEncoding('utf8');
@@ -144,6 +144,7 @@ const server = createServer((req, res) => {
       rootMarkerCount = (messages.match(/local read fixture/g) || []).length;
     }
     if (!tool && ['rg-text', 'cd-rg'].includes(readCase)) privateSearchObserved ||= JSON.stringify(request.messages || []).includes('SEARCH_TOKEN=private');
+    if (!tool && readCase === 'rg-text') hiddenSearchObserved ||= JSON.stringify(request.messages || []).includes('SEARCH_TOKEN=hidden-public');
     if (!tool && readCase === 'cwd-change-rg') privateSearchObserved ||= JSON.stringify(request.messages || []).includes('CHILD_MARKER_PRIVATE');
     const message = { id: `msg_fixture_${requests}`, type: 'message', role: 'assistant', content: [], model: 'claude-sonnet-4-5', stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
     const events = [{ type: 'message_start', message }];
@@ -273,6 +274,7 @@ try {
   } else if (readCase) {
     assert.equal((await readFile(artifact, 'utf8')).replaceAll('\r\n', '\n'), readCase === 'relative-write' ? 'changed\n' : readCase === 'git-diff-file' ? 'changed fixture\n' : readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
     if (['rg-text', 'cd-rg'].includes(readCase)) assert.equal(privateSearchObserved, false, 'sensitive file contents must not be included in the search result');
+    if (readCase === 'rg-text' && process.env.AGENTOC_QA_RG_HIDDEN === '1') assert.equal(hiddenSearchObserved, true, 'ordinary hidden file must remain searchable');
     if (readCase === 'relative-write') assert.equal(approvals, 1, 'real Claude must exercise the relative-operation approval callback');
     if (readCase === 'rg-text' && askAll) assert.equal(approvals, 1, 'ask rule must route the search through Ragent');
     if (readCase === 'git-diff-file' && askAll) assert.equal(approvals, 1, 'ask rule must route the file diff through Ragent');

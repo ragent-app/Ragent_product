@@ -56,7 +56,7 @@ if (process.platform === 'win32') {
     assert.notEqual(result.status, 0);
     await assert.rejects(access(path.join(workspace, 'marker.txt')), { code: 'ENOENT' });
   }
-  for (const command of [`rg ${ripgrepSafePrefix()} --files .`, `rg ${ripgrepSafePrefix()} --files -g '!*.txt' .`, "rg --no-config -S --max-count 2 -e fixture '中文 文件.md'"]) {
+  for (const command of [`rg ${ripgrepSafePrefix()} --files .`, `rg ${ripgrepSafePrefix()} --files -g '!*.txt' .`, `rg ${ripgrepSafePrefix()} --hidden --no-ignore --files .`, `rg ${ripgrepSafePrefix()} -uu --files .`, "rg --no-config -S --max-count 2 -e fixture '中文 文件.md'"]) {
     assert.equal((await inspect(command)).decision, 'allow', `safe ripgrep request: ${command}`);
   }
   for (const command of ["rg --files .", "rg --no-config --files .", "rg --no-config --files -g '*' .", "rg --no-config --files --glob='*.js' .", 'rg --no-config --files -t js .', 'rg --no-config --files --type=js .', 'rg --no-config --files --hidden .', 'rg --no-config --files --follow .']) {

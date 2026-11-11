@@ -14,6 +14,7 @@ await mkdir(workspace); await mkdir(outside);
 await writeFile(path.join(workspace, 'readme.txt'), 'SAFE_WORKSPACE\n');
 await writeFile(path.join(workspace, '.env'), 'PRIVATE_WORKSPACE\n');
 await writeFile(path.join(outside, 'readme.txt'), 'PRIVATE_OUTSIDE\nSEARCH_TOKEN=public\n');
+await writeFile(path.join(outside, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n');
 await writeFile(path.join(outside, '.env'), 'OUTSIDE_SECRET\nSEARCH_TOKEN=private\n');
 await writeFile(path.join(outside, '.ENV.local'), 'SEARCH_TOKEN=private-uppercase\n');
 await mkdir(path.join(outside, '.ssh'));
@@ -67,6 +68,13 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const found = execFileSync(bash, ['--noprofile', '--norc', '-c', outsideText.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: config } });
   assert.match(found, /SEARCH_TOKEN=public/);
   assert.doesNotMatch(found, /SEARCH_TOKEN=private|\.env|\.ssh/i);
+  for (const command of ['rg --hidden -n SEARCH_TOKEN ../outside', 'rg -uu -n SEARCH_TOKEN ../outside', 'rg --no-ignore --hidden -n SEARCH_TOKEN ../outside']) {
+    const bridge = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(command), state });
+    assert.ok(bridge, `${riskMode}: ${command}`);
+    const result = execFileSync(bash, ['--noprofile', '--norc', '-c', bridge.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: config } });
+    assert.match(result, /SEARCH_TOKEN=hidden-public/);
+    assert.doesNotMatch(result, /SEARCH_TOKEN=private|\.env|\.ssh/i);
+  }
   const outsideWrite = await buildClaudeWindowsRelativeOperationBridge({ approval: approval(`echo safe > ../outside/${destination}`), state });
   assert.ok(outsideWrite, `${riskMode}: ordinary outside-workspace write must be allowed`);
   execFileSync(bash, ['--noprofile', '--norc', '-c', outsideWrite.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });

@@ -13,6 +13,7 @@ if (process.platform !== 'win32') {
 const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-rg-hook-'));
 try {
   await writeFile(path.join(root, 'ordinary.txt'), 'fixture');
+  await writeFile(path.join(root, '.hidden.txt'), 'ordinary hidden fixture');
   await writeFile(path.join(root, '.env'), 'fake-secret');
   await writeFile(path.join(root, '.ignore'), '!.env\n');
   const config = path.join(root, 'ripgrep-config');
@@ -32,6 +33,13 @@ try {
       { cwd: root, windowsHide: true, encoding: 'utf8', env: { ...process.env, RIPGREP_CONFIG_PATH: config } });
     assert.match(actual, /ordinary\.txt/);
     assert.doesNotMatch(actual, /\.env/, 'real PowerShell search must ignore the config requesting hidden files');
+    const hidden = await buildCodexWindowsRipgrepHookDecision({ event: { ...event, tool_input: { command: `rg -uu --files ${quoted}` } }, state, runId: 'fixture-run' });
+    assert.equal(hidden.hookSpecificOutput?.permissionDecision, 'allow');
+    const hiddenOutput = execFileSync(resolveWindowsSystemPaths().powershell,
+      ['-NoProfile', '-NonInteractive', '-Command', hidden.hookSpecificOutput.updatedInput.command],
+      { cwd: root, windowsHide: true, encoding: 'utf8' });
+    assert.match(hiddenOutput, /\.hidden\.txt/);
+    assert.doesNotMatch(hiddenOutput, /\.env/);
     for (const changed of [
       { ...event, tool_input: { command: `rg --files -g '*' ${quoted}` } },
       { ...event, tool_input: { command: `rg --files ${quoted}`, sandbox_permissions: 'require_escalated' } },
