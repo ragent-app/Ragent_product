@@ -312,6 +312,8 @@ export function createAdminServer({
         data.secretId = resourceId;
       } else if (pathname === '/api/asr') {
         operation = 'set_asr';
+      } else if (pathname === '/api/asr/settings') {
+        operation = 'set_asr_settings';
       } else if (pathname === '/api/diagnostics/asr-transcription') {
         operation = 'test_asr_transcription';
       } else if (pathname === '/api/database/password-rotation') {

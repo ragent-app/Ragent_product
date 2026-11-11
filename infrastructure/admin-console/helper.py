@@ -467,7 +467,24 @@ def _secret_metadata():
             {"id": "database-password", "label": "Accounts 数据库应用账号", "category": "数据库", "configured": db_configured, "role": DATABASE_APP_ROLE, "updatedAt": account_mtime, "canReplace": db_configured},
         ],
         "asrEnabled": accounts.get("AGENTOC_ACCOUNTS_ASR_ENABLED") == "1" and bool(accounts.get("OPENAI_API_KEY")),
+        "asrSettings": _asr_settings(accounts),
         "fcmAvailable": fcm["available"],
+    }
+
+
+def _asr_settings(accounts):
+    def value(key, default, minimum, maximum):
+        try:
+            parsed = int(accounts.get(key, str(default)))
+            return parsed if minimum <= parsed <= maximum else default
+        except (TypeError, ValueError):
+            return default
+    return {
+        "freeMinutes": value("AGENTOC_ACCOUNTS_ASR_FREE_MINUTES", 15, 0, 100000),
+        "plusMinutes": value("AGENTOC_ACCOUNTS_ASR_PLUS_MINUTES", 120, 0, 100000),
+        "proMinutes": value("AGENTOC_ACCOUNTS_ASR_PRO_MINUTES", 600, 0, 100000),
+        "timeoutMs": value("AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS", 30000, 1000, 120000),
+        "model": "gpt-transcribe",
     }
 
 
@@ -1074,6 +1091,40 @@ def _update_asr(actor, data):
     return {"enabled": enabled}
 
 
+def _update_asr_settings(actor, data):
+    fields = {
+        "freeMinutes": ("AGENTOC_ACCOUNTS_ASR_FREE_MINUTES", 0, 100000),
+        "plusMinutes": ("AGENTOC_ACCOUNTS_ASR_PLUS_MINUTES", 0, 100000),
+        "proMinutes": ("AGENTOC_ACCOUNTS_ASR_PRO_MINUTES", 0, 100000),
+        "timeoutMs": ("AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS", 1000, 120000),
+    }
+    if set(data) != set(fields):
+        raise AdminError("ASR_SETTINGS_INVALID")
+    for field, (_, minimum, maximum) in fields.items():
+        if isinstance(data[field], bool) or not isinstance(data[field], int) or not minimum <= data[field] <= maximum:
+            raise AdminError("ASR_SETTINGS_INVALID")
+    snapshot = file_snapshot(ACCOUNTS_ENV)
+    if not snapshot["exists"]:
+        raise AdminError("CONFIG_UNAVAILABLE")
+    content = snapshot["content"]
+    for field, (key, _, _) in fields.items():
+        content = replace_env_value_text(content, key, str(data[field]))
+    atomic_write(ACCOUNTS_ENV, content)
+    try:
+        _service_restart(ACCOUNTS_SERVICE)
+    except Exception as exc:
+        restore_file_snapshot(ACCOUNTS_ENV, snapshot)
+        try:
+            _service_restart(ACCOUNTS_SERVICE)
+        except Exception as rollback_exc:
+            _audit(actor, "speech.cloud.settings", "accounts-asr", "rollback-failed")
+            raise AdminError("SERVICE_ROLLBACK_FAILED") from rollback_exc
+        _audit(actor, "speech.cloud.settings", "accounts-asr", "rolled-back")
+        raise AdminError("SERVICE_RESTART_FAILED") from exc
+    _audit(actor, "speech.cloud.settings", "accounts-asr", "success")
+    return _asr_settings(read_env(ACCOUNTS_ENV))
+
+
 def _test_asr_transcription(actor, data):
     """An explicitly billed provider probe; it does not impersonate a user."""
     if data.get("confirmed") is not True:
@@ -1304,6 +1355,8 @@ def handle_operation(request):
         return _set_secret(actor, data)
     if op == "set_asr":
         return _update_asr(actor, data)
+    if op == "set_asr_settings":
+        return _update_asr_settings(actor, data)
     if op == "test_asr_transcription":
         return _test_asr_transcription(actor, data)
     if op == "rotate_database_password":

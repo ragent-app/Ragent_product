@@ -16,6 +16,30 @@ SPEC.loader.exec_module(HELPER)
 
 
 class AdminHelperValidationTests(unittest.TestCase):
+    def test_asr_settings_are_validated_and_reverted_if_restart_fails(self):
+        folder = pathlib.Path("G:/AgentoC/.tmp/admin-console")
+        folder.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=folder) as directory:
+            env_file = pathlib.Path(directory) / "accounts.env"
+            original = "OPENAI_API_KEY=private-key\nAGENTOC_ACCOUNTS_ASR_FREE_MINUTES=15\n"
+            env_file.write_text(original, encoding="utf-8")
+            values = {"freeMinutes": 0, "plusMinutes": 100, "proMinutes": 500, "timeoutMs": 30000}
+            def write(path, content, **_kwargs): pathlib.Path(path).write_text(content, encoding="utf-8")
+            with patch.object(HELPER, "ACCOUNTS_ENV", env_file), patch.object(HELPER, "atomic_write", side_effect=write), \
+                 patch.object(HELPER, "_audit"), patch.object(HELPER, "_service_restart") as restart:
+                with self.assertRaises(HELPER.AdminError):
+                    HELPER._update_asr_settings("owner", {**values, "freeMinutes": -1})
+                self.assertEqual(env_file.read_text(encoding="utf-8"), original)
+                restart.assert_not_called()
+                restart.side_effect = [RuntimeError("failure"), None]
+                with self.assertRaises(HELPER.AdminError):
+                    HELPER._update_asr_settings("owner", values)
+                self.assertEqual(env_file.read_text(encoding="utf-8"), original)
+                restart.side_effect = None
+                result = HELPER._update_asr_settings("owner", values)
+                self.assertEqual(result["freeMinutes"], 0)
+                self.assertIn("OPENAI_API_KEY=private-key", env_file.read_text(encoding="utf-8"))
+
     def test_asr_provider_test_is_bounded_authorized_and_does_not_log_audio_or_key(self):
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as wav:

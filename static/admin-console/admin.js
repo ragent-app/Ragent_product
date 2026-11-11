@@ -20,6 +20,7 @@
     'secret.rotate': '轮换服务凭据',
     'speech.cloud.toggle': '更改云端语音识别状态',
     'speech.cloud.test': '测试云端语音供应商',
+    'speech.cloud.settings': '更改云端语音配额',
     'database.password.rotate': '轮换数据库密码',
     'database.backup.create': '创建数据库备份',
     'database.restore': '恢复数据库备份',
@@ -44,6 +45,7 @@
     ASR_TEST_AUDIO_INVALID: '请选择不超过 20 秒的 16 kHz 单声道 16 位 WAV 音频。',
     ASR_TEST_UNAVAILABLE: '请先配置并开启云端语音服务。',
     ASR_TEST_PROVIDER_FAILED: '供应商转写失败，请检查凭据、模型权限和供应商状态。',
+    ASR_SETTINGS_INVALID: '请检查语音额度和请求超时的范围。',
     SERVICE_RESTART_FAILED: '配置已写入，但服务重启未成功。请检查中心服务状态。',
     MIGRATION_FAILED: '数据库迁移执行失败，服务数据未在页面中展示。',
     RESTORE_FAILED: '备份恢复失败；恢复操作使用事务，现有数据库未被部分覆盖。',
@@ -378,6 +380,7 @@
     const asrEnabled = Boolean(state.secrets?.asrEnabled);
     const keyConfigured = Boolean(statusById('openai-api-key').configured);
     const fcm = statusById('fcm-service-account');
+    const limits = state.secrets?.asrSettings || { freeMinutes: 15, plusMinutes: 120, proMinutes: 600, timeoutMs: 30000, model: 'gpt-transcribe' };
     return `<div class="section-stack">
       <div class="security-callout"><span>✓</span><div><strong>密钥只写入，不回显</strong>所有凭据通过 HTTPS 直接传入服务器；页面不读取密钥值，不将内容写入浏览器缓存或操作日志。更新后会自动重启对应服务。</div></div>
       <section class="panel-card"><div class="panel-title-row"><div><h2>云端语音识别</h2><p>由 Ragent Accounts 转发到 OpenAI Transcription API。</p></div><span class="state-pill" data-state="${asrEnabled ? 'good' : 'warn'}">${asrEnabled ? '当前开启' : '当前关闭'}</span></div>
@@ -386,6 +389,7 @@
         ${!asrEnabled ? '<label class="checkbox-row"><input id="asrReview" type="checkbox"><span>我已检查 OpenAI API 数据控制，并确认当前 Ragent 隐私说明已覆盖云端转写。</span></label>' : ''}
         ${!keyConfigured ? '<p class="inline-alert">尚未配置 API key。按照当前设置，云端语音识别保持关闭。</p>' : ''}
       </section>
+      <section class="panel-card"><h2>语音额度与超时</h2><p>模型：${esc(limits.model)}。修改后 Accounts 服务会短暂重启；重启失败时会恢复原设置。</p><form data-asr-settings>${[['freeMinutes','Free 月额度（分钟）',0,100000],['plusMinutes','Plus 月额度（分钟）',0,100000],['proMinutes','Pro 月额度（分钟）',0,100000],['timeoutMs','供应商请求超时（毫秒）',1000,120000]].map(([name,label,min,max]) => `<label class="form-label small">${label}<input class="form-control" type="number" name="${name}" min="${min}" max="${max}" step="1" value="${Number(limits[name])}" required></label>`).join('')}<button class="btn btn-primary" type="submit">保存语音设置</button></form></section>
       <div class="secret-grid">
         ${secretCard({ id: 'openai-api-key', title: 'OpenAI Transcription API', description: '语音识别服务凭据。保存 key 不会自动开启转写。', inputLabel: '新的 API key', placeholder: '粘贴新的 OpenAI API key', help: '仅保存在 Accounts 服务器配置中；页面不会显示已有值。' })}
         <article class="secret-card"><div class="secret-card-head"><div><h3>FCM 服务账号</h3><p>用于账号推送通知的 Google service account JSON。</p></div>${credentialBadge(fcm)}</div><form class="secret-form" data-secret-form="fcm-service-account"><label class="form-label small">选择新的服务账号 JSON 文件<input class="form-control" type="file" accept="application/json,.json" data-secret-file required></label><div class="form-text">文件只上传到受保护的 Oracle 服务，保存后自动应用，不会保存在浏览器。</div><button class="btn btn-primary" type="submit" ${fcm.available === false ? 'disabled' : ''}>替换并应用</button></form><div class="form-text mt-2">最近配置变更：${date(fcm.updatedAt)}</div></article>
@@ -522,6 +526,16 @@
   });
 
   document.addEventListener('submit', async (event) => {
+    const asrForm = event.target.closest('[data-asr-settings]');
+    if (asrForm) {
+      event.preventDefault();
+      if (state.busy || !asrForm.reportValidity()) return;
+      if (!window.confirm('保存设置并短暂重启 Accounts 服务？')) return;
+      const fields = new FormData(asrForm);
+      const data = Object.fromEntries(['freeMinutes', 'plusMinutes', 'proMinutes', 'timeoutMs'].map((name) => [name, Number(fields.get(name))]));
+      try { await action('/api/asr/settings', data, '语音设置已更新。'); } catch { /* The action handler presents the error. */ }
+      return;
+    }
     const form = event.target.closest('[data-secret-form]');
     if (!form) return;
     event.preventDefault();

@@ -124,6 +124,13 @@ async function main() {
     });
     assert.equal(deniedProbe.status, 403);
 
+    const settings = await fetch(`${base}/api/asr/settings`, {
+      method: 'POST', headers: { 'cf-access-jwt-assertion': token(), Origin: 'https://ops.agentoncloud.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ freeMinutes: 10, plusMinutes: 100, proMinutes: 500, timeoutMs: 30000 }),
+    });
+    assert.equal(settings.status, 200);
+    assert.equal(seen.at(-1).op, 'set_asr_settings');
+
     const direct = await fetch(`${base}/`);
     assert.equal(direct.status, 401, 'the page itself is denied without Cloudflare Access');
   } finally {
