@@ -36,12 +36,22 @@ export function matchesLinuxRunUnitState(output, { runId, launchAttempt, invocat
   } catch { return false; }
 }
 
-export async function isLinuxRunUnitLive(expected) {
+// Only the root lifecycle broker that just created the unit may capture this
+// identity. An existing unit of the same name is not evidence of a launch.
+export async function captureLinuxRunUnitIdentity({ runId, launchAttempt } = {}) {
   try {
-    if (process.platform !== 'linux' || process.geteuid?.() !== 0) return false;
-    const unit = linuxRunUnitName(expected?.runId, expected?.launchAttempt);
+    if (process.platform !== 'linux' || process.geteuid?.() !== 0) return null;
+    const unit = linuxRunUnitName(runId, launchAttempt);
     const args = ['show', ...KEYS.map((key) => `--property=${key}`), '--', unit];
     const { stdout } = await runSystemctl('/usr/bin/systemctl', args, { timeout: 2000, maxBuffer: 16384, env: { PATH: '/usr/bin:/bin', LANG: 'C' } });
-    return matchesLinuxRunUnitState(stdout, expected);
-  } catch { return false; }
+    const ids = stdout.split('\n').filter((line) => line.startsWith('InvocationID='));
+    if (ids.length !== 1) return null;
+    const identity = { runId, launchAttempt, invocationId: ids[0].slice('InvocationID='.length) };
+    return matchesLinuxRunUnitState(stdout, identity) ? identity : null;
+  } catch { return null; }
+}
+
+export async function isLinuxRunUnitLive(expected) {
+  const actual = await captureLinuxRunUnitIdentity({ runId: expected?.runId, launchAttempt: expected?.launchAttempt });
+  return actual !== null && actual.invocationId === expected?.invocationId;
 }

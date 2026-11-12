@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { linuxRunUnitName, matchesLinuxRunUnitState, isLinuxRunUnitLive } from '../scripts/linux-run-unit-liveness.mjs';
+import { linuxRunUnitName, matchesLinuxRunUnitState, captureLinuxRunUnitIdentity, isLinuxRunUnitLive } from '../scripts/linux-run-unit-liveness.mjs';
 
 const expected = { runId: 'run_test12345678', launchAttempt: 2, invocationId: 'a'.repeat(32) };
 const unit = linuxRunUnitName(expected.runId, expected.launchAttempt);
@@ -17,6 +17,7 @@ test('a unit must match the recorded launch generation and systemd invocation', 
 });
 test('real systemd fixture is active only for the recorded invocation', { skip: !process.env.AGENTOC_TEST_SYSTEMD_INVOCATION }, async () => {
   const identity = { runId: 'run_test12345678', launchAttempt: 2, invocationId: process.env.AGENTOC_TEST_SYSTEMD_INVOCATION };
+  assert.deepEqual(await captureLinuxRunUnitIdentity(identity), identity);
   assert.equal(await isLinuxRunUnitLive(identity), true);
   assert.equal(await isLinuxRunUnitLive({ ...identity, invocationId: 'b'.repeat(32) }), false);
 });
