@@ -112,7 +112,7 @@ function parseAppServerMessage(message, state = {}) {
   // Run completion while the parent turn is still active.
   if (message.agentoc_intermediate === true) return [];
   if (message.type === MAC_CLEANUP_SPOOL_TYPE && message.status === 'unconfirmed') {
-    return [statusEvent(MAC_CLEANUP_WARNING, { code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED' })];
+    return [messageEvent('system', MAC_CLEANUP_WARNING, undefined, { code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED' })];
   }
   if (message.type === 'agentoc.approval_response') {
     if ((message.autoApproved === true || message.autoDenied === true)

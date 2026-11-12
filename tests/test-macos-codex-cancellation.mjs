@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { MAC_CLEANUP_NOTIFICATION, MAC_CLEANUP_SPOOL_TYPE, MAC_CLEANUP_WARNING, macCancellationCleanupStatus, readMacCleanupNotification } from '../chat/macos-codex-cancellation.mjs';
 import { projectApiRun } from '../chat/run-api-contract.mjs';
 import { createCodexAppServerAdapter } from '../chat/adapters/codex-app-server.mjs';
+import { isHarnessEphemeralEvent } from '../chat/harness-event-policy.mjs';
 
 const identity = { threadId: 'thread-1', runId: 'run-1' };
 const event = (status, runId = 'run-1', threadId = 'thread-1') => ({
@@ -34,7 +35,9 @@ assert.equal(projectApiRun({ ...run, cancelRequested: false }).cancellationClean
 const adapter = createCodexAppServerAdapter();
 const warning = adapter.parseLine(JSON.stringify({ type: MAC_CLEANUP_SPOOL_TYPE, status: 'unconfirmed', content: 'untrusted content' }));
 assert.equal(warning.length, 1);
-assert.equal(warning[0].type, 'status');
+assert.equal(warning[0].type, 'message');
+assert.equal(warning[0].role, 'system');
 assert.equal(warning[0].content, MAC_CLEANUP_WARNING);
+assert.equal(isHarnessEphemeralEvent({ ...warning[0], runId: 'run-1', runtimeFamily: 'codex-app-server-json' }), false);
 assert.deepEqual(adapter.parseLine(JSON.stringify({ type: MAC_CLEANUP_SPOOL_TYPE, status: 'attempted' })), []);
 console.log('macOS cancellation result checks passed');
