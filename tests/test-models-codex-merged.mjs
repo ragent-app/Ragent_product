@@ -264,6 +264,13 @@ try {
   assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').error, undefined);
   assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'discovered');
 
+  // A newly loaded server module has empty in-memory maps. Its fast path
+  // must recover only the verified account's last discovered catalog.
+  const restartedModule = await import(`${pathToFileURL(join(repoRoot, 'chat', 'models.mjs')).href}?restart-fixture`);
+  const afterRestart = await restartedModule.getModelsForTool('codex', { providerProfile: 'codex-official-2', fast: true });
+  assert.equal(afterRestart.models.some((m) => m.id === 'gpt-official-extra@codex-official-2'), true,
+    'a cold process can serve the persisted discovered catalog immediately');
+
   await new Promise((resolve) => setTimeout(resolve, 200));
   writeFileSync(process.env.FIXTURE_MODEL_RECOVERY_FILE, 'trimmed');
   Date.now = () => baseNow + 182_000;
