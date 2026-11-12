@@ -20,6 +20,10 @@ function outboxPath(runId, launchAttempt) {
   marker(runId, launchAttempt); // validates both fields
   return join(DIRECTORY, `${createHash('sha256').update(runId, 'utf8').digest('hex')}-${launchAttempt}.revoke.json`);
 }
+function explicitCancellationPath(runId) {
+  marker(runId, 0);
+  return join(DIRECTORY, `${createHash('sha256').update(runId, 'utf8').digest('hex')}.cancel-request.json`);
+}
 async function verifyDirectory(directory, mode) {
   const stat = await lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.geteuid?.() ||
@@ -77,6 +81,18 @@ export async function persistLinuxRunCancelIntent(runId, launchAttempt) {
   // any runner-writable status. This file contains identifiers, never tokens.
   await persistRecord(outboxPath(runId, launchAttempt), `${JSON.stringify({ version: 1, runId, launchAttempt })}\n`);
   await persistRecord(marker(runId, launchAttempt), '{"version":1}\n');
+}
+
+// Separate from generic terminal invalidation: a later explicit cancellation
+// must not be overwritten by recovery of an earlier completion transaction.
+export async function persistLinuxRunExplicitCancellation(runId) {
+  await ensureLinuxRunCancelIntentStore();
+  await persistRecord(explicitCancellationPath(runId), '{"version":1}\n');
+}
+export async function hasLinuxRunExplicitCancellation(runId) {
+  await ensureLinuxRunCancelIntentStore();
+  try { await lstat(explicitCancellationPath(runId)); return true; }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
 }
 
 // Read only strict, owner-protected outbox records. Malformed or partial

@@ -79,7 +79,7 @@ export async function removeLinuxRunResultSnapshots(runId, attempt = null) {
   await ensureLinuxRunCancelIntentStore();
   if (attempt !== null) filename(runId, attempt); // validate before interpolation
   const generation = attempt === null ? '(?:0|[1-9][0-9]{0,4})' : String(attempt);
-  const pattern = new RegExp(`^${prefix}-${generation}\\.result\\.json(?:\\.[a-f0-9]{32}\\.tmp)?$`);
+  const pattern = new RegExp(`^${prefix}-${generation}\\.(?:result|status-result)\\.json(?:\\.[a-f0-9]{32}\\.tmp)?$`);
   const names = (await readdir(directory)).filter((name) => pattern.test(name));
   for (const name of names) {
     try { await unlink(join(directory, name)); } catch (error) { if (error.code !== 'ENOENT') throw error; }

@@ -612,6 +612,8 @@ let linuxRunScopeRenewalTimer = null;
 let linuxRunScopeRenewalPromise = null;
 let linuxRunScopeOutboxTimer = null;
 let linuxRunScopeOutboxPromise = null;
+let linuxRunResultTransactionTimer = null;
+let linuxRunResultTransactionPromise = null;
 
 // Memory registry (DS-06): active detached-run watchers.
 registerCache('observedRuns', {
@@ -9667,6 +9669,20 @@ export async function startDetachedRunObservers() {
     recoverOutbox();
     linuxRunScopeOutboxTimer = setInterval(recoverOutbox, 15_000);
     linuxRunScopeOutboxTimer.unref?.();
+  }
+  if (process.platform === 'linux' && !linuxRunResultTransactionTimer) {
+    const recovery = import('./linux-run-result-transaction-recovery.mjs')
+      .then(({ createLinuxRunResultTransactionRecovery }) => createLinuxRunResultTransactionRecovery());
+    const recoverTransactions = () => {
+      if (linuxRunResultTransactionPromise) return;
+      linuxRunResultTransactionPromise = recovery.then((recover) => recover())
+        .then(({ invalid }) => { if (invalid) console.error(`[runs] ${invalid} invalid result transactions`); })
+        .catch((error) => console.error(`[runs] result transaction recovery failed: ${error.message}`))
+        .finally(() => { linuxRunResultTransactionPromise = null; });
+    };
+    recoverTransactions();
+    linuxRunResultTransactionTimer = setInterval(recoverTransactions, 15_000);
+    linuxRunResultTransactionTimer.unref?.();
   }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {

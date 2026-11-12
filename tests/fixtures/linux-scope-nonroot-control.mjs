@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 const root = process.env.AGENTOC_TEST_ROOT;
 const runnerUid = Number(process.env.AGENTOC_TEST_RUNNER_UID);
 const runId = 'run_nonrootfixture1', sessionId = 's1', requestId = 't1';
-const { createRun, getRunResult } = await import('../../chat/runs.mjs');
+const { createRun, getRunAcceptanceEvidence, getRunResult } = await import('../../chat/runs.mjs');
 const { computeExecutionScopeDigest } = await import('../../chat/execution-scope.mjs');
 const { issueLinuxRunScopeGrant } = await import('../../chat/linux-run-scope-issuance.mjs');
 const { handleTemporaryControlRunCheck } = await import('../../chat/router-temporary-control-run-check.mjs');
@@ -32,6 +32,15 @@ for await (const line of createInterface({ input: process.stdin })) {
   if (line === 'read') {
     try { process.stdout.write(`QA:${JSON.stringify({ result: await getRunResult(runId) })}\n`); }
     catch (error) { process.stdout.write(`QA:${JSON.stringify({ error: error.code })}\n`); }
+  }
+  if (line === 'crash-after-journal') {
+    const { writeLinuxRunResultTransaction } = await import('../../chat/linux-run-result-transaction.mjs');
+    const before = await getRunAcceptanceEvidence(runId);
+    const after = { ...before, state: 'failed', result: { completedAt: '2026-11-12T01:00:00.000Z',
+      exitCode: 1, error: 'recovered-after-crash' }, updatedAt: '2026-11-12T01:00:00.000Z' };
+    await writeLinuxRunResultTransaction(runId, 0, before, after);
+    await new Promise((resolve) => process.stdout.write('QA:{"journal":true}\n', resolve));
+    process.kill(process.pid, 'SIGKILL');
   }
   if (line === 'exit') break;
 }

@@ -99,6 +99,16 @@ test('non-root control recovers a distinct runner result after root broker retur
         '/usr/bin/rm', '--', sharedResult]);
       control.stdin.write('read\n');
       assert.deepEqual((await next()).result, outcome);
+      let crashed = new Promise((resolve) => control.once('close', (code, signal) => resolve({ code, signal })));
+      control.stdin.write('crash-after-journal\n');
+      assert.equal((await next()).journal, true);
+      assert.equal((await crashed).signal, 'SIGKILL');
+      control = null;
+      startControl(true);
+      assert.equal((await next()).uid, owner.uid);
+      control.stdin.write('read\n');
+      assert.deepEqual((await next()).result, { completedAt: '2026-11-12T01:00:00.000Z', exitCode: 1, error: 'recovered-after-crash' });
+      assert.equal(JSON.parse(await readFile(`${root}/spool/${ready.runId}/status.json`, 'utf8')).state, 'failed');
       closed = new Promise((resolve) => control.once('close', resolve));
       control.stdin.end('exit\n');
       const exit = await closed;

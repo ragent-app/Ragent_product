@@ -1886,14 +1886,21 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
         throw sessionApiError('MESSAGE_IDEMPOTENCY_CONFLICT', 409, 'Message Run protocol cannot change');
       next.appApiMessageVersion = latest.appApiMessageVersion;
     }
-    const protectsScope = scopeTracking && (next.cancelRequested === true || isTerminalRunState(next.state));
+    let protectsScope = scopeTracking && (next.cancelRequested === true || isTerminalRunState(next.state));
+    if (!scopeTracking && process.platform === 'linux' && !isolatedScopeRunner() &&
+        process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
+        (next.cancelRequested === true || isTerminalRunState(next.state))) {
+      const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+      protectsScope = await hasLinuxRunControlBinding(runId, linuxScopeAttempt(next));
+    }
     if (protectsScope) {
       // Only the control plane carries the feature flag. Its private config
       // directory is masked from the runner. Invalidate before publishing a
       // cancel/terminal transition, including transitions outside Stop.
       if (beforeWrite) beforeWrite(next);
-      const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+      const { persistLinuxRunCancelIntent, persistLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
       await persistLinuxRunCancelIntent(runId, Number.isSafeInteger(next.runnerLaunchAttempt) ? next.runnerLaunchAttempt : 0);
+      if (next.cancelRequested === true) await persistLinuxRunExplicitCancellation(runId);
       if (authorizeWrite) await authorizeWrite(latest);
       if (!Object.hasOwn(latest, 'linuxScopeRevocationPending') ||
           (!latest.cancelRequested && next.cancelRequested) ||
@@ -1913,6 +1920,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
       if (beforeWrite) beforeWrite(next);
     }
     let protectedResultAttempt = null;
+    let resultTransaction = false;
     if (process.platform === 'linux' && !isolatedScopeRunner() &&
         (scopeTracking || (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE)) &&
         isTerminalRunState(next.state) && next.result && typeof next.result === 'object' && !Array.isArray(next.result) &&
@@ -1921,11 +1929,20 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
         const attempt = linuxScopeAttempt(next);
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
         if (await hasLinuxRunControlBinding(runId, attempt)) {
+          const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
+          if (await hasLinuxRunResultTransaction(runId, attempt)) throw linuxScopeResultUnavailable();
           if (Buffer.byteLength(JSON.stringify(next.result), 'utf8') > 4 * 1024 * 1024 - 4096 ||
               !await confirmLinuxScopeCompletion(runId, next, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
           protectedResultAttempt = attempt;
           if (authorizeWrite) await authorizeWrite(latest);
           if (beforeWrite) beforeWrite(next);
+          // External admission callbacks can expire between two writes. Only
+          // callback-free internal updates may commit a recoverable intent.
+          if (!authorizeWrite && !beforeWrite && !beforeCommit) {
+            const { writeLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
+            await writeLinuxRunResultTransaction(runId, attempt, latest, next);
+            resultTransaction = true;
+          }
         }
       } catch { throw linuxScopeResultUnavailable(); }
     }
@@ -1950,6 +1967,10 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     const nextIndex = runIndexSummary(next);
     if (runIndexSummaryChanged(previousIndex, nextIndex)) {
       await appendRunIndexRecord(next);
+    }
+    if (resultTransaction) {
+      const { removeLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
+      await removeLinuxRunResultTransaction(runId, protectedResultAttempt);
     }
     return clone(next);
   }));
@@ -2117,13 +2138,48 @@ export async function getRunResult(runId) {
         const run = await getRunUnlocked(runId);
         if (run) {
           const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
-          recoverPending = await hasLinuxRunControlBinding(runId, linuxScopeAttempt(run));
+          const attempt = linuxScopeAttempt(run);
+          recoverPending = await hasLinuxRunControlBinding(runId, attempt);
+          if (!recoverPending && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+            const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
+            recoverPending = await hasLinuxRunResultTransaction(runId, attempt);
+          }
         }
       } catch { throw linuxScopeResultUnavailable(); }
     }
   }
   if (recoverPending) {
     return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
+      const current = await getRunAcceptanceEvidence(runId);
+      if (current) {
+        try {
+          const attempt = linuxScopeAttempt(current);
+          const { hasLinuxRunResultTransaction, readLinuxRunResultTransaction, removeLinuxRunResultTransaction } =
+            await import('./linux-run-result-transaction.mjs');
+          if (/^run_[A-Za-z0-9_-]{8,128}$/.test(runId) && await hasLinuxRunResultTransaction(runId, attempt)) {
+            const transaction = await readLinuxRunResultTransaction(runId, attempt);
+            const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+            const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
+            // In-memory Run objects can retain undefined properties that JSON
+            // does not persist; compare the exact JSON-representable value.
+            const diskShape = JSON.parse(JSON.stringify(current));
+            if (!transaction || (transaction.after.cancelRequested !== true && await hasLinuxRunExplicitCancellation(runId)) ||
+                !await matchesLinuxRunControlBinding({ run: current, manifest: await getRunManifestUnlocked(runId), launchAttempt: attempt }) ||
+                (!runFieldEqual(diskShape, transaction.before) && !runFieldEqual(diskShape, transaction.after))) throw linuxScopeResultUnavailable();
+            if (!runFieldEqual(diskShape, transaction.after)) {
+              await writeJsonAtomic(runStatusPath(runId), transaction.after,
+                await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: true }));
+              runStatusCache.set(runId, transaction.after);
+              await recordCacheMeta(runId, runStatusPath(runId), runStatusCacheMeta);
+            }
+            const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+            await saveLinuxRunResultSnapshot(runId, attempt, transaction.after.result, { replace: true });
+            await appendRunIndexRecord(transaction.after);
+            await removeLinuxRunResultTransaction(runId, attempt);
+            return clone(transaction.after.result);
+          }
+        } catch { throw linuxScopeResultUnavailable(); }
+      }
       let handle;
       try {
         handle = await open(runPendingResultPath(runId), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
@@ -2214,6 +2270,8 @@ export async function writeRunResult(runId, result) {
           const attempt = linuxScopeAttempt(run);
           const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
           if (await hasLinuxRunControlBinding(runId, attempt)) {
+            const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
+            if (await hasLinuxRunResultTransaction(runId, attempt)) throw linuxScopeResultUnavailable();
             if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
             const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
             await saveLinuxRunResultSnapshot(runId, attempt, result || {}, { replace: true });
@@ -2240,6 +2298,10 @@ export async function clearRunResult(runId) {
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
         if (await hasLinuxRunControlBinding(runId, attempt)) protectedAttempt = attempt;
       }
+    }
+    if (protectedAttempt !== null) {
+      const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
+      if (await hasLinuxRunResultTransaction(runId, protectedAttempt)) throw linuxScopeResultUnavailable();
     }
     await removePath(runResultPath(runId));
     await removePath(runPendingResultPath(runId));
@@ -2832,7 +2894,7 @@ export async function requestRunCancel(runId, { beforeWrite = null, authorizeWri
     cancelRequestedAt: new Date().toISOString(),
     ...(trackRevocation ? { linuxScopeRevocationPending: true } : {}),
   }), { beforeWrite, authorizeWrite });
-  if (updated && trackRevocation && !await retryLinuxRunScopeRevocation(updated)) {
+  if (updated?.linuxScopeRevocationPending === true && !await retryLinuxRunScopeRevocation(updated)) {
     console.warn(`[runs] privileged Run scope revocation pending for ${runId}`);
   }
   return updated;
@@ -2843,7 +2905,7 @@ async function retryLinuxRunScopeRevocation(run) {
   const attempt = Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
   try {
     const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
-    if ((await revokeLinuxRunScope(run)).state !== 'revoked') return false;
+    if ((await revokeLinuxRunScope(run, { enabled: true })).state !== 'revoked') return false;
     await updateRun(run.id, (current) => {
       const currentAttempt = Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0;
       if ((!current.cancelRequested && !isTerminalRunState(current.state)) || !current.linuxScopeRevocationPending || currentAttempt !== attempt) return current;
