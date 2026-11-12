@@ -83,9 +83,10 @@ resolve_package_version() {
     fi
   fi
 
-  for name in "$OUTPUT_DIR"/agentoc_*_"$ARCH".deb; do
+  for name in "$OUTPUT_DIR"/ragent_*_"$ARCH".deb "$OUTPUT_DIR"/agentoc_*_"$ARCH".deb; do
     [ -e "$name" ] || continue
     candidate="$(basename "$name")"
+    candidate="${candidate#ragent_}"
     candidate="${candidate#agentoc_}"
     candidate="${candidate%_${ARCH}.deb}"
     if [ -z "$best" ] || dpkg --compare-versions "$candidate" gt "$best"; then
@@ -269,7 +270,7 @@ fi
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb.XXXXXX")"
 STAGE="$WORK_DIR/stage"
 APP_DIR="$STAGE/opt/agentoc/app"
-OUTPUT_NAME="agentoc_${VERSION}_${ARCH}.deb"
+OUTPUT_NAME="ragent_${VERSION}_${ARCH}.deb"
 OUTPUT="$WORK_DIR/$OUTPUT_NAME"
 FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 

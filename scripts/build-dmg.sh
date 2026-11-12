@@ -267,7 +267,7 @@ printf 'Building AgentoC %s (darwin/%s) with Codex %s and Claude Code %s\n' \
 STAGE="$WORK_DIR/stage"
 CONTENTS="$STAGE/AgentoC.app/Contents"
 APP_DIR="$CONTENTS/Resources/app"
-OUTPUT_NAME="agentoc_${VERSION}-darwin-${ARCH}.dmg"
+OUTPUT_NAME="ragent_${VERSION}-darwin-${ARCH}.dmg"
 FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 DMG_PATH="$WORK_DIR/$OUTPUT_NAME"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$APP_DIR" "$OUTPUT_DIR"
@@ -551,7 +551,7 @@ codesign --verify --deep --strict "$STAGE/AgentoC.app"
 # ── 10. DMG ──────────────────────────────────────────────────────────────────
 # Refuse a mixed-source bundle before optional notarization submits it.
 assert_source_unchanged
-hdiutil create -volname AgentoC -srcfolder "$STAGE" -format UDZO "$DMG_PATH" >/dev/null
+hdiutil create -volname Ragent -srcfolder "$STAGE" -format UDZO "$DMG_PATH" >/dev/null
 if [ -n "$SIGN_IDENTITY" ]; then
   codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG_PATH"
   codesign --verify --strict "$DMG_PATH"

@@ -8,7 +8,7 @@ in its release notes; a source build alone is not a published release.
 ## Install and first use
 
 On a supported system with systemd, install a verified package with
-`sudo apt install ./agentoc_<version>_amd64.deb`, then open **Ragent** from the
+`sudo apt install ./ragent_<version>_amd64.deb`, then open **Ragent** from the
 applications menu. The manager connects to the service on `127.0.0.1:7690`.
 The package starts its system services during installation and after reboot.
 It does not require a separately installed Node runtime.

@@ -12,7 +12,7 @@ export async function createReleaseBuildinfo(artifact, version, commit) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)
       || !version.split('.').every((part) => Number.isSafeInteger(Number(part)))
       || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)
-      || !(name === `agentoc_${version}_amd64.deb` || name === `agentoc_${version}-darwin-arm64.dmg`)) {
+      || !(name === `ragent_${version}_amd64.deb` || name === `ragent_${version}-darwin-arm64.dmg`)) {
     throw new Error('Invalid release version, commit or supported artifact name');
   }
   const input = await open(artifact, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));

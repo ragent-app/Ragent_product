@@ -33,15 +33,15 @@ function releaseBuildInfo(release, asset, { allowLegacy = true } = {}) {
   return build ? { build, commit: match[2] } : null;
 }
 function assetVersion(asset) {
-  const match = /^(?:Ragent-|AgentoC-|agentoc_)([0-9]+(?:\.[0-9]+){2,3})(?=[-_])/i.exec(String(asset?.name || ""));
+  const match = /^(?:Ragent-|AgentoC-|ragent_|agentoc_)([0-9]+(?:\.[0-9]+){2,3})(?=[-_])/i.exec(String(asset?.name || ""));
   return match ? version(match[1]) : null;
 }
 function releaseAsset(asset, platform = process.platform, arch = process.arch) {
   if (!asset || typeof asset.name !== "string") return false;
   const patterns = {
     "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-windows-x64-setup\.exe|(?:Ragent|AgentoC)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
-    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-linux-x64|agentoc_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
-    "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-macos-arm64|agentoc_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
+    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-linux-x64|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
+    "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-macos-arm64|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
   };
   const pattern = patterns[`${platform}-${arch}`];
   if (!pattern || !pattern.test(asset.name)) return false;
