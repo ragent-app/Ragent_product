@@ -24,6 +24,7 @@ function exists(relativePath) {
 const buildScript = read('scripts/build-deb.sh');
 const restartScript = read('restart.sh');
 const mainService = read('packaging/deb/agentoc.service');
+const ragentMainService = read('packaging/deb/ragent.service');
 const runnerLifecycleService = read('packaging/deb/agentoc-runner-lifecycle.service');
 const runnerSupervisorService = read('packaging/deb/agentoc-runner-supervisor.service');
 const privilegedExecutorService = read('packaging/deb/agentoc-privileged-executor.service');
@@ -40,6 +41,12 @@ const runAsServiceUser = read('packaging/deb/run-as-service-user');
 const legacyCcSwitchRetirement = read('packaging/deb/retire-legacy-cc-switch');
 const repairStateAccess = read('packaging/deb/repair-state-access');
 const packageJson = JSON.parse(read('package.json'));
+
+assert.equal(ragentMainService.replace(/^Alias=agentoc\.service\r?\n/m, ''), mainService,
+  'renaming the main unit must retain all service security and dependency settings');
+assert.match(ragentMainService, /^Alias=agentoc\.service$/m);
+assert.match(buildScript, /ln -s ragent\.service "\$STAGE\/lib\/systemd\/system\/agentoc\.service"/);
+assert.match(postinst, /systemctl restart "\$main_service"/);
 
 assert.match(buildScript, /Debian packaging requires a clean committed source tree/);
 assert.match(buildScript, /SOURCE_COMMIT.*agentoc-source-commit/s);

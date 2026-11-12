@@ -516,7 +516,12 @@ PRIVILEGED_PEERCRED_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$STAGE/usr/lib/agentoc/
   echo "Refusing to package privileged peercred helper for the wrong architecture: expected $EXPECTED_ELF_MACHINE, got $PRIVILEGED_PEERCRED_ELF_MACHINE" >&2
   exit 1
 }
-install -m 0644 "$ROOT/packaging/deb/agentoc.service" "$STAGE/lib/systemd/system/agentoc.service"
+if [ "$PACKAGE_NAME" = ragent ]; then
+  install -m 0644 "$ROOT/packaging/deb/ragent.service" "$STAGE/lib/systemd/system/ragent.service"
+  ln -s ragent.service "$STAGE/lib/systemd/system/agentoc.service"
+else
+  install -m 0644 "$ROOT/packaging/deb/agentoc.service" "$STAGE/lib/systemd/system/agentoc.service"
+fi
 install -m 0644 "$ROOT/packaging/deb/agentoc-runner-lifecycle.service" "$STAGE/lib/systemd/system/agentoc-runner-lifecycle.service"
 install -m 0644 "$ROOT/packaging/deb/agentoc-runner-supervisor.service" "$STAGE/lib/systemd/system/agentoc-runner-supervisor.service"
 # P2-C: systemd socket-activation units for the runner services.

@@ -582,11 +582,13 @@ if getent passwd "$service_user" >/dev/null 2>&1; then
   chmod 0644 /etc/agentoc/runner-user
 fi
 
+main_service=agentoc.service
+if [ "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" = ragent ]; then main_service=ragent.service; fi
 if [ -d /run/systemd/system ]; then
   # Same-user runner mode: both the chat service and supervisor use the
   # configured service identity. Generate the override instead of relying on
   # the package fallback (the system account 'agentoc').
-  for unit in agentoc.service agentoc-storage-gc.service; do
+  for unit in "$main_service" agentoc-storage-gc.service; do
     install -d -m 0755 "/etc/systemd/system/$unit.d"
     cat > "/etc/systemd/system/$unit.d/10-service-user.conf" <<EOF
 [Service]
@@ -622,8 +624,8 @@ EOF
   fi
   chown root:root /etc/agentoc/auth-secret
   chmod 0600 /etc/agentoc/auth-secret
-  install -d -m 0755 /etc/systemd/system/agentoc.service.d
-  cat > /etc/systemd/system/agentoc.service.d/20-auth-secret.conf <<EOF
+  install -d -m 0755 "/etc/systemd/system/$main_service.d"
+  cat > "/etc/systemd/system/$main_service.d/20-auth-secret.conf" <<EOF
 [Service]
 EnvironmentFile=/etc/agentoc/auth-secret
 EOF
@@ -669,8 +671,8 @@ if [ -d /run/systemd/system ]; then
   systemctl restart agentoc-runner-supervisor.socket
   systemctl enable agentoc-runner-supervisor.service >/dev/null
   systemctl restart agentoc-runner-supervisor.service
-  systemctl enable agentoc.service >/dev/null
-  systemctl restart agentoc.service
+  systemctl enable "$main_service" >/dev/null
+  systemctl restart "$main_service"
 fi
 
 # Services may rewrite managed Codex files during startup.  Apply the final

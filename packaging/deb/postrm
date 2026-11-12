@@ -32,7 +32,7 @@ if [ "${1:-}" = purge ]; then
       rm -f "$marker"
     fi
   done
-  rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d /etc/systemd/system/agentoc-runner-supervisor.socket.d
+  rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/ragent.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d /etc/systemd/system/agentoc-runner-supervisor.socket.d
   rm -f /etc/agentoc/service-user /etc/agentoc/auth-secret /etc/agentoc/initial-credentials
   rmdir /etc/agentoc >/dev/null 2>&1 || true
   # Accounts is a separately deployed service; its state must survive removal

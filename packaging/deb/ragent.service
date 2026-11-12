@@ -1,0 +1,48 @@
+[Unit]
+Description=Ragent local AI workbench
+After=network-online.target
+Wants=network-online.target
+After=agentoc-privileged-executor.service
+Wants=agentoc-privileged-executor.service
+After=agentoc-runner-supervisor.service
+Requires=agentoc-runner-supervisor.service
+After=agentoc-runner-lifecycle.service
+Requires=agentoc-runner-lifecycle.service
+
+[Service]
+Type=simple
+User=agentoc
+Group=agentoc
+SupplementaryGroups=agentoc-privileged
+WorkingDirectory=/opt/agentoc/app
+# The package may render deployment-specific owner-auth metadata at build time.
+# Load it before the general conffile so an explicit operator value in
+# agentoc.env remains authoritative on upgrades.
+EnvironmentFile=-/etc/agentoc/account-auth.env
+EnvironmentFile=/etc/agentoc/agentoc.env
+# P2P 信令配置（AGENTOC_P2P_SIGNALING_URL 等）；老包可能没有该文件，`-` 前缀表示可选
+EnvironmentFile=-/etc/agentoc/connectivity.env
+ExecStartPre=/usr/lib/agentoc/retire-legacy-cc-switch
+# The + prefix runs this cheap state check as root even though the service
+# itself runs as the configured owner. Full recursive state repair happens
+# once during package configuration; restarts must not scan all history files.
+ExecStartPre=+/usr/lib/agentoc/repair-state-access --quick
+# notify-exec pre-connects the notify socket and execs Node in place, so the
+# main pid sends READY/WATCHDOG itself. That is what makes NotifyAccess=main
+# safe here: forged notify messages from cgroup children (e.g. STOPPING=1,
+# the 2026-08-31 silent restart-loop root cause) are rejected by systemd.
+ExecStart=/usr/lib/agentoc/notify-exec /opt/agentoc/runtime/node /opt/agentoc/app/chat-server.mjs
+Restart=always
+RestartSec=3
+WatchdogSec=45s
+NotifyAccess=main
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/var/lib/agentoc /var/log/agentoc
+
+[Install]
+WantedBy=multi-user.target
+Alias=agentoc.service

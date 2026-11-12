@@ -15,12 +15,20 @@ if [ "${DPKG_MAINTSCRIPT_PACKAGE:-}" = ragent ] && [ "${1:-}" = install ]; then
       if ! awk '/^# RAGENT_PAYLOAD_MANIFEST_BEGIN$/ {if (seen) exit 1; seen=1; capture=1; next}
         /^# RAGENT_PAYLOAD_MANIFEST_END$/ {if (!capture) exit 1; capture=0; finished=1; exit}
         capture {print} END {if (!seen || !finished) exit 1}' "$0" > "$manifest" \
-        || [ ! -s "$manifest" ] || ! dpkg-query -L agentoc > "$legacy_files"; then
+        || [ ! -s "$manifest" ] || [ ! -f /var/lib/dpkg/info/agentoc.list ] \
+        || [ -L /var/lib/dpkg/info/agentoc.list ] || ! cat /var/lib/dpkg/info/agentoc.list > "$legacy_files"; then
         echo 'Cannot verify the legacy package file inventory; refusing migration.' >&2
         exit 1
       fi
       if ! while IFS= read -r legacy_file; do
         [ -n "$legacy_file" ] || continue
+        # On merged-/usr systems these are distribution-owned directory
+        # aliases even when the package records them as directories. They are
+        # not package-owned payload symlinks and need not be replaced.
+        case "$legacy_file" in
+          /bin|/sbin|/lib|/lib64)
+            if [ -L "$legacy_file" ] && [ "$(readlink "$legacy_file")" = "usr/${legacy_file#/}" ]; then continue; fi ;;
+        esac
         if [ -d "$legacy_file" ] && [ ! -L "$legacy_file" ]; then continue; fi
         printf '%s\n' "$legacy_file"
       done < "$legacy_files" | awk 'NR == FNR {payload[$0]=1; next}
