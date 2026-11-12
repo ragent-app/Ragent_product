@@ -441,7 +441,10 @@ function parseApprovalRequest(approval) {
   const params = approval.params || {};
   const providerItemId = params.itemId || params.callId || '';
   const providerApprovalId = params.approvalId || '';
-  const command = formatCommandValue(params.command);
+  // An argv array is not a shell command string. Preserve empty arguments and
+  // boundaries in the owner-facing approval instead of flattening them.
+  const commandIsArgv = Array.isArray(params.command);
+  const command = commandIsArgv ? `argv: ${JSON.stringify(params.command)}` : formatCommandValue(params.command);
   const filePaths = collectFileChangePaths(params);
   return approvalRequestEvent({
     approvalId: approval.approvalId,
@@ -463,7 +466,7 @@ function parseApprovalRequest(approval) {
     permissions: params.permissions || null,
     status: 'pending',
     source: 'codex-app-server',
-    explanation: explanationForApproval({ command, cwd: params.cwd || '', providerDescription: params.reason || params.request?.message || params.request?.prompt }),
+    explanation: commandIsArgv ? null : explanationForApproval({ command, cwd: params.cwd || '', providerDescription: params.reason || params.request?.message || params.request?.prompt }),
   });
 }
 

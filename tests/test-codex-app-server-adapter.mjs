@@ -511,6 +511,13 @@ assert.equal(approvalEvents[0].type, 'approval_request');
 assert.equal(approvalEvents[0].approvalId, 'item/commandExecution/requestApproval:approval-1');
 assert.equal(approvalEvents[0].command, 'echo approved');
 
+const argvApprovalEvents = adapter.parseLine(JSON.stringify({
+  ...approvalRequestMessage,
+  id: 'argv-approval',
+  params: { ...approvalRequestMessage.params, command: ['/bin/bash', '-c', 'rm /tmp/a b', ''] },
+}));
+assert.equal(argvApprovalEvents[0].command, 'argv: ["/bin/bash","-c","rm /tmp/a b",""]');
+
 const mcpStatusEvents = adapter.parseLine(JSON.stringify({
   method: 'mcpServer/startupStatus/updated',
   params: { name: 'agentoc_actions_fixture', status: 'ready', threadId: 'thread-123' },
