@@ -11,6 +11,7 @@ export async function installWindowsRunCliShim(env, { runDirectory, nodePath, en
   const binDir = join(runDirectory, 'cli-bin');
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, 'agentoc.cmd'), '@echo off\r\n"%AGENTOC_CLI_NODE%" "%AGENTOC_CLI_ENTRY%" %*\r\n', 'utf8');
+  await writeFile(join(binDir, 'ragent.cmd'), '@echo off\r\n"%AGENTOC_CLI_NODE%" "%AGENTOC_CLI_ENTRY%" %*\r\n', 'utf8');
   env.AGENTOC_CLI_NODE = nodePath;
   env.AGENTOC_CLI_ENTRY = entryPath;
   env.PATH = [binDir, env.PATH].filter(Boolean).join(delimiter);

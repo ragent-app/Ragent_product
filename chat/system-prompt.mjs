@@ -35,13 +35,13 @@ function buildSessionControlApiAndSpawnSection({ currentSessionId, chatPort }) {
 
 - Multi-session routing is a core dispatch principle; this is not primarily a user-facing UI action. Split only when a turn has 2+ independently actionable goals and the separate context or parallelism is useful; keep one bounded workflow in this Session otherwise.
 - Do not split a single bounded workflow just because the user expressed it as a numbered checklist, bug-triage rubric, or ordered step sequence. If the user asks to continue in the same session/workflow or not to create another child session, treat that as a strong no-split signal; if work stays here, have a clear no-split reason. A spawned session is an independent worker that simply received bounded handoff context; a parent session may coordinate while each child session owns one goal. A delegated "Delegation handoff:" is already a focused task; do not spawn again unless it contains genuinely independent work.
-- Use \`agentoc session-spawn --task "<focused task>" --json\`; add \`--wait\` when the parent needs the result and \`--final-only\` when only a bounded summary should return. The handoff is just the focused task plus the parent session id; let the child fetch it from the parent session when needed.
-- If the \`agentoc\` command is unavailable, use \`node "$AGENTOC_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\`.
+- Use \`ragent session-spawn --task "<focused task>" --json\`; add \`--wait\` when the parent needs the result and \`--final-only\` when only a bounded summary should return. The handoff is just the focused task plus the parent session id; let the child fetch it from the parent session when needed.
+- If the \`ragent\` command is unavailable, use \`node "$AGENTOC_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\` in a POSIX shell, or \`node "$env:AGENTOC_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\` in PowerShell.
 
 ## Session Control API
 This is a product route index, not a grant of authority. Availability depends on the current run's principal, capability, feature flags and server authorization. Use only operations actually granted to this run; do not attempt to bypass a denial.
 
-- Call \`agentoc api <METHOD> <PATH> --body '<JSON>'\`; use \`--wait-run\` only when a started Run's terminal result is needed. Fallback: \`node "$AGENTOC_PROJECT_ROOT/cli.js" api ...\`.
+- Call \`ragent api <METHOD> <PATH> --body '<JSON>'\`; use \`--wait-run\` only when a started Run's terminal result is needed. Fallback: \`node "$AGENTOC_PROJECT_ROOT/cli.js" api ...\` in a POSIX shell or \`node "$env:AGENTOC_PROJECT_ROOT/cli.js" api ...\` in PowerShell.
 - Use \`AGENTOC_SESSION_ID\`, \`AGENTOC_CHAT_BASE_URL\`, and \`AGENTOC_PROJECT_ROOT\`; URL-encode ids and use stable \`requestId\`/\`idempotencyKey\` values for retryable mutations.
 - Responses are authoritative: 202 means accepted/queued, then inspect \`run\` or poll \`GET /api/runs/:runId\`; 401/403/409 means an auth, capability, or state boundary. \`/ws\` emits invalidation hints only; refetch the HTTP resource. Never forge headers or reuse a capability across resources.
 
@@ -61,7 +61,7 @@ Runs, collaboration, and deferred wake:
 - Collaboration: \`GET/POST /api/collaborations\` and \`GET|POST /api/collaborations/:id/{dispatch,retry,cancel}\`. For a new multi-agent plan, first \`POST /api/collaborations/validate\`, keep its short-lived \`validationId\`, then \`POST /api/collaborations/dispatch-validated\` with that id and one stable idempotencyKey; do not send a different raw plan after validation. Read a collaboration's durable checkpoint from its detail response; owners can also inspect \`GET /api/orchestrations/:executionId\`. If the AgentoC MCP server is connected, \`agentoc_list_orchestrations\` and \`agentoc_get_orchestration\` provide the same read-only projection without scanning transcript bodies. Enabled Consultation V1 uses \`POST /api/consultations\`, \`GET /api/consultations/:id\`, \`POST .../{dispatch,decide,cancel}\`, and \`GET .../decisions\`.
 - Projects: \`GET/POST /api/projects\`, \`GET/PATCH/DELETE /api/projects/:id\`, \`POST .../:id/delete\`, checkpoints/handoffs, \`POST /api/project-handoffs/:id/accept\`, \`POST /api/projects/:id/session-migration/export\`, \`POST /api/projects/migrate\`, and \`POST /api/session-migrations/import\`; these mutations are owner-only.
 - Organizations, when enabled: \`GET /api/organizations/:id[/projection]\`, \`POST .../cancel|provision\`, \`POST .../phases/:phaseId/dispatch\`, and \`GET /api/sessions/:id/organization/projection\`; provisioning/cancel/dispatch are owner-gated.
-- Wake triggers: \`GET/POST /api/triggers\` and \`GET/PATCH/DELETE /api/triggers/:id\`; list the current session with \`agentoc trigger list --json\`. Use \`--session\` to select a different session; \`trigger list\` also accepts \`--source-session\`. Create \`at_time\` or event triggers for AI follow-up, e.g. \`agentoc trigger create --in 2h --text "Follow up on this later" --json\`. Use trigger-created session wake-ups only when the future work genuinely requires AI reasoning, drafting, or conversation continuation. Do not create a \`collaboration_terminal\` trigger to resume the collaboration's own parent Session: Durable Collaboration already owns child-result collection, aggregation, and terminal status through its control channel. Events: \`run_terminal\`, \`collaboration_terminal\`, \`process_terminal\`, \`process_output\`, \`session_event\`.
+- Wake triggers: \`GET/POST /api/triggers\` and \`GET/PATCH/DELETE /api/triggers/:id\`; list the current session with \`ragent trigger list --json\`. Use \`--session\` to select a different session; \`trigger list\` also accepts \`--source-session\`. Create \`at_time\` or event triggers for AI follow-up, e.g. \`ragent trigger create --in 2h --text "Follow up on this later" --json\`. Use trigger-created session wake-ups only when the future work genuinely requires AI reasoning, drafting, or conversation continuation. Do not create a \`collaboration_terminal\` trigger to resume the collaboration's own parent Session: Durable Collaboration already owns child-result collection, aggregation, and terminal status through its control channel. Events: \`run_terminal\`, \`collaboration_terminal\`, \`process_terminal\`, \`process_output\`, \`session_event\`.
 - Managed processes: create with \`POST /api/sessions/:id/managed-processes\`, inspect with \`GET /api/managed-processes?sessionId=:id\` or \`GET /api/managed-processes/:id\`, cancel with \`POST .../:id/cancel\` or \`DELETE .../:id\`; use executable/argv and \`shell:false\`. Output is bounded and wake text has a server default.
 
 Files, workspace, and connected surfaces:
@@ -93,7 +93,7 @@ function buildSessionControlSections(args) {
 
 function buildMultiAgentGuidanceSection({ includeSessionSpawn = true } = {}) {
   const dispatchRule = includeSessionSpawn
-    ? '- Use `agentoc session-spawn` only for an independent or high-noise subtask that benefits from a separate context; use `--wait` when the parent needs the result and `--final-only` when only a bounded summary should return.'
+    ? '- Use `ragent session-spawn` only for an independent or high-noise subtask that benefits from a separate context; use `--wait` when the parent needs the result and `--final-only` when only a bounded summary should return.'
     : '- This is already a delegated bounded task. Complete it in the current Session and do not create or delegate another Session.';
   return `## Multi-Agent Capability Selection
 
@@ -226,9 +226,9 @@ No startup memory index was found. This does not block the user's task. Use expl
 
 async function buildConnectorCapabilitiesSection() {
   const connectorSections = [];
-  const agendaCommand = 'agentoc agenda add --title "Title" --start "ISO8601" --duration 60';
+  const agendaCommand = 'ragent agenda add --title "Title" --start "ISO8601" --duration 60';
   const agendaFallbackCommand = 'node "$AGENTOC_PROJECT_ROOT/cli.js" agenda add --title "Title" --start "ISO8601" --duration 60';
-  const agendaHelpCommand = 'agentoc agenda --help';
+  const agendaHelpCommand = 'ragent agenda --help';
   const agendaFallbackHelpCommand = 'node "$AGENTOC_PROJECT_ROOT/cli.js" agenda --help';
 
   try {
@@ -240,9 +240,9 @@ async function buildConnectorCapabilitiesSection() {
       ];
 
       connectorSections.push(`### Calendar
-Calendar events default to the instance iCal subscription feed. For ordinary calendar requests, write directly to that feed with \`${agendaCommand}\`. If the \`agentoc\` command is unavailable in PATH, use \`${agendaFallbackCommand}\` instead. The write stays instance-local when the shell already carries \`AGENTOC_INSTANCE_ROOT\` or \`AGENTOC_CONFIG_DIR\`.
+Calendar events default to the instance iCal subscription feed. For ordinary calendar requests, write directly to that feed with \`${agendaCommand}\`. If the \`ragent\` command is unavailable in PATH, use \`${agendaFallbackCommand}\` in a POSIX shell, or replace \`$AGENTOC_PROJECT_ROOT\` with \`$env:AGENTOC_PROJECT_ROOT\` in PowerShell. The write stays instance-local when the shell already carries \`AGENTOC_INSTANCE_ROOT\` or \`AGENTOC_CONFIG_DIR\`.
 
-For workflow details, use \`${agendaHelpCommand}\`. If the \`agentoc\` command is unavailable in PATH, use \`${agendaFallbackHelpCommand}\`. Do not create completion targets for normal interactive calendar requests.
+For workflow details, use \`${agendaHelpCommand}\`. If the \`ragent\` command is unavailable in PATH, use \`${agendaFallbackHelpCommand}\`. Do not create completion targets for normal interactive calendar requests.
 
 If the user explicitly needs first-class external calendar notifications and a ready bound calendar connector is already present, you may use that bound connector instead of the feed.
 

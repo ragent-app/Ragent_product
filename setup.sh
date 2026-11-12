@@ -275,6 +275,7 @@ print_header "Step 5: Creating Configuration Files"
 mkdir -p "$HOME/.local/bin"
 chmod +x "$SCRIPT_DIR/cli.js"
 ln -sf "$SCRIPT_DIR/cli.js" "$HOME/.local/bin/agentoc"
+ln -sf "$SCRIPT_DIR/cli.js" "$HOME/.local/bin/ragent"
 print_success "Installed local CLI shim: ~/.local/bin/agentoc"
 
 if [[ "$USE_CLOUDFLARE" == true ]]; then

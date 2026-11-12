@@ -496,6 +496,7 @@ EOF
 chmod 0755 "$STAGE/opt/agentoc/runtime/qrcode-terminal"
 
 install -m 0755 "$ROOT/packaging/deb/agentoc-wrapper" "$STAGE/usr/bin/agentoc"
+install -m 0755 "$ROOT/packaging/deb/agentoc-wrapper" "$STAGE/usr/bin/ragent"
 install -m 0755 "$ROOT/packaging/deb/run-as-service-user" "$STAGE/usr/lib/agentoc/run-as-service-user"
 install -m 0755 "$ROOT/packaging/deb/repair-state-access" "$STAGE/usr/lib/agentoc/repair-state-access"
 install -m 0755 "$ROOT/packaging/deb/retire-legacy-cc-switch" "$STAGE/usr/lib/agentoc/retire-legacy-cc-switch"

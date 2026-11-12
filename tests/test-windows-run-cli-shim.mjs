@@ -23,6 +23,10 @@ if (process.platform !== 'win32') {
     assert.equal(result.status, 0, result.stderr || String(result.error));
     assert.match(result.stdout, /agentoc trigger <command>/);
     assert.match(result.stdout, /--session/);
+    const alias = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      'ragent trigger --help'], { env, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(alias.status, 0, alias.stderr || String(alias.error));
+    assert.equal(alias.stdout, result.stdout);
     console.log('Windows Run CLI launcher: native PowerShell resolved and ran the CLI');
   } finally {
     await rm(directory, { recursive: true, force: true });

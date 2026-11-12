@@ -34,7 +34,8 @@
     "darwin"
   ],
   "bin": {
-    "agentoc": "cli.js"
+    "agentoc": "cli.js",
+    "ragent": "cli.js"
   },
   "directories": {
     "doc": "docs",

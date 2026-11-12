@@ -56,42 +56,42 @@ function spawnFile(command, args = []) {
 }
 
 function printHelp() {
-  console.log(`agentoc v${pkg.version}
+  console.log(`Ragent v${pkg.version}
 
 Usage:
-  agentoc setup                    Configure the local Ragent host
-  agentoc start                    Start all services
-  agentoc stop                     Stop all services
-  agentoc restart [service]        Restart services; Linux/macOS chat restart blocks active runs unless --force
-  agentoc doctor [--json]          Print read-only per-user runtime diagnostics
-  agentoc doctor --service [--json] Inspect the installed MSI service instance
-  agentoc doctor --owner-bootstrap [--json] Check installed Owner bootstrap trust
-  agentoc upgrade-check             Check whether an upgrade can preserve active Runs
-  agentoc upgrade-prepare           Enter upgrade drain after validating active Runs
-  agentoc provision-host           Plan or execute whole-host provider provisioning
-  agentoc bootstrap-host           Converge a Linux host into a Ragent host baseline
-  agentoc install-profile          Resolve modules from install env and render runtime plan
-  agentoc validate-profile         Validate host + profile health and report degradation
-  agentoc guest-instance           Create isolated guest instances on this machine
-  agentoc chat                     Run chat server in foreground
-  agentoc api                      Call the local Ragent HTTP API with owner auth
-  agentoc mail                     Manage agent mailbox and send outbound email
-  agentoc assistant-message        Append an assistant message with optional local-file attachments
-  agentoc pair                     Create a trusted-device pairing QR and short code
-  agentoc signal                   Run metadata-only P2P signaling
-  agentoc p2p-host                 Run the local WebRTC DataChannel host
-  agentoc connector                Run or inspect the outbound host connector
-  agentoc local-bridge            Manage linked local helper bridges for a session
-  agentoc agenda                  Manage the instance calendar feed
-  agentoc trigger                  Manage durable session triggers
-  agentoc managed-process          Start and control processes that outlive a Run
-  agentoc usage-summary            Summarize local Codex token usage
-  agentoc session-spawn            Spawn a focused parallel session from a source session
-  agentoc collaborate              Durable multi-Agent collaboration control
-  agentoc consult                  Consultation round control (create|status|dispatch|decide|cancel|decisions)
-  agentoc set-password             Set username & password for login
-  agentoc --help                   Show this help message
-  agentoc --version                Show version`);
+  ragent setup                    Configure the local Ragent host
+  ragent start                    Start all services
+  ragent stop                     Stop all services
+  ragent restart [service]        Restart services; Linux/macOS chat restart blocks active runs unless --force
+  ragent doctor [--json]          Print read-only per-user runtime diagnostics
+  ragent doctor --service [--json] Inspect the installed MSI service instance
+  ragent doctor --owner-bootstrap [--json] Check installed Owner bootstrap trust
+  ragent upgrade-check             Check whether an upgrade can preserve active Runs
+  ragent upgrade-prepare           Enter upgrade drain after validating active Runs
+  ragent provision-host           Plan or execute whole-host provider provisioning
+  ragent bootstrap-host           Converge a Linux host into a Ragent host baseline
+  ragent install-profile          Resolve modules from install env and render runtime plan
+  ragent validate-profile         Validate host + profile health and report degradation
+  ragent guest-instance           Create isolated guest instances on this machine
+  ragent chat                     Run chat server in foreground
+  ragent api                      Call the local Ragent HTTP API with owner auth
+  ragent mail                     Manage agent mailbox and send outbound email
+  ragent assistant-message        Append an assistant message with optional local-file attachments
+  ragent pair                     Create a trusted-device pairing QR and short code
+  ragent signal                   Run metadata-only P2P signaling
+  ragent p2p-host                 Run the local WebRTC DataChannel host
+  ragent connector                Run or inspect the outbound host connector
+  ragent local-bridge            Manage linked local helper bridges for a session
+  ragent agenda                  Manage the instance calendar feed
+  ragent trigger                  Manage durable session triggers
+  ragent managed-process          Start and control processes that outlive a Run
+  ragent usage-summary            Summarize local Codex token usage
+  ragent session-spawn            Spawn a focused parallel session from a source session
+  ragent collaborate              Durable multi-Agent collaboration control
+  ragent consult                  Consultation round control (create|status|dispatch|decide|cancel|decisions)
+  ragent set-password             Set username & password for login
+  ragent --help                   Show this help message
+  ragent --version                Show version`);
 }
 
 switch (command) {
