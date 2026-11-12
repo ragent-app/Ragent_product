@@ -2370,9 +2370,14 @@ class RoomSessionRepository(
     override suspend fun loadRuntimeModels(tool: String, providerProfile: String): List<RuntimeModelOption> {
         val response = execute(ApiRequest(
             "GET",
-            "/api/models?tool=${encode(tool)}&provider=${encode(providerProfile)}",
+            "/api/models?tool=${encode(tool)}&provider=${encode(providerProfile)}&refresh=1",
         ))
-        return parseRuntimeModels(codec.decode(serializer<JsonObject>(), response.body)).map { model ->
+        val root = codec.decode(serializer<JsonObject>(), response.body)
+        val models = parseRuntimeModels(root)
+        if (models.isEmpty() && (root["catalog"] as? JsonObject)?.string("status") == "unavailable") {
+            throw IllegalStateException("Model catalog unavailable")
+        }
+        return models.map { model ->
             if (model.provider == null) model.copy(provider = providerProfile) else model
         }
     }
