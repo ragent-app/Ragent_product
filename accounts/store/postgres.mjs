@@ -721,6 +721,11 @@ async function replaceRows(client, table, columns, rows, toRow) {
   await insertRowsInBatches(client, table, columns, rows, toRow);
 }
 
+async function hasInstanceAccessGrantsTable(client) {
+  const result = await client.query(`select to_regclass(format('%I.%I', current_schema(), 'instance_access_grants')) is not null as available`);
+  return result.rows[0]?.available === true;
+}
+
 async function readSnapshot(client) {
   const accounts = await client.query('select * from accounts order by created_at, account_id');
   const transactions = await client.query('select * from owner_auth_transactions order by created_at, transaction_id');
@@ -729,6 +734,8 @@ async function readSnapshot(client) {
     JSON.stringify([row.transaction_id, row.nonce, row.bootstrap_hash]), row.state_hash,
   ]));
   const bindings = await client.query('select * from instance_bindings order by bound_at, instance_id');
+  const instanceAccessGrants = await hasInstanceAccessGrantsTable(client)
+    ? await client.query('select * from instance_access_grants order by created_at, grant_id') : { rows: [] };
   const devices = await client.query('select * from devices order by created_at, device_id');
   const history = await client.query('select * from binding_history order by occurred_at, instance_id');
   const nativeAuthRequests = await client.query('select * from native_owner_auth_requests order by completed_at, request_id');
@@ -788,6 +795,11 @@ async function readSnapshot(client) {
       browserStateHash: browserStateBySource.get(JSON.stringify([row.transaction_id, row.nonce, row.bootstrap_hash])) || '',
     })),
     instanceBindings: bindings.rows.map(rowToBinding),
+    instanceAccessGrants: instanceAccessGrants.rows.map(row => ({ grantId: String(row.grant_id),
+      instanceId: String(row.instance_id), ownerAccountId: String(row.owner_account_id), accountId: String(row.account_id),
+      bindingKeyFingerprint: String(row.binding_key_fingerprint), bindingBoundAt: toIso(row.binding_bound_at),
+      bindingHistoryFingerprint: String(row.binding_history_fingerprint),
+      scope: String(row.scope), createdAt: toIso(row.created_at), revokedAt: toIso(row.revoked_at) })),
     devices: devices.rows.map(rowToDevice),
     bindingHistory: history.rows.map(rowToHistory),
     nativeAuthRequests: nativeAuthRequests.rows.map(rowToNativeAuthRequest),
@@ -820,6 +832,11 @@ async function readSnapshot(client) {
 async function writeSnapshot(client, snapshot, previousSnapshot) {
   // Clear this FK subgraph before generic full-rewrite insertion.  The broker
   // is serialized, so a transient empty set is never externally observable.
+  const grantsTableAvailable = await hasInstanceAccessGrantsTable(client);
+  if (!grantsTableAvailable && (snapshot.instanceAccessGrants || []).length) {
+    throw new Error('Instance access grants migration is required');
+  }
+  if (grantsTableAvailable) await client.query('delete from instance_access_grants');
   await client.query('delete from account_join_grants');
   await client.query('delete from account_credential_refreshes');
   await client.query('delete from account_session_challenges');
@@ -872,6 +889,14 @@ async function writeSnapshot(client, snapshot, previousSnapshot) {
     snapshot.instanceBindings || [],
     bindingToRow,
   );
+  const liveAccountIds = new Set(snapshot.accounts.map(account => account.accountId));
+  if (grantsTableAvailable) await replaceRows(client, 'instance_access_grants',
+    ['grant_id', 'instance_id', 'owner_account_id', 'account_id', 'binding_key_fingerprint', 'binding_bound_at', 'binding_history_fingerprint',
+      'scope', 'created_at', 'revoked_at'],
+    (snapshot.instanceAccessGrants || []).filter(grant => liveAccountIds.has(grant.ownerAccountId) && liveAccountIds.has(grant.accountId)),
+    grant => ({ grant_id: grant.grantId, instance_id: grant.instanceId, owner_account_id: grant.ownerAccountId,
+      account_id: grant.accountId, binding_key_fingerprint: grant.bindingKeyFingerprint,
+      binding_bound_at: grant.bindingBoundAt, binding_history_fingerprint: grant.bindingHistoryFingerprint, scope: grant.scope, created_at: grant.createdAt, revoked_at: grant.revokedAt || null }));
   await replaceRows(
     client,
     'devices',
