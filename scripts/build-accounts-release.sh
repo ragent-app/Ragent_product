@@ -2,15 +2,15 @@
 set -euo pipefail
 
 # Builds the Accounts service as an independent, versioned release archive.
-# This never stages the local AgentoC control plane, its providers, or a Deb.
+# This never stages the local Ragent control plane, its providers, or a Deb.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${AGENTOC_ACCOUNTS_RELEASE_VERSION:-$(node -p "require('$ROOT/package.json').version")+accounts}"
-ARCH="${AGENTOC_ACCOUNTS_RELEASE_ARCH:-$(dpkg --print-architecture)}"
-OUTPUT_DIR="${AGENTOC_ACCOUNTS_RELEASE_OUTPUT_DIR:-$ROOT/release}"
-NODE_VERSION="${AGENTOC_ACCOUNTS_NODE_VERSION:-v24.18.0}"
-NODE_CACHE_DIR="${AGENTOC_ACCOUNTS_NODE_CACHE_DIR:-$ROOT/cache/node}"
-SOURCE_REVISION="${AGENTOC_ACCOUNTS_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}"
-SOURCE_MODE="${AGENTOC_ACCOUNTS_SOURCE_MODE:-git-objects}"
+VERSION="${RAGENT_ACCOUNTS_RELEASE_VERSION:-${AGENTOC_ACCOUNTS_RELEASE_VERSION:-$(node -p "require('$ROOT/package.json').version")+accounts}}"
+ARCH="${RAGENT_ACCOUNTS_RELEASE_ARCH:-${AGENTOC_ACCOUNTS_RELEASE_ARCH:-$(dpkg --print-architecture)}}"
+OUTPUT_DIR="${RAGENT_ACCOUNTS_RELEASE_OUTPUT_DIR:-${AGENTOC_ACCOUNTS_RELEASE_OUTPUT_DIR:-$ROOT/release}}"
+NODE_VERSION="${RAGENT_ACCOUNTS_NODE_VERSION:-${AGENTOC_ACCOUNTS_NODE_VERSION:-v24.18.0}}"
+NODE_CACHE_DIR="${RAGENT_ACCOUNTS_NODE_CACHE_DIR:-${AGENTOC_ACCOUNTS_NODE_CACHE_DIR:-$ROOT/cache/node}}"
+SOURCE_REVISION="${RAGENT_ACCOUNTS_SOURCE_REVISION:-${AGENTOC_ACCOUNTS_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}}"
+SOURCE_MODE="${RAGENT_ACCOUNTS_SOURCE_MODE:-${AGENTOC_ACCOUNTS_SOURCE_MODE:-git-objects}}"
 if [[ ! "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Accounts source revision must be a full 40-character Git commit SHA" >&2
   exit 1
@@ -23,9 +23,9 @@ case "$ARCH" in
 esac
 
 mkdir -p "$OUTPUT_DIR" "$NODE_CACHE_DIR"
-WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.agentoc-accounts-release.XXXXXX")"
-export npm_config_cache="${AGENTOC_ACCOUNTS_NPM_CACHE:-$WORK_DIR/npm-cache}"
-RELEASE_NAME="agentoc-accounts-${VERSION}-${ARCH}"
+WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.ragent-accounts-release.XXXXXX")"
+export npm_config_cache="${RAGENT_ACCOUNTS_NPM_CACHE:-${AGENTOC_ACCOUNTS_NPM_CACHE:-$WORK_DIR/npm-cache}}"
+RELEASE_NAME="ragent-accounts-${VERSION}-${ARCH}"
 RELEASE_DIR="$WORK_DIR/$RELEASE_NAME"
 APP_DIR="$RELEASE_DIR/app"
 OUTPUT="$OUTPUT_DIR/${RELEASE_NAME}.tar.gz"
@@ -38,7 +38,7 @@ trap cleanup EXIT
 mkdir -p "$APP_DIR" "$RELEASE_DIR/runtime"
 node "$ROOT/scripts/stage-runtime-payload.mjs" \
   --source "$ROOT" --destination "$APP_DIR" --profile accounts --source-mode "$SOURCE_MODE"
-install -m 0644 "$ROOT/deploy/accounts/agentoc-accounts.service" "$RELEASE_DIR/agentoc-accounts.service"
+install -m 0644 "$ROOT/deploy/accounts/ragent-accounts.service" "$RELEASE_DIR/ragent-accounts.service"
 
 (cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
 rm -f "$APP_DIR/package-lock.json"
@@ -61,7 +61,7 @@ tar -xJf "$NODE_CACHE_PATH" -C "$WORK_DIR"
 install -m 0755 "$WORK_DIR/$NODE_DIST/bin/node" "$RELEASE_DIR/runtime/node"
 
 cat > "$RELEASE_DIR/release.json" <<EOF
-{"service":"agentoc-accounts","version":"$VERSION","architecture":"$ARCH","nodeVersion":"$NODE_VERSION","sourceRevision":"$SOURCE_REVISION"}
+{"service":"ragent-accounts","version":"$VERSION","architecture":"$ARCH","nodeVersion":"$NODE_VERSION","sourceRevision":"$SOURCE_REVISION"}
 EOF
 
 chmod -R a+rX "$RELEASE_DIR"

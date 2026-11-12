@@ -2,7 +2,9 @@
 
 The Accounts API is released independently from the Windows/local-control-plane package. Build the versioned archive with `scripts/build-accounts-release.sh`; the archive contains the Accounts runtime payload, its pinned Node runtime, this systemd unit, and release metadata.
 
-The production unit runs as `agentoc-accounts`, reads `/etc/agentoc/accounts.env`, and serves the app from `/opt/agentoc-accounts/current`. Keep releases immutable under `/opt/agentoc-accounts/releases`, switch `current` atomically, and keep the previous release available for rollback. Do not install the central service under `/opt/agentoc`.
+The release contains `ragent-accounts.service`, with `agentoc-accounts.service` provided as a transitional systemd alias. Existing production deployments still run as `agentoc-accounts`, read `/etc/agentoc/accounts.env`, and serve the app from `/opt/agentoc-accounts/current`. Keep releases immutable under `/opt/agentoc-accounts/releases`, switch `current` atomically, and keep the previous release available for rollback. Do not install the central service under `/opt/agentoc`.
+
+Before activating the new unit on a host with the former unit installed, back up its unit, enablement links and drop-ins, and migrate the unit name under a tested rollback plan. Do not install the alias over an existing regular unit file; verify the active process, both names, and account health after `daemon-reload` and before any restart. The existing service user, configuration and data paths are transitional and require a separate verified migration.
 
 Apply database migrations using the account service environment file before enabling a release that uses them:
 

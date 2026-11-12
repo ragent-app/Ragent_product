@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC accounts API (production)
+Description=Ragent accounts API (production)
 After=network-online.target
 Wants=network-online.target
 
@@ -33,3 +33,5 @@ SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
+# Transitional alias for deployments and integrations still using the former unit.
+Alias=agentoc-accounts.service
