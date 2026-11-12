@@ -156,7 +156,9 @@ async function startServer({ home, configDir, memoryDir, workRoot, port }) {
       ...process.env,
       AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
       AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      AGENTOC_AUTH_SESSION_SECRET: 'test-owner-welcome-secret',
       HOME: home,
+      AGENTOC_INSTANCE_ROOT: home,
       AGENTOC_CONFIG_DIR: configDir,
       AGENTOC_MEMORY_DIR: memoryDir,
       AGENTOC_WORK_ROOT_DIR: workRoot,
@@ -188,7 +190,7 @@ async function startServer({ home, configDir, memoryDir, workRoot, port }) {
 async function stopServer(child) {
   if (!child || child.exitCode !== null) return;
   child.kill('SIGTERM');
-  await waitFor(() => child.exitCode !== null, 'server shutdown');
+  await waitFor(() => child.exitCode !== null || child.signalCode !== null, 'server shutdown');
 }
 
 async function restoreStarterSessions(port) {
@@ -301,7 +303,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   assert.match(digestUserContent, /每天早上 8 点|行业热点/u, 'digest showcase should demonstrate a recurring summary ask');
   assert.equal(digestAssistantMessage?.attachments?.length, 1, 'digest showcase should attach the delivered summary body');
   const digestShowcaseContent = await resolveEventContent(port, digestShowcaseSession.id, digestAssistantMessage, { Cookie: ownerCookie });
-  assert.match(digestShowcaseContent, /实际跑通过|固化成每天自动发/u, 'digest showcase should end with a concrete delivery handoff');
+  assert.match(digestShowcaseContent, /预置摘要附件|固化成每天自动发/u, 'digest showcase should end with a concrete delivery handoff');
   const digestDownloadRes = await fetch(`http://127.0.0.1:${port}/api/assets/${digestAssistantMessage.attachments[0].assetId}/download`, {
     method: 'GET',
     headers: { Cookie: ownerCookie },

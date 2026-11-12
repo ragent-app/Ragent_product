@@ -141,6 +141,8 @@ async function startServer({ home, port }) {
       AGENTOC_AUTH_SESSION_SECRET: "test-secret-agentoc-http-template",
       AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
       HOME: home,
+      AGENTOC_INSTANCE_ROOT: home,
+      AGENTOC_CONFIG_DIR: join(home, '.config', 'agentoc'),
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
     },
@@ -165,7 +167,7 @@ async function startServer({ home, port }) {
 async function stopServer(child) {
   if (!child || child.exitCode !== null) return;
   child.kill('SIGTERM');
-  await waitFor(() => child.exitCode !== null, 'server shutdown');
+  await waitFor(() => child.exitCode !== null || child.signalCode !== null, 'server shutdown');
 }
 
 async function createSession(port, name) {
@@ -321,8 +323,8 @@ try {
     );
     assert.match(
       createdFromStarterPreset.json.session?.systemPrompt || '',
-      /drive the intake|opening checklist/i,
-      'create-agent starter prompt should mandate a guided intake instead of passive one-shot collection',
+      /When it is sufficient, use reasonable defaults and proceed/i,
+      'create-agent starter prompt should proceed when the description is sufficient',
     );
     assert.match(
       createdFromStarterPreset.json.session?.systemPrompt || '',

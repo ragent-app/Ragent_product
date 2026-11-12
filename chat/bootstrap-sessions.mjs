@@ -106,7 +106,7 @@ function buildInboundEmailSetupHint(mailboxAddress) {
 function buildEmailShowcaseIntro(mailboxAddress) {
   if (mailboxAddress) {
     return [
-      '这个示例基于我刚验证过的真实链路。',
+      '这是预置的邮件接入示例，展示配置成功后的使用方式。',
       `这个实例当前的收件地址是 \`${mailboxAddress}\`。你直接给它发邮件，左侧会自动多出一个新会话。`,
       '正式测试前，先把你会用来发送的邮箱告诉我，我会先把它设成允许发件人；不然安全机制会先把邮件拦掉。',
       '下面这条用户消息，就是邮件进入会话后实际会出现的格式。',
@@ -114,7 +114,7 @@ function buildEmailShowcaseIntro(mailboxAddress) {
   }
 
   return [
-    '这个示例基于我刚验证过的真实链路。',
+    '这是预置的邮件接入示例，展示配置成功后的使用方式。',
     '实例启用邮箱接入后，你直接给它发邮件，左侧会自动多出一个新会话。',
     '正式测试前，先把你会用来发送的邮箱告诉我，我会先把它设成允许发件人；不然安全机制会先把邮件拦掉。',
     '下面这条用户消息，就是邮件进入会话后实际会出现的格式。',
@@ -140,8 +140,8 @@ function buildEmailShowcaseUserMessage(mailboxAddress) {
 
 function buildDigestShowcaseIntro() {
   return [
-    '这是一个已经实测跑通过的样例。',
-    '这个流程不是只展示“能做摘要”或“能发邮件”其中一项，而是把两件事接成一条真实交付链路：先整理最近行业热点，再把结果发到指定邮箱。',
+    '这是预置样例，用于展示可能的工作过程和结果。',
+    '这个示例展示先整理行业热点、再向指定邮箱发送摘要的预期流程。',
   ].join('\n\n');
 }
 
@@ -199,8 +199,8 @@ function buildCalendarGuideMessages() {
         '- **iOS**：设置 → 日历 → 账户 → 添加账户 → 其他 → 添加已订阅的日历 → 粘贴地址',
         '- **macOS**：日历 → 文件 → 新建日历订阅 → 粘贴地址',
         '- **Android**：推荐使用 [One Calendar](https://play.google.com/store/apps/details?id=com.degenhardt.android.onecalendar)，支持导入订阅链接',
-        '**建议设置：** 订阅后将刷新频率改为"每 5 分钟"，这样新事件会更快同步到你的日历中。',
-        '订阅完成后，你可以在任何会话中告诉我要加什么日程，事件会自动出现在你的日历里。',
+        '日历客户端的刷新频率和设置方式因应用而异，请以客户端实际选项为准。',
+        '订阅完成后，可通过支持的会话创建日程；客户端何时刷新取决于其自身设置。',
       ].join('\n\n'),
     },
   ];
@@ -265,7 +265,7 @@ async function getOwnerBootstrapSessionDefinitions() {
         {
           role: 'assistant',
           content: [
-            '这是一个已经实测跑通过的样例。',
+            '这是预置样例，用于展示可能的工作过程和结果。',
             '你可以直接点附件看交付长什么样：上面是用户上传的原始表，下面是我回给用户的结果文件。',
           ].join('\n\n'),
         },
@@ -284,7 +284,7 @@ async function getOwnerBootstrapSessionDefinitions() {
         {
           role: 'assistant',
           content: [
-            '这条链路我已经实际跑通过了。下面两个附件可以直接下载：一个是清洗后的表，一个是清洗说明。',
+            '下面是示例结果：一个清洗后的表和一份清洗说明。',
             '你把自己的表发来后，我会先按同样方式跑第一版，再决定有没有必要固化成重复流程。',
           ].join('\n\n'),
           attachments: [
@@ -322,7 +322,7 @@ async function getOwnerBootstrapSessionDefinitions() {
         {
           role: 'assistant',
           content: [
-            '这条链路我已经实际跑通过了。我先把今天这份摘要发到指定邮箱，同时把同一份正文放成附件供你直接看。',
+            '这是一份预置摘要附件；实际发送邮件需要先配置并授权可用的邮箱。',
             '如果你确认格式和收件都没问题，我再把它固化成每天自动发。',
           ].join('\n\n'),
           attachments: [
