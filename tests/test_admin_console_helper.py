@@ -45,6 +45,18 @@ class AdminHelperValidationTests(unittest.TestCase):
             result = HELPER._turn_analytics(HELPER.dt.datetime(2026, 11, 12, tzinfo=HELPER.dt.timezone.utc))
         self.assertEqual(result['status'], 'query_failed')
         self.assertFalse(result['available'])
+
+    def test_turn_analytics_secret_is_stored_without_restart_or_disclosure(self):
+        config = {'accountId': 'a' * 32, 'token': 'x' * 40}
+        with patch.object(HELPER, 'atomic_write') as write, \
+             patch.object(HELPER, '_service_restart') as restart, \
+             patch.object(HELPER, '_audit') as audit:
+            result = HELPER._set_secret('owner', {'secretId': 'turn-analytics', 'value': HELPER.json.dumps(config)})
+        restart.assert_not_called()
+        self.assertEqual(write.call_args.kwargs['mode'], 0o600)
+        self.assertTrue(result['configured'])
+        self.assertNotIn(config['token'], HELPER.json.dumps(result))
+        self.assertNotIn(config['token'], str(audit.call_args))
     @unittest.skipUnless(hasattr(signal, "SIGALRM"), "provider deadline requires Unix signals")
     def test_asr_provider_probe_has_a_hard_deadline(self):
         buffer = io.BytesIO()
