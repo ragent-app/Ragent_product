@@ -15,6 +15,7 @@ import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext, revokeLinuxRunContext, withLinuxRunPeerContext } from '../scripts/linux-run-context-store.mjs';
 import { stageLinuxRunPeerResult, readRevokedLinuxRunPeerResult } from '../scripts/linux-run-peer-result-store.mjs';
 import { createLinuxRunPeerResultServer } from '../scripts/linux-run-peer-result-server.mjs';
+import { readProtectedLinuxRunResult } from '../chat/linux-run-peer-result-client.mjs';
 
 const execAsync = promisify(execFile);
 
@@ -63,10 +64,11 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       const launch = (name, zombie = false) => {
         const code = zombie
           ? 'import array,os,socket,sys,time\na,b=socket.socketpair()\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); b.sendmsg([b"x"],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array("i",[s.fileno()]))]); os._exit(0)\nelse:\n a.recvmsg(1,socket.CMSG_SPACE(4)); time.sleep(120)'
-          : 'import json,os,socket,sys\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); signal=s.recv(1)\n if signal == b"w":\n  c=socket.socket(socket.AF_UNIX); c.connect(sys.argv[2]); c.sendall((json.dumps({"type":"stage","runId":"run_peerfixture1","launchAttempt":2,"result":{"exitCode":0,"message":"fixture"}})+"\\n").encode()); reply=b""\n  while not reply.endswith(b"\\n"):\n   chunk=c.recv(65536)\n   if not chunk: break\n   reply+=chunk\n  s.sendall(reply); s.recv(1)\n os._exit(0)\nelse:\n os.wait()';
+          : 'import os,socket,subprocess,sys\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); signal=s.recv(1)\n if signal == b"w":\n  js="const m=await import(process.argv[3]);try {const value=await m.stageProtectedLinuxRunResult({socketPath:process.argv[1],peerHelper:process.argv[2],runId: \'run_peerfixture1\',launchAttempt:2,result:{exitCode:0,message:\'fixture\'}});console.log(JSON.stringify({ok:true,value}));} catch {console.log(JSON.stringify({ok:false}));}"\n  p=subprocess.run(["/usr/bin/node","--input-type=module","-e",js,sys.argv[2],sys.argv[3],sys.argv[4]],capture_output=True,timeout=5); s.sendall(p.stdout); s.recv(1)\n os._exit(0)\nelse:\n os.wait()';
         execFileSync('/usr/bin/systemd-run', ['--quiet', '--collect', '--service-type=exec', `--unit=${name}`,
           '--slice=agentoc-runners.slice', '--property=User=agentoc-runner', '--property=NoNewPrivileges=yes',
-          '/usr/bin/python3', '-c', code, socketPath, inboxPath], { timeout: 10000 });
+          '/usr/bin/python3', '-c', code, socketPath, inboxPath, helper,
+          new URL('../chat/linux-run-peer-result-client.mjs', import.meta.url).href], { timeout: 10000 });
         started.push(name);
       };
       const credentials = async socket => {
@@ -178,6 +180,24 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       assert.deepEqual(result.result, staged.result);
       assert.deepEqual(await requestAs(uid, peerA.gid, readRequest), { ok: false });
       assert.deepEqual(await requestAs(controlUid, controlGid, readRequest), { ok: true, value: result });
+      const readClient = 'const m=await import(process.argv[3]);const value=await m.readProtectedLinuxRunResult({socketPath:process.argv[1],peerHelper:process.argv[2],runId:"run_peerfixture1",launchAttempt:2});console.log(JSON.stringify(value));';
+      const clientResult = await execAsync('/usr/bin/setpriv', ['--reuid', String(controlUid), '--regid', String(controlGid), '--clear-groups',
+        '/usr/bin/node', '--input-type=module', '-e', readClient, inboxPath, helper,
+        new URL('../chat/linux-run-peer-result-client.mjs', import.meta.url).href], { timeout: 5000 });
+      assert.deepEqual(JSON.parse(clientResult.stdout), result);
+      // A root-owned socket pathname alone does not authenticate its listener:
+      // bind as root, then drop identity before listening and sending a forged reply.
+      const fakePath = `${root}/fake.sock`;
+      const fakeCode = 'import os,socket,sys,time\ns=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); os.chmod(sys.argv[1],0o666); os.setgroups([]); os.setgid(int(sys.argv[3])); os.setuid(int(sys.argv[2])); s.listen(); print("ready",flush=True); c,_=s.accept(); c.sendall(b\'{"ok":true,"value":null}\\n\'); time.sleep(3)';
+      const fake = spawn('/usr/bin/python3', ['-c', fakeCode, fakePath, String(controlUid), String(controlGid)], { stdio: ['ignore', 'pipe', 'pipe'] });
+      try {
+        await new Promise((resolve, reject) => { fake.stdout.once('data', resolve); fake.once('error', reject); fake.once('exit', () => reject(new Error('fake server exited'))); });
+        await assert.rejects(readProtectedLinuxRunResult({ ...expected, socketPath: fakePath, peerHelper: helper }),
+          { code: 'LINUX_RUN_RESULT_CHANNEL_UNAVAILABLE' });
+      } finally {
+        fake.kill('SIGKILL');
+        if (fake.exitCode === null && fake.signalCode === null) await new Promise(resolve => fake.once('exit', resolve));
+      }
       assert.equal(stop(unit), true);
       started.splice(started.indexOf(unit), 1);
       assert.equal(await isLinuxRunPeerLive(binding, peerA), false);
