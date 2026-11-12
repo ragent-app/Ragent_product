@@ -1315,6 +1315,12 @@ export function createOwnerAuthBroker({
       const requiresGrant = (normalizeDeliveryMode(record.deliveryMode) || 'browser_callback') === 'browser_callback';
       if (!accountId || (requiresGrant && !record.grantHash))
         throw createError('owner_auth_account_invalid', 'Unable to resolve Account identity.', 502);
+      if (demoIdentity && record.purpose === 'bind') {
+        const existing = getInstanceBindings(draft).find((binding) => binding.instanceId === record.instance.instanceId && !binding.revokedAt);
+        if (existing && existing.accountId !== accountId) {
+          throw createError('owner_auth_demo_binding_conflict', 'Test sign-in cannot replace an existing owner binding.', 409);
+        }
+      }
       record.accountId = accountId;
       recordCompletedBinding(draft, record, accountId, clock, { allowInsecureReturnUrl });
       record.completedAt = nowIso(clock);

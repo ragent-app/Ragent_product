@@ -36,5 +36,20 @@ assert.ok(state.instanceBindings.every(binding=>binding.provider==='demo'));
 createDemoAccountAuth(policy).assertAccount(state,policy.accountId,state.instanceBindings[1].instanceId);
 const restricted=createDemoAccountAuth({...policy,instanceAccess:'allowlist'});
 assert.throws(()=>restricted.assertAccount(state,policy.accountId),{code:'owner_auth_demo_unavailable'});
+{
+ const key=generateKeyPairSync('ed25519');const publicKey=key.publicKey.export({type:'spki',format:'pem'}).toString();
+ const instance={instanceId:'inst_existing_owner_fixture',algorithm:'ed25519',publicKey,keyFingerprint:createInstancePublicKeyFingerprint(publicKey)};
+ const transactionId='tx_existing_owner_fixture',returnUrl='https://instance.example.test/api/auth/google/complete?tx='+transactionId;
+ state.instanceBindings.push({instanceId:instance.instanceId,accountId:'acct_google_existing',provider:'google'});
+ const proof={instance,transactionId,purpose:'bind',returnUrl,issuedAt:new Date().toISOString(),audience:'agentoc-owner-auth'};
+ proof.signature=sign(null,Buffer.from(buildInstanceProofMessage({...proof,instanceId:instance.instanceId})),key.privateKey).toString('base64url');
+ const started=await broker.start(proof);
+ const {desktopState}=deriveDesktopReplayValues({transactionId,bootstrap:started.bootstrap});
+ const desktop=await broker.beginDesktop({transactionId,bootstrap:started.bootstrap,desktopState});
+ const phoneState='phone_existing_owner_fixture';
+ await broker.beginPhone({transactionId,phoneTicket:desktop.phoneTicket,phoneState});
+ await assert.rejects(broker.completePhoneDemoCredential({transactionId,phoneState,username,password}),{code:'owner_auth_demo_binding_conflict'});
+ assert.equal(state.instanceBindings.find(binding=>binding.instanceId===instance.instanceId).accountId,'acct_google_existing');
+}
 assert.equal(JSON.stringify(state).includes(password),false);
 console.log('PASS password QR transactions: two signed instances, CSRF state, wrong password, replay, legacy allowlist and no Google identity');
