@@ -245,7 +245,7 @@ try {
     },
   });
   assert.notEqual(mismatch.status, 0, 'Deb packaging must refuse an explicit unvalidated runtime override');
-  assert.match(mismatch.stderr, /Codex 0\.165\.0 is outside the validated AgentoC adapter range/);
+  assert.match(mismatch.stderr, /Codex 0\.165\.0 is outside the validated Ragent adapter range/);
 } finally {
   rmSync(fakeNpmRoot, { recursive: true, force: true });
 }

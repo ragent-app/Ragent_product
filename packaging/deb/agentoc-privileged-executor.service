@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC privileged executor
+Description=Ragent privileged executor
 After=local-fs.target
 Before=agentoc.service
 

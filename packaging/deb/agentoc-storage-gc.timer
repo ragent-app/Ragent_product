@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily AgentoC bounded storage inventory and retention pass
+Description=Daily Ragent bounded storage inventory and retention pass
 
 [Timer]
 OnCalendar=*-*-* 03:30:00

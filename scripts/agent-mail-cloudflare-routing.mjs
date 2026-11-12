@@ -78,7 +78,7 @@ Examples:
   node scripts/agent-mail-cloudflare-routing.mjs probe --address trial6@example.test --json
 
 Notes:
-  - This helper summarizes and can sync the desired Cloudflare Email Routing shape for AgentoC guest-instance mailboxes.
+  - This helper summarizes and can sync the desired Cloudflare Email Routing shape for Ragent guest-instance mailboxes.
   - It supports either \`CLOUDFLARE_API_TOKEN\` or \`CLOUDFLARE_GLOBAL_API_KEY\`/\`CLOUDFLARE_API_KEY\` plus \`CLOUDFLARE_EMAIL\`.
   - Local Cloudflare auth can also live in \`${DEFAULT_CLOUDFLARE_AUTH_FILE}\`.
   - The OAuth token from \`wrangler login\` is not enough for \`/email/routing/*\` endpoints.`);

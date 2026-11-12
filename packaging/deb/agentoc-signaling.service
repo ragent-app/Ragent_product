@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC P2P metadata-only signaling server
+Description=Ragent P2P metadata-only signaling server
 After=network-online.target
 Wants=network-online.target
 

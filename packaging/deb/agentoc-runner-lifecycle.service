@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC per-Run lifecycle broker
+Description=Ragent per-Run lifecycle broker
 After=local-fs.target
 Before=agentoc-runner-supervisor.service agentoc.service
 

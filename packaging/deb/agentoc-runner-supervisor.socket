@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC detached runner supervisor socket
+Description=Ragent detached runner supervisor socket
 # P2-C: systemd owns the listening socket so it survives supervisor restarts
 # (no ECONNREFUSED window during Restart=always) and the socket file is created
 # with the service-user permissions declaratively instead of by the daemon.

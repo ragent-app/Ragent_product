@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC per-Run lifecycle broker socket
+Description=Ragent per-Run lifecycle broker socket
 # P2-C: systemd owns the listening socket so it survives broker restarts and the
 # socket file is created with the control-plane ownership declaratively.  Runs
 # launch as the low-privilege agentoc-runner user and can never reach it.

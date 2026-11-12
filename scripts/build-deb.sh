@@ -236,14 +236,14 @@ CODEX_ADAPTER_COMPATIBLE="$(node --input-type=module -e \
   'import(process.argv[1]).then((m) => process.stdout.write(m.isAdapterCompatible("codex", process.argv[2]) ? "yes" : "no"))' \
   "$ROOT/chat/harness-compatibility.mjs" "$CODEX_VERSION")"
 if [ "$CODEX_ADAPTER_COMPATIBLE" != "yes" ]; then
-  echo "Codex $CODEX_VERSION is outside the validated AgentoC adapter range." >&2
+  echo "Codex $CODEX_VERSION is outside the validated Ragent adapter range." >&2
   exit 1
 fi
 CLAUDE_ADAPTER_COMPATIBLE="$(node --input-type=module -e \
   'import(process.argv[1]).then((m) => process.stdout.write(m.isAdapterCompatible("claude", process.argv[2]) ? "yes" : "no"))' \
   "$ROOT/chat/harness-compatibility.mjs" "$CLAUDE_VERSION")"
 if [ "$CLAUDE_ADAPTER_COMPATIBLE" != "yes" ]; then
-  echo "Claude Code $CLAUDE_VERSION is outside the validated AgentoC adapter range." >&2
+  echo "Claude Code $CLAUDE_VERSION is outside the validated Ragent adapter range." >&2
   exit 1
 fi
 printf 'Bundling Codex %s and Claude Code %s from %s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$NPM_REGISTRY"
@@ -586,8 +586,8 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: Ninglo
 Depends: adduser, ca-certificates, util-linux, acl, libasound2t64 | libasound2, libatk-bridge2.0-0, libatk1.0-0, libatspi2.0-0, libc6, libcairo2, libcups2, libdbus-1-3, libdrm2, libexpat1, libgbm1, libglib2.0-0, libgtk-3-0, libnspr4, libnss3, libpango-1.0-0, libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2
-Description: AgentoC local AI workbench with TURN-first mobile pairing
- AgentoC runs an AI automation control plane on the local machine and can
+Description: Ragent local AI workbench with TURN-first mobile pairing
+ Ragent runs an AI automation control plane on the local machine and can
  pair through authenticated Cloudflare Realtime TURN and upgrade to LAN/P2P
  without requiring a public domain or routing application state through a
  second control plane.

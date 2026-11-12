@@ -330,7 +330,7 @@ export function buildLifecycleSystemdArgs(runId, {
     '--unit', unitName,
     '--slice', 'agentoc-runners.slice',
     '--working-directory', projectRoot,
-    '--description', `AgentoC Run ${runId}`,
+    '--description', `Ragent Run ${runId}`,
     '--property', `User=${groupDrop ? 'root' : serviceUser}`,
     '--property', `Group=${groupDrop ? 'root' : serviceGroup}`,
     '--property', 'KillMode=control-group',

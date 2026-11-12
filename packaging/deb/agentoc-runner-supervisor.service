@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC detached runner supervisor
+Description=Ragent detached runner supervisor
 After=network-online.target
 Wants=network-online.target
 After=agentoc-runner-lifecycle.service

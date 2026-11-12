@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC bounded storage inventory and retention pass
+Description=Ragent bounded storage inventory and retention pass
 After=local-fs.target
 ConditionPathIsDirectory=/var/lib/agentoc/config
 ConditionPathIsDirectory=/var/lib/agentoc/workspace

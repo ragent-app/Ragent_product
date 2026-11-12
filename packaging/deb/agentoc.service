@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentoC local AI workbench
+Description=Ragent local AI workbench
 After=network-online.target
 Wants=network-online.target
 After=agentoc-privileged-executor.service

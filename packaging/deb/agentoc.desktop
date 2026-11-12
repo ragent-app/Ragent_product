@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=AgentoC Pair Phone
-Name[zh_CN]=AgentoC 手机配对
-Comment=Show a QR code to pair the AgentoC Android app
-Comment[zh_CN]=显示二维码并连接 AgentoC 安卓应用
+Name=Ragent Pair Phone
+Name[zh_CN]=Ragent 手机配对
+Comment=Show a QR code to pair the Ragent Android app
+Comment[zh_CN]=显示二维码并连接 Ragent 安卓应用
 Exec=agentoc pair
 Icon=agentoc
 Terminal=true
