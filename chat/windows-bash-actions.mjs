@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsVersion, analyzeWindowsWorkspaceScriptTask } from './windows-powershell-actions.mjs';
+import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsVersion, analyzeWindowsWorkspaceScriptTask, isWindowsPingProbe } from './windows-powershell-actions.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 // Parse a literal simple command only. Anything requiring shell expansion,
@@ -331,6 +331,9 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   }
   if ((['pwd', 'true', 'false', ':'].includes(program) && words.length === 1) || program === 'echo') {
     return outputEntry.length ? analyzeFiles(outputEntry, context) : { complete: true, actions: [{ kind: 'read', program, target: null }] };
+  }
+  if (isWindowsPingProbe(String(program).toLowerCase(), words.slice(1))) {
+    return withOutput({ complete: true, actions: [{ kind: 'read', program: 'ping', target: null, caution: true }] });
   }
   if (['which', 'command', 'type'].includes(program)) {
     const args = words.slice(1);

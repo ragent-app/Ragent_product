@@ -122,7 +122,7 @@ export function staticExternalArguments(elements) {
 
 // A literal ICMP probe has no file or process mutation. Reject flags that
 // require complex route lists and leave dynamic expressions for review.
-function isPingProbe(program, args) {
+export function isWindowsPingProbe(program, args) {
   if (!['ping', 'ping.exe'].includes(program) || !Array.isArray(args)) return false;
   let host = '';
   const switches = new Set(['-4', '-6', '-a', '-f', '-t']);
@@ -601,7 +601,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const versionArgs = staticExternalArguments(entry.elements);
     const version = entry.pipelineInput === false && versionArgs && analyzeWindowsVersion(entry.name, versionArgs);
     if (version) { actions.push(version); continue; }
-    if (entry.pipelineInput === false && isPingProbe(program, versionArgs)) {
+    if (entry.pipelineInput === false && isWindowsPingProbe(program, versionArgs)) {
       actions.push({ kind: 'read', program: 'ping', target: null, caution: true }); continue;
     }
     if (entry.pipelineInput === false && isWingetListQuery(program, versionArgs)) {
