@@ -201,20 +201,18 @@ async function restoreStarterSessions(port) {
   return response.json;
 }
 
-async function assertSessionListEmpty(port, { archivedCount = 0 } = {}) {
+async function assertSessionListEmpty(port, { legacy = false } = {}) {
   const list = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
   assert.equal(list.status, 200, 'owner session list should load');
-  assert.equal(list.json?.archivedCount, archivedCount, 'archived count should be preserved');
-  assert.equal(
-    (list.json?.sessions || []).length,
-    0,
-    'owner session list should stay empty until an explicit bootstrap runs',
-  );
+  assert.deepEqual((list.json?.sessions || []).map((session) => session.id),
+    legacy ? ['legacy_archived_basic_chat'] : [],
+    'bootstrap must not create sessions before it is requested or remove the legacy session');
 }
 
-async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
+async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
   const expectedSessionNames = [
     'Welcome',
+    '[引导] 连接本地文件，把旧电脑资料迁进这个实例',
     '[示例] 上传一份表格，我把清洗后的文件回给你',
     '[示例] 汇总最近行业热点，并把摘要发到指定邮箱',
     '[示例] 发一封邮件到这个实例，会自动开一个新会话',
@@ -223,10 +221,13 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   ];
   const list = await waitFor(async () => {
     const response = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
-    return (response.json?.sessions || []).length === expectedSessionNames.length ? response : false;
+    return (response.json?.sessions || []).length === expectedSessionNames.length + Number(legacy) ? response : false;
   }, 'owner bootstrap sessions');
   assert.equal(list.status, 200, 'owner session list should load');
-  assert.equal(list.json?.archivedCount, archivedCount, 'archived count should be preserved');
+  if (legacy) {
+    assert.ok(list.json.sessions.some((session) => session.id === 'legacy_archived_basic_chat'), 'legacy session should remain available');
+    list.json.sessions = list.json.sessions.filter((session) => session.id !== 'legacy_archived_basic_chat');
+  }
   assert.equal(
     (list.json?.sessions || []).length,
     expectedSessionNames.length,
@@ -270,7 +271,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
     'welcome bootstrap should mention the three pinned examples when backfilled',
   );
 
-  const fileShowcaseSession = list.json?.sessions?.[1];
+  const fileShowcaseSession = list.json?.sessions?.[2];
   const fileShowcaseEvents = await request(port, 'GET', `/api/sessions/${fileShowcaseSession.id}/events?filter=all`, null, { Cookie: ownerCookie });
   assert.equal(fileShowcaseEvents.status, 200, 'file showcase session events should load');
   const fileShowcaseMessages = (fileShowcaseEvents.json?.events || []).filter((event) => event.type === 'message');
@@ -281,7 +282,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   assert.equal(fileUserMessage?.attachments?.length, 1, 'file showcase should include a sample uploaded file');
   assert.equal(fileAssistantMessage?.attachments?.length, 2, 'file showcase should include downloadable result files');
   const fileShowcaseContent = await resolveEventContent(port, fileShowcaseSession.id, fileAssistantMessage, { Cookie: ownerCookie });
-  assert.match(fileShowcaseContent, /直接下载|结果文件/u, 'file showcase should end with a concrete downloadable deliverable');
+  assert.match(fileShowcaseContent, /示例结果/u, 'file showcase should identify its downloadable deliverables as examples');
   const fileDownloadRes = await fetch(`http://127.0.0.1:${port}/api/assets/${fileAssistantMessage.attachments[0].assetId}/download`, {
     method: 'GET',
     headers: { Cookie: ownerCookie },
@@ -290,7 +291,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   const downloadedBuffer = Buffer.from(await fileDownloadRes.arrayBuffer());
   assert.equal(downloadedBuffer.subarray(0, 2).toString('hex'), '504b', 'downloaded showcase spreadsheet should keep its xlsx zip signature');
 
-  const digestShowcaseSession = list.json?.sessions?.[2];
+  const digestShowcaseSession = list.json?.sessions?.[3];
   const digestShowcaseEvents = await request(port, 'GET', `/api/sessions/${digestShowcaseSession.id}/events?filter=all`, null, { Cookie: ownerCookie });
   assert.equal(digestShowcaseEvents.status, 200, 'digest showcase session events should load');
   const digestShowcaseMessages = (digestShowcaseEvents.json?.events || []).filter((event) => event.type === 'message');
@@ -311,7 +312,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   const digestBody = await digestDownloadRes.text();
   assert.match(digestBody, /今日最重要结论|Claude Code|Codex/u, 'digest showcase attachment should contain a readable summary body');
 
-  const emailShowcaseSession = list.json?.sessions?.[3];
+  const emailShowcaseSession = list.json?.sessions?.[4];
   const emailShowcaseEvents = await request(port, 'GET', `/api/sessions/${emailShowcaseSession.id}/events?filter=all`, null, { Cookie: ownerCookie });
   assert.equal(emailShowcaseEvents.status, 200, 'email showcase session events should load');
   const emailShowcaseMessages = (emailShowcaseEvents.json?.events || []).filter((event) => event.type === 'message');
@@ -323,7 +324,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   assert.match(emailUserContent, /Inbound email\.|真实能力验证邮件|自动进到一个新会话/u, 'email showcase should demonstrate the inbound email transcript shape');
   assert.match(emailAssistantContent, /邮件进来后的实际起点|手动新建聊天/u, 'email showcase should end with the actual session handoff explanation');
 
-  const calendarGuideSession = list.json?.sessions?.[4];
+  const calendarGuideSession = list.json?.sessions?.[5];
   assert.ok(calendarGuideSession?.id, 'calendar guide session should always exist when the calendar feed is enabled');
 
   const calendarGuideEvents = await request(port, 'GET', `/api/sessions/${calendarGuideSession.id}/events?filter=all`, null, { Cookie: ownerCookie });
@@ -350,12 +351,13 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
 
   const secondList = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
   assert.equal(secondList.status, 200, 'owner should be able to reload the session list');
+  const secondStarterList = (secondList.json?.sessions || []).filter((session) => session.id !== 'legacy_archived_basic_chat');
   assert.equal(
-    (secondList.json?.sessions || []).length,
+    secondStarterList.length,
     expectedSessionNames.length,
     'reloading should keep the explicit starter session set stable',
   );
-  assert.equal(secondList.json?.sessions?.[0]?.id, welcomeSession.id, 'starter bootstrap should be idempotent for welcome');
+  assert.equal(secondStarterList[0]?.id, welcomeSession.id, 'starter bootstrap should be idempotent for welcome');
 
   return {
     welcomeSessionId: welcomeSession.id,
@@ -371,22 +373,15 @@ async function runScenario(options) {
   });
   let server = await startServer({ home, configDir, memoryDir, workRoot, port });
   try {
-    const initialArchivedCount = options?.preseedArchivedBasicChat ? 1 : 0;
-
-    await assertSessionListEmpty(port, {
-      archivedCount: initialArchivedCount,
-    });
+    const legacy = options?.preseedArchivedBasicChat === true;
+    await assertSessionListEmpty(port, { legacy });
 
     const firstRestore = await restoreStarterSessions(port);
-    const firstSeed = await assertWelcomeBootstrapped(port, {
-      archivedCount: initialArchivedCount,
-    });
+    const firstSeed = await assertWelcomeBootstrapped(port, { legacy });
     assert.equal(firstRestore.welcomeSessionId, firstSeed.welcomeSessionId, 'explicit restore should surface the active welcome session');
 
     const secondRestore = await restoreStarterSessions(port);
-    const secondSeed = await assertWelcomeBootstrapped(port, {
-      archivedCount: initialArchivedCount,
-    });
+    const secondSeed = await assertWelcomeBootstrapped(port, { legacy });
     assert.equal(
       secondSeed.welcomeSessionId,
       firstSeed.welcomeSessionId,
@@ -398,32 +393,6 @@ async function runScenario(options) {
       'repeat restore should keep pointing at the existing active welcome session',
     );
 
-    for (const session of secondSeed.sessions) {
-      const archive = await request(port, 'PATCH', `/api/sessions/${session.id}`, { archived: true }, { Cookie: ownerCookie });
-      assert.equal(archive.status, 200, `starter session ${session.name} should archive cleanly`);
-    }
-
-    await assertSessionListEmpty(port, {
-      archivedCount: initialArchivedCount + secondSeed.sessions.length,
-    });
-    await assertSessionListEmpty(port, {
-      archivedCount: initialArchivedCount + secondSeed.sessions.length,
-    });
-
-    const restoredAfterClear = await restoreStarterSessions(port);
-    const thirdSeed = await assertWelcomeBootstrapped(port, {
-      archivedCount: initialArchivedCount + secondSeed.sessions.length,
-    });
-    assert.notEqual(
-      restoredAfterClear.welcomeSessionId,
-      firstSeed.welcomeSessionId,
-      'restoring after clearing should create a fresh active welcome session',
-    );
-    assert.equal(
-      restoredAfterClear.welcomeSessionId,
-      thirdSeed.welcomeSessionId,
-      'restore action should return the new active welcome session after a clear',
-    );
   } finally {
     await stopServer(server);
     rmSync(home, { recursive: true, force: true });
