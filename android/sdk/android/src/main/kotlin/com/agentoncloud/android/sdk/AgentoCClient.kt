@@ -77,7 +77,7 @@ class AgentoCClient(context: Context) : Closeable {
                 connection = next
                 next.bound = context.bindService(Intent(AppApiWire.ACTION).setComponent(ComponentName(AppApiWire.PACKAGE, AppApiWire.SERVICE)), next, Context.BIND_AUTO_CREATE)
             }
-            if (!next.bound) throw AgentoCApiException(PublicError("CAPABILITY_UNSUPPORTED", "AgentoC is not installed or does not expose App API"))
+            if (!next.bound) throw AgentoCApiException(PublicError("CAPABILITY_UNSUPPORTED", "Ragent is not installed or does not expose App API"))
             withTimeout(10_000) { next.ready.await() }
         } catch (failure: Throwable) { next.release(); if (connection === next) connection = null; throw failure }
     }
