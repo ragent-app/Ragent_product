@@ -244,6 +244,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 2026-11-12 构建提交 `1633f09b` 的 Windows 安装候选，公开版本 `0.0.1`，内部 MSI 版本 `0.0.70`，EXE SHA-256 `51b5759e1570ba45f32f8341cb3212e80150e7c85cb8490666a82fd22755a687`。第一次静默升级因未指定既有 G 盘安装目录被升级准入拒绝（1603），原实例保持 ready；明确指定安装目录后，管理员通道等待超时，但 MSI 日志随后确认安装成功，正式实例 ready，五个关键审批文件与该提交一致。真实安装实例使用本地模拟模型，Claude 和 Codex 的 recommended/full-auto 四种组合均通过普通工作区外读取和隔离敏感目录删除的策略验收；Codex recommended 首次创建会话遇 `OBD_ENDPOINT_UNAVAILABLE`，重试通过。
 - 后续并行安装把正式实例更新至 `a7b22afd`，该提交包含 `1633f09b`，五个关键审批文件仍与后者一致。新实例上，额外的 PowerShell 逻辑取反及 PathType 条件读取在 Claude full-auto、Codex recommended 中自动通过，敏感目录删除分别自动拒绝和经审批拒绝；此前 Claude recommended 场景通过后被并行安装中断，遗留测试会话和 provider 已清理。最后 Codex full-auto 场景创建会话遇 `OBD_ENDPOINT_POLICY_INVALID`，实例随后健康端点不可用、日志出现 `OSV_STOPPED`，该场景未通过；临时 provider 的 API 清理遇 `OBC_TRANSPORT_FAILED`，尚待服务恢复后清理。服务重启或故障原因尚未查明，不据此推算生产通过率。
 
+- 后续核对本机控制服务的 `/healthz/owner-activation` 返回 503、状态 `OSV_STOPPED`，CLI 启动端点记录已过期；在确认没有活动 Run 和其他安装进程后，通过授权管理员通道重启 `AgentoC-ControlPlane`，owner 激活恢复 listening、健康状态 200。中断遗留的测试 provider 已通过正式 API 删除。随后在已安装提交 `a7b22afd` 上重跑真实 Codex full-auto：工作区外 PowerShell `-not` 与 `-PathType Leaf` 组合读取自动通过，隔离敏感目录删除自动拒绝，CLI 收到拒绝且文件完整；本地模拟模型未消耗官方额度。此前已在相同审批文件版本上通过 Claude recommended/full-auto 与 Codex recommended 对应场景。重启恢复了服务，但未查明此前停止的根因，也未证明其他命令和生产审批频率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
