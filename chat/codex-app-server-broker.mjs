@@ -561,7 +561,7 @@ function runBroker() {
         && turnActivity.isIdle() && pending.size === 0 && pendingServerRequests.size === 0
         && pendingThreadReloads.size === 0 && pendingThreadClients.length === 0
         && threadStartQueue.length === 0 && activeThreadRequestId === null
-        && pendingHookCalls.size === 0 && mcpOAuthOwners.size === 0;
+        && pendingHookCalls.size === 0 && (typeof mcpOAuthOwners === 'undefined' || mcpOAuthOwners.size === 0);
       if (!idle) {
         sendClient(client, { type: 'agentoc-codex-broker-retire-result', accepted: false });
         return;
@@ -685,10 +685,12 @@ function runBroker() {
       pending.set(upstreamId, { client, clientId: message.id });
       rewritten.id = upstreamId;
     }
+    turnActivity.startRequest(rewritten);
     try { upstream.stdin.write(`${JSON.stringify(rewritten)}\n`); } catch {}
   };
 
   const attachClient = (client) => {
+    if (stopping) { client.destroy(); return; }
     clients.add(client);
     let buffer = '';
     client.on('data', (chunk) => {
