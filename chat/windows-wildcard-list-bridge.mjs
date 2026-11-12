@@ -20,7 +20,9 @@ try {
   $raw=& ${quote(helperPath)} --list-json '${encoded}'
   if ($LASTEXITCODE -ne 0) { throw 'bound directory listing failed' }
   $r=$raw | Microsoft.PowerShell.Utility\\ConvertFrom-Json
-  $items=@($r.items | Microsoft.PowerShell.Core\\Where-Object { $_.name -like [string]$r.request.pattern } |
+  $items=@($r.items | Microsoft.PowerShell.Core\\Where-Object {
+    ($r.request.kind -eq 'all' -or ($r.request.kind -eq 'directory' -and $_.directory) -or ($r.request.kind -eq 'file' -and -not $_.directory)) -and
+      $_.name -like [string]$r.request.pattern } |
     Microsoft.PowerShell.Utility\\Sort-Object @{Expression={$_.directory};Descending=$true}, @{Expression={$_.name};Ascending=$true})
   if ($r.request.output -eq 'name') {
     $items | Microsoft.PowerShell.Core\\ForEach-Object { [string]$_.name }
@@ -51,11 +53,11 @@ try {
 
 function validRequest(value) {
   return value && typeof value === 'object' && !Array.isArray(value) &&
-    Object.keys(value).sort().join(',') === 'directory,force,formatTable,output,pattern,properties,schemaVersion' &&
+    Object.keys(value).sort().join(',') === 'directory,force,formatTable,kind,output,pattern,properties,schemaVersion' &&
     value.schemaVersion === 1 && typeof value.directory === 'string' && /^[a-z]:[\\/]/i.test(value.directory) &&
     !value.directory.slice(2).includes(':') && !/[*?\[\]`]/.test(value.directory) &&
     typeof value.pattern === 'string' && value.pattern.length > 0 && value.pattern.length <= 255 &&
-    /[*?\[]/.test(value.pattern) && !/[\\/:\0]/.test(value.pattern) && typeof value.force === 'boolean' &&
+    /[*?\[]/.test(value.pattern) && !/[\\/:\0]/.test(value.pattern) && typeof value.force === 'boolean' && ['all','file','directory'].includes(value.kind) &&
     ['name', 'select', 'default'].includes(value.output) && typeof value.formatTable === 'boolean' && Array.isArray(value.properties) &&
     ((value.output === 'name' && !value.formatTable && value.properties.length === 0) ||
       (value.output === 'default' && value.formatTable && value.properties.join(',') === 'Mode,LastWriteTime,Length,Name') ||
@@ -96,7 +98,7 @@ function parseListingCommands(ast) {
   const [first, select] = ast.commands;
   if (!['get-childitem', 'gci', 'ls', 'dir'].includes(String(first.name || '').toLowerCase()) || first.invocation !== 'Unknown' ||
       first.pipelineInput !== false || first.redirections || first.elements[0]?.kind !== 'literal') return null;
-  let source = '', force = false, name = false, sawPath = false;
+  let source = '', force = false, name = false, sawPath = false, kind = 'all';
   for (let i = 1; i < first.elements.length; i++) {
     const item = first.elements[i];
     if (item.kind === 'literal' && !source) { source = item.value; continue; }
@@ -105,6 +107,8 @@ function parseListingCommands(ast) {
     if (key === 'force' || key === 'name') {
       if (item.argumentType || (key === 'force' ? force : name)) return null;
       if (key === 'force') force = true; else name = true;
+    } else if ((key === 'file' || key === 'directory') && kind === 'all' && !item.argumentType) {
+      kind = key;
     } else if (key === 'path' && !sawPath && !source) {
       sawPath = true;
       if (item.argumentType) {
@@ -120,7 +124,7 @@ function parseListingCommands(ast) {
   if (typeof source !== 'string' || !/^[a-z]:[\\/]/i.test(source) || source.includes('`') ||
       source.split(/[\\/]+/).some((part, index, all) => part === '..' && all.slice(0, index).some(value => /[*?\[\]]/.test(value)))) return null;
   const absolute = win.resolve(source), directory = win.dirname(absolute), pattern = win.basename(absolute);
-  const body = { schemaVersion: 1, directory, pattern, force, output: name ? 'name' : 'select', properties: [], formatTable: false };
+  const body = { schemaVersion: 1, directory, pattern, force, kind, output: name ? 'name' : 'select', properties: [], formatTable: false };
   const plainOutString = entry => entry && String(entry.name || '').toLowerCase() === 'out-string' && entry.invocation === 'Unknown' &&
     entry.pipelineInput === true && !entry.redirections && entry.elements.length === 1;
   if (name) return (ast.commands.length === 1 || (ast.commands.length === 2 && plainOutString(select))) && validRequest(body) ? body : null;

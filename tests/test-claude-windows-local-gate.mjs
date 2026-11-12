@@ -128,7 +128,7 @@ const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerC
 const bashGitRoot = outsideGitRoot.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 let readCommand = readCase === 'conditional'
   ? process.env.AGENTOC_QA_BOUND_NAME_LIST === '1'
-    ? `Get-ChildItem -Path '${path.join(outsideReadRoot, '*.md').replaceAll("'", "''")}' -Force${process.env.AGENTOC_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.AGENTOC_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
+    ? `Get-ChildItem -Path '${path.join(outsideReadRoot, '*.md').replaceAll("'", "''")}' -Force${process.env.AGENTOC_QA_BOUND_LIST_FILE === '1' ? ' -File' : ''}${process.env.AGENTOC_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.AGENTOC_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
     : process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
     ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(outsideReadRoot) + path.sep).replaceAll("'", "''")}' + '${path.basename(outsideReadRoot).replaceAll("'", "''")}')` : `'${outsideReadRoot.replaceAll("'", "''")}'`}; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
     : `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`

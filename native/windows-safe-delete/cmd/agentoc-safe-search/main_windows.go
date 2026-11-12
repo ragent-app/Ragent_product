@@ -49,6 +49,7 @@ type listingRequest struct {
 	Directory     string   `json:"directory"`
 	Pattern       string   `json:"pattern"`
 	Force         bool     `json:"force"`
+	Kind          string   `json:"kind,omitempty"`
 	Output        string   `json:"output"`
 	Properties    []string `json:"properties,omitempty"`
 	FormatTable   bool     `json:"formatTable,omitempty"`
@@ -85,7 +86,9 @@ const listingScript = `$ErrorActionPreference='Stop'
 [Console]::OutputEncoding=New-Object System.Text.UTF8Encoding $false
 [Console]::InputEncoding=New-Object System.Text.UTF8Encoding $false
 $r=ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
-$items=@($r.items | Microsoft.PowerShell.Core\Where-Object { $_.name -like [string]$r.pattern } |
+$items=@($r.items | Microsoft.PowerShell.Core\Where-Object {
+  ($r.kind -eq 'all' -or ($r.kind -eq 'directory' -and $_.directory) -or ($r.kind -eq 'file' -and -not $_.directory)) -and
+    $_.name -like [string]$r.pattern } |
   Microsoft.PowerShell.Utility\Sort-Object @{Expression={$_.directory};Descending=$true}, @{Expression={$_.name};Ascending=$true})
 if ($r.output -eq 'name') {
   $items | Microsoft.PowerShell.Core\ForEach-Object { [string]$_.name }
@@ -266,6 +269,12 @@ func prepareListing(encoded string) (listingRequest, []safedelete.ListingName, e
 		(input.Output != "name" && input.Output != "select-name" && input.Output != "select" && input.Output != "default") {
 		return input, nil, errors.New("invalid listing request")
 	}
+	if input.Kind == "" {
+		input.Kind = "all"
+	}
+	if input.Kind != "all" && input.Kind != "file" && input.Kind != "directory" {
+		return input, nil, errors.New("invalid listing kind")
+	}
 	allowedProperties := map[string]bool{"name": true, "mode": true, "length": true, "lastwritetime": true, "attributes": true, "psiscontainer": true}
 	seenProperties := map[string]bool{}
 	for _, value := range input.Properties {
@@ -305,11 +314,12 @@ func runListing(encoded string, stdout, stderr io.Writer) error {
 		Items       []safedelete.ListingName `json:"items"`
 		Directory   string                   `json:"directory"`
 		Pattern     string                   `json:"pattern"`
+		Kind        string                   `json:"kind"`
 		Output      string                   `json:"output"`
 		Properties  []string                 `json:"properties"`
 		FormatTable bool                     `json:"formatTable"`
 		ModernMode  bool                     `json:"modernMode"`
-	}{items, input.Directory, input.Pattern, input.Output, input.Properties, input.FormatTable, parentUsesModernPowerShell()})
+	}{items, input.Directory, input.Pattern, input.Kind, input.Output, input.Properties, input.FormatTable, parentUsesModernPowerShell()})
 	if err != nil {
 		return errors.New("listing data unavailable")
 	}

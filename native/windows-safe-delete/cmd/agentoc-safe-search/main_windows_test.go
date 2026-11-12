@@ -83,6 +83,40 @@ func TestListingMatchesPowerShellNameOutput(t *testing.T) {
 	}
 }
 
+func TestListingMatchesPowerShellFileAndDirectoryFilters(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "folder.md"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.md"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell := filepath.Join(system, "WindowsPowerShell", "v1.0", "powershell.exe")
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	for _, kind := range []string{"file", "directory"} {
+		input := listingRequest{SchemaVersion: 1, Directory: root, Pattern: "*.md", Force: true, Kind: kind, Output: "name"}
+		args := requestArgs(t, input)
+		args[0] = "--list"
+		var got, stderr bytes.Buffer
+		if err := run(args, &got, &stderr); err != nil {
+			t.Fatalf("bound %s listing: %v: %s", kind, err, stderr.String())
+		}
+		source := "[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding $false; Get-ChildItem -Path " +
+			quote(filepath.Join(root, "*.md")) + " -Force -" + kind + " -Name"
+		want, err := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", source).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(got.String()) != strings.TrimSpace(string(want)) {
+			t.Fatalf("kind=%s: got %q; want %q", kind, got.String(), want)
+		}
+	}
+}
+
 func TestListingHelperChild(t *testing.T) {
 	encoded := os.Getenv("AGENTOC_QA_LISTING_HELPER_CHILD")
 	if encoded == "" {

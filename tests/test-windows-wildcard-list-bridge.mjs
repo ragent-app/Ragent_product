@@ -18,6 +18,7 @@ await mkdir(workspace); await mkdir(outside); await mkdir(target);
 await writeFile(path.join(outside, 'visible.md'), 'fixture');
 await writeFile(path.join(outside, 'aaa.md'), 'fixture');
 await writeFile(path.join(outside, '项目.md'), 'fixture');
+await mkdir(path.join(outside, 'folder.md'));
 await writeFile(path.join(outside, 'other.txt'), 'fixture');
 await writeFile(path.join(target, 'not-followed.md'), 'fixture');
 const helperPath = process.env.AGENTOC_QA_SAFE_SEARCH_HELPER;
@@ -44,6 +45,14 @@ try {
     assert.ok(nameBridge, 'the -Name form is also bound');
     assert.equal(execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', utf8Prefix + nameBridge.updatedCommand], { encoding: 'utf8', cwd: workspace, windowsHide: true }).trim(),
       execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', utf8Prefix + nameCommand], { encoding: 'utf8', cwd: workspace, windowsHide: true }).trim());
+    for (const kind of ['File', 'Directory']) {
+      const filteredCommand = `Get-ChildItem -Path ${q(pattern)} -${kind} -Name`;
+      const filteredApproval = { ...approval, params: { ...approval.params, input: { command: filteredCommand } } };
+      const filteredBridge = await buildWindowsWildcardNameBridge({ approval: filteredApproval, state, helperPath });
+      assert.ok(filteredBridge, `${kind} listing is bound`);
+      assert.equal(execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', utf8Prefix + filteredBridge.updatedCommand], { encoding: 'utf8', cwd: workspace, windowsHide: true }).trim(),
+        execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', utf8Prefix + filteredCommand], { encoding: 'utf8', cwd: workspace, windowsHide: true }).trim());
+    }
     const tableCommand = `Get-ChildItem -Path ${q(pattern)} -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String`;
     const tableApproval = { ...approval, params: { ...approval.params, input: { command: tableCommand } } };
     const tableBridge = await buildWindowsWildcardNameBridge({ approval: tableApproval, state, helperPath });
@@ -83,6 +92,7 @@ try {
     const hook = await buildCodexWindowsWildcardNameHookDecision({ event, state, runId: 'run-fixture', helperPath });
     assert.equal(hook.hookSpecificOutput?.updatedInput?.command, bridge.updatedCommand);
     for (const unsafe of [
+      `Get-ChildItem -Path ${q(pattern)} -File -Directory -Name`,
       `Get-ChildItem -Path ${q(pattern)} -Recurse | Select-Object Name`,
       `Get-ChildItem -Path ${q(path.join(root, '*', '*.md'))} | Select-Object Name`,
       `Get-ChildItem -Path ${q(pattern)} | Select-Object Name,FullName`,
@@ -102,6 +112,11 @@ try {
       assert.doesNotMatch(lateOutput, /not-followed\.md/, 'newly matched junction is listed but never traversed');
       assert.equal(await buildWindowsWildcardNameBridge({ approval: tableApproval, state, helperPath }), null,
         'pre-existing junction metadata requires the original approval path');
+      const filesOnlyApproval = { ...tableApproval, params: { ...tableApproval.params, input: { command: tableCommand.replace('-Force', '-Force -File') } } };
+      const filesOnlyBridge = await buildWindowsWildcardNameBridge({ approval: filesOnlyApproval, state, helperPath });
+      assert.ok(filesOnlyBridge, 'a directory junction excluded by -File does not block the listing');
+      const filesOnlyOutput = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', filesOnlyBridge.updatedCommand], { encoding: 'utf8', cwd: workspace, windowsHide: true });
+      assert.doesNotMatch(filesOnlyOutput, /link-/);
       assert.equal(await buildWindowsWildcardNameBridge({ approval: defaultApproval, state, helperPath }), null,
         'default listing with a pre-existing junction requires the original approval path');
       assert.throws(() => execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', `${tableBridge.updatedCommand}; exit $LASTEXITCODE`],
