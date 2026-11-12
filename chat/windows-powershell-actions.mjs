@@ -120,6 +120,20 @@ export function staticExternalArguments(elements) {
   return args;
 }
 
+function isWingetListQuery(program, args) {
+  if (!['winget', 'winget.exe'].includes(program) || !Array.isArray(args) ||
+      String(args[0]).toLowerCase() !== 'list') return false;
+  const switches = new Set(['--exact', '-e', '--disable-interactivity']);
+  const options = new Set(['--id', '--name', '--moniker', '--source', '-s', '--count', '-n']);
+  for (let i = 1; i < args.length; i += 1) {
+    const arg = args[i].toLowerCase();
+    if (switches.has(arg)) continue;
+    if (!options.has(arg) || !args[i + 1] || args[i + 1].startsWith('-')) return false;
+    i += 1;
+  }
+  return true;
+}
+
 export function readOnlyRipgrepArgs(rawArgs) {
   const args = [...rawArgs]; let filesOnly = false; let selectsFiles = false; let configDisabled = false; let lastSelector = -1; const patterns = []; const positional = []; const exclusions = new Map();
   for (let index = 0; index < args.length; index += 1) {
@@ -458,6 +472,13 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     return '';
   };
   for (const expression of expressions) {
+    if (expression.expressionType === 'ParenExpressionAst') {
+      // The native AST walk also reports the commands and expressions inside
+      // the parentheses, so each inner operation is checked independently.
+      const reason = await appendRedirects(expression, 'parenthesized');
+      if (reason) return { complete: false, actions, reason };
+      continue;
+    }
     if (expression.expressionType === 'InvokeMemberExpressionAst' && expression.staticFileCall) {
       const call = expression.staticFileCall;
       if (!['read', 'write', 'delete'].includes(call.kind) || typeof call.path !== 'string' || !call.path) {
@@ -530,6 +551,9 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const versionArgs = staticExternalArguments(entry.elements);
     const version = entry.pipelineInput === false && versionArgs && analyzeWindowsVersion(entry.name, versionArgs);
     if (version) { actions.push(version); continue; }
+    if (entry.pipelineInput === false && isWingetListQuery(program, versionArgs)) {
+      actions.push({ kind: 'read', program: 'winget list', target: null }); continue;
+    }
     const ripgrep = await analyzeRipgrepCommand(entry, context, fsApi);
     if (ripgrep) {
       if (!ripgrep.complete) return { ...ripgrep, actions: [...actions, ...ripgrep.actions] };
@@ -568,6 +592,15 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       }
       actions.push(...directoryActions, ...git.actions);
       continue;
+    }
+    if (program === 'select-string') {
+      const args = parseArguments(entry.elements, new Set(['pattern', 'simplematch', 'casesensitive', 'quiet', 'notmatch']),
+        new Set(['simplematch', 'casesensitive', 'quiet', 'notmatch']));
+      if (entry.pipelineInput !== true || !args || args.positional.length > 1 ||
+          (args.named.has('pattern') ? args.positional.length !== 0 : args.positional.length !== 1)) {
+        return { complete: false, actions, reason: 'unsupported Select-String arguments' };
+      }
+      actions.push({ kind: 'read', program, target: null }); continue;
     }
     if (program === 'where-object') {
       // Accept the native parser's narrowly validated script predicate or the
@@ -673,12 +706,11 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const sourceTarget = await resolveTarget(source, context.cwd, fsApi, context);
     if (!sourceTarget) return { complete: false, actions, reason: 'file target cannot be resolved' };
     const recursive = args.named.has('recurse') || (program === 'get-childitem' && args.named.has('depth'));
-    const allowShallowDirectoryListing = kind === 'read' && program === 'get-childitem'
-      && sourceTarget.directory === true && !recursive;
+    const allowShallowDirectoryListing = kind === 'read' && !recursive &&
+      (program === 'test-path' || (program === 'get-childitem' && sourceTarget.directory === true));
     const add = (action, target) => actions.push({ kind: action, program, target,
-      // Get-ChildItem emits directory-entry metadata only. Allow one-level
-      // enumeration even under protected roots; file contents, recursion,
-      // writes, and deletes keep their regular path checks.
+      // Test-Path reports existence, and a shallow Get-ChildItem reports
+      // directory-entry metadata. Neither reads the file contents.
       protected: isProtected(target, context, { allowProgramDataWorkspaceRead: action === 'read', allowShallowDirectoryListing, allowOrdinarySystemRead: action === 'read' && target.file }),
       directory: sourceTarget.directory === true,
       workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),

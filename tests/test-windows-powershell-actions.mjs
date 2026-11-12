@@ -119,6 +119,22 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
 let result = await inspect('Get-Content readme.txt | Select-Object -First 1');
 assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
+assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
+assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
+for (const command of ["winget list --id Microsoft.VisualStudioCode --exact --disable-interactivity | Select-String 'Visual Studio'", "winget.exe list --source winget | Select-String -Pattern 'example' -SimpleMatch", "'text' | Select-String 'text'", "(winget list --id Example.App | Select-String 'Example')"]) {
+  assert.equal((await inspect(command)).decision, 'allow', command);
+}
+for (const riskMode of ['recommended', 'full-auto']) {
+  const command = "winget list --id Microsoft.VisualStudioCode --exact --disable-interactivity | Select-String 'Visual Studio'";
+  const state = { riskMode, cwd: workspace, riskContext: context, riskContextValid: true };
+  const claude = { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command } } };
+  const codex = { kind: 'command', params: { command: [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', command] } };
+  assert.equal((await decideWindowsApproval(claude, state)).decision, 'auto-allow', `${riskMode}: Claude list query`);
+  assert.equal((await decideWindowsApproval(codex, state)).decision, 'auto-allow', `${riskMode}: Codex list query`);
+}
+for (const command of ['winget install --id Example.App', 'winget uninstall --id Example.App', '(winget uninstall --id Example.App)', 'winget list --open-logs', "winget list --id Example.App | Select-String -Path 'secret.txt' -Pattern 'x'"]) {
+  assert.equal((await inspect(command)).decision, 'review', command);
+}
 for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline', "git log -1 --format='%h %s'"]) {
   assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
 }
