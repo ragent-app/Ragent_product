@@ -60,6 +60,10 @@ async function cleanupTemporary(directory, target) {
   }
   if (names.length) await syncDirectory(directory);
 }
+async function requireMarker(filename) {
+  const marker = await readChecked(filename, 1024);
+  if (!marker || Object.keys(marker).join(',') !== 'version' || marker.version !== 1) fail();
+}
 
 export async function stageLinuxRunPeerResult({ directory, pinDirectory, resultDirectory,
   runId, launchAttempt, peer, result } = {}) {
@@ -111,14 +115,57 @@ export async function readRevokedLinuxRunPeerResult({ directory, resultDirectory
   await validateDirectory(resultDirectory);
   const target = path.join(resultDirectory, name(runId, launchAttempt, 'peer-result.json'));
   const revoked = path.join(directory, name(runId, launchAttempt, 'revoked'));
+  const discarded = path.join(resultDirectory, name(runId, launchAttempt, 'peer-result.discarded'));
   return withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {
-    const marker = await readChecked(revoked, 1024);
-    if (!marker || Object.keys(marker).join(',') !== 'version' || marker.version !== 1) fail();
+    await requireMarker(revoked);
     await cleanupTemporary(resultDirectory, target);
+    try { await requireMarker(discarded); return null; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
     let record;
     try { record = await readChecked(target, MAX_BYTES); }
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
     if (!validRecord(record, runId, launchAttempt)) fail();
     return record;
+  });
+}
+
+// Control service only. Publish a durable tombstone under the same lock as
+// staging and revocation before removing data. A retry finishes interrupted
+// cleanup without ever making the old result readable again.
+export async function discardRevokedLinuxRunPeerResult({ directory, resultDirectory, runId, launchAttempt } = {}) {
+  await validateDirectory(resultDirectory);
+  const target = path.join(resultDirectory, name(runId, launchAttempt, 'peer-result.json'));
+  const revoked = path.join(directory, name(runId, launchAttempt, 'revoked'));
+  const discarded = path.join(resultDirectory, name(runId, launchAttempt, 'peer-result.discarded'));
+  return withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {
+    await requireMarker(revoked);
+    await cleanupTemporary(resultDirectory, discarded);
+    try { await requireMarker(discarded); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const temporary = `${discarded}.${randomBytes(16).toString('hex')}.tmp`;
+      let file;
+      try {
+        file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        await file.chown(0, 0); await file.chmod(0o600);
+        await file.writeFile('{"version":1}\n', 'utf8'); await file.sync(); await file.close(); file = null;
+        await rename(temporary, discarded);
+      } finally {
+        if (file) await file.close();
+        await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
+      }
+    }
+    // Also sync on retry: a preceding attempt may have renamed the marker but
+    // crashed before acknowledging its durable directory entry.
+    await syncDirectory(resultDirectory);
+    await cleanupTemporary(resultDirectory, target);
+    try {
+      const record = await readChecked(target, MAX_BYTES);
+      if (!validRecord(record, runId, launchAttempt)) fail();
+      await unlink(target);
+    }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await syncDirectory(resultDirectory);
+    return { discarded: true };
   });
 }

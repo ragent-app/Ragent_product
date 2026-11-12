@@ -144,7 +144,9 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
         return JSON.parse(stdout);
       };
       const readRequest = { type: 'read', ...expected };
+      const discardRequest = { type: 'discard', ...expected };
       assert.deepEqual(await requestAs(controlUid, controlGid, readRequest), { ok: false });
+      assert.deepEqual(await requestAs(controlUid, controlGid, discardRequest), { ok: false });
       assert.deepEqual(await requestAs(controlUid, controlGid, { ...readRequest, peer: peerA }), { ok: false });
       assert.equal(await isLinuxRunPeerLive({ ...binding, invocationId: 'b'.repeat(32) }, peerA), false);
       assert.equal(await isLinuxRunPeerLive(binding, { ...peerA, gid: 0 }), false);
@@ -224,6 +226,20 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
         fake.kill('SIGKILL');
         if (fake.exitCode === null && fake.signalCode === null) await new Promise(resolve => fake.once('exit', resolve));
       }
+      assert.deepEqual(await requestAs(uid, peerA.gid, discardRequest), { ok: false });
+      const discardClient = 'const m=await import(process.argv[3]);const value=await m.discardProtectedLinuxRunResult({socketPath:process.argv[1],peerHelper:process.argv[2],runId:"run_peerfixture1",launchAttempt:2});console.log(JSON.stringify(value));';
+      const discarded = await execAsync('/usr/bin/setpriv', ['--reuid', String(controlUid), '--regid', String(controlGid), '--clear-groups',
+        '/usr/bin/node', '--input-type=module', '-e', discardClient, inboxPath, helper,
+        new URL('../chat/linux-run-peer-result-client.mjs', import.meta.url).href], { timeout: 5000 });
+      assert.deepEqual(JSON.parse(discarded.stdout), { discarded: true });
+      await assert.rejects(stat(filename), { code: 'ENOENT' });
+      assert.deepEqual(await requestAs(controlUid, controlGid, readRequest), { ok: true, value: null });
+      // Simulate old result data left behind after the durable tombstone was
+      // committed. A read must not resurrect it; retry must remove it.
+      await writeFile(filename, `${JSON.stringify(result)}\n`, { mode: 0o600 });
+      assert.deepEqual(await requestAs(controlUid, controlGid, readRequest), { ok: true, value: null });
+      assert.deepEqual(await requestAs(controlUid, controlGid, discardRequest), { ok: true, value: { discarded: true } });
+      await assert.rejects(stat(filename), { code: 'ENOENT' });
       assert.equal(stop(unit), true);
       started.splice(started.indexOf(unit), 1);
       assert.equal(await isLinuxRunPeerLive(binding, peerA), false);

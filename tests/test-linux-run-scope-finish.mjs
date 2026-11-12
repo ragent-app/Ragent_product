@@ -343,6 +343,12 @@ test('runner terminal write invalidates only its protected control binding',
         const { persistLinuxRunCompletionReceipt } = await import('../chat/linux-run-completion-receipt.mjs');
         await persistLinuxRunCompletionReceipt(peerId, 0);
         await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        // An interrupted clear is durable even if the root broker is offline:
+        // the old shared result cannot reappear while cleanup is retried.
+        await assert.rejects(clearRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        assert.equal(await getRunResult(peerId), null);
+        await assert.rejects(clearRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        assert.equal(await getRunResult(peerId), null);
         process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
         await assert.rejects(removeRunsForSession('s1'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.ok(await readFile(runStatusPath(peerId), 'utf8'));

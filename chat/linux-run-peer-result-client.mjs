@@ -100,3 +100,9 @@ export async function readProtectedLinuxRunResult({ runId, launchAttempt, ...opt
       !value.result || typeof value.result !== 'object' || Array.isArray(value.result)) throw unavailable();
   return value;
 }
+
+export async function discardProtectedLinuxRunResult({ runId, launchAttempt, ...options } = {}) {
+  const value = await requestProtectedResult({ type: 'discard', runId, launchAttempt }, options);
+  if (!value || Object.keys(value).join(',') !== 'discarded' || value.discarded !== true) throw unavailable();
+  return value;
+}

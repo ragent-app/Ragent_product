@@ -2210,6 +2210,8 @@ export async function getRunResult(runId) {
               const { hasLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
               if (!await matchesLinuxRunControlBinding({ run: current, manifest, launchAttempt: attempt }) ||
                   !await hasLinuxRunCompletionReceipt(runId, attempt)) throw linuxScopeResultUnavailable();
+              const { hasLinuxPeerResultClearIntent } = await import('./linux-run-peer-result-clear.mjs');
+              if (await hasLinuxPeerResultClearIntent(runId, attempt)) return null;
               const { readLinuxRunResultSnapshot, saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
               let result = await readLinuxRunResultSnapshot(runId, attempt);
               if (!result) {
@@ -2386,6 +2388,7 @@ export async function writeRunResult(runId, result) {
 export async function clearRunResult(runId) {
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     let protectedAttempt = null;
+    let peerAttempts = [];
     if (process.platform === 'linux' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
         process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1') {
       if (/^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
@@ -2394,14 +2397,33 @@ export async function clearRunResult(runId) {
           if ((await findLinuxRunResultTransactionAttempts(runId)).length) throw linuxScopeResultUnavailable();
         } catch { throw linuxScopeResultUnavailable(); }
       }
-      const run = await getRunUnlocked(runId);
+      let run = await getRunUnlocked(runId);
+      const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
+      const bindings = /^run_[A-Za-z0-9_-]{8,128}$/.test(runId) ? await listLinuxRunControlBindings(runId) : [];
+      if (bindings.some(binding => binding.resultChannel === 'peer-v1')) {
+        run = await getRunAcceptanceEvidence(runId);
+        const latest = bindings.at(-1);
+        if (!run || latest.resultChannel !== 'peer-v1' || linuxScopeAttempt(run) !== latest.launchAttempt)
+          throw linuxScopeResultUnavailable();
+        const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+        const { hasLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+        const manifest = await getRunManifestUnlocked(runId);
+        peerAttempts = bindings.filter(binding => binding.resultChannel === 'peer-v1').map(binding => binding.launchAttempt);
+        for (const attempt of peerAttempts) {
+          if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: attempt }) ||
+              !await hasLinuxRunCompletionReceipt(runId, attempt)) throw linuxScopeResultUnavailable();
+        }
+      }
       if (run) {
         const attempt = linuxScopeAttempt(run);
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
         if (await hasLinuxRunControlBinding(runId, attempt)) {
           const { readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
-          if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1')
-            throw linuxScopeResultUnavailable(); // Root copy needs an acknowledged removal protocol first.
+          if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1') {
+            const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+            if (!await matchesLinuxRunControlBinding({ run, manifest: await getRunManifestUnlocked(runId), launchAttempt: attempt }))
+              throw linuxScopeResultUnavailable();
+          }
           protectedAttempt = attempt;
         }
       }
@@ -2410,13 +2432,22 @@ export async function clearRunResult(runId) {
       const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
       if (await hasLinuxRunResultTransaction(runId, protectedAttempt)) throw linuxScopeResultUnavailable();
     }
+    if (peerAttempts.length) {
+      try {
+        const { persistLinuxPeerResultClearIntent } = await import('./linux-run-peer-result-clear.mjs');
+        const { discardProtectedLinuxRunResult } = await import('./linux-run-peer-result-client.mjs');
+        for (const attempt of peerAttempts) await persistLinuxPeerResultClearIntent(runId, attempt);
+        for (const attempt of peerAttempts)
+          await discardProtectedLinuxRunResult({ socketPath: '/run/agentoc-peer-result/result.sock', runId, launchAttempt: attempt });
+      } catch { throw linuxScopeResultUnavailable(); }
+    }
     await removePath(runResultPath(runId));
     await removePath(runPendingResultPath(runId));
     // If interrupted, retain the protected copy until both shared paths have
     // gone; a later recovery can safely retry the clear.
     if (protectedAttempt !== null) {
       const { removeLinuxRunResultSnapshots } = await import('./linux-run-result-snapshot.mjs');
-      await removeLinuxRunResultSnapshots(runId, protectedAttempt);
+      await removeLinuxRunResultSnapshots(runId, peerAttempts.length ? null : protectedAttempt);
     }
     runResultCache.delete(runId);
     runResultCacheMeta.delete(runId);

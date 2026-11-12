@@ -7,7 +7,7 @@ import { createServer } from 'node:net';
 import { posix as path } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { assertLinuxRootControlledDirectory } from '../chat/linux-target-key-store.mjs';
-import { stageLinuxRunPeerResult, readRevokedLinuxRunPeerResult } from './linux-run-peer-result-store.mjs';
+import { stageLinuxRunPeerResult, readRevokedLinuxRunPeerResult, discardRevokedLinuxRunPeerResult } from './linux-run-peer-result-store.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
 
 const MAX_REQUEST = 4 * 1024 * 1024;
@@ -54,7 +54,7 @@ function decodeRequest(buffer) {
       !Number.isSafeInteger(request.launchAttempt) || request.launchAttempt < 0 || request.launchAttempt > 10000) fail();
   const keys = Object.keys(request).sort().join(',');
   if ((request.type === 'stage' && keys === 'launchAttempt,result,runId,type') ||
-      (request.type === 'read' && keys === 'launchAttempt,runId,type')) return request;
+      (['read', 'discard'].includes(request.type) && keys === 'launchAttempt,runId,type')) return request;
   fail();
 }
 
@@ -111,7 +111,8 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
             runId: request.runId, launchAttempt: request.launchAttempt, peer, result: request.result });
         } else {
           if (peer.uid !== controlUid) fail();
-          value = await readRevokedLinuxRunPeerResult({ directory, resultDirectory,
+          const operation = request.type === 'discard' ? discardRevokedLinuxRunPeerResult : readRevokedLinuxRunPeerResult;
+          value = await operation({ directory, resultDirectory,
             runId: request.runId, launchAttempt: request.launchAttempt });
         }
         if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: true, value })}\n`);
