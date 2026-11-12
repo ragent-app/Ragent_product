@@ -1,0 +1,6 @@
+<resources>
+    <string name="ragent_login_title">Iniciar sesión con Ragent</string><string name="ragent_login_description">Inicia sesión con tu cuenta y contraseña de Ragent.</string>
+    <string name="ragent_login_username">Cuenta de Ragent</string><string name="ragent_login_password">Contraseña</string>
+    <string name="ragent_login_credentials_error">Comprueba tu cuenta y contraseña e inténtalo de nuevo.</string><string name="ragent_login_unavailable_error">El inicio de sesión de Ragent no está disponible. Inténtalo más tarde.</string>
+    <string name="ragent_login_failed_error">No se pudo iniciar sesión. Inténtalo de nuevo.</string><string name="ragent_login_connections_error">Cierra la conexión existente antes de volver a intentarlo.</string>
+</resources>

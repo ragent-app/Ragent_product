@@ -1,0 +1,6 @@
+<resources>
+    <string name="ragent_login_title">Ragentでログイン</string><string name="ragent_login_description">Ragentアカウントとパスワードでログインします。</string>
+    <string name="ragent_login_username">Ragentアカウント</string><string name="ragent_login_password">パスワード</string>
+    <string name="ragent_login_credentials_error">アカウントとパスワードを確認して、もう一度お試しください。</string><string name="ragent_login_unavailable_error">Ragentログインは現在利用できません。後でもう一度お試しください。</string>
+    <string name="ragent_login_failed_error">ログインできませんでした。もう一度お試しください。</string><string name="ragent_login_connections_error">現在の接続を切断してから、もう一度お試しください。</string>
+</resources>

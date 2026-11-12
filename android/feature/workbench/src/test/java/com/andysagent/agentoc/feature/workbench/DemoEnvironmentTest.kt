@@ -19,16 +19,16 @@ class DemoEnvironmentTest {
         assertFalse(active.isRestrictedDemoAccount)
         val catalog = RuntimeCatalog(tools = listOf(RuntimeToolOption("claude", "Claude")))
         assertSame(catalog, restrictDemoRuntimeCatalog(catalog, active.isRestrictedDemoAccount))
-        assertTrue(active.copy(demoAccessMode = "unknown").isRestrictedDemoAccount)
+        assertFalse(active.copy(demoAccessMode = "unknown").isRestrictedDemoAccount)
         assertFalse(active.copy(accountSessionResolved = false).isDemoAccount)
         assertFalse(active.copy(accountId = "acct_google_fixture").isDemoAccount)
     }
 
-    @Test fun `only a verified special account selects the restricted environment`() {
+    @Test fun `account provider does not select a restricted environment`() {
         val account = GoogleAccountUiState(accountId = "acct_demo_" + "a".repeat(48))
         assertFalse(account.isRestrictedDemoAccount)
         val active = account.copy(accountSessionResolved = true, status = GoogleAccountStatus.SignedIn)
-        assertTrue(active.isRestrictedDemoAccount)
+        assertFalse(active.isRestrictedDemoAccount)
         assertFalse(active.copy(accountId = "acct_google_fixture").isRestrictedDemoAccount)
         assertFalse(active.copy(accountId = "acct_demo_invalid").isRestrictedDemoAccount)
     }

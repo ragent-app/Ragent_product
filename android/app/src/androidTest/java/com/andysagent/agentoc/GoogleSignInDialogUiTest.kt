@@ -87,7 +87,7 @@ class GoogleSignInDialogUiTest {
             }
         }
         val detail = composeRule.onNodeWithText(composeRule.activity.getString(WorkbenchR.string.settings_google_sign_in_devices_detail)).fetchSemanticsNode().boundsInRoot
-        val demo = composeRule.onNodeWithText(composeRule.activity.getString(WorkbenchR.string.demo_sign_in_title)).fetchSemanticsNode().boundsInRoot
+        val demo = composeRule.onNodeWithText(composeRule.activity.getString(WorkbenchR.string.ragent_login_title)).fetchSemanticsNode().boundsInRoot
         assertTrue("Demo action must be below the sign-in description", demo.top >= detail.bottom)
     }
 }

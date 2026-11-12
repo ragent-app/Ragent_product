@@ -50,7 +50,7 @@ class DemoEnvironmentNoticeTest {
     @Test fun accountLoginOffersSpecialAccountEntry() {
         var starts = 0
         rule.setContent { AgentocTheme { GoogleSignInGuideScreen({}, {}, onContinueWithDemo = { starts++ }) } }
-        rule.onNodeWithText("Demo account sign-in").performScrollTo().assertIsDisplayed().performClick()
+        rule.onNodeWithText("Sign in with Ragent").performScrollTo().assertIsDisplayed().performClick()
         assertEquals(1, starts)
     }
 

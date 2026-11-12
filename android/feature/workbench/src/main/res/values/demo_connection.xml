@@ -1,9 +1,9 @@
 <resources>
-    <string name="demo_connection_finding">Finding your demo workspace</string>
-    <string name="demo_connection_connecting">Connecting to the demo workspace</string>
-    <string name="demo_connection_reconnecting">Reconnecting to the demo workspace</string>
-    <string name="demo_connection_unavailable">The demo workspace is temporarily unavailable</string>
-    <string name="demo_connection_detail">We’ll open the workspace automatically when the secure connection is ready.</string>
+    <string name="demo_connection_finding">Finding your workspace</string>
+    <string name="demo_connection_connecting">Connecting to your workspace</string>
+    <string name="demo_connection_reconnecting">Reconnecting to your workspace</string>
+    <string name="demo_connection_unavailable">The workspace is temporarily unavailable</string>
+    <string name="demo_connection_detail">We’ll continue when the secure connection is ready.</string>
     <string name="demo_connection_slow">This is taking longer than expected. We’re still trying to connect.</string>
     <string name="demo_connection_retry">Retry connection</string>
     <string name="demo_connection_sign_out">Sign out</string>

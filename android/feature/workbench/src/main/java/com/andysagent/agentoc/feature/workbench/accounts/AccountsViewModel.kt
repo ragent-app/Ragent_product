@@ -73,7 +73,9 @@ data class GoogleAccountUiState(
         get() = hasVerifiedAccountSession && accountId?.matches(Regex("^acct_demo_[a-f0-9]{48}$")) == true
 
     val isRestrictedDemoAccount: Boolean
-        get() = isDemoAccount && demoAccessMode != "full"
+        // Authentication provider is not a workbench permission. Actual
+        // instance capabilities and entitlements remain authoritative.
+        get() = false
 }
 
 sealed interface AccountsEvent {

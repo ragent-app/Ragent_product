@@ -23,8 +23,8 @@ class DemoSignInDialogTest {
     @Test fun invalidFormCannotSignInAndExplainsRealWorkspace() {
         var dismisses = 0
         rule.setContent { AgentocTheme { DemoSignInDialog(DemoSignInUiState(open = true), {}, {}, {}, { dismisses++ }) } }
-        rule.onNodeWithText("Demo account sign-in").assertIsDisplayed()
-        rule.onNodeWithText("This demo workspace is shared with other testers. Do not enter personal or sensitive information in chats. Use sample data only.").assertIsDisplayed()
+        rule.onNodeWithText("Sign in with Ragent").assertIsDisplayed()
+        rule.onNodeWithText("Use your Ragent account and password to sign in.").assertIsDisplayed()
         rule.onNodeWithText("Sign in").assertIsNotEnabled()
         rule.onNodeWithText("Cancel").performClick(); assertEquals(1, dismisses)
     }
@@ -37,6 +37,6 @@ class DemoSignInDialogTest {
 
     @Test fun failedLoginHasActionableSafeText() {
         rule.setContent { AgentocTheme { DemoSignInDialog(DemoSignInUiState(open = true, error = DemoSignInError.Credentials), {}, {}, {}, {}) } }
-        rule.onNodeWithText("Check the demo username and password, then try again.").assertIsDisplayed()
+        rule.onNodeWithText("Check your account and password, then try again.").assertIsDisplayed()
     }
 }

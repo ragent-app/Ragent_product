@@ -1,7 +1,7 @@
 package com.andysagent.agentoc
 
 import com.andysagent.agentoc.feature.workbench.DemoEnvironmentSurface
-import com.andysagent.agentoc.feature.workbench.WelcomeScreen
+import com.andysagent.agentoc.feature.workbench.GoogleSignInGuideScreen
 
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,10 +48,11 @@ class DemoEnvironmentNativeUiTest {
         rule.onNodeWithText("Workbench content").assertIsDisplayed()
     }
 
-    @Test fun welcomeHasADirectSpecialAccountEntry() {
+    @Test fun accountSignInOffersRagentAlongsideGoogle() {
         var starts = 0
-        rule.setContent { AgentocTheme { WelcomeScreen({}, {}, onDemoSignIn = { starts++ }) } }
-        val label = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(com.andysagent.agentoc.feature.workbench.R.string.demo_sign_in_title)
+        rule.setContent { AgentocTheme { GoogleSignInGuideScreen({}, {}, onContinueWithDemo = { starts++ }) } }
+        val label = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(com.andysagent.agentoc.feature.workbench.R.string.ragent_login_title)
+        rule.onNodeWithTag("account-sign-in-primary").assertIsDisplayed()
         rule.onNodeWithText(label).performScrollTo().assertIsDisplayed().performClick()
         assertEquals(1, starts)
         exportScreenshot("special-account-welcome.png")

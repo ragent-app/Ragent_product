@@ -1,0 +1,10 @@
+<resources>
+    <string name="ragent_login_title">Sign in with Ragent</string>
+    <string name="ragent_login_description">Use your Ragent account and password to sign in.</string>
+    <string name="ragent_login_username">Ragent account</string>
+    <string name="ragent_login_password">Password</string>
+    <string name="ragent_login_credentials_error">Check your account and password, then try again.</string>
+    <string name="ragent_login_unavailable_error">Ragent sign-in is currently unavailable. Try again later.</string>
+    <string name="ragent_login_failed_error">Could not sign in. Try again.</string>
+    <string name="ragent_login_connections_error">An existing connection must be closed before signing in. Try again after disconnecting.</string>
+</resources>

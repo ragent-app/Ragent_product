@@ -85,17 +85,17 @@ class UserJourneyOnboardingUiTest {
                     else -> Unit
                 } })
         } }
-        compose.onNodeWithText(text(WorkbenchR.string.demo_sign_in_title)).assertDoesNotExist()
+        compose.onNodeWithText(text(WorkbenchR.string.ragent_login_title)).assertDoesNotExist()
         compose.onNodeWithTag("sign-in-from-computer").performScrollTo().performClick()
         compose.onNodeWithTag("temporary-access-entry").performScrollTo().performClick()
         compose.onNodeWithTag("welcome-sign-in").performScrollTo().performClick()
         compose.onNodeWithTag("sign-in-from-computer").assertDoesNotExist()
         compose.onNodeWithTag("temporary-access-entry").assertDoesNotExist()
-        compose.onNodeWithText(text(WorkbenchR.string.demo_sign_in_title)).performScrollTo().performClick()
+        compose.onNodeWithText(text(WorkbenchR.string.ragent_login_title)).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, reverse); assertEquals(1, temporary); assertEquals(1, demo) }
         compose.onNodeWithContentDescription(text(WorkbenchR.string.welcome_back_to_connection)).performClick()
         compose.onNodeWithTag("welcome-entry-page").assertExists()
-        compose.onNodeWithText(text(WorkbenchR.string.demo_sign_in_title)).assertDoesNotExist()
+        compose.onNodeWithText(text(WorkbenchR.string.ragent_login_title)).assertDoesNotExist()
     }
 
     @Test fun setupAdvancesAndReturnsWithoutLaunchingTheScannerEarly() {

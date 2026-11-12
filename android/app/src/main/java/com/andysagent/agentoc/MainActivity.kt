@@ -37,6 +37,9 @@ import com.andysagent.agentoc.core.designsystem.recordToLayer
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -77,6 +80,7 @@ import kotlinx.serialization.decodeFromString
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.core.content.ContextCompat
 import com.andysagent.agentoc.core.auth.BrowserSignInRecovery
 import com.andysagent.agentoc.core.auth.encodeBrowserSignInRecovery
@@ -88,6 +92,7 @@ import com.andysagent.agentoc.core.domain.AccountsRepositoryException
 import com.andysagent.agentoc.core.protocol.parsePairingUri
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.core.designsystem.AgentoDialog
+import com.andysagent.agentoc.core.designsystem.AgentoButton
 import com.andysagent.agentoc.core.designsystem.AgentoDialogActionLayout
 import com.andysagent.agentoc.core.designsystem.LocalAgentocColors
 import com.andysagent.agentoc.core.agentui.AgentConnectionStatus
@@ -2151,7 +2156,7 @@ internal fun GoogleSignInConfirmationDialog(
                 color = LocalAgentocColors.current.secondaryContent,
             )
             Text(
-                text = if (isDemoSignIn) stringResource(WorkbenchR.string.demo_sign_in_title) else detail,
+                text = if (isDemoSignIn) stringResource(WorkbenchR.string.ragent_login_title) else detail,
                 style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
                 color = LocalAgentocColors.current.secondaryContent,
             )
@@ -2164,7 +2169,13 @@ internal fun GoogleSignInConfirmationDialog(
                 Text(stringResource(WorkbenchR.string.account_privacy_open))
             }
             onDemoSignIn?.takeUnless { isDemoSignIn }?.let { onDemo ->
-                TextButton(onClick = onDemo) { Text(stringResource(WorkbenchR.string.demo_sign_in_title)) }
+                AgentoButton(
+                    text = stringResource(WorkbenchR.string.ragent_login_title),
+                    onClick = onDemo,
+                    modifier = Modifier.fillMaxWidth(),
+                    secondary = true,
+                    leadingIcon = { Image(painterResource(WorkbenchR.drawable.ic_ragent_sign_in), null, Modifier.size(24.dp)) },
+                )
             }
         }
     }

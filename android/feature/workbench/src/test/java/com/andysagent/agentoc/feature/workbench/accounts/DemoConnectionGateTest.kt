@@ -27,7 +27,7 @@ class DemoConnectionGateTest {
             DemoEnvironmentSurface(true, DemoConnectionUiState(active = true)) { Text("Send a task") }
         } }
         rule.onNodeWithTag("demo-connection-progress").assertIsDisplayed()
-        rule.onNodeWithText("Finding your demo workspace").assertIsDisplayed()
+        rule.onNodeWithText("Finding your workspace").assertIsDisplayed()
         rule.onNodeWithText("Send a task").assertExists()
     }
 
@@ -58,7 +58,7 @@ class DemoConnectionGateTest {
             DemoConnectionGate(DemoConnectionUiState(active = true, phase = DemoConnectionPhase.Reconnecting,
                 elapsedMillis = 5_100), { retry++ }, { signOut++ })
         } }
-        rule.onNodeWithText("Reconnecting to the demo workspace").assertIsDisplayed()
+        rule.onNodeWithText("Reconnecting to your workspace").assertIsDisplayed()
         rule.onNodeWithText("This is taking longer than expected. We’re still trying to connect.").assertIsDisplayed()
         rule.onNodeWithText("Retry connection").performClick()
         rule.onNodeWithText("Close").performClick()

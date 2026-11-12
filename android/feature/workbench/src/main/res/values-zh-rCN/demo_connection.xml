@@ -1,9 +1,9 @@
 <resources>
-    <string name="demo_connection_finding">正在查找演示工作台</string>
-    <string name="demo_connection_connecting">正在连接演示工作台</string>
-    <string name="demo_connection_reconnecting">正在重新连接演示工作台</string>
-    <string name="demo_connection_unavailable">演示工作台暂时无法连接</string>
-    <string name="demo_connection_detail">安全连接就绪后会自动进入工作台，无需手动选择电脑。</string>
+    <string name="demo_connection_finding">正在查找工作台</string>
+    <string name="demo_connection_connecting">正在连接工作台</string>
+    <string name="demo_connection_reconnecting">正在重新连接工作台</string>
+    <string name="demo_connection_unavailable">工作台暂时无法连接</string>
+    <string name="demo_connection_detail">安全连接就绪后将继续。</string>
     <string name="demo_connection_slow">连接比预期慢，我们仍在尝试连接。</string>
     <string name="demo_connection_retry">重试连接</string>
     <string name="demo_connection_sign_out">退出账号</string>

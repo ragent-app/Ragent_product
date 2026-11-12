@@ -37,27 +37,27 @@ fun DemoSignInDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(dismissOnBackPress = !state.busy, dismissOnClickOutside = !state.busy),
-        title = { Text(stringResource(R.string.demo_sign_in_title)) },
+        title = { Text(stringResource(R.string.ragent_login_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.demo_sign_in_description))
+                Text(stringResource(R.string.ragent_login_description))
                 OutlinedTextField(value = state.username, onValueChange = onUsernameChanged,
-                    label = { Text(stringResource(R.string.demo_sign_in_username)) },
+                    label = { Text(stringResource(R.string.ragent_login_username)) },
                     enabled = !state.busy, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false))
                 OutlinedTextField(value = state.password, onValueChange = onPasswordChanged,
-                    label = { Text(stringResource(R.string.demo_sign_in_password)) },
+                    label = { Text(stringResource(R.string.ragent_login_password)) },
                     enabled = !state.busy, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
                 state.error?.let { error ->
                     Text(stringResource(when (error) {
-                        DemoSignInError.Credentials -> R.string.demo_sign_in_error_credentials
-                        DemoSignInError.Unavailable -> R.string.demo_sign_in_error_unavailable
+                        DemoSignInError.Credentials -> R.string.ragent_login_credentials_error
+                        DemoSignInError.Unavailable -> R.string.ragent_login_unavailable_error
                         DemoSignInError.RateLimited -> R.string.demo_sign_in_error_rate
                         DemoSignInError.Network -> R.string.demo_sign_in_error_network
-                        DemoSignInError.ExistingConnections -> R.string.demo_sign_in_error_connections
-                        DemoSignInError.Failed -> R.string.demo_sign_in_error_failed
+                        DemoSignInError.ExistingConnections -> R.string.ragent_login_connections_error
+                        DemoSignInError.Failed -> R.string.ragent_login_failed_error
                     }), color = MaterialTheme.colorScheme.error)
                 }
                 if (state.busy) CircularProgressIndicator()

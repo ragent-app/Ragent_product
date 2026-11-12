@@ -1,6 +1,7 @@
 package com.andysagent.agentoc.feature.workbench
 
 import android.content.res.Configuration
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -69,11 +71,6 @@ fun GoogleSignInGuideScreen(
         ) {
             OnboardingPageContent(
                 header = { SignInTopBar(onBack = onBack) },
-                footer = {
-                    onContinueWithDemo?.let { demo ->
-                        OnboardingTextAction(stringResource(R.string.demo_sign_in_title), demo, quiet = true)
-                    }
-                },
             ) { compact ->
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -104,7 +101,7 @@ fun GoogleSignInGuideScreen(
                     AgentoButton(
                         text = stringResource(R.string.sign_in_guide_continue_with_google),
                         onClick = onContinue,
-                        modifier = Modifier.widthIn(min = 216.dp, max = 280.dp).testTag("account-sign-in-primary"),
+                        modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth().testTag("account-sign-in-primary"),
                         labelMaxLines = 2,
                         labelStyle = MaterialTheme.typography.labelLarge.copy(
                             fontSize = 16.sp, lineHeight = 22.sp, lineBreak = LineBreak.Heading,
@@ -116,7 +113,24 @@ fun GoogleSignInGuideScreen(
                                 contentAlignment = Alignment.Center) { GoogleBrandIcon(Modifier.size(18.dp)) }
                         },
                     )
-
+                    onContinueWithDemo?.let { onRagentLogin ->
+                        Spacer(Modifier.height(12.dp))
+                        AgentoButton(
+                            text = stringResource(R.string.ragent_login_title),
+                            onClick = onRagentLogin,
+                            modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth().testTag("account-sign-in-ragent"),
+                            labelMaxLines = 2,
+                            labelStyle = MaterialTheme.typography.labelLarge.copy(
+                                fontSize = 16.sp, lineHeight = 22.sp, lineBreak = LineBreak.Heading,
+                            ),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                            decision = true,
+                            leadingIcon = {
+                                Image(painterResource(R.drawable.ic_ragent_sign_in), contentDescription = null,
+                                    modifier = Modifier.size(28.dp).clip(CircleShape))
+                            },
+                        )
+                    }
 
                     Spacer(Modifier.height(8.dp))
                     onContinueWithBrowser?.let { browser ->
