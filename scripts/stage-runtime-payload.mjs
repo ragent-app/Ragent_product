@@ -13,6 +13,7 @@ const manifestPath = new URL('../packaging/runtime-payload.json', import.meta.ur
 const windowsBuildInputs = [
   'android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png',
   'static/desktop/agentoc-android-logo.png',
+  'static/icon-512.png',
   ...['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html', 'stage-windows.mjs'].map(name => `desktop/${name}`),
 ];
 
