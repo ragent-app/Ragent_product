@@ -19,18 +19,26 @@ try {
     const run = await createRun({ status: { sessionId: 'fixture', requestId: 'request', state: 'running', tool: 'claude' },
       manifest: { sessionId: 'fixture', requestId: 'request', folder: root, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: {} } });
     const state = { riskMode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, riskContextValid: true,
-      sessionControlReadAvailable: true, windowsManagedActionChannel: true, windowsManagedActionBinding: { runId: run.id },
+      sessionControlReadAvailable: true, sessionControlReadRunId: run.id,
       riskContext: { platform: 'win32', trustedWorkspaceRoot: root },
       pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
-    const request = { type: 'control_request', request_id: `fixture-${riskMode}`, request: { subtype: 'can_use_tool', tool_name: 'PowerShell',
-      input: { command: 'agentoc trigger list --json 2>&1 | Out-String' } } };
-    let sent = '';
-    const child = { stdin: { writable: true, write(value) { sent += value; } } };
-    await trackClaudeBidiApprovalRequest(run.id, state, request, child, { cliReadHelperPath: helper });
-    const response = JSON.parse(sent);
-    assert.equal(response.response.response.behavior, 'allow');
-    assert.ok(response.response.response.updatedInput.command.startsWith(`& '${helper.replaceAll("'", "''")}' trigger-list `));
-    assert.match(response.response.response.updatedInput.command, /'http:\/\/127\.0\.0\.1:\d+' --json$/);
+    const cases = [
+      ['agentoc trigger list --json 2>&1 | Out-String', 'trigger-list', true],
+      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --json | Out-String', 'trigger-list', true],
+      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --session $env:AGENTOC_SESSION_ID --json | Out-String', 'trigger-list', true],
+      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --source-session $env:AGENTOC_SESSION_ID --json | Out-String', 'trigger-list', true],
+      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --help | Out-String', 'trigger-help', false],
+    ];
+    for (const [index, [command, action, json]] of cases.entries()) {
+      const request = { type: 'control_request', request_id: `fixture-${riskMode}-${index}`, request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command } } };
+      let sent = '';
+      const child = { stdin: { writable: true, write(value) { sent += value; } } };
+      await trackClaudeBidiApprovalRequest(run.id, state, request, child, { cliReadHelperPath: helper });
+      const response = JSON.parse(sent);
+      assert.equal(response.response.response.behavior, 'allow');
+      assert.ok(response.response.response.updatedInput.command.startsWith(`& '${helper.replaceAll("'", "''")}' ${action} `));
+      assert.match(response.response.response.updatedInput.command, json ? /'http:\/\/127\.0\.0\.1:\d+' --json$/ : /'http:\/\/127\.0\.0\.1:\d+'$/);
+    }
     const spool = await readRunSpoolRecords(run.id);
     assert.ok(spool.some(item => item.json?.autoApproved === true && item.json?.reason === 'controlled read-only CLI operation'));
     assert.ok(!(await getRun(run.id)).appServerPendingApprovals?.some(item => item.state !== 'responded'));

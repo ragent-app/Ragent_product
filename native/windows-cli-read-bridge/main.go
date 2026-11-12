@@ -15,7 +15,8 @@ import (
 )
 
 func readArguments(args []string) (string, bool, error) {
-	if len(args) < 2 || len(args) > 3 || args[0] != "trigger-list" || (len(args) == 3 && args[2] != "--json") {
+	if len(args) < 2 || len(args) > 3 || (args[0] != "trigger-list" && args[0] != "trigger-help") ||
+		(len(args) == 3 && (args[0] != "trigger-list" || args[2] != "--json")) {
 		return "", false, errors.New("unsupported read operation")
 	}
 	u, err := url.Parse(args[1])
@@ -92,6 +93,9 @@ func run(args []string) error {
 		}
 	}
 	argv := []string{cli, "trigger", "list", "--base-url", base}
+	if args[0] == "trigger-help" {
+		argv = append(argv, "--help")
+	}
 	if jsonOutput {
 		argv = append(argv, "--json")
 	}

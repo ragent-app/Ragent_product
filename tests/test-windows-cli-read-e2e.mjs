@@ -52,6 +52,16 @@ try {
   const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
   assert.equal(code, 0, stderr); assert.deepEqual(JSON.parse(stdout), { triggers: [] });
   assert.equal(reads, 2); assert.equal(renewals, 1);
+  const help = spawn(exe, ['trigger-help', base], { windowsHide: true, env: { ...process.env,
+    AGENTOC_SESSION_ID: 'session', AGENTOC_SESSION_CONTROL_TOKEN: 'expired',
+    AGENTOC_SESSION_CONTROL_RUN_ID: 'run', AGENTOC_SESSION_CONTROL_SESSION_ID: 'session', AGENTOC_SESSION_CONTROL_TURN_ID: 'turn',
+    LOCALAPPDATA: path.join(root, 'service-profile', 'Local'), NODE_OPTIONS: '--require nonexistent-malicious-module',
+  } });
+  let helpOutput = '', helpError = '';
+  help.stdout.on('data', data => { helpOutput += data; }); help.stderr.on('data', data => { helpError += data; });
+  const helpCode = await new Promise((resolve, reject) => { help.once('error', reject); help.once('close', resolve); });
+  assert.equal(helpCode, 0, helpError); assert.match(helpOutput, /agentoc trigger <command>/);
+  assert.equal(reads, 2, 'help must not perform an API request'); assert.equal(renewals, 1);
   console.log('windows-cli-read-e2e: installed CLI, capability renewal and sanitized environment passed');
 } finally {
   if (server) await new Promise(resolve => server.close(resolve));

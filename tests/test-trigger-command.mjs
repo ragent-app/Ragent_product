@@ -9,6 +9,8 @@ const homeDir = join(tempRoot, 'home');
 mkdirSync(join(homeDir, '.config', 'agentoc'), { recursive: true });
 writeFileSync(join(homeDir, '.config', 'agentoc', 'auth.json'), `${JSON.stringify({ token: 'owner-token' })}\n`, 'utf8');
 process.env.HOME = homeDir;
+process.env.LOCALAPPDATA = join(tempRoot, 'local-app-data');
+process.env.AGENTOC_CONFIG_DIR = join(homeDir, '.config', 'agentoc');
 process.env.AGENTOC_SESSION_ID = 'sess-current';
 
 const requests = [];
@@ -157,6 +159,10 @@ assert.ok(typeof requests.at(-1)?.body?.scheduledAt === 'string' && requests.at(
 const listed = JSON.parse((await runCli(['list', '--session', 'sess-current', '--base-url', baseUrl, '--json'])).stdout);
 assert.equal(listed.triggers.length, 1);
 assert.equal(requests.at(-1)?.query?.get('sessionId'), 'sess-current');
+const listedBySource = JSON.parse((await runCli(['list', '--source-session', 'sess-current', '--base-url', baseUrl, '--json'])).stdout);
+assert.equal(listedBySource.triggers.length, 1);
+assert.equal(requests.at(-1)?.query?.get('sessionId'), 'sess-current');
+await assert.rejects(runCli(['create', '--source-session', 'sess-current']), /only supported for trigger list/);
 
 const loaded = JSON.parse((await runCli(['get', 'trg_000000000000000000000001', '--base-url', baseUrl, '--json'])).stdout);
 assert.equal(loaded.trigger.id, 'trg_000000000000000000000001');

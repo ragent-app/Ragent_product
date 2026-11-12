@@ -3726,6 +3726,7 @@ async function main() {
       spawnEnv.AGENTOC_SESSION_CONTROL_RUN_ID === runId &&
       spawnEnv.AGENTOC_SESSION_CONTROL_SESSION_ID === manifest.sessionId &&
       spawnEnv.AGENTOC_SESSION_ID === manifest.sessionId && spawnEnv.AGENTOC_SESSION_CONTROL_TURN_ID);
+    claudeBidiState.sessionControlReadRunId = claudeBidiState.sessionControlReadAvailable ? runId : '';
   }
   // —— 2026-08-06 防污染兜底：codex run 启动前把 managed home 镜像到 DB current 行 ——
   // 切换可走平台端点或 cc-switch 自身，两者都可能不同步 managed home；

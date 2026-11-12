@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, readFile, writeFile, access, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, access, realpath, rm, copyFile, cp } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +25,9 @@ const askAll = process.env.AGENTOC_QA_CLAUDE_ASK_ALL === '1';
 const taskToolCase = process.env.AGENTOC_QA_CLAUDE_TASK_TOOL || '';
 if (taskToolCase && (!askAll || !['TaskList', 'TaskCreate', 'TaskGet', 'TaskUpdate'].includes(taskToolCase))) throw new Error('task fixture requires an explicit supported tool and command gate');
 const taskFollowup = ['TaskGet', 'TaskUpdate'].includes(taskToolCase);
+const cliReadCase = process.env.AGENTOC_QA_CLAUDE_CLI_READ || '';
+if (cliReadCase && (!askAll || !['list', 'session', 'source', 'help'].includes(cliReadCase))) throw new Error('invalid CLI read fixture');
+if (cliReadCase) process.env.CHAT_PORT = '18669';
 process.env.AGENTOC_INSTANCE_ROOT = instance;
 process.env.AGENTOC_CONFIG_DIR = path.join(instance, 'config');
 process.env.AGENTOC_WORK_ROOT_DIR = path.join(instance, 'workspace');
@@ -55,7 +58,7 @@ const deleteCase = process.env.AGENTOC_QA_CLAUDE_DELETE === '1';
 const nativePowerShell = process.env.AGENTOC_QA_CLAUDE_NATIVE_POWERSHELL === '1';
 const deleteList = process.env.AGENTOC_QA_CLAUDE_DELETE_LIST === '1';
 const deleteSteps = process.env.AGENTOC_QA_CLAUDE_DELETE_STEPS === '1';
-if (nativePowerShell && !deleteCase && process.env.AGENTOC_QA_CLAUDE_READ !== 'conditional') throw new Error('native PowerShell fixture requires deletion or conditional-read mode');
+if (nativePowerShell && !deleteCase && process.env.AGENTOC_QA_CLAUDE_READ !== 'conditional' && !cliReadCase) throw new Error('native PowerShell fixture requires deletion, conditional-read or CLI-read mode');
 if (deleteList && (!deleteCase || !nativePowerShell)) throw new Error('deletion list requires native PowerShell fixture');
 if (deleteSteps && (!deleteList || !nativePowerShell)) throw new Error('deletion steps require native PowerShell list fixture');
 const outsideFileCase = process.env.AGENTOC_QA_CLAUDE_FILE_OUTSIDE === '1';
@@ -132,6 +135,7 @@ const guidanceScript = `${guidanceAction}; [System.IO.File]::WriteAllText('${gui
 const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(guidanceScript)}`;
 let requests = 0;
 let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
+let cliReads = 0;
 const server = createServer((req, res) => {
   if (phoneQueueCase && req.url.startsWith('/api/')) {
     void (async () => {
@@ -160,6 +164,10 @@ const server = createServer((req, res) => {
     return;
   }
   if (phoneQueueCase && req.method === 'GET' && req.url === '/fixture/status') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ queued: phoneQueued })); return; }
+  if (cliReadCase && req.method === 'GET' && req.url === '/api/triggers?sessionId=claude-local-fixture') {
+    if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture') { res.writeHead(403).end(); return; }
+    cliReads++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ triggers: [{ id: 'fixture-trigger' }] })); return;
+  }
   if (req.method === 'GET' && req.url === '/fixture/read') { res.writeHead(200).end('local read fixture'); return; }
   let body = ''; req.setEncoding('utf8');
   req.on('data', (chunk) => { body += chunk; if (body.length > 4_000_000) req.destroy(); });
@@ -189,6 +197,8 @@ const server = createServer((req, res) => {
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
     if (!tool && phoneQueueCase) phoneToolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item => item.type === 'tool_result'));
+    if (!tool && cliReadCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item =>
+      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && JSON.stringify(item.content).includes(cliReadCase === 'help' ? 'agentoc trigger <command>' : 'fixture-trigger')));
     if (!tool && taskToolCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content)
       && message.content.some(item => item.type === 'tool_result' && item.tool_use_id === `toolu_fixture_${taskFollowup ? 2 : 1}` && item.is_error !== true
         && (!['TaskCreate', 'TaskGet'].includes(taskToolCase) || JSON.stringify(item.content).includes('Fixture task'))));
@@ -210,7 +220,8 @@ const server = createServer((req, res) => {
     if (tool) {
       const taskResult = taskFollowup && requests === 2 ? JSON.stringify(request.messages || []).match(/Task #(\d+) created successfully/) : null;
       if (taskFollowup && requests === 2 && !taskResult) { res.writeHead(400).end(); return; }
-      const input = JSON.stringify(toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
+      const cliSuffix = cliReadCase === 'session' ? '--session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'source' ? '--source-session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'help' ? '--help' : '--json';
+      const input = JSON.stringify(cliReadCase ? { command: `node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
         : toolName === 'TaskGet' ? { taskId: taskResult[1] } : toolName === 'TaskUpdate' ? { taskId: taskResult[1], status: 'completed' } : installCase ? { command: installCommand, description: 'Fixture installation' } : uninstallCase
         ? { command: 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact', description: 'Fixture uninstall' } : deleteCase
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
@@ -227,7 +238,7 @@ const server = createServer((req, res) => {
     res.end();
   });
 });
-await new Promise((resolve) => server.listen(phoneQueueCase ? 18667 : 0, '127.0.0.1', resolve));
+await new Promise((resolve) => server.listen(phoneQueueCase ? 18667 : cliReadCase ? 18669 : 0, '127.0.0.1', resolve));
 if (readCase === 'curl') readCommand = `curl -fsS http://127.0.0.1:${server.address().port}/fixture/read`;
 const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
   XDG_CACHE_HOME: path.join(root, 'cache'), XDG_CONFIG_HOME: path.join(root, 'xdg-config'),
@@ -245,6 +256,18 @@ const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 
 if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
 const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, riskContextValid: boundContext?.valid ?? true,
   riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), sentApprovalResponseIds: new Set(), autoApprovedMcpRequestIds: new Set() };
+let cliReadHelperPath = '';
+if (cliReadCase) {
+  const source = process.env.AGENTOC_TEST_INSTALLED_PAYLOAD, helper = process.env.AGENTOC_TEST_CLI_READ_BINARY;
+  if (!path.isAbsolute(source || '') || !path.isAbsolute(helper || '')) throw new Error('CLI fixture requires absolute isolated payload and helper inputs');
+  const payload = path.join(root, 'cli-payload'); await mkdir(path.join(payload, 'bin'), { recursive: true });
+  await Promise.all(['node.exe', 'cli.js', 'package.json'].map(file => copyFile(path.join(source, file), path.join(payload, file))));
+  await cp(path.join(source, 'lib'), path.join(payload, 'lib'), { recursive: true });
+  cliReadHelperPath = path.join(payload, 'bin', 'agentoc-cli-read-bridge.exe'); await copyFile(helper, cliReadHelperPath);
+  Object.assign(env, { AGENTOC_SESSION_ID: 'claude-local-fixture', AGENTOC_SESSION_CONTROL_SESSION_ID: 'claude-local-fixture',
+    AGENTOC_SESSION_CONTROL_RUN_ID: run.id, AGENTOC_SESSION_CONTROL_TURN_ID: 'fixture-turn', AGENTOC_SESSION_CONTROL_TOKEN: 'fixture-token' });
+  gateState.sessionControlReadAvailable = true; gateState.sessionControlReadRunId = run.id;
+}
 if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
 if (nativePowerShell) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
 if (guidanceCase) {
@@ -299,7 +322,7 @@ output.on('line', (line) => {
         assert.equal(response?.response?.response?.behavior, 'deny', 'uninstall must never be auto-approved');
         return child.stdin.write(value);
       } } } : child;
-      await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : {});
+      await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : cliReadCase ? { cliReadHelperPath } : {});
       if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
         const current = await getRun(run.id);
         const pending = current.appServerPendingApprovals?.find((item) => item.approvalId === approval.approvalId);
@@ -366,7 +389,8 @@ try {
     if (cwdChangeCase && process.platform !== 'win32') assert.equal(gateState.cwd, await realpath(path.join(root, 'child')));
     if (readCase === 'cwd-change-rg') assert.equal(privateSearchObserved, false, 'subsequent search must not return sensitive file contents');
     if (readCase === 'git-status') assert.equal(approvals, 0, 'Claude Code should not emit an approval request for read-only git status');
-  } else if (taskToolCase) assert.ok(toolResultObserved, 'actual Claude must return a successful task tool result');
+  } else if (cliReadCase) { assert.ok(toolResultObserved, 'actual Claude must return the CLI result'); assert.equal(cliReads, cliReadCase === 'help' ? 0 : 1); }
+  else if (taskToolCase) assert.ok(toolResultObserved, 'actual Claude must return a successful task tool result');
   else if (protectedCase || conservativeOutside || uninstallCase) await assert.rejects(access(artifact), { code: 'ENOENT' });
   else assert.equal((await readFile(artifact, 'utf8')).replace(/^\uFEFF/, ''), dotnetCase ? 'dotnet fixture' : 'local fixture\n');
   assert.ok(requests >= 2, 'local model must receive the tool result');
@@ -377,7 +401,7 @@ try {
   else if (readCase === 'git-status' && approvals > 0) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'a surfaced read-only Git request must be automatically approved');
   else if (!reviewCase && (!readCase || approvals) && readCase !== 'git-status') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'actual sidecar must persist the automatic decision');
   else if (reviewCase && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true), 'unattended protected write must be denied');
-  console.log(`claude-windows-local-gate: ${mode} real CLI${nativePowerShell ? ' native PowerShell' : ''} ${taskToolCase ? `${taskToolCase} completed` : installCase ? 'controlled install reached mock service' : reviewCase ? 'dangerous operation denied' : deleteCase ? 'handle-bound fixture deletion completed' : guidanceCase ? 'managed executor guidance received' : readCase ? `${readCase} ${approvals ? 'approval observed' : 'read completed without approval request'}` : dotnetCase ? 'trusted PowerShell wrapped file write completed' : outsideFileCase ? 'outside-workspace file write completed' : 'file approval completed'}`);
+  console.log(`claude-windows-local-gate: ${mode} real CLI${nativePowerShell ? ' native PowerShell' : ''} ${cliReadCase ? `trigger ${cliReadCase} completed` : taskToolCase ? `${taskToolCase} completed` : installCase ? 'controlled install reached mock service' : reviewCase ? 'dangerous operation denied' : deleteCase ? 'handle-bound fixture deletion completed' : guidanceCase ? 'managed executor guidance received' : readCase ? `${readCase} ${approvals ? 'approval observed' : 'read completed without approval request'}` : dotnetCase ? 'trusted PowerShell wrapped file write completed' : outsideFileCase ? 'outside-workspace file write completed' : 'file approval completed'}`);
 } finally {
   child.kill(); output.close(); await new Promise((resolve) => server.close(resolve));
   const parent = path.resolve(os.tmpdir()).toLowerCase();

@@ -15,6 +15,7 @@ func TestReadArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"trigger-list", "http://127.0.0.1:7690"},
 		{"trigger-list", "http://127.0.0.1:7690", "--json"},
+		{"trigger-help", "http://127.0.0.1:7690"},
 	} {
 		if _, _, err := readArguments(args); err != nil {
 			t.Fatalf("%v: %v", args, err)
@@ -24,6 +25,7 @@ func TestReadArguments(t *testing.T) {
 		{"trigger-list", "http://example.com:7690"}, {"trigger-list", "http://127.0.0.1:7690/other"},
 		{"trigger-list", "http://127.0.0.1:7690", "--base-url"}, {"trigger-list", "http://127.0.0.1:7690", "--json", "delete"},
 		{"trigger-delete", "http://127.0.0.1:7690"},
+		{"trigger-help", "http://127.0.0.1:7690", "--json"},
 	} {
 		if _, _, err := readArguments(args); err == nil {
 			t.Fatalf("unexpectedly accepted %v", args)
