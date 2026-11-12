@@ -267,7 +267,7 @@ export function createSessionTurnCompletionHelpers(services) {
       phase: 'queued',
       trigger: 'automatic',
       title: 'Automatic continuation reviewing',
-      summary: 'AgentoC is checking whether the latest reply stopped too early.',
+      summary: 'Ragent is checking whether the latest reply stopped too early.',
     });
   }
 
@@ -288,7 +288,7 @@ export function createSessionTurnCompletionHelpers(services) {
       phase: 'applied',
       trigger: 'automatic',
       title: 'Automatic continuation started',
-      summary: 'AgentoC launched a follow-up turn to finish avoidable unfinished work.',
+      summary: 'Ragent launched a follow-up turn to finish avoidable unfinished work.',
       reason,
     });
   }
@@ -412,7 +412,7 @@ export function createSessionTurnCompletionHelpers(services) {
       await appendEvent(sessionId, statusEvent(`Assistant self-check: review failed — ${reason}`));
       await appendEvent(sessionId, buildReplySelfCheckFailedOperation(
         'Automatic continuation review failed',
-        'AgentoC could not complete the background early-stop review.',
+        'Ragent could not complete the background early-stop review.',
         reason,
       ));
       broadcastSessionInvalidation(sessionId);
@@ -434,7 +434,7 @@ export function createSessionTurnCompletionHelpers(services) {
       await appendEvent(sessionId, statusEvent('Assistant self-check: skipped automatic continuation because new work arrived first.'));
       await appendEvent(sessionId, buildReplySelfCheckSkippedOperation(
         'Automatic continuation skipped',
-        'New work arrived before AgentoC could launch the follow-up turn.',
+        'New work arrived before Ragent could launch the follow-up turn.',
         'new work arrived first',
       ));
       broadcastSessionInvalidation(sessionId);
@@ -455,7 +455,7 @@ export function createSessionTurnCompletionHelpers(services) {
       await appendEvent(sessionId, statusEvent(REPLY_SELF_CHECK_ACCEPT_STATUS));
       await appendEvent(sessionId, buildReplySelfCheckSkippedOperation(
         'Automatic continuation not needed',
-        'AgentoC kept the latest reply as-is after review.',
+        'Ragent kept the latest reply as-is after review.',
         reason,
       ));
       broadcastSessionInvalidation(sessionId);
@@ -508,7 +508,7 @@ export function createSessionTurnCompletionHelpers(services) {
       await appendEvent(sessionId, statusEvent(`Assistant self-check: failed to continue automatically — ${failureReason}`));
       await appendEvent(sessionId, buildReplySelfCheckFailedOperation(
         'Automatic continuation failed',
-        'AgentoC could not launch the follow-up turn.',
+        'Ragent could not launch the follow-up turn.',
         failureReason,
       ));
       broadcastSessionInvalidation(sessionId);

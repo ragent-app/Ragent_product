@@ -139,7 +139,7 @@ context.renderContextOperationInto(container, {
   trigger: 'automatic',
   phase: 'queued',
   title: 'Automatic continuation reviewing',
-  summary: 'AgentoC is checking whether the latest reply stopped too early.',
+  summary: 'Ragent is checking whether the latest reply stopped too early.',
 });
 
 assert.equal(container.children.length, 1, 'consecutive reply self-check events should reuse the same drawer');

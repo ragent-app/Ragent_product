@@ -52,7 +52,7 @@ export const AGY_OFFICIAL_PROVIDER_ID = 'agy-official';
 export const CODEX_DEVICE_LOGIN_URL = 'https://auth.openai.com/codex/device';
 // AgY only emits its browser OAuth handoff from print mode. An empty argv
 // starts the interactive TUI and never exposes the URL to the control plane.
-const AGY_BROWSER_LOGIN_PROMPT = 'Sign in to AgentoC in your browser.';
+const AGY_BROWSER_LOGIN_PROMPT = 'Sign in to Ragent in your browser.';
 const loginJobs = new Map();
 const provisionQueue = createSerialTaskQueue();
 const providerIoBudget = getAdaptiveConcurrencyBudget('providerIO');
