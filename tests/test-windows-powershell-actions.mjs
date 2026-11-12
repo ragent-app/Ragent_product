@@ -182,6 +182,12 @@ assert.equal((await inspect('Write-Output hello > ..\\protected\\result.txt')).d
 assert.equal((await inspect('Write-Output hello > ordinary-link')).decision, 'review');
 assert.equal((await inspect('Write-Output hello > $env:TEMP')).decision, 'review');
 assert.equal((await inspect('Write-Output hello 2>&1')).decision, 'allow');
+assert.equal((await inspect('Write-Output hello 2>$null')).decision, 'allow');
+assert.equal((await inspect('Write-Output hello > $null')).decision, 'allow');
+assert.equal((await inspect("Get-Content -LiteralPath 'readme.txt' 2>$null")).decision, 'allow');
+assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret.txt' 2>$null")).decision, 'review');
+assert.equal((await inspect('Write-Output hello 2>$env:TEMP')).decision, 'review');
+assert.equal((await inspect('Write-Output hello 2>$(Get-Location)')).decision, 'review');
 assert.equal((await inspect("'hello' > result.txt")).decision, 'allow');
 assert.equal((await inspect("'hello' >> result.txt")).decision, 'allow');
 assert.equal((await inspect("'hello' > ..\\protected\\result.txt")).decision, 'review');
@@ -368,6 +374,12 @@ for (const command of [
   "if (Test-Path readme.txt) { Remove-Item readme.txt } else { 'missing' }",
   "if (Test-Path readme.txt) { Set-Content output.txt changed }",
   "if (Test-Path readme.txt) { 'text' > output.txt }",
+]) assert.equal((await inspect(command)).decision, 'allow', command);
+for (const command of [
+  "if (Test-Path readme.txt) { Set-Content ..\\protected\\result.txt changed }",
+  "if (Test-Path readme.txt) { Get-Content readme.txt } else { Remove-Item ..\\protected\\secret }",
+  "if (Test-Path readme.txt) { Remove-Item folder -Recurse -Force }",
+  "if (Test-Path readme.txt) { Get-Content readme.txt } else { Unknown-Command }",
   "if ($env:DO_DELETE) { Get-Content readme.txt }",
   "if (Test-Path readme.txt) { Get-Content ..\\protected\\secret }",
 ]) assert.equal((await inspect(command)).decision, 'review', command);

@@ -22,12 +22,18 @@ foreach ($token in $tokens) {
   }
   if ($kind -in @('LParen','LCurly','LBracket','AtParen','AtCurly')) { $delimiterDepth++ }
 }
+function Test-NullRedirection($node) {
+  return $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $node.VariablePath.UserPath -ieq 'null' -and
+    $node.Parent -is [System.Management.Automation.Language.FileRedirectionAst] -and $node.Parent.Location -eq $node
+}
 function Get-RedirectionFacts($node) {
   @($node.Redirections | ForEach-Object {
     $location = $null; $locationType = $null
     if ($_ -is [System.Management.Automation.Language.FileRedirectionAst] -and $null -ne $_.Location) {
       $locationType = $_.Location.GetType().Name
-      if ($_.Location -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $_.Location -is [System.Management.Automation.Language.ConstantExpressionAst]) { $location = [string]$_.Location.Value }
+      if (Test-NullRedirection $_.Location) { $locationType = 'StaticNull' }
+      elseif ($_.Location -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $_.Location -is [System.Management.Automation.Language.ConstantExpressionAst]) { $location = [string]$_.Location.Value }
     }
     @{ type = $_.GetType().Name; location = $location; locationType = $locationType }
   })
@@ -98,7 +104,7 @@ $expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.L
   @{ expressionType = $_.Expression.GetType().Name; staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
 })
 $dynamicNodes = @($ast.FindAll({ param($n)
-  (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n)) -or
+  (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n) -and -not (Test-NullRedirection $n)) -or
   ($n -is [System.Management.Automation.Language.SubExpressionAst]) -or
   ($n -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) -or
   ($n -is [System.Management.Automation.Language.AssignmentStatementAst]) -or

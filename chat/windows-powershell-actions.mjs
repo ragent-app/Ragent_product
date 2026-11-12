@@ -430,11 +430,10 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     }
   }
   const expressions = Array.isArray(ast.expressions) ? ast.expressions : [];
-  // A conditional can be classified without evaluating it if every branch
-  // consists solely of independently verified reads. Other dynamic nodes
-  // (variables, assignments, script blocks, member invocation, loops, etc.)
-  // remain unsupported, and any write in any branch is rejected below.
-  const conditional = ast.dynamicNodes.includes('IfStatementAst');
+  // Analyze every command and expression in every conditional branch. Their
+  // normal target and operation checks still apply regardless of which branch
+  // runs. Variables, assignments, script blocks, loops, and other dynamic
+  // constructs remain unsupported here.
   if (ast.errors.length || ast.dynamicNodes.some(node => node !== 'IfStatementAst') || (!ast.commands.length && !expressions.length)) {
     return { complete: false, actions: [], reason: ast.errors.length ? 'PowerShell syntax error' : 'dynamic or unsupported PowerShell syntax' };
   }
@@ -447,6 +446,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       // output streams. It does not open a file; the command and any file
       // redirections are still independently classified below.
       if (redirect.type === 'MergingRedirectionAst') continue;
+      if (redirect.type === 'FileRedirectionAst' && redirect.locationType === 'StaticNull') continue;
       if (redirect.type !== 'FileRedirectionAst' || !['StringConstantExpressionAst', 'ConstantExpressionAst'].includes(redirect.locationType)) return 'dynamic or unsupported redirection';
       if (lacksAttestedAbsolutePath(redirect.location, context)) return 'working directory is not attested';
       const target = await resolveTarget(redirect.location, context.cwd, fsApi, context);
@@ -709,9 +709,6 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     } catch (error) {
       if (error?.code !== 'ENOENT') return { complete: false, actions, reason: 'file target cannot be inspected' };
     }
-  }
-  if (conditional && actions.some(action => action.kind !== 'read')) {
-    return { complete: false, actions, reason: 'conditional file changes require review' };
   }
   return { complete: true, actions, parserVersion: ast.parserVersion, psVersion: ast.psVersion };
 }

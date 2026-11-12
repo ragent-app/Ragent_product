@@ -201,6 +201,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 最近荣耀手机 Codex Official OAuth 运行在审批事件产生前因 refresh token 已使用而失败。用户说明 Codex 账号目前无法登录，免费档额度很少且要求不要消耗；因此本轮只做本地假传输/合成事件验收，没有重试 OAuth 或请求官方模型。手机端完整 OAuth → Ragent UI → 真实审批事件验收仍未完成；没有把 provider 的“可用”状态当作授权成功。
 - 不同 provider request id 的语义重复合并、手机端 OAuth、已部署 Windows 服务与 Linux/macOS 原生环境验收仍未完成；当前不把它们记为通过。
 
+- PowerShell 的 `2>$null` 和 `>$null` 现在识别为丢弃输出，普通命令不再因此被当成动态路径；其他动态重定向仍按原风险处理。条件语句不再因为包含普通写入或删除而整条要求审批：条件和所有分支中的动作分别经过现有策略检查，受保护目标、无法识别的动作和危险递归删除仍进入风险处理。真实 Windows Claude 和 Codex 客户端使用本机模拟模型服务，在 recommended 和 full-auto 两种模式下分别验证了普通读取重定向与条件写入自动执行；未使用真实账号额度。PowerShell 动作和共享审批门回归通过，三星真机使用隔离测试服务验证危险 Claude 操作进入审批并被拒绝。以上是指定用例的结果，不能据此推算生产审批频率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
