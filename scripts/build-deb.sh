@@ -486,6 +486,13 @@ rm -f "$APP_DIR/bin/agentoc-p2p-host-amd64" "$APP_DIR/bin/agentoc-p2p-host-arm64
 rm -f "$APP_DIR/bin/agentoc-p2p-host-darwin-arm64" "$APP_DIR/bin/agentoc-p2p-host-darwin-x64"
 rm -f "$APP_DIR/bin/agentoc-p2p-host" "$APP_DIR/bin/agentoc-p2p-host.exe"
 install -m 0755 "$P2P_HOST_BINARY" "$APP_DIR/bin/ragent-p2p-host"
+# A legacy Debian package may own this path.  The renamed package must take
+# over every owned file during dpkg's package rename, or the old package can
+# remain installed and later remove live files.  Keep a compatibility link to
+# the new binary until all legacy installations have completed the upgrade.
+if [ "$PACKAGE_NAME" = ragent ]; then
+  ln -s ragent-p2p-host "$APP_DIR/bin/agentoc-p2p-host"
+fi
 
 QRCODE_TARBALL="qrcode-terminal-${QRCODE_TERMINAL_VERSION}.tgz"
 QRCODE_CACHE_PATH="$NODE_CACHE_DIR/$QRCODE_TARBALL"
