@@ -5,6 +5,7 @@
 ## 2026-11-11 Windows 与三星补充进展
 
 - Windows 审批器已支持一部分静态 Bash 管道和常见 Git 只读参数，并区分上下文不足、配置不可信、额外权限等原因；`recommended` 与 `full-auto` 继续使用同一自动放行标准。
+- 2026-11-12 核对本机正式服务：运行目录 `G:\AgentoCapp\payload` 的源提交为 `44aebe1`，其审批文件与当前源码的哈希不同，不能将源码验收视为已部署。以提交 `eabe593` 构建了 G 盘安装候选，公开版本 `0.0.1`、内部 MSI 版本 `0.0.58`，EXE SHA-256 为 `385ce1617efd6588edb460a1bf53c8cb163c12fd902dc84ba3a80044cb761d00`；运行时审批文件完整性检查通过，安装候选未签名。用户指定的既有管理员通道对当前 `G:\AgentoCapp` 执行只读升级准入检查通过，数据布局为原位保留。候选相对已安装版本跨 211 个提交、279 个文件，且另有并行任务进行；尚未安装、重启或对正式服务执行升级后验收。
 - Windows Git 分类现支持常见的字面量 `git log --format=...` / `--pretty=format:...` 输出格式，例如 `git log -1 --format='%h %s'`。真实 Claude CLI 和 Codex App Server 分别在 recommended 与 full-auto 下触发审批回调、自动放行并返回隔离仓库的提交结果；模型服务为本机模拟端点，没有使用官方额度。Bash、PowerShell 和 Git 分类回归通过；其他未知选项仍由原有风险流程处理。
 - Claude 已支持按实际工具参数自动处理 `TaskCreate`、`TaskGet`、`TaskList`、`TaskUpdate`，包括任务状态和依赖变更；这类操作管理 Claude 的任务列表。输入不完整、含未知字段或附带额外权限仍按原有流程处理。使用本机真实 Claude CLI、隔离任务列表和本机模拟模型，分别强制这四类工具触发审批回调，recommended 与 full-auto 八种组合均自动通过并返回成功结果；读取、更新测试先创建任务再操作其实际 ID。该结果不代表真实负载频率，也未验证其他 Claude 版本的未来参数。
 - 该策略变更后，在三星 SM-S9060 使用先前构建的隔离 workbench 测试 APK 重跑真实 Windows Claude 危险请求回传：1/1 通过，手机拒绝经实际提交路由及生产 `flushClaudeBidiApprovalResponses` 回到 CLI；本机模拟模型收到工具结果。测试 APK 构建时间早于本次策略变更，Windows 审批代码为变更后的当前源码；owner 身份、网络承载及发送调度仍由夹具驱动。测试后移除了临时测试包和 USB 端口映射，正式手机应用保留。首次尝试重新构建时因 G 盘空间降至约 485 MiB 主动中止，随后改用现有 APK 完成测试。
