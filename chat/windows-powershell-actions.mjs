@@ -37,9 +37,9 @@ const BUILTIN_ALIASES = new Map([
   ['mv', 'move-item'], ['move', 'move-item'], ['mi', 'move-item'],
   ['ren', 'rename-item'], ['rni', 'rename-item'],
   ['rm', 'remove-item'], ['del', 'remove-item'], ['ri', 'remove-item'],
-  ['echo', 'write-output'], ['write', 'write-output'], ['sort', 'sort-object'], ['ft', 'format-table'],
+  ['echo', 'write-output'], ['write', 'write-output'], ['sort', 'sort-object'], ['ft', 'format-table'], ['fl', 'format-list'],
 ]);
-const FILTERS = new Set(['select-object', 'sort-object', 'format-table', 'measure-object', 'out-string', 'write-output', 'get-date', 'get-location', 'get-service', 'get-process', 'get-command']);
+const FILTERS = new Set(['select-object', 'sort-object', 'format-table', 'format-list', 'measure-object', 'out-null', 'out-string', 'write-output', 'get-date', 'get-location', 'get-service', 'get-process', 'get-command']);
 const SAFE_FILTER_PARAMS = new Set(['first', 'last', 'skip', 'unique', 'property', 'descending', 'width', 'line', 'name', 'displayname', 'noenumerate', 'id', 'module', 'commandtype', 'all', 'listimported', 'includeusername', 'autosize']);
 const SAFE_FILTER_SWITCHES = new Set(['unique', 'descending', 'noenumerate', 'all', 'listimported', 'includeusername', 'autosize']);
 const WORKSPACE_SCRIPT_TASKS = new Set(['build', 'check', 'format:check', 'format-check', 'lint', 'test', 'test:ci', 'test:unit', 'typecheck', 'type-check']);
@@ -491,7 +491,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const previous = entry.elements[index - 1];
     // Literal property names describe formatting/selection only. Keep dynamic
     // calculated properties and arbitrary list-bearing commands out of this path.
-    if (lists.length === 1 && ['select-object', 'sort-object', 'format-table'].includes(program) &&
+    if (lists.length === 1 && ['select-object', 'sort-object', 'format-table', 'format-list'].includes(program) &&
         (index === 1 || (index === 2 && previous?.kind === 'parameter' &&
           String(previous.name || '').toLowerCase() === 'property' && !previous.argumentType)) &&
         Array.isArray(entry.elements[index].values) && entry.elements[index].values.length > 0 &&

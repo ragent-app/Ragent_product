@@ -184,6 +184,11 @@ assert.equal((await inspect('Write-Output hello > $env:TEMP')).decision, 'review
 assert.equal((await inspect('Write-Output hello 2>&1')).decision, 'allow');
 assert.equal((await inspect('Write-Output hello 2>$null')).decision, 'allow');
 assert.equal((await inspect('Write-Output hello > $null')).decision, 'allow');
+assert.equal((await inspect("New-Item -ItemType File -Path 'new-fixture.txt' | Out-Null")).decision, 'allow');
+assert.equal((await inspect("New-Item -ItemType File -Path '..\\protected\\new-fixture.txt' | Out-Null")).decision, 'review');
+assert.equal((await inspect("Get-Item -LiteralPath 'readme.txt' | Format-List Name,Length | Out-String")).decision, 'allow');
+assert.equal((await inspect("Get-Item -LiteralPath '..\\protected\\secret.txt' | fl Name,Length | Out-String")).decision, 'review');
+assert.equal((await inspect("Get-Item -LiteralPath 'readme.txt' | Format-List @{Name='x';Expression={Remove-Item readme.txt}} | Out-String")).decision, 'review');
 assert.equal((await inspect("Get-Content -LiteralPath 'readme.txt' 2>$null")).decision, 'allow');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret.txt' 2>$null")).decision, 'review');
 assert.equal((await inspect('Write-Output hello 2>$env:TEMP')).decision, 'review');

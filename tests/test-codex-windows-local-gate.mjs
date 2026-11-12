@@ -61,7 +61,7 @@ if (managedRipgrep) {
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
-if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
+if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'output-filters', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
@@ -80,6 +80,7 @@ const safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
   : fileCommand === 'read-null' ? `Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
   : fileCommand === 'conditional-write' ? `if (Test-Path -LiteralPath '${fileFixture.replace(/'/g, "''")}') { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
+  : fileCommand === 'output-filters' ? `Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' | Format-List Name,Length | Out-String`
   : fileCommand === 'uninstall' ? 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact'
   : fileCommand === 'git-status' ? 'git status --short'
   : fileCommand === 'git-diff' ? 'git diff'
@@ -447,7 +448,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     const fileResult = fileCommand === 'rename'
       ? await readFile(path.join(home, 'renamed-fixture.txt'), 'utf8').catch(() => null) === 'fixture content' && !await access(fileFixture).then(() => true, () => false)
       : fileCommand === 'clear' ? await readFile(fileFixture, 'utf8').catch(() => null) === ''
-        : fileCommand === 'conditional-write' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replaceAll('\r\n', '\n') === 'changed fixture\n'
+        : ['conditional-write', 'output-filters'].includes(fileCommand) ? (await readFile(fileFixture, 'utf8').catch(() => '')).replaceAll('\r\n', '\n') === 'changed fixture\n'
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
     if (msg.params.item.exitCode !== 0 || !fileResult || (fileCommand === 'read-null' && !String(msg.params.item.aggregatedOutput || '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || (managedInstall && submissions !== 1)) {
       process.stderr.write('approved harmless command failed\n'); process.exitCode = 1;
