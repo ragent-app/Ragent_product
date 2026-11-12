@@ -228,6 +228,7 @@ assert.match(buildScript, /Built deb is missing the canonical P2P host sidecar/)
 assert.match(postinst, /retire_legacy_p2p_host_variants\(\)/);
 assert.match(postinst, /\/opt\/agentoc\/app\/bin\/agentoc-p2p-host-amd64/);
 assert.match(postinst, /\/opt\/agentoc\/app\/bin\/agentoc-p2p-host-arm64/);
+assert.match(buildScript, /install -m 0755 "\$P2P_HOST_BINARY" "\$APP_DIR\/bin\/ragent-p2p-host"/);
 
 execFileSync('bash', ['-n', join(root, 'scripts/build-deb.sh')]);
 

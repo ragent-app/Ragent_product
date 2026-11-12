@@ -18,7 +18,7 @@ const forbidden = [
   /^tests\/fixtures\/risk-datasets\/taglio4-[^/]+\.jsonl$/i,
   /\.bak-[^/]+$/i,
   /^android\/docs\/(?!README\.md$)/i,
-  /^bin\/agentoc-p2p-host/i,
+  /^bin\/(?:agentoc|ragent)-p2p-host/i,
   /(^|\/)(?:node_modules|\.gradle|\.kotlin|build)\//i,
   /(^|\/)(?:google-services\.json|keystore\.properties)$/i,
   /(^|\/)\.env(?:$|\.(?!example$))/i,

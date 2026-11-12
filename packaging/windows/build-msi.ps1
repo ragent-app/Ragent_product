@@ -238,13 +238,13 @@ try {
     if (-not (Test-Path -LiteralPath $p2pBuilder -PathType Leaf)) { throw 'Windows P2P host builder is missing.' }
     $stagedP2pBin = Join-Path $payloadRoot 'bin'
     New-Item -ItemType Directory -Force -Path $stagedP2pBin | Out-Null
-    $stagedP2pHost = Join-Path $stagedP2pBin 'agentoc-p2p-host.exe'
+    $stagedP2pHost = Join-Path $stagedP2pBin 'ragent-p2p-host.exe'
     & $p2pBuilder -SourceRoot $payloadRoot -OutputPath $stagedP2pHost
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $stagedP2pHost -PathType Leaf)) {
         throw 'Windows P2P host staging failed.'
     }
     foreach ($legacyP2pName in @(
-        'agentoc-p2p-host', 'agentoc-p2p-host-amd64', 'agentoc-p2p-host-arm64',
+        'agentoc-p2p-host', 'agentoc-p2p-host.exe', 'agentoc-p2p-host-amd64', 'agentoc-p2p-host-arm64',
         'agentoc-p2p-host-amd64.exe', 'agentoc-p2p-host-arm64.exe'
     )) {
         $legacyP2pPath = Join-Path $stagedP2pBin $legacyP2pName

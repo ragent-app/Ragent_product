@@ -29,6 +29,7 @@ scripts/windows-a0-smoke.mjs
 /android/docs/*
 !/android/docs/README.md
 /bin/agentoc-p2p-host*
+/bin/ragent-p2p-host*
 /cloudflare/email-worker/wrangler.jsonc
 .dev.vars
 .wrangler/

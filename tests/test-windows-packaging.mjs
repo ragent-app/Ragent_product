@@ -193,6 +193,7 @@ assert.match(build, /Join-Path \$qrcodeRuntimeRoot 'qrcode-terminal\.cmd'/);
 assert.match(nodeToolchain, /PayloadRoot 'node\.exe'/);
 assert.match(build, /build-p2p-host\.ps1/);
 assert.match(build, /agentoc-p2p-host\.exe/);
+assert.match(build, /ragent-p2p-host\.exe/);
 assert.match(build, /agentoc-p2p-host-amd64\.exe/);
 assert.match(build, /Remove-Item/);
 assert.match(p2pBuilder, /GOOS/);

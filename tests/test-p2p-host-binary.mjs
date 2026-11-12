@@ -39,9 +39,13 @@ const writePe = (path, machine) => {
 
 const canonical = join(bin, 'agentoc-p2p-host');
 const variant = join(bin, 'agentoc-p2p-host-amd64');
+const renamed = join(bin, 'ragent-p2p-host');
 
 writeElf(canonical, currentMachine);
 writeElf(variant, currentMachine);
+writeElf(renamed, currentMachine);
+assert.equal(resolveP2PHostBinary(root, { platform: 'linux' }), renamed, 'renamed package binary wins over a legacy binary');
+rmSync(renamed);
 assert.equal(resolveP2PHostBinary(root, { platform: 'linux' }), canonical, 'canonical package binary wins over a stale same-architecture variant');
 
 writeElf(canonical, foreignMachine);
@@ -49,6 +53,7 @@ assert.equal(resolveP2PHostBinary(root, { platform: 'linux' }), variant, 'source
 
 const windowsCanonical = join(bin, 'agentoc-p2p-host.exe');
 const windowsVariant = join(bin, 'agentoc-p2p-host-amd64.exe');
+const windowsRenamed = join(bin, 'ragent-p2p-host.exe');
 writeElf(windowsCanonical, currentMachine);
 writePe(windowsVariant, 0x8664);
 assert.equal(
@@ -57,6 +62,9 @@ assert.equal(
   'Windows must reject an ELF .exe and fall back to a matching PE variant',
 );
 writePe(windowsCanonical, 0x8664);
+writePe(windowsRenamed, 0x8664);
+assert.equal(resolveP2PHostBinary(root, { platform: 'win32', arch: 'x64' }), windowsRenamed, 'Windows prefers the renamed package binary');
+rmSync(windowsRenamed);
 assert.equal(
   resolveP2PHostBinary(root, { platform: 'win32', arch: 'x64' }),
   windowsCanonical,

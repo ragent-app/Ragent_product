@@ -374,8 +374,9 @@ lipo -verify_arch "$ARCH" "$P2P_HOST_BINARY"
 mkdir -p "$APP_DIR/bin"
 rm -f "$APP_DIR/bin/agentoc-p2p-host-amd64" "$APP_DIR/bin/agentoc-p2p-host-arm64"
 rm -f "$APP_DIR/bin/agentoc-p2p-host-darwin-arm64" "$APP_DIR/bin/agentoc-p2p-host-darwin-x64"
-install -m 0755 "$P2P_HOST_BINARY" "$APP_DIR/bin/agentoc-p2p-host"
-P2P_BINARY_SHA="$(shasum -a 256 "$APP_DIR/bin/agentoc-p2p-host" | awk '{print $1}')"
+rm -f "$APP_DIR/bin/agentoc-p2p-host" "$APP_DIR/bin/agentoc-p2p-host.exe"
+install -m 0755 "$P2P_HOST_BINARY" "$APP_DIR/bin/ragent-p2p-host"
+P2P_BINARY_SHA="$(shasum -a 256 "$APP_DIR/bin/ragent-p2p-host" | awk '{print $1}')"
 
 # ── 5. Codex engine (launcher + darwin native, same release) ─────────────────
 CODEX_MAIN_TARBALL="codex-${CODEX_VERSION}.tgz"
@@ -477,7 +478,7 @@ if [ -n "$SIGN_IDENTITY" ]; then
   # with the app's narrow JIT entitlement before notarization.
   codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
     --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/node"
-  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR/bin/agentoc-p2p-host"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR/bin/ragent-p2p-host"
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
   codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
@@ -498,13 +499,13 @@ if [ -n "$SIGN_IDENTITY" ]; then
   SIGNING_STATUS=developer-id
 else
   codesign --force --sign - --entitlements "$ROOT/packaging/macos/entitlements.plist" "$CONTENTS/Resources/runtime/node"
-  codesign --force --sign - "$APP_DIR/bin/agentoc-p2p-host"
+  codesign --force --sign - "$APP_DIR/bin/ragent-p2p-host"
   codesign --force --sign - "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
   codesign --force --sign - "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
   codesign --force --sign - "$STAGE/Ragent.app"
 fi
 codesign --verify --strict "$CONTENTS/Resources/runtime/node"
-codesign --verify --strict "$APP_DIR/bin/agentoc-p2p-host"
+codesign --verify --strict "$APP_DIR/bin/ragent-p2p-host"
 codesign --verify --strict "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
 codesign --verify --strict "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
 codesign --verify --deep --strict "$MANAGER"
@@ -537,7 +538,7 @@ for required in \
   "$CONTENTS/Resources/runtime/claude" \
   "$APP_DIR/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE/package.json" \
   "$APP_DIR/bin/claude" \
-  "$APP_DIR/bin/agentoc-p2p-host" \
+  "$APP_DIR/bin/ragent-p2p-host" \
   "$APP_DIR/static/chat/ui.js" \
   "$APP_DIR/templates/chat.html"
 do
