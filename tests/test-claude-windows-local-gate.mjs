@@ -90,7 +90,7 @@ const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-
 const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-file-')) : '';
 const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-git-')) : '';
 if (outsideGitRoot) { execFileSync('git', ['init', '-q'], { cwd: outsideGitRoot, windowsHide: true }); await writeFile(path.join(outsideGitRoot, 'fixture.md'), 'outside git fixture\n'); }
-const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || (readCase === 'conditional' && process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1') || cliReadCase === 'asset' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
+const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || (readCase === 'conditional' && (process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1' || process.env.AGENTOC_QA_BOUND_NAME_LIST === '1')) || cliReadCase === 'asset' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
 if (outsideReadRoot) await writeFile(path.join(outsideReadRoot, 'fixture.md'), 'local read fixture\n');
 const deleteTarget = path.join(outsideCase ? outsideRoot : protectedCase ? protectedRoot : root, unicodeFixture ? '构建 输出' : 'delete-fixture');
 const keepFile = path.join(root, 'keep-fixture.txt');
@@ -127,7 +127,9 @@ const bashArtifact = artifact.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.
 const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 const bashGitRoot = outsideGitRoot.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 let readCommand = readCase === 'conditional'
-  ? process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
+  ? process.env.AGENTOC_QA_BOUND_NAME_LIST === '1'
+    ? `Get-ChildItem -Path '${path.join(outsideReadRoot, '*.md').replaceAll("'", "''")}' -Force${process.env.AGENTOC_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.AGENTOC_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
+    : process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
     ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(outsideReadRoot) + path.sep).replaceAll("'", "''")}' + '${path.basename(outsideReadRoot).replaceAll("'", "''")}')` : `'${outsideReadRoot.replaceAll("'", "''")}'`}; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
     : `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
   : readCase === 'conditional-write' ? `if (Test-Path -LiteralPath '${artifact.replaceAll("'", "''")}') { Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`

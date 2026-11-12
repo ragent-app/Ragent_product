@@ -11,6 +11,7 @@ if (process.platform !== 'win32') {
 }
 const plain = await parseWindowsPowerShellAst('Get-Content -LiteralPath "a b.txt"');
 assert.equal(plain.errors.length, 0);
+assert.equal(plain.assignmentCount, 0);
 assert.deepEqual(plain.chainOperators, []);
 assert.equal(plain.commands[0].name, 'Get-Content');
 assert.deepEqual(plain.commands[0].elements.map((x) => x.kind), ['literal', 'parameter', 'literal']);
@@ -35,6 +36,7 @@ const literalRedirect = await parseWindowsPowerShellAst("'hello' > output.md");
 assert.equal(literalRedirect.expressions[0].expressionType, 'StringConstantExpressionAst');
 assert.equal(literalRedirect.expressions[0].redirectFacts[0].location, 'output.md');
 const dynamic = await parseWindowsPowerShellAst('Get-Content $env:TEMP');
+assert.equal((await parseWindowsPowerShellAst("$p='G:\\fixture'; Get-Item -LiteralPath $p")).assignmentCount, 1);
 const confirmFalse = await parseWindowsPowerShellAst('Remove-Item -Confirm:$false fixture.txt');
 assert.deepEqual(confirmFalse.dynamicNodes, []);
 assert.equal(confirmFalse.commands[0].elements[1].argumentType, 'StaticConfirmFalse');

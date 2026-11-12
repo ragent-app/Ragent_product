@@ -239,7 +239,7 @@ $dynamicNodes = @($ast.FindAll({ param($n)
   ($n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and @($n.NestedExpressions).Count -gt 0))
 }, $true) | ForEach-Object { $_.GetType().Name })
 $errorMessages = @($errors | ForEach-Object { $_.Message })
-@{ commands = $commands; expressions = $expressions; dynamicNodes = $dynamicNodes; errors = $errorMessages; chainOperators = $chainOperators; psVersion = $PSVersionTable.PSVersion.ToString() } | ConvertTo-Json -Depth 12 -Compress
+@{ commands = $commands; expressions = $expressions; dynamicNodes = $dynamicNodes; errors = $errorMessages; chainOperators = $chainOperators; assignmentCount = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)).Count; psVersion = $PSVersionTable.PSVersion.ToString() } | ConvertTo-Json -Depth 12 -Compress
 `;
 
 export const WINDOWS_POWERSHELL_AST_VERSION = 'powershell-native-ast/v1';

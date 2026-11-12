@@ -17,6 +17,7 @@ export const WINDOWS_APPROVAL_PAYLOAD_FILES = Object.freeze([
   'native/windows-safe-delete/tree_windows.go', 'native/windows-safe-delete/cmd/agentoc-safe-delete/main_windows.go',
   'native/windows-safe-delete/executable_path_pin_windows.go', 'native/windows-safe-delete/executable_pin_windows.go',
   'native/windows-safe-delete/read_set_pin_windows.go', 'native/windows-safe-delete/cmd/agentoc-safe-search/main_windows.go',
+  'native/windows-safe-delete/directory_listing_pin_windows.go', 'chat/windows-wildcard-list-bridge.mjs',
   'packaging/windows/build-safe-search.ps1',
   'packaging/windows/build-safe-delete.ps1', 'chat/windows-safe-delete-plan.mjs', 'chat/windows-safe-delete-bridge.mjs', 'chat/codex-windows-safe-delete-hook.mjs',
   'native/windows-cli-read-bridge/go.mod', 'native/windows-cli-read-bridge/main.go',

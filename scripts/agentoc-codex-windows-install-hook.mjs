@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { buildCodexWindowsInstallHookDecision } from '../chat/codex-windows-install-hook.mjs';
 import { buildCodexWindowsSafeDeleteHookDecision } from '../chat/codex-windows-safe-delete-hook.mjs';
 import { buildCodexWindowsRipgrepHookDecision, buildCodexWindowsSelectStringGlobHookDecision } from '../chat/windows-ripgrep-bridge.mjs';
+import { buildCodexWindowsWildcardNameHookDecision } from '../chat/windows-wildcard-list-bridge.mjs';
 import { buildCodexWindowsElevationGuidance } from '../chat/windows-elevation-guidance.mjs';
 import { buildCodexWindowsCliAssetHookDecision } from '../chat/codex-windows-cli-asset-hook.mjs';
 
@@ -13,6 +14,9 @@ export async function evaluateCodexWindowsHook(event, env = process.env) {
   let safeDeleteContext;
   try { safeDeleteContext = JSON.parse(env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT || 'null'); } catch { safeDeleteContext = null; }
   if (safeDeleteContext) {
+    const listing = await buildCodexWindowsWildcardNameHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
+      helperPath: safeDeleteContext.searchHelperPath });
+    if (listing.hookSpecificOutput) return listing;
     const search = await buildCodexWindowsSelectStringGlobHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
       helperPath: safeDeleteContext.searchHelperPath });
     if (search.hookSpecificOutput) return search;

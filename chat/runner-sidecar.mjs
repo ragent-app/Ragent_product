@@ -121,6 +121,7 @@ import {
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
 import { buildClaudeWindowsRipgrepBridge, buildWindowsSelectStringGlobBridge, verifyCodexWindowsBoundSearchApproval } from './windows-ripgrep-bridge.mjs';
+import { buildWindowsWildcardNameBridge, verifyCodexWindowsWildcardNameApproval } from './windows-wildcard-list-bridge.mjs';
 import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
@@ -2792,7 +2793,11 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     && await verifyCodexWindowsCliAssetApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
   const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsBoundSearchApproval({ approval, state, helperPath: searchHelperPath });
-  const gateDecision = controlledSearch
+  const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+    && await verifyCodexWindowsWildcardNameApproval({ approval, state, helperPath: searchHelperPath });
+  const gateDecision = controlledListing
+    ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'pinned local directory name listing' }
+    : controlledSearch
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'handle-bound verified search' }
     : controlledAsset
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session asset publication' }
@@ -2984,6 +2989,20 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
 
   const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
+  const listingBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+    ? await buildWindowsWildcardNameBridge({ approval, state, helperPath: searchHelperPath }) : null;
+  if (listingBridge) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: listingBridge.updatedCommand } });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound wildcard listing response');
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'pinned local directory name listing', ...riskAuditFields(listingBridge.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, listingBridge.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
+  }
   const searchGlobBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.reason === 'wildcard search requires bound targets'
     ? await buildWindowsSelectStringGlobBridge({ approval, state, helperPath: searchHelperPath }) : null;
   if (searchGlobBridge) {
