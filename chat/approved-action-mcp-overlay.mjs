@@ -261,7 +261,7 @@ function safeServerName(runId, kind = 'actions') {
     .update(hashInput, 'utf8')
     .digest('hex')
     .slice(0, 16);
-  return `agentoc_${normalizedKind}_${suffix}`;
+  return `ragent_${normalizedKind}_${suffix}`;
 }
 
 function tomlString(value) {

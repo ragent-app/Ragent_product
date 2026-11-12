@@ -4178,7 +4178,7 @@ async function main() {
         .map((key) => [key, spawnEnv[key]]),
     );
     acpMcpServers = [{
-      name: 'agentoc-browser',
+      name: 'ragent-browser',
       command: process.execPath,
       args: [join(PROJECT_ROOT, 'scripts', 'agentoc-browser-mcp-server.mjs')],
       env: browserEnv,

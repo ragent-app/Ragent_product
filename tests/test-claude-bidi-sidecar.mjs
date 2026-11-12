@@ -112,7 +112,7 @@ function result(text, extra = {}) {
   });
 }
 function managedMcpServerName() {
-  return 'agentoc_actions_' + crypto.createHash('sha256')
+  return 'ragent_actions_' + crypto.createHash('sha256')
     .update(process.env.AGENTOC_RUN_ID || 'run', 'utf8')
     .digest('hex')
     .slice(0, 16);

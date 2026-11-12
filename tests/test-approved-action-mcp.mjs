@@ -246,7 +246,7 @@ await writeFile(join(codexOverlay.root, 'rules', 'owner.rules'), '# isolated cha
 assert.equal(await readFile(join(codexSource, 'rules', 'owner.rules'), 'utf8'), ownerRule);
 const overlayConfig = await readFile(codexOverlay.configPath, 'utf8');
 assert.match(overlayConfig, /mcp_servers\.user_tool/);
-assert.match(overlayConfig, /mcp_servers\.agentoc_actions_/);
+assert.match(overlayConfig, /mcp_servers\.ragent_actions_/);
 assert.match(overlayConfig, /agentoc-approved-actions-mcp\.mjs/);
 // Regression: codex MCP children do not inherit the parent env. The run-scoped
 // bindings must be projected into the [mcp_servers.X.env] table or the script
@@ -363,9 +363,9 @@ const multiOverlay = await prepareManagedMcpOverlay({
 });
 assert.equal(multiOverlay.serverNames.length, 3);
 const multiConfig = await readFile(multiOverlay.configPath, 'utf8');
-assert.match(multiConfig, /mcp_servers\.agentoc_actions_/);
-assert.match(multiConfig, /mcp_servers\.agentoc_browser_/);
-assert.match(multiConfig, /mcp_servers\.agentoc_broker_/);
+assert.match(multiConfig, /mcp_servers\.ragent_actions_/);
+assert.match(multiConfig, /mcp_servers\.ragent_browser_/);
+assert.match(multiConfig, /mcp_servers\.ragent_broker_/);
 assert.match(multiConfig, /AGENTOC_APPROVED_ACTIONS_TOKEN = "action-token"/);
 assert.match(multiConfig, /AGENTOC_BROWSER_TOKEN = "browser-token"/);
 assert.match(multiConfig, /AGENTOC_WINDOWS_BROKER_TOKEN = "broker-token"/);
@@ -408,7 +408,7 @@ const claudeOverlay = await prepareApprovedActionMcpOverlay({
 assert.ok(claudeOverlay);
 const claudeArgs = buildClaudeBidiArgs({ mcpConfigPath: claudeOverlay.configPath });
 assert.deepEqual(claudeArgs.slice(-2), ['--mcp-config', claudeOverlay.configPath]);
-assert.match(await readFile(claudeOverlay.configPath, 'utf8'), /agentoc_actions_/);
+assert.match(await readFile(claudeOverlay.configPath, 'utf8'), /ragent_actions_/);
 await claudeOverlay.cleanup();
 
 console.log('test-approved-action-mcp: ok');

@@ -158,13 +158,13 @@ function send(message) {
   process.stdout.write(JSON.stringify(message) + '\\n');
 }
 function managedMcpServerName() {
-  return 'agentoc_actions_' + crypto.createHash('sha256')
+  return 'ragent_actions_' + crypto.createHash('sha256')
     .update(process.env.AGENTOC_RUN_ID || 'run', 'utf8')
     .digest('hex')
     .slice(0, 16);
 }
 function managedBrokerServerName() {
-  return 'agentoc_broker_' + crypto.createHash('sha256').update((process.env.AGENTOC_RUN_ID || 'run') + ':broker', 'utf8').digest('hex').slice(0, 16);
+  return 'ragent_broker_' + crypto.createHash('sha256').update((process.env.AGENTOC_RUN_ID || 'run') + ':broker', 'utf8').digest('hex').slice(0, 16);
 }
 function threadPayload(id) {
   return {
