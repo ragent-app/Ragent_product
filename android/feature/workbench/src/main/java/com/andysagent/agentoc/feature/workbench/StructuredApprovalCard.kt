@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.contentDescription
@@ -81,6 +82,7 @@ fun StructuredApprovalCard(
     val selected = actionable.filter { it.selected }
     val passkeyRequired = selected.any { it.needsPasskey }
     val serverManagedInstall = state.actions.any { it.category == "software_install" }
+    val executorUnavailable = state.executorUnavailableReasonCode == "macos_administrator_unavailable"
 
 
     AgentoFrostedGlassBox(
@@ -155,6 +157,9 @@ fun StructuredApprovalCard(
             if (state.reason.isNotBlank()) {
                 Text(text = state.reason, style = AgentocTextStyles.agentBody, color = colors.secondaryContent)
             }
+            if (executorUnavailable) {
+                Text(text = stringResource(R.string.approval_macos_executor_unavailable), style = AgentocTextStyles.caption, color = colors.secondaryContent)
+            }
             val metadata = listOfNotNull(
                 state.batchId?.takeIf { it.isNotBlank() }?.let { "Batch $it" },
                 state.permissionMode?.takeIf { it.isNotBlank() },
@@ -177,20 +182,20 @@ fun StructuredApprovalCard(
                     StructuredApprovalActionRow(
                         action = action,
                         isDark = isDark,
-                        enabled = !state.resolving && action.state in selectableActionStates,
+                        enabled = !executorUnavailable && !state.resolving && action.state in selectableActionStates,
                         onSelected = { onActionSelected(action.id, it) },
                     )
                 }
             }
 
-            if (passkeyRequired) {
+            if (passkeyRequired && !executorUnavailable) {
                 Text(
                     text = "Your phone's system passkey will open to approve the selected host action.",
                     style = AgentocTextStyles.caption,
                     color = colors.secondaryContent,
                 )
             }
-            if (serverManagedInstall) {
+            if (serverManagedInstall && !executorUnavailable) {
                 Text(
                     text = "Software installs are handled automatically by the host.",
                     style = AgentocTextStyles.caption,
@@ -216,7 +221,7 @@ fun StructuredApprovalCard(
                     destructive = true,
                     hapticFeedback = false,
                 )
-                AgentoButton(
+                if (!executorUnavailable) AgentoButton(
                     text = state.approveLabel,
                     onClick = {
                         AgentoHaptics.performConfirm(hapticView)

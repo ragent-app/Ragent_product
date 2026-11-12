@@ -1286,6 +1286,10 @@ internal fun ApprovalCardContent(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
+        if (approval.executorUnavailableReasonCode == "macos_administrator_unavailable") {
+            Text(stringResource(R.string.approval_macos_executor_unavailable),
+                style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
+        }
 
         val scopeDetails = buildList {
             approval.reason.takeIf { it.isNotBlank() && it != description && it != "The agent is waiting for your decision before continuing." }
@@ -1356,7 +1360,7 @@ internal fun ApprovalCardContent(
                 }
             }
 
-            Surface(
+            if (approval.executorUnavailableReasonCode != "macos_administrator_unavailable") Surface(
                 onClick = onApprove,
                 enabled = !approval.resolving,
                 modifier = Modifier.weight(1f).heightIn(min = 52.dp),

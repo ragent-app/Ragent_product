@@ -3716,6 +3716,7 @@ private fun Approval.toUiState(): PermissionRequestUiState = PermissionRequestUi
     grantRoot = grantRoot,
     permissionsJson = permissionsJson,
     explanation = explanation?.toUiState(),
+    executorUnavailableReasonCode = executorUnavailableReasonCode,
     actions = actions.map { action ->
         ApprovalActionUiState(
             id = action.id,

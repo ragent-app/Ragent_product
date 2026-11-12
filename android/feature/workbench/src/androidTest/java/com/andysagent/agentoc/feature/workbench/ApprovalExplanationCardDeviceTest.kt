@@ -7,19 +7,45 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import java.util.Locale
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.andysagent.agentoc.core.agentui.ApprovalExplanationUiState
+import com.andysagent.agentoc.core.agentui.ApprovalActionUiState
 import com.andysagent.agentoc.core.agentui.PermissionRequestUiState
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ApprovalExplanationCardDeviceTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun unavailableMacSessionCardAllowsOnlyDenial() {
+        var denied = false
+        val approval = PermissionRequestUiState(id = "mac", title = "Bash", reason = "Restart service",
+            approveLabel = "Test approve", denyLabel = "Test deny", executorUnavailableReasonCode = "macos_administrator_unavailable")
+        rule.setContent { AgentocTheme { ApprovalCardContent(approval, {}, { denied = true }, {}) } }
+        rule.onNodeWithText(rule.activity.getString(R.string.approval_macos_executor_unavailable)).assertIsDisplayed()
+        rule.onNodeWithText("Test approve").assertDoesNotExist()
+        rule.onNodeWithText("Test deny").performClick()
+        rule.runOnIdle { assertTrue(denied) }
+    }
+
+    @Test fun unavailableMacStructuredCardAllowsOnlyDenial() {
+        var denied = false
+        val approval = PermissionRequestUiState(id = "mac-batch", title = "Batch", reason = "Restart service",
+            approveLabel = "Test approve", denyLabel = "Test deny", executorUnavailableReasonCode = "macos_administrator_unavailable",
+            actions = listOf(ApprovalActionUiState(id = "op", description = "Restart", category = "privileged_other")))
+        rule.setContent { AgentocTheme { StructuredApprovalCard(approval, { _, _ -> }, {}, { denied = true }) } }
+        rule.onNodeWithText(rule.activity.getString(R.string.approval_macos_executor_unavailable)).assertIsDisplayed()
+        rule.onNodeWithText("Test approve").assertDoesNotExist()
+        rule.onNodeWithText("Test deny").performClick()
+        rule.runOnIdle { assertTrue(denied) }
+    }
 
     @Test fun sessionCardShowsLocalizedActionAndProviderDescription() {
         val approval = PermissionRequestUiState(id = "a", title = "Bash", reason = "Read example", command = "if true; then rm example; fi",

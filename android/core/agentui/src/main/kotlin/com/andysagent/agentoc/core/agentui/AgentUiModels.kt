@@ -53,6 +53,7 @@ data class PermissionRequestUiState(
     val grantRoot: String? = null,
     val permissionsJson: String? = null,
     val explanation: ApprovalExplanationUiState? = null,
+    val executorUnavailableReasonCode: String? = null,
 )
 
 @Immutable
