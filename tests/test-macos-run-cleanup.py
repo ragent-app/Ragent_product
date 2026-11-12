@@ -45,6 +45,12 @@ time.sleep(120)
             except (FileNotFoundError, json.JSONDecodeError):
                 time.sleep(0.1)
         assert len(pids) == 4, "fixture did not start"
+        # A same-user process beneath the app-server is not a direct child of
+        # this helper's caller and must not become a cleanup root.
+        rejected = subprocess.run([str(helper), str(pids[0]), "run-cancel-a"], check=False)
+        assert rejected.returncode == 65, f"unrelated root returned {rejected.returncode}"
+        assert parent.poll() is None, "shared parent was stopped by rejected cleanup"
+        os.kill(pids[0], 0)
         result = subprocess.run([str(helper), str(parent.pid), "run-cancel-a"], check=False)
         assert result.returncode == 0, f"cleanup returned {result.returncode}"
         def alive(pid):

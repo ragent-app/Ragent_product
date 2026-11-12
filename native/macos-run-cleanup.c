@@ -109,7 +109,12 @@ int main(int argc, char **argv) {
   }
   pid_t root = (pid_t)parsed;
   struct process_info root_info;
-  if (root == getpid() || !info(root, &root_info) || root_info.uid != getuid()) return 65;
+  /* The broker starts both the upstream app-server and this helper. A PID
+   * alone can be stale or reused: never accept an unrelated same-user process
+   * as the root of a cleanup scan. Recheck this relationship before signals. */
+  pid_t caller = getppid();
+  if (caller <= 1 || root == getpid() || !info(root, &root_info) ||
+      root_info.uid != getuid() || root_info.ppid != caller) return 65;
   int bytes = proc_listallpids(NULL, 0);
   if (bytes <= 0 || bytes > MAX_PROCESSES) return 70;
   size_t capacity = (size_t)bytes + 256;
@@ -144,7 +149,10 @@ int main(int argc, char **argv) {
     }
     if (!changed) break;
   }
-  if (!same_process(&root_info)) { free(items); return 65; }
+  struct process_info current_root;
+  if (getppid() != caller || !info(root, &current_root) || current_root.ppid != caller ||
+      current_root.uid != root_info.uid || current_root.start_sec != root_info.start_sec ||
+      current_root.start_usec != root_info.start_usec) { free(items); return 65; }
   for (size_t i = 0; i < count; i++) {
     if (items[i].marked && same_process(&items[i]) && kill(items[i].pid, SIGTERM) != 0 && errno != ESRCH) incomplete = 1;
   }
