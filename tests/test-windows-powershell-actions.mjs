@@ -19,6 +19,10 @@ await mkdir(path.join(workspace, 'existing-dest', 'folder', '.ssh'), { recursive
 await mkdir(path.join(workspace, 'sensitive-folder', '.ssh'), { recursive: true });
 await mkdir(path.join(workspace, 'build', 'nested'), { recursive: true });
 await mkdir(path.join(workspace, 'build-sensitive', '.ssh'), { recursive: true });
+await mkdir(path.join(workspace, 'glob-read'));
+await writeFile(path.join(workspace, 'glob-read', 'public.md'), 'fixture');
+await writeFile(path.join(workspace, 'glob-read', 'public.txt'), 'fixture');
+await writeFile(path.join(workspace, 'glob-read', '.env.txt'), 'fixture');
 await writeFile(path.join(workspace, 'readme.txt'), 'fixture');
 await writeFile(path.join(workspace, 'another.txt'), 'fixture');
 await writeFile(path.join(root, 'ordinary.txt'), 'outside fixture');
@@ -121,10 +125,10 @@ assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
 assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
-for (const command of ["Select-String -Path readme.txt -Pattern fixture", "Select-String fixture readme.txt", "Select-String -LiteralPath '..\\ordinary.txt' -Pattern fixture -SimpleMatch"]) {
+for (const command of ["Select-String -Path readme.txt -Pattern fixture", "Select-String fixture readme.txt", "Select-String -LiteralPath '..\\ordinary.txt' -Pattern fixture -SimpleMatch", "Select-String -Path 'glob-read\\*.md' -Pattern fixture", "Select-String -Path '..\\ordinary.*' -Pattern fixture", "Select-String -Path 'glob-read\\no-match-*.md' -Pattern fixture"]) {
   assert.equal((await inspect(command)).decision, 'allow', `${command}: ordinary files can be searched`);
 }
-for (const command of ["Select-String -Path '..\\protected\\secret' -Pattern fixture", "Select-String -Path '*.txt' -Pattern fixture", "Select-String -LiteralPath ordinary-link -Pattern fixture"]) {
+for (const command of ["Select-String -Path '..\\protected\\secret' -Pattern fixture", "Select-String -Path 'glob-read\\*.txt' -Pattern fixture", "Select-String -Path '..\\protected\\*.txt' -Pattern fixture", "Select-String -LiteralPath ordinary-link -Pattern fixture"]) {
   assert.equal((await inspect(command)).decision, 'review', `${command}: file scope still needs checking`);
 }
 for (const command of ["winget list --id Microsoft.VisualStudioCode --exact --disable-interactivity | Select-String 'Visual Studio'", "winget.exe list --source winget | Select-String -Pattern 'example' -SimpleMatch", "'text' | Select-String 'text'", "(winget list --id Example.App | Select-String 'Example')"]) {

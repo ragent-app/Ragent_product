@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { lstat, realpath, readdir } from 'node:fs/promises';
-import { parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
+import { expandWindowsPowerShellGlob, parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
 import { systemPathRootsForPlatform } from './risk-policy.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
@@ -415,7 +415,7 @@ async function inspectRecursiveTarget(target, context, fsApi, {
 }
 
 /** Converts native AST into bounded effects. It never executes the command. */
-export async function analyzeWindowsPowerShell(command, context = {}, { parse = parseWindowsPowerShellAst, fsApi = { lstat, realpath, readdir }, executable } = {}) {
+export async function analyzeWindowsPowerShell(command, context = {}, { parse = parseWindowsPowerShellAst, expandGlob = expandWindowsPowerShellGlob, fsApi = { lstat, realpath, readdir }, executable } = {}) {
   let ast;
   try { ast = await parse(command, { executable }); } catch (error) {
     return { complete: false, actions: [], reason: 'PowerShell parser unavailable', error: error.message };
@@ -437,7 +437,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     segments.push(command.slice(offset).trim());
     if (segments.every(Boolean)) {
       const results = [];
-      for (const segment of segments) results.push(await analyzeWindowsPowerShell(segment, context, { parse, fsApi, executable }));
+      for (const segment of segments) results.push(await analyzeWindowsPowerShell(segment, context, { parse, expandGlob, fsApi, executable }));
       if (results.every((result) => result.complete && result.actions.length)) {
         return { complete: true, actions: results.flatMap((result) => result.actions),
           parserVersion: ast.parserVersion, psVersion: ast.psVersion, chainOperator: 'AndAnd' };
@@ -606,12 +606,36 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
         return { complete: false, actions, reason: 'unsupported Select-String arguments' };
       }
       const filePath = namedPath || args.positional[expectedPositionals];
-      if ((!filePath && entry.pipelineInput !== true) || (filePath && entry.pipelineInput === true) ||
-          (filePath && !args.named.has('literalpath') && /[*?\[\]]/.test(filePath))) {
+      if ((!filePath && entry.pipelineInput !== true) || (filePath && entry.pipelineInput === true)) {
         return { complete: false, actions, reason: 'unsupported Select-String arguments' };
       }
       if (filePath) {
-        const files = await analyzeWindowsFileChanges([{ path: filePath, kind: 'read' }], context, { fsApi });
+        let paths = [filePath];
+        if (!args.named.has('literalpath') && /[*?\[\]]/.test(filePath)) {
+          if (typeof context.cwd !== 'string' || !win.isAbsolute(context.cwd) ||
+              (context.requireAbsolutePaths && !/^[a-z]:[\\/]/i.test(filePath)) ||
+              /[`$]/.test(filePath) || /^[~]/.test(filePath) || /^(?:\\\\[?.]\\|\\\\)/.test(filePath) ||
+              /^[a-z]:[^\\/]/i.test(filePath) ||
+              filePath.split(/[\\/]+/).some((part, index, all) => part === '..' && all.slice(0, index).some(value => /[*?\[\]]/.test(value)))) {
+            return { complete: false, actions, reason: 'wildcard search path is not attested' };
+          }
+          const absolute = win.resolve(context.cwd, filePath);
+          const parts = absolute.slice(3).split('\\');
+          const wildcardIndex = parts.findIndex(part => /[*?\[\]]/.test(part));
+          if (!/^[a-z]:\\/i.test(absolute) || absolute.slice(2).includes(':') || wildcardIndex < 0 ||
+              parts.some(part => /[. ]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(part))) {
+            return { complete: false, actions, reason: 'wildcard search path is invalid' };
+          }
+          const prefix = win.join(win.parse(absolute).root, ...parts.slice(0, wildcardIndex));
+          const parent = await resolveTarget(prefix, context.cwd, fsApi, context);
+          if (!parent?.directory || isProtected(parent, context, { allowOrdinarySystemRead: true })) {
+            return { complete: false, actions, reason: 'wildcard search directory needs review' };
+          }
+          try { paths = await expandGlob(absolute, { executable }); }
+          catch { return { complete: false, actions, reason: 'wildcard search targets cannot be inspected' }; }
+          if (!paths.length) { actions.push({ kind: 'read', program, target: null }); continue; }
+        }
+        const files = await analyzeWindowsFileChanges(paths.map(path => ({ path, kind: 'read' })), context, { fsApi });
         if (!files.complete) return { ...files, actions: [...actions, ...files.actions] };
         actions.push(...files.actions.map(action => ({ ...action, program })));
         continue;

@@ -94,7 +94,7 @@ if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
 const safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
   : fileCommand === 'read-null' ? `Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
-  : fileCommand === 'select-string' ? `Select-String -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Pattern 'fixture content'`
+  : fileCommand === 'select-string' ? `Select-String ${process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? path.join(outsideWriteRoot, '*.txt') : fileFixture).replace(/'/g, "''")}' -Pattern 'fixture content'`
   : fileCommand === 'conditional-write' ? `if (Test-Path -LiteralPath '${fileFixture.replace(/'/g, "''")}') { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : fileCommand === 'output-filters' ? `Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' | Format-List Name,Length | Out-String`
   : fileCommand === 'where-filter' ? `Get-ChildItem -LiteralPath '${home.replace(/'/g, "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like 'ordinary-*.txt') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like 'ordinary-*.txt' }" : "Name -like 'ordinary-*.txt'"} | Select-Object Name | Out-String`

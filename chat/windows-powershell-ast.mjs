@@ -182,6 +182,48 @@ $errorMessages = @($errors | ForEach-Object { $_.Message })
 
 export const WINDOWS_POWERSHELL_AST_VERSION = 'powershell-native-ast/v1';
 
+// Use the Windows filesystem provider's own wildcard rules. The pattern is
+// data on stdin, never interpolated into the fixed PowerShell program.
+const GLOB_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
+$request = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
+$items = @(Get-ChildItem -Path ([string]$request.pattern) -Force -File -ErrorAction Stop | Select-Object -First 10001 | ForEach-Object { $_.FullName })
+@{ paths = $items } | ConvertTo-Json -Compress
+`;
+
+export function expandWindowsPowerShellGlob(pattern, { executable, timeoutMs = 5000, spawnProcess = spawn } = {}) {
+  if (typeof pattern !== 'string' || !path.win32.isAbsolute(pattern) || Buffer.byteLength(pattern, 'utf8') > 32768) {
+    return Promise.reject(new Error('Invalid wildcard path'));
+  }
+  const shell = executable || resolveWindowsSystemPaths()?.powershell;
+  if (!shell || !path.win32.isAbsolute(shell)) return Promise.reject(new Error('Windows system PowerShell is unavailable'));
+  const encoded = Buffer.from(GLOB_SCRIPT, 'utf16le').toString('base64');
+  return new Promise((resolve, reject) => {
+    let finished = false; let stdout = ''; const decoder = new StringDecoder('utf8');
+    const child = spawnProcess(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
+      shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const finish = (error, result) => { if (finished) return; finished = true; clearTimeout(timer); error ? reject(error) : resolve(result); };
+    const timer = setTimeout(() => { child.kill(); finish(new Error('Wildcard expansion timed out')); }, timeoutMs);
+    child.on('error', finish);
+    child.stderr.on('data', () => {});
+    child.stdout.on('data', chunk => { stdout += decoder.write(chunk); if (stdout.length > 4 * 1024 * 1024) { child.kill(); finish(new Error('Wildcard expansion output exceeded limit')); } });
+    child.on('close', code => {
+      stdout += decoder.end();
+      if (code !== 0) return finish(new Error('Wildcard expansion failed'));
+      try {
+        const result = JSON.parse(stdout.replace(/^\uFEFF/, ''));
+        if (!Array.isArray(result.paths) || result.paths.length > 10000 || result.paths.some(value => typeof value !== 'string' || !path.win32.isAbsolute(value))) throw new Error('Invalid wildcard expansion result');
+        finish(null, result.paths);
+      } catch (error) { finish(error); }
+    });
+    child.stdin.on('error', finish);
+    child.stdin.end(JSON.stringify({ pattern }));
+  });
+}
+
 export function parseWindowsPowerShellAst(command, { executable, timeoutMs = 5000, spawnProcess = spawn } = {}) {
   if (typeof command !== 'string' || !command.trim() || Buffer.byteLength(command, 'utf8') > 128 * 1024) {
     return Promise.reject(new Error('PowerShell command is empty or exceeds the parser limit'));
