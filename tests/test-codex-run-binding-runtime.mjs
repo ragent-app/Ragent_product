@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -62,6 +62,15 @@ test('native preparation writes distinct account-bound records for concurrent ru
   broker.listen(codexAppServerBrokerSocketPath(home));
   await once(broker, 'listening');
   t.after(() => new Promise((done) => broker.close(done)));
+  await writeFile(join(home, 'auth.json'), JSON.stringify({ tokens: { access_token: 'rotated-access', refresh_token: 'rotated-refresh', account_id: 'account-a' } }));
+  await secretStore.writeSecret('credential', { authType: 'oauth', tokens: { access_token: 'same-chain-other-metadata', refresh_token: 'refresh', account_id: 'account-a' } });
+  const staleSnapshot = await prepareNativeRunProviderHome('run_binding_stale_snapshot', manifest, options);
+  assert.equal(staleSnapshot.ok, true);
+  assert.equal(JSON.parse(await readFile(join(home, 'auth.json'), 'utf8')).tokens.refresh_token, 'rotated-refresh');
+  await secretStore.writeSecret('credential', { authType: 'oauth', tokens: { access_token: 'relogin', refresh_token: 'different-chain', account_id: 'account-a' } });
+  await assert.rejects(prepareNativeRunProviderHome('run_binding_relogin', manifest, options), { code: 'CODEX_HANDOFF_CREDENTIALS_DIVERGED' });
+  assert.equal(JSON.parse(await readFile(join(home, 'auth.json'), 'utf8')).tokens.refresh_token, 'rotated-refresh');
+  await secretStore.writeSecret('credential', { authType: 'oauth', tokens: { access_token: 'access', refresh_token: 'refresh', account_id: 'account-a' } });
   const other = await prepareNativeRunProviderHome('run_binding_third', otherManifest, options);
   assert.equal(other.ok, true);
   assert.equal(other.homeDir, first.homeDir);

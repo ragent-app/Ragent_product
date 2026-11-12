@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { verifyCodexHandoffCredentials } from '../lib/provider-runtime/codex-account-credentials.mjs';
+import { createHash } from 'node:crypto';
+import { codexRefreshFingerprint, verifyCodexHandoffCredentials, verifySelectedCodexCredential } from '../lib/provider-runtime/codex-account-credentials.mjs';
 
 test('handoff refuses ambiguous credentials and unverifiable history', async (t) => {
   const parent = resolve(tmpdir());
@@ -27,6 +28,14 @@ test('handoff refuses ambiguous credentials and unverifiable history', async (t)
   await assert.rejects(verifyCodexHandoffCredentials(args), { code: 'CODEX_HANDOFF_CREDENTIALS_INVALID' });
   await writeAuth(legacyHomeRoot, 'account-a', 'refresh-b');
   await assert.rejects(verifyCodexHandoffCredentials(args), { code: 'CODEX_HANDOFF_CREDENTIALS_DIVERGED' });
+  const prior = { account_id: 'account-a', refresh_token: 'refresh-b' };
+  const sourceFingerprint = createHash('sha256').update(JSON.stringify(prior)).digest('hex').slice(0, 16);
+  await writeFile(join(canonicalHomeRoot, 'codex', '.agentoc-oauth-state.json'), JSON.stringify({ sourceFingerprint }));
+  assert.deepEqual(await verifyCodexHandoffCredentials({ ...args, selectedTokens: prior }), { retainLegacySource: true });
+  await writeFile(join(canonicalHomeRoot, 'codex', '.agentoc-oauth-state.json'), JSON.stringify({ sourceRefreshFingerprint: codexRefreshFingerprint(prior) }));
+  await verifySelectedCodexCredential({ ...args, selectedTokens: { ...prior, access_token: 'different-metadata' } });
+  await assert.rejects(verifySelectedCodexCredential({ ...args, selectedTokens: { account_id: 'account-a', refresh_token: 'different-login' } }),
+    { code: 'CODEX_HANDOFF_CREDENTIALS_DIVERGED' });
   await writeAuth(legacyHomeRoot, 'account-a', 'refresh-a');
   assert.deepEqual(await verifyCodexHandoffCredentials(args), { retainLegacySource: true });
 });
