@@ -3,6 +3,7 @@ import assert from 'assert/strict';
 
 import {
   buildClaudeBidiApprovalResponseMessage,
+  describeManagedPrivilegeResponse,
   buildClaudeBidiManagedMcpResponse,
   buildClaudeBidiInitializeMessage,
   buildClaudeBidiInterruptMessage,
@@ -94,6 +95,21 @@ assert.equal(
   buildClaudeBidiApprovalResponseMessage(approvalRequest, 'deny').response.response.behavior,
   'deny',
 );
+const managedEntry = {
+  privilegedBatchId: 'batch', privilegedOpId: 'op', privilegedDecision: 'approved',
+  privilegedDecisionSource: 'owner', privilegedExecutionState: 'completed',
+};
+const managedMessage = describeManagedPrivilegeResponse(managedEntry);
+assert.match(managedMessage, /owner approved/);
+assert.match(managedMessage, /completed it successfully/);
+assert.match(managedMessage, /prevent duplicate execution/);
+assert.equal(buildClaudeBidiApprovalResponseMessage(approvalRequest, 'deny', [], {
+  message: managedMessage,
+}).response.response.message, managedMessage);
+assert.match(describeManagedPrivilegeResponse({ ...managedEntry, privilegedExecutionState: 'failed' }), /partial effects/);
+assert.match(describeManagedPrivilegeResponse({ ...managedEntry, privilegedExecutionState: 'unknown' }), /outcome is unknown/);
+assert.match(describeManagedPrivilegeResponse({ ...managedEntry, privilegedDecision: 'denied', privilegedDecisionSource: 'policy' }), /not authorized/);
+assert.equal(describeManagedPrivilegeResponse({}), '');
 
 const managedMcpApproval = readClaudeBidiManagedMcpRequest({
   type: 'control_request',

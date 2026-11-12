@@ -119,6 +119,27 @@ export function readClaudeBidiManagedMcpRequest(message) {
   };
 }
 
+// The managed executor, not the provider tool, handles privileged operations.
+// The provider gate is denied to prevent a second execution; explain that
+// internal denial without exposing command output as trusted instructions.
+export function describeManagedPrivilegeResponse(entry) {
+  if (!entry?.privilegedBatchId || !entry?.privilegedOpId) return '';
+  const decision = entry.privilegedDecision;
+  const source = entry.privilegedDecisionSource;
+  const review = decision === 'approved'
+    ? (source === 'owner' ? 'The owner approved the managed operation.' : 'The managed operation was authorized.')
+    : decision === 'denied'
+      ? (source === 'owner' ? 'The owner did not approve the managed operation.' : 'The managed operation was not authorized.')
+      : 'The approval decision is unknown.';
+  const state = entry.privilegedExecutionState;
+  const outcome = state === 'completed'
+    ? 'The managed executor completed it successfully.'
+    : state === 'failed'
+      ? 'The managed execution failed; it may have had partial effects.'
+      : 'The managed execution outcome is unknown.';
+  return `Ragent blocked the original tool request to prevent duplicate execution. ${review} ${outcome} Do not automatically repeat the operation; report the recorded result accurately.`;
+}
+
 export function buildClaudeBidiApprovalResponseMessage(approval, decision, choices, options = {}) {
   const requestId = approval?.providerRequestIdString || approval?.providerRequestId;
   if (!requestId) return null;

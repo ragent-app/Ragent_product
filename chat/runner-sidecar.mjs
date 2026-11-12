@@ -93,6 +93,7 @@ import {
 } from './codex-app-server-protocol.mjs';
 import {
   buildClaudeBidiApprovalResponseMessage,
+  describeManagedPrivilegeResponse,
   buildClaudeBidiManagedMcpResponse,
   buildClaudeBidiInitializeMessage,
   buildClaudeBidiInterruptMessage,
@@ -3221,6 +3222,9 @@ export async function flushCodexAppServerApprovalResponses(proc, state, run) {
           ...(entry?.privilegedBatchId ? { privilegedBatchId: entry.privilegedBatchId } : {}),
           ...(entry?.privilegedOpId ? { privilegedOpId: entry.privilegedOpId } : {}),
           ...(entry?.privilegedCategory ? { privilegedCategory: entry.privilegedCategory } : {}),
+          ...(entry?.privilegedDecision ? { privilegedDecision: entry.privilegedDecision } : {}),
+          ...(entry?.privilegedDecisionSource ? { privilegedDecisionSource: entry.privilegedDecisionSource } : {}),
+          ...(entry?.privilegedExecutionState ? { privilegedExecutionState: entry.privilegedExecutionState } : {}),
           ...riskAuditFields(pending),
         },
       });
@@ -3240,6 +3244,7 @@ export async function flushClaudeBidiApprovalResponses(proc, state, run) {
     const pending = findPendingCodexAppServerApproval(state, run, approvalId);
     if (!decision || !pending) continue;
     const message = buildClaudeBidiApprovalResponseMessage(pending, decision, entry?.choices, {
+      message: describeManagedPrivilegeResponse(entry),
       updatedInput: entry?.updatedInput,
       customAnswer: entry?.customAnswer,
       customAnswers: entry?.customAnswers,
@@ -3263,6 +3268,9 @@ export async function flushClaudeBidiApprovalResponses(proc, state, run) {
       ...(entry?.privilegedBatchId ? { privilegedBatchId: entry.privilegedBatchId } : {}),
       ...(entry?.privilegedOpId ? { privilegedOpId: entry.privilegedOpId } : {}),
       ...(entry?.privilegedCategory ? { privilegedCategory: entry.privilegedCategory } : {}),
+      ...(entry?.privilegedDecision ? { privilegedDecision: entry.privilegedDecision } : {}),
+      ...(entry?.privilegedDecisionSource ? { privilegedDecisionSource: entry.privilegedDecisionSource } : {}),
+      ...(entry?.privilegedExecutionState ? { privilegedExecutionState: entry.privilegedExecutionState } : {}),
       ...riskAuditFields(pending),
     };
     // DS-14: line was a pure duplicate of json — readers prefer `json`.
