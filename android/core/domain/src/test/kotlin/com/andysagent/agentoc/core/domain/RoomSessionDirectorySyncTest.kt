@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.andysagent.agentoc.core.database.AgentoCDatabase
+import com.andysagent.agentoc.core.database.ApprovalEntity
 import com.andysagent.agentoc.core.database.SessionEntity
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.model.SessionStatus
@@ -22,6 +23,28 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], manifest = Config.NONE)
 class RoomSessionDirectorySyncTest {
+    @Test fun staleIdleDetailDoesNotRetireApprovalForAcceptedFirstTurn() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AgentoCDatabase::class.java).allowMainThreadQueries().build()
+        database.dao().upsertSessions(listOf(SessionEntity("accepted", "New", "project", ACCEPTED_FIRST_TURN_STATUS, 0L, 1L)))
+        database.dao().upsertApprovals(listOf(ApprovalEntity("approval", "accepted", "Approve", "pending", updatedAt = 1L)))
+        val carrier = object : AgentoCTransport {
+            override val connectionState = MutableStateFlow(RuntimeConnectionState.Connected)
+            override val invalidations: Flow<InvalidationHint> = emptyFlow()
+            override suspend fun execute(request: ApiRequest): ApiResponse {
+                check(request.path == "/api/sessions/accepted")
+                return ApiResponse(200, """{"session":{"id":"accepted","projectId":"project","status":"idle","latestSeq":0}}""")
+            }
+            override fun connectInvalidationSocket() = Unit
+            override suspend fun close() = Unit
+        }
+        val repository = RoomSessionRepository(database, carrier)
+        try {
+            assertEquals(SessionStatus.WaitingApproval, repository.refreshSessionDetail("accepted")?.status)
+            assertEquals("pending", database.dao().getPendingApprovals("accepted").single().status)
+        } finally { repository.close(); database.close() }
+    }
+
     @Test fun acceptedFirstMessagePersistsBeforePendingOperationIsRemoved() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AgentoCDatabase::class.java).allowMainThreadQueries().build()
