@@ -143,7 +143,7 @@ class AppApiRuntimeGraphTest {
             }
             carriers[target.instanceId] = carrier
             TargetRuntime(target.instanceId, target.endpoint, "", carrier,
-                RoomSessionRepository(database, carrier, targetId = target.instanceId), carrier, scope, {
+                RoomSessionRepository(database, carrier, targetId = target.instanceId), carrier, scope, disposeStorage = {
                     database.close(); databaseCloses.computeIfAbsent(target.instanceId) { AtomicInteger() }.incrementAndGet()
                 })
         }, config, notificationRegistrar = {}, connectionWaitTimeoutMs = connectionWaitTimeoutMs)

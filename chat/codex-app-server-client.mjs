@@ -315,9 +315,10 @@ export async function listCodexAppServerModels({
 }
 
 const CODEX_CAPABILITY_METHODS = Object.freeze({
-  skills: { method: 'skills/list', params: (cwd) => ({ cwds: [cwd], forceReload: false }) },
-  plugins: { method: 'plugin/list', params: (cwd) => ({ cwds: [cwd] }) },
-  mcp: { method: 'mcpServerStatus/list', params: () => ({ detail: 'toolsAndAuthOnly' }) },
+  skills: { method: 'skills/list', params: (cwd, refresh) => ({ cwds: [cwd], forceReload: refresh }) },
+  mcp: { method: 'mcpServerStatus/list', params: () => ({ detail: 'toolsAndAuthOnly', limit: 100 }), paginated: true },
+  apps: { method: 'app/list', params: (_cwd, refresh) => ({ limit: 100, forceRefetch: refresh }), paginated: true },
+  installedApps: { method: 'app/installed', params: (_cwd, refresh) => ({ forceRefresh: refresh }) },
 });
 
 async function requestCodexCapabilityCatalogFromBroker(socketPath, method, params, {
@@ -409,6 +410,12 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
   });
 }
 
+// This connects only to an existing provider broker; it never starts another
+// OAuth owner. Callers choose an explicit method and handle version failures.
+export async function requestExistingCodexBroker(socketPath, method, params = {}, options = {}) {
+  return requestCodexCapabilityCatalogFromBroker(socketPath, method, params, options);
+}
+
 /** Read the current Codex home’s native skills, plugins and MCP status. */
 export async function listCodexAppServerCapabilities({
   toolId = 'codex',
@@ -420,6 +427,9 @@ export async function listCodexAppServerCapabilities({
   environment = null,
   ensureBrokerImpl = ensureCodexAppServerBroker,
   connectImpl = connect,
+  refresh = false,
+  expectedAccountId = '',
+  existingBrokerOnly = false,
 } = {}) {
   const home = trimString(codexHomeDir);
   if (!home) throw new Error('Codex home is required for capability discovery');
@@ -429,40 +439,61 @@ export async function listCodexAppServerCapabilities({
   let env = environment && typeof environment === 'object'
     ? { ...environment, CODEX_HOME: home }
     : null;
-  if (!command) {
+  if (!command && !existingBrokerOnly) {
     const invocation = await resolveCodexToolInvocation(toolId, { codexHomeDir: home });
     command = invocation.command;
     env = invocation.env;
   }
   const socketPath = codexAppServerBrokerSocketPath(home);
-  const args = Array.isArray(upstreamArgs) ? upstreamArgs : [
-    'app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY ? buildSharedCodexWindowsHook({ socketPath }).args : []),
-  ];
-  const spawnSpec = buildPlatformSpawnSpec(command, args, { cwd: workingDirectory, env: env || { ...process.env, CODEX_HOME: home } });
-  await ensureBrokerImpl({
-    socketPath,
-    lockPath: codexAppServerBrokerLockPath(home),
-    upstreamFile: spawnSpec.file,
-    upstreamArgs: spawnSpec.args,
-    upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
-    cwd: workingDirectory,
-    env: spawnSpec.env,
-    waitMs: Math.max(1_000, timeoutMs),
-  });
-  const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
+  if (!existingBrokerOnly) {
+    const args = Array.isArray(upstreamArgs) ? upstreamArgs : [
+      'app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY ? buildSharedCodexWindowsHook({ socketPath }).args : []),
+    ];
+    const spawnSpec = buildPlatformSpawnSpec(command, args, { cwd: workingDirectory, env: env || { ...process.env, CODEX_HOME: home } });
+    await ensureBrokerImpl({
+      socketPath,
+      lockPath: codexAppServerBrokerLockPath(home),
+      upstreamFile: spawnSpec.file,
+      upstreamArgs: spawnSpec.args,
+      upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
+      cwd: workingDirectory,
+      env: spawnSpec.env,
+      waitMs: Math.max(1_000, timeoutMs),
+    });
+  }
   const entries = Object.entries(CODEX_CAPABILITY_METHODS);
   const results = await Promise.all(entries.map(async ([key, spec]) => {
     try {
-      const data = await requestCodexCapabilityCatalogFromBroker(socketPath, spec.method, spec.params(workingDirectory), {
-        timeoutMs: remainingMs,
-        connectImpl,
-      });
+      let data;
+      let cursor = null;
+      const seen = new Set();
+      const rows = [];
+      for (let page = 0; ; page += 1) {
+        const remainingMs = timeoutMs - (Date.now() - startedAt);
+        if (remainingMs <= 0) throw new Error(`Timed out waiting for Codex ${spec.method}`);
+        const params = { ...spec.params(workingDirectory, refresh === true), ...(cursor ? { cursor } : {}) };
+        const result = await requestCodexCapabilityCatalogFromBroker(socketPath, spec.method, params, {
+          timeoutMs: remainingMs, connectImpl, expectedAccountId,
+        });
+        if (!spec.paginated) { data = result; break; }
+        const pageRows = Array.isArray(result.data) ? result.data : Array.isArray(result.servers) ? result.servers : null;
+        if (!pageRows) throw new Error(`Invalid Codex ${spec.method} response`);
+        rows.push(...pageRows);
+        if (rows.length > 5000) throw new Error(`Codex ${spec.method} pagination limit exceeded`);
+        cursor = typeof result.nextCursor === 'string' ? result.nextCursor : '';
+        if (!cursor) { data = { data: rows }; break; }
+        if (page >= 49) throw new Error(`Codex ${spec.method} pagination limit exceeded`);
+        if (seen.has(cursor)) throw new Error(`Codex ${spec.method} repeated a cursor`);
+        seen.add(cursor);
+      }
       return [key, { ok: true, data }];
     } catch (error) {
       return [key, { ok: false, error: readErrorMessage(error) }];
     }
   }));
-  return Object.fromEntries(results);
+  // The current upstream documentation explicitly excludes plugin management
+  // methods from production clients. Do not probe them during normal use.
+  return { ...Object.fromEntries(results), plugins: { ok: false, unsupported: true } };
 }
 
 function normalizeForkResult(message) {

@@ -90,6 +90,7 @@
     <string name="agentui_slash_kind_skill">技能</string>
     <string name="agentui_slash_kind_mcp">MCP 服务</string>
     <string name="agentui_slash_kind_plugin">插件</string>
+    <string name="agentui_slash_kind_app">应用</string>
     <string name="agentui_slash_source_codex">Codex</string>
     <string name="agentui_slash_source_claude">Claude Code</string>
     <string name="agentui_slash_source_agentoc">AgentoC</string>

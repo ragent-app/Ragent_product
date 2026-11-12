@@ -146,6 +146,7 @@
   function runtimeOperation(method, path) {
     const normalizedMethod = String(method || "GET").toUpperCase();
     const pathname = pathnameOf(path);
+    if (normalizedMethod === "POST" && /^\/api\/sessions\/[^/]+\/harness-capabilities\/skills$/.test(pathname)) return "tool.write";
     if (pathname.startsWith("/api/sessions/") && pathname.endsWith("/organization/projection") && normalizedMethod === "GET") return "workflow.read";
     if (pathname === "/api/sessions" && normalizedMethod === "POST") return "session.create";
     if (normalizedMethod === "GET" && (pathname === "/api/sessions" || pathname.startsWith("/api/sessions/"))) return "session.read";
@@ -177,7 +178,7 @@
     if (pathname === "/api/agents" || pathname.startsWith("/api/agents/")) return normalizedMethod === "GET" ? "agent.read" : "agent.write";
     if (pathname === "/api/native-providers" || pathname.startsWith("/api/native-providers/")) return normalizedMethod === "GET" ? "provider.read" : "provider.write";
     if (pathname === "/api/native-provider-oauth/jobs" || pathname.startsWith("/api/native-provider-oauth/jobs/")) return normalizedMethod === "GET" ? "provider.read" : "provider.write";
-    if (pathname === "/api/connectors" || pathname.startsWith("/api/connectors/") || pathname.startsWith("/api/codex/mcp-servers") || pathname.startsWith("/api/claude/mcp-servers")) return normalizedMethod === "GET" ? "connector.read" : "connector.write";
+    if (pathname === "/api/connectors" || pathname.startsWith("/api/connectors/") || pathname.startsWith("/api/codex/mcp-servers") || pathname.startsWith("/api/claude/mcp-servers") || /^\/api\/providers\/[^/]+\/codex\/(?:mcp-servers(?:\/|$)|plugin-preference$|capability-sync(?:-policy)?$)/.test(pathname)) return normalizedMethod === "GET" ? "connector.read" : "connector.write";
     if (pathname === "/api/autocomplete" || pathname === "/api/browse" || pathname.startsWith("/api/workspace-files") || pathname.startsWith("/api/assets/") || pathname.startsWith("/api/images/") || pathname.startsWith("/api/media/")) {
       if (normalizedMethod === "GET") return "file.read";
       if (normalizedMethod === "PUT" && pathname.startsWith("/api/assets/") && pathname.endsWith("/upload")) return "file.write";

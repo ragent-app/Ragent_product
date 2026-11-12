@@ -7,6 +7,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +39,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.key
@@ -56,6 +59,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
@@ -129,8 +135,9 @@ fun WebParitySurface(
     val crossProviders = page == WebParityPage.ModelProviders && state.providerCrossInstance
     val selectedProviderInstance = state.providerInstances.firstOrNull { it.instance.id == state.providerTargetId }
     val providerLabel = if (crossProviders) selectedProviderInstance?.instance?.label else targetLabel
+    val connectedForWrites = page == WebParityPage.Harnesses || connectionAvailable
     val writable = if (crossProviders) selectedProviderInstance?.available == true && !state.actionInProgress
-        else page == WebParityPage.Harnesses || connectionAvailable
+        else connectedForWrites && !(page == WebParityPage.Connectors && state.actionInProgress)
     CompositionLocalProvider(LocalRemoteSettingsWritable provides writable) {
     AgentoSurface(modifier.fillMaxSize(), color = if (page == WebParityPage.ModelProviders || page == WebParityPage.Harnesses)
         LocalAgentocColors.current.surfaceLow else LocalAgentocColors.current.canvas) {
@@ -148,7 +155,7 @@ fun WebParitySurface(
                 refreshDescription = stringResource(R.string.settings_refresh_page, title),
                 refreshing = state.refreshing,
             )
-            if (!writable && !crossProviders) Column(Modifier.widthIn(max = AgentocSizes.ContentMaxWidth).fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            if (!connectedForWrites && !crossProviders) Column(Modifier.widthIn(max = AgentocSizes.ContentMaxWidth).fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                 Text(stringResource(R.string.settings_config_offline),
                     color = LocalAgentocColors.current.secondaryContent, style = MaterialTheme.typography.bodyMedium)
             }
@@ -255,6 +262,7 @@ private fun localizedParityError(message: String): String {
         "Connector login failed" -> R.string.sp_error_connector_login
         "Provider login failed" -> R.string.sp_error_provider_login
         "Credential submission failed" -> R.string.sp_error_credentials
+        "Callback is invalid, expired, or unsupported" -> R.string.sp_mcp_oauth_invalid_callback
         "Provider rotation update failed" -> R.string.sp_error_rotation
         "Provider selection update failed" -> R.string.sp_error_selection
         "File could not be opened" -> R.string.sp_error_file
@@ -475,16 +483,23 @@ fun AgentsAppsPage(
 @Composable
 private fun ConnectorsPage(state: WebParityUiState, onEvent: (WebParityEvent) -> Unit) {
     val uriHandler = LocalUriHandler.current
+    val clipboard = LocalClipboardManager.current
     LaunchedEffect(state.externalUrl) {
         state.externalUrl?.let { url -> runCatching { uriHandler.openUri(url) }; onEvent(WebParityEvent.ClearExternalUrl) }
     }
     var dialog by remember { mutableStateOf(false) }
     var family by remember { mutableStateOf("codex") }
+    var mcpProviderId by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var command by remember { mutableStateOf("") }
+    var commandArgs by remember { mutableStateOf("") }
     var deletingServer by remember { mutableStateOf<WebMcpServer?>(null) }
     LazyColumn(contentPadding = navigationContentPadding(), verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
-        item { RemoteSettingsAction(stringResource(R.string.sp_add_mcp), { dialog = true }, leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Plus, null) }) }
+        item { RemoteSettingsAction(stringResource(R.string.sp_add_mcp), {
+            name = ""; command = ""; commandArgs = ""; family = "codex"
+            mcpProviderId = state.codexManagementProviderId ?: state.codexPluginPreference?.providerId ?: state.codexSyncState?.providerId.orEmpty()
+            dialog = true
+        }, leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Plus, null) }) }
         item { Text(stringResource(R.string.sp_connected_services), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = AgentocSpacing.Compact)) }
         items(state.connectors, key = { it.id }) { connector ->
             val isGithub = connector.id.contains("github", ignoreCase = true)
@@ -510,9 +525,177 @@ private fun ConnectorsPage(state: WebParityUiState, onEvent: (WebParityEvent) ->
         }
         item { Text(stringResource(R.string.sp_mcp_servers), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = AgentocSpacing.Compact)) }
         if (state.mcpServers.isEmpty()) item { AgentoEmptyState(stringResource(R.string.sp_no_mcp), stringResource(R.string.sp_no_mcp_detail)) }
-        items(state.mcpServers, key = { "${it.family}:${it.name}" }) { server ->
+        items(state.mcpServers, key = { "${it.family}:${it.providerId}:${it.name}" }) { server ->
             SettingsContentCard(Modifier.fillMaxWidth()) {
-                AgentoListItem(title = server.name, supportingText = "${server.family} · ${server.detail}", leading = { AgentoWebIcon(AgentoWebGlyph.Terminal, null) }, trailing = { RemoteSettingsAction(stringResource(R.string.sp_delete), { deletingServer = server }, secondary = true) })
+                Column {
+                    val authLabel = if (server.family != "codex") "" else " · " + stringResource(when (server.authState) {
+                        "connected" -> R.string.sp_mcp_auth_connected
+                        "authorization_required" -> R.string.sp_mcp_auth_required
+                        "credential_configured" -> R.string.sp_mcp_auth_configured
+                        "unsupported" -> R.string.sp_mcp_auth_unsupported
+                        else -> R.string.sp_mcp_auth_unknown
+                    })
+                    AgentoListItem(title = server.name, supportingText = "${state.providers.firstOrNull { it.id == server.providerId }?.name ?: server.family} · ${server.detail}$authLabel", leading = { AgentoWebIcon(AgentoWebGlyph.Terminal, null) })
+                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = AgentocSpacing.Standard, vertical = AgentocSpacing.Compact),
+                        horizontalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact),
+                        verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
+                        if (server.family == "codex" && server.providerId.isNotBlank() && server.detail in listOf("http", "streamable_http", "sse")) {
+                            RemoteSettingsAction(stringResource(R.string.settings_connect), { onEvent(WebParityEvent.StartMcpOAuth(server.providerId, server.name)) }, secondary = true)
+                        }
+                        RemoteSettingsAction(stringResource(R.string.sp_delete), { deletingServer = server }, secondary = true)
+                    }
+                }
+            }
+        }
+        val codexAccounts = state.providers.filter { it.agentType == "codex" }
+        if (codexAccounts.isNotEmpty()) {
+            item(key = "codex-management-account") {
+                Column(verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
+                    Text(stringResource(R.string.sp_codex_management_account), style = MaterialTheme.typography.titleMedium)
+                    val selected = state.codexManagementProviderId?.takeIf { id -> codexAccounts.any { it.id == id } }
+                        ?: state.codexPluginPreference?.providerId ?: state.codexSyncState?.providerId
+                        ?: codexAccounts.firstOrNull()?.id
+                    codexAccounts.forEach { account ->
+                        AgentoListItem(title = account.name, selected = selected == account.id,
+                            onClick = { onEvent(WebParityEvent.SelectCodexManagementProvider(account.id)) },
+                            leading = { RadioButton(selected = selected == account.id, onClick = null) })
+                    }
+                    if (!state.loading && !state.refreshing && state.codexPluginPreference == null) {
+                        Text(stringResource(R.string.sp_codex_management_unavailable), style = MaterialTheme.typography.bodySmall,
+                            color = LocalAgentocColors.current.secondaryContent)
+                    }
+                }
+            }
+        }
+        state.codexSyncState?.let { sync ->
+            item(key = "codex-capability-sync") {
+                SettingsContentCard(Modifier.fillMaxWidth()) {
+                    val status = if (sync.mode == "disabled") R.string.sp_codex_sync_disabled else when (sync.status) {
+                        "discovered" -> R.string.sp_codex_sync_discovered
+                        "waiting_for_runtime" -> R.string.sp_codex_sync_waiting
+                        "partial" -> R.string.sp_codex_sync_partial
+                        else -> R.string.sp_codex_sync_unchecked
+                    }
+                    Column {
+                        AgentoListItem(title = stringResource(R.string.sp_codex_sync), supportingText = stringResource(status),
+                            leading = { AgentoWebIcon(AgentoWebGlyph.Terminal, null) })
+                        FlowRow(Modifier.fillMaxWidth().padding(horizontal = AgentocSpacing.Standard, vertical = AgentocSpacing.Compact),
+                            horizontalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact),
+                            verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
+                            listOf("approved-auto" to R.string.sp_codex_sync_auto, "manual" to R.string.sp_codex_sync_manual,
+                                "disabled" to R.string.sp_codex_sync_off).forEach { (mode, label) ->
+                                RemoteSettingsAction(stringResource(label), { onEvent(WebParityEvent.SetCodexSyncPolicy(sync.providerId, mode)) },
+                                    modifier = Modifier.semantics { selected = sync.mode == mode }, secondary = sync.mode != mode)
+                            }
+                            RemoteSettingsAction(stringResource(R.string.sp_codex_sync_refresh), {
+                                onEvent(WebParityEvent.RefreshCodexSync(sync.providerId))
+                            }, enabled = sync.mode != "disabled", secondary = true)
+                        }
+                    }
+                }
+            }
+        }
+        state.codexPluginPreference?.let { preference ->
+            item(key = "codex-plugin-preference") {
+                SettingsContentCard(Modifier.fillMaxWidth()) {
+                    Column {
+                        AgentoListItem(title = stringResource(R.string.sp_codex_plugin_loading),
+                            supportingText = stringResource(if (preference.desiredEnabled) R.string.sp_codex_plugin_pending_on else R.string.sp_codex_plugin_pending_off),
+                            leading = { AgentoWebIcon(AgentoWebGlyph.Terminal, null) })
+                        FlowRow(Modifier.fillMaxWidth().padding(horizontal = AgentocSpacing.Standard, vertical = AgentocSpacing.Compact),
+                            horizontalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact),
+                            verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
+                                RemoteSettingsAction(stringResource(if (preference.desiredEnabled) R.string.sp_skill_disable else R.string.sp_skill_enable), {
+                                    onEvent(WebParityEvent.SetCodexPluginPreference(preference.providerId, !preference.desiredEnabled))
+                                }, secondary = true)
+                                RemoteSettingsAction(stringResource(R.string.sp_codex_plugin_apply), {
+                                    onEvent(WebParityEvent.SetCodexPluginPreference(preference.providerId, preference.desiredEnabled))
+                                }, secondary = true)
+                        }
+                    }
+                }
+            }
+        }
+        if (state.codexApps.isNotEmpty() && !state.openSessionId.isNullOrBlank()) {
+            item { Text(stringResource(R.string.sp_codex_apps), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = AgentocSpacing.Compact)) }
+            items(state.codexApps, key = { "${it.providerId}:${it.id}" }) { app ->
+                val runtime = stringResource(when (app.runtime) {
+                    "callable" -> R.string.sp_codex_app_callable
+                    "unavailable" -> R.string.sp_codex_app_unavailable
+                    else -> R.string.sp_codex_app_unknown
+                })
+                val configuration = when (app.configuration) {
+                    "enabled" -> stringResource(R.string.sp_codex_app_enabled)
+                    "disabled" -> stringResource(R.string.sp_codex_app_disabled)
+                    else -> stringResource(R.string.sp_codex_app_configuration_unknown)
+                }
+                val account = if (app.accessible == false) " · ${stringResource(R.string.sp_codex_app_account_unavailable)}" else ""
+                SettingsContentCard(Modifier.fillMaxWidth()) {
+                    AgentoListItem(title = app.name, supportingText = "$configuration · $runtime$account",
+                        leading = { AgentoWebIcon(AgentoWebGlyph.Share, null) })
+                }
+            }
+            item { Text(stringResource(R.string.sp_codex_app_authorization_hint), style = MaterialTheme.typography.bodySmall,
+                color = LocalAgentocColors.current.secondaryContent) }
+        } else if (codexAccounts.isNotEmpty() && !state.loading && !state.refreshing) {
+            item(key = "codex-apps-guidance") {
+                Text(stringResource(R.string.sp_codex_apps_guidance), style = MaterialTheme.typography.bodySmall,
+                    color = LocalAgentocColors.current.secondaryContent)
+            }
+        }
+        if (state.codexSkills.isNotEmpty() && !state.openSessionId.isNullOrBlank()) {
+            item { Text(stringResource(R.string.sp_codex_skills), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = AgentocSpacing.Compact)) }
+            items(state.codexSkills, key = { "${it.providerId}:${it.id}" }) { skill ->
+                val status = stringResource(if (skill.enabled) R.string.sp_skill_enabled else R.string.sp_skill_disabled)
+                val pending = if (skill.enabled != skill.desiredEnabled) " · ${stringResource(if (skill.desiredEnabled) R.string.sp_skill_pending_enable else R.string.sp_skill_pending_disable)}" else ""
+                SettingsContentCard(Modifier.fillMaxWidth()) {
+                    Column {
+                        AgentoListItem(title = skill.name, supportingText = "$status$pending", leading = { AgentoWebIcon(AgentoWebGlyph.Terminal, null) })
+                        RemoteSettingsAction(stringResource(if (skill.enabled != skill.desiredEnabled) R.string.sp_skill_undo else if (skill.desiredEnabled) R.string.sp_skill_disable else R.string.sp_skill_enable), {
+                            onEvent(WebParityEvent.SetCodexSkill(state.openSessionId!!, skill, !skill.desiredEnabled))
+                        }, modifier = Modifier.padding(start = AgentocSpacing.Standard, end = AgentocSpacing.Standard, bottom = AgentocSpacing.Compact), secondary = true)
+                    }
+                }
+            }
+        }
+        if (codexAccounts.isNotEmpty() && state.codexSkills.isEmpty()) {
+            item(key = "codex-skills-guidance") {
+                Text(stringResource(R.string.sp_codex_skills_guidance), style = MaterialTheme.typography.bodySmall,
+                    color = LocalAgentocColors.current.secondaryContent)
+            }
+        }
+    }
+    state.mcpOAuthJob?.let { job ->
+        RemoteSettingsDialog(
+            title = stringResource(R.string.sp_mcp_oauth_title),
+            confirmLabel = stringResource(R.string.sp_mcp_oauth_check),
+            dismissLabel = stringResource(R.string.sp_mcp_oauth_stop),
+            onConfirm = { onEvent(WebParityEvent.CheckMcpOAuth) },
+            onDismiss = { onEvent(WebParityEvent.ClearMcpOAuth) },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
+                Text(stringResource(R.string.sp_mcp_oauth_account_server,
+                    state.providers.firstOrNull { it.id == job.providerId }?.name?.ifBlank { job.providerId } ?: job.providerId,
+                    job.serverName), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(when {
+                    job.callbackSubmitted -> R.string.sp_mcp_oauth_submitted
+                    job.mobileCallbackSupported -> R.string.sp_mcp_oauth_mobile
+                    else -> R.string.sp_mcp_oauth_host
+                }))
+                Text(stringResource(when (job.state) {
+                    "connected" -> R.string.sp_mcp_oauth_connected
+                    "failed", "expired" -> R.string.sp_mcp_oauth_failed
+                    "completed_unverified" -> R.string.sp_mcp_oauth_unverified
+                    else -> R.string.sp_mcp_oauth_pending
+                }))
+                state.error?.let { Text(localizedParityError(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                if (job.mobileCallbackSupported && !job.callbackSubmitted && job.state == "pending") {
+                    RemoteSettingsAction(stringResource(R.string.sp_mcp_oauth_open), { runCatching { uriHandler.openUri(job.url) } }, secondary = true)
+                    RemoteSettingsAction(stringResource(R.string.sp_mcp_oauth_submit), {
+                        onEvent(WebParityEvent.SubmitMcpOAuthCallback(clipboard.getText()?.text.orEmpty()))
+                    }, secondary = true)
+                }
+                RemoteSettingsAction(stringResource(R.string.sp_mcp_oauth_copy), { clipboard.setText(AnnotatedString(job.url)) }, secondary = true)
             }
         }
     }
@@ -524,21 +707,48 @@ private fun ConnectorsPage(state: WebParityUiState, onEvent: (WebParityEvent) ->
             dismissLabel = stringResource(R.string.settings_cancel),
             destructive = true,
             onDismiss = { deletingServer = null },
-            onConfirm = { deletingServer = null; onEvent(WebParityEvent.DeleteMcpServer(server.family, server.name)) },
+            onConfirm = { deletingServer = null; onEvent(WebParityEvent.DeleteMcpServer(server.family, server.name, server.providerId)) },
         ) { Text(stringResource(R.string.sp_delete_mcp_body, server.name)) }
     }
     if (dialog) RemoteSettingsDialog(
         title = stringResource(R.string.sp_add_mcp),
         confirmLabel = stringResource(R.string.sp_add),
         dismissLabel = stringResource(R.string.settings_cancel),
+        confirmEnabled = name.isNotBlank() && command.isNotBlank() && (family == "claude" || state.providers.any { it.id == mcpProviderId && it.agentType == "codex" }),
         onDismiss = { dialog = false },
-        onConfirm = { dialog = false; onEvent(WebParityEvent.AddMcpServer(family, name, command)) },
+        onConfirm = { dialog = false; onEvent(WebParityEvent.AddMcpServer(family, name, command, mcpProviderId,
+            commandArgs.lineSequence().map(String::trim).filter(String::isNotEmpty).toList())) },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
-            Text(stringResource(R.string.sp_command_hint), style = MaterialTheme.typography.bodySmall)
-            AgentoTextField(family, { family = it.lowercase().takeIf { value -> value == "claude" } ?: "codex" }, stringResource(R.string.sp_runtime_label), Modifier.fillMaxWidth())
+            Text(stringResource(if (family == "codex") R.string.sp_codex_command_hint else R.string.sp_command_hint), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.sp_runtime_label), style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(AgentocSpacing.Compact)) {
+                RemoteSettingsAction("Codex", { family = "codex" }, secondary = family != "codex")
+                RemoteSettingsAction("Claude", { family = "claude" }, secondary = family != "claude")
+            }
+            if (family == "codex") {
+                Text(stringResource(R.string.sp_codex_mcp_account), style = MaterialTheme.typography.bodySmall)
+                Column(Modifier.selectableGroup()) {
+                    state.providers.filter { it.agentType == "codex" }.forEach { provider ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().selectable(
+                                selected = mcpProviderId == provider.id,
+                                role = Role.RadioButton,
+                                onClick = { mcpProviderId = provider.id },
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = mcpProviderId == provider.id, onClick = null)
+                            Text(provider.name)
+                        }
+                    }
+                }
+            }
             AgentoTextField(name, { name = it }, stringResource(R.string.sp_name), Modifier.fillMaxWidth())
             AgentoTextField(command, { command = it }, stringResource(R.string.sp_command_url), Modifier.fillMaxWidth())
+            if (family == "codex" && !command.trim().startsWith("http://", true) && !command.trim().startsWith("https://", true)) {
+                AgentoTextField(commandArgs, { commandArgs = it }, stringResource(R.string.sp_codex_command_args), Modifier.fillMaxWidth(), singleLine = false)
+            }
         }
     }
 }

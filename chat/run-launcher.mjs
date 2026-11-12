@@ -923,6 +923,19 @@ export async function spawnDetachedRunnerAsProcess(runId, {
   }
 }
 
+export async function scheduleRunCapabilityDiscovery(runId, {
+  readManifest = getRunManifest,
+  schedule = null,
+  homesRoot = '',
+} = {}) {
+  const manifest = await readManifest(runId);
+  const selection = resolveRunProviderSelection(manifest);
+  const providerId = trimString(manifest?.nativeRuntimeSnapshot?.providerProfileId) || selection.providerId;
+  if (WORKBENCH_EXECUTION_POLICY || selection.app !== 'codex' || !providerId || manifest?.executionScope?.accessMode === 'read') return;
+  const scheduleSync = schedule || (await import('./codex-capability-sync.mjs')).scheduleCodexCapabilitySync;
+  scheduleSync(providerId, homesRoot ? { managedHomeDir: join(homesRoot, 'codex') } : {});
+}
+
 export function createDetachedRunnerSpawner({
   execFileImpl = execFileAsync,
   spawnImpl = spawnProcess,
@@ -930,11 +943,13 @@ export function createDetachedRunnerSpawner({
   connectImpl = connectSocket,
   platform = process.platform,
   assertExecutionBoundaryImpl = assertRunLaunchBoundary,
+  scheduleRunDiscoveryImpl = scheduleRunCapabilityDiscovery,
 } = {}) {
   return async function spawnDetachedRunner(runId, { launchAttempt = 0 } = {}) {
     // All launch strategies, including lifecycle and legacy fallbacks, share
     // this gate before preparing credentials or contacting a broker.
     await assertExecutionBoundaryImpl(runId);
+    const launch = async () => {
     if (shouldUseRunnerLifecycleBroker()) {
       try {
         return await launchDetachedRunnerViaLifecycleBroker(runId, { connectImpl, launchAttempt });
@@ -979,6 +994,13 @@ export function createDetachedRunnerSpawner({
       }
     }
     return spawnDetachedRunnerAsProcess(runId, { spawnImpl });
+    };
+    const result = await launch();
+    // Discovery is advisory and must not delay or fail a successfully launched
+    // task. Resolve its actual provider again in the control process; never
+    // infer a different account or start a separate authenticated broker.
+    void Promise.resolve().then(() => scheduleRunDiscoveryImpl(runId)).catch(() => {});
+    return result;
   };
 }
 

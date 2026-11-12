@@ -251,6 +251,7 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   let spawnInvocation = null;
   let unrefCalled = false;
   const previousSandbox = process.env.IS_SANDBOX;
+  const discoveryRuns = [];
   const previousSupervisorSocket = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
   const previousSupervisorRequired = process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
   process.env.IS_SANDBOX = '';
@@ -259,6 +260,7 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   const spawner = createDetachedRunnerSpawner({
     assertExecutionBoundaryImpl: strategyFixtureBoundary,
     platform: 'linux',
+    scheduleRunDiscoveryImpl: async (runId) => { discoveryRuns.push(runId); throw new Error('advisory discovery failure'); },
     getScopeImpl: () => 'system',
     execFileImpl: async (command) => {
       if (command === 'systemd-run') {
@@ -278,6 +280,8 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   });
 
   const result = await spawner('run_fallback');
+  await Promise.resolve();
+  assert.deepEqual(discoveryRuns, ['run_fallback']);
   assert.equal(result.pid, 65432);
   assert.equal(result.unitName, null);
   assert.equal(result.unitScope, null);

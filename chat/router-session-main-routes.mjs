@@ -16,7 +16,8 @@ import { createTemporaryControlApprovalActor } from '../lib/temporary-control-po
 import { join, resolve } from 'path';
 
 import { MANAGED_WORK_ROOT_DIR } from '../lib/config.mjs';
-import { listHarnessCapabilities, resolveHarnessCapabilityInstructions } from './harness-capability-catalog.mjs';
+import { listHarnessCapabilities, resolveHarnessCapabilityInstructions, resolveCapabilitySessionProvider } from './harness-capability-catalog.mjs';
+import { setCodexSkillPreference } from './codex-skill-management.mjs';
 import { WORKBENCH_EXECUTION_POLICY, workbenchToolAllowed } from '../lib/workbench-execution-policy.mjs';
 import { readBody } from '../lib/utils.mjs';
 import { measureApiRequestPhase, setApiRequestCorrelation } from './api-request-log.mjs';
@@ -401,6 +402,38 @@ export async function handleSessionMainRoutes({
 }) {
   if (await handleSessionApiMutationRoutes({ req, res, parsedUrl, pathname, authSession,
     requireSessionAccess, writeJson, invalidate: notifyCommittedSessionApiMutation })) return true;
+  const skillPreferenceRoute = req.method === 'POST'
+    ? pathname.match(/^\/api\/sessions\/([^/]+)\/harness-capabilities\/skills$/) : null;
+  if (skillPreferenceRoute) {
+    let sessionId;
+    try { sessionId = decodeURIComponent(skillPreferenceRoute[1]); }
+    catch { writeJson(res, 400, { error: 'Invalid session id' }); return true; }
+    if (authSession?.role !== 'owner' || WORKBENCH_EXECUTION_POLICY) {
+      writeJson(res, 403, { error: 'Skill management is unavailable for this session' }); return true;
+    }
+    if (!await requireSessionAccess(res, authSession, sessionId, { metadataOnly: true })) return true;
+    try {
+      const payload = JSON.parse(await readBody(req, 4096));
+      const session = await getSession(sessionId);
+      if (!session) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const providerId = typeof payload?.providerProfileId === 'string' ? payload.providerProfileId.trim() : '';
+      const savedProvider = await resolveCapabilitySessionProvider({ session });
+      if (!['codex', 'codex-cli', 'agentoc-codex-app-server'].includes(session.tool) || !savedProvider || savedProvider !== providerId) {
+        writeJson(res, 409, { error: 'The session account changed; refresh the list', code: 'CODEX_SKILL_ACCOUNT_CHANGED' }); return true;
+      }
+      const project = session.projectId ? await getProject(session.projectId) : null;
+      const result = await setCodexSkillPreference({ providerId, cwd: project?.rootPath || process.cwd(), id: payload?.id, enabled: payload?.enabled,
+        verifySelection: async () => {
+          const current = await getSession(sessionId);
+          return Boolean(current && ['codex', 'codex-cli', 'agentoc-codex-app-server'].includes(current.tool)
+            && await resolveCapabilitySessionProvider({ session: current }) === providerId);
+        } });
+      writeJson(res, 200, result);
+    } catch (error) {
+      writeJson(res, error?.statusCode || 400, { error: error?.statusCode ? error.message : 'Skill preference could not be saved', code: error?.statusCode ? error.code : 'CODEX_SKILL_UPDATE_FAILED' });
+    }
+    return true;
+  }
   const capabilitiesRoute = req.method === 'GET'
     ? pathname.match(/^\/api\/sessions\/([^/]+)\/harness-capabilities$/)
     : null;
@@ -413,6 +446,10 @@ export async function handleSessionMainRoutes({
       return true;
     }
     if (!await requireSessionAccess(res, authSession, sessionId, { metadataOnly: true })) return true;
+    if (authSession?.role === 'visitor') {
+      writeJson(res, 403, { error: 'Harness capabilities are not available to visitor sessions.', code: 'HARNESS_CAPABILITY_FORBIDDEN' });
+      return true;
+    }
     try {
       const session = await getSession(sessionId);
       if (!session) {
@@ -436,6 +473,8 @@ export async function handleSessionMainRoutes({
         session: { ...session, tool: requestedTool },
         cwd: project?.rootPath || process.cwd(),
         providerProfileId: requestedProviderProfile,
+        model: requestUrl.searchParams.get('model')?.trim() || session.model,
+        refresh: requestUrl.searchParams.get('refresh') === 'true',
       });
       res.setHeader?.('Cache-Control', 'private, no-store');
       writeJson(res, 200, { sessionId, ...catalog });
@@ -1279,6 +1318,7 @@ export async function handleSessionMainRoutes({
             session: { ...rawManagedSession, tool: requestedTool },
             cwd: project?.rootPath || process.cwd(),
             providerProfileId: requestedProviderProfile,
+            model: authSession?.role === 'visitor' ? rawManagedSession.model : (payload?.model || rawManagedSession.model),
           });
         }
         const preSavedAttachments = await measureApiRequestPhase(

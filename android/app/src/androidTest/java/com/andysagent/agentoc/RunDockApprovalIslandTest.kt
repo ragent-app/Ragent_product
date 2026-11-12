@@ -52,6 +52,28 @@ class RunDockApprovalIslandTest {
     )
 
     @Test
+    fun longMcpApprovalRetainsFullRequestInDetails() {
+        val request = "Allow Google Drive to run google_drive.create_folder?\n" +
+            "Tool arguments:\n" + "very-long-folder-name-".repeat(30) + "\nparent_folder: root"
+        composeRule.setContent {
+            AgentocTheme {
+                RunDock(
+                    runStatus = AgentRunStatus.WaitingApproval,
+                    approval = approval.copy(reason = request),
+                    isOfflineOrTransportError = false,
+                    onStop = {}, onOpenRunDetails = {}, onApprove = {}, onDeny = {},
+                    onReviewChanges = {}, onRetryConnection = {}, approvalExpanded = true,
+                    onExpandApproval = {}, onCollapseApproval = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        // The first node is the ellipsized overview; the second is in the
+        // independently scrollable details, so its full text remains visible.
+        composeRule.onAllNodesWithText(request, substring = true).assertCountEquals(2)
+    }
+
+    @Test
     fun resolvingRequestKeepsLargeTargetsButCannotSubmitTwice() {
         var decisions = 0
         composeRule.setContent {

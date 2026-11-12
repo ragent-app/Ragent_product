@@ -1887,6 +1887,14 @@ export async function startNativeOAuthLogin({
       job.phase = 'completed';
       job.failureCode = '';
       await Promise.resolve(onProviderChanged?.()).catch(() => {});
+      if (job.agentType === 'codex' && job.providerId) {
+        // Discovery is best-effort and must not delay or fail account login.
+        // The sync manager only connects to an already-running verified broker.
+        const providerId = job.providerId;
+        void import('./codex-capability-sync.mjs')
+          .then(({ scheduleCodexCapabilitySync }) => scheduleCodexCapabilitySync(providerId, { configDir, registry, secretStore }))
+          .catch(() => {});
+      }
     } catch (error) {
       job.state = 'failed';
       job.phase = 'finalize-failed';

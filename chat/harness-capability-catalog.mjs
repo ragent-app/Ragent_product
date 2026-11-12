@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   CLAUDE_MANAGED_HOME_DIR,
   CODEX_MANAGED_HOME_DIR,
@@ -11,6 +11,12 @@ import {
 import { listCodexAppServerCapabilities } from './codex-app-server-client.mjs';
 import { listClaudeMcpServers } from '../lib/claude-mcp-manager.mjs';
 import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.mjs';
+import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
+import { nativeProviderHomeRoot, resolveCodexAccountHomeRoot } from '../lib/provider-runtime/provider-home.mjs';
+import { nativeOAuthAccountId, resolveDefaultProviderProfileId, resolveNativeSelectionFromManifest } from '../lib/provider-runtime/run-provider-prepare.mjs';
+import { managedCodexMcpAccountBinding } from '../lib/provider-runtime/codex-mcp-config.mjs';
+import { codexSkillId, listCodexSkillPreferences } from '../lib/provider-runtime/codex-skill-preferences.mjs';
+import { recordCodexCapabilitySyncResult } from './codex-capability-sync.mjs';
 
 const MAX_SKILL_FILES = 500;
 const MAX_SKILL_DESCRIPTION = 400;
@@ -77,12 +83,8 @@ async function resolveNativeProfileHome(providerProfileId, tool) {
   if (!profile || profile.agentType !== family) {
     throw capabilityResolutionError('The selected provider profile is not available for this harness.');
   }
-  const providerKey = createHash('sha256')
-    .update(`${profile.agentType}:${profile.id}`)
-    .digest('hex')
-    .slice(0, 32);
   const homeRoot = family === 'codex' ? CODEX_MANAGED_HOME_DIR : CLAUDE_MANAGED_HOME_DIR;
-  return join(dirname(homeRoot), 'by-provider', providerKey);
+  return nativeProviderHomeRoot(dirname(homeRoot), profile.agentType, profile.id);
 }
 
 async function readJsonFile(pathname) {
@@ -92,7 +94,7 @@ async function readJsonFile(pathname) {
   } catch { return null; }
 }
 
-function normalizeCapability({ id, kind, source, title, description = '', invocationText = '', enabled = true, reason = '' }) {
+function normalizeCapability({ id, kind, source, title, description = '', invocationText = '', enabled = true, reason = '', state = null }) {
   const safeTitle = text(title, 120);
   if (!safeTitle || !text(id, 500)) return null;
   const safeInvocationText = typeof invocationText === 'string'
@@ -106,6 +108,7 @@ function normalizeCapability({ id, kind, source, title, description = '', invoca
     description: text(description, MAX_SKILL_DESCRIPTION),
     invocationText: safeInvocationText,
     enabled: enabled === true,
+    ...(state ? { state } : {}),
     ...(reason ? { disabledReason: text(reason, 240) } : {}),
   };
 }
@@ -259,14 +262,15 @@ function codexCapabilityItems(catalog) {
       if (!name) continue;
       const enabled = skill?.enabled !== false;
       items.push(normalizeCapability({
-        id: `codex:skill:${name}`,
+        id: `codex:skill:${opaqueFileId(text(skill?.path, 2000) || name)}`,
         kind: 'skill',
         source: skill?.path?.startsWith?.('plugin://') ? 'plugin' : 'codex',
         title: name,
-        description: skill?.shortDescription || skill?.description || '',
+        description: skill?.interface?.shortDescription || skill?.shortDescription || skill?.description || '',
         invocationText: enabled ? `$${name} ` : '',
         enabled,
         reason: enabled ? '' : text(skill?.disabledReason || 'Skill is disabled.'),
+        state: { manageable: typeof skill?.path === 'string' && isAbsolute(skill.path) },
       }));
     }
   }
@@ -293,16 +297,49 @@ function codexCapabilityItems(catalog) {
       if (!name) continue;
       const source = name.toLowerCase() === 'agentoc' ? 'agentoc' : 'codex';
       const status = text(server?.status || server?.startupStatus, 40).toLowerCase();
+      const authStatus = text(server?.authStatus, 40);
+      const authorization = authStatus === 'oAuth' ? 'connected'
+        : authStatus === 'notLoggedIn' ? 'authorization_required'
+          : authStatus === 'bearerToken' ? 'credential_configured'
+            : authStatus === 'unsupported' ? 'unsupported' : 'unknown';
+      // `enabled` controls whether the user may request this capability; an
+      // absent startup status is not proof that a configured server failed.
+      // Runtime readiness remains explicitly unknown in the state projection.
       const enabled = !['failed', 'cancelled', 'disabled'].includes(status);
       items.push(normalizeCapability({
         id: `${source}:mcp:${source === 'agentoc' ? opaqueFileId(name) : name}`,
         kind: 'mcp',
         source,
         title: name,
-        description: status ? `MCP server · ${status}` : 'Codex MCP server',
+        description: status ? `MCP server · ${status}` : 'Codex MCP server · runtime status unknown',
         invocationText: '',
         enabled,
         reason: enabled ? '' : 'This MCP server is not available in the current runtime.',
+        state: { discovery: 'discovered', runtime: status === 'ready' ? 'available' : enabled ? 'unknown' : 'unavailable', authorization, scope: 'global' },
+      }));
+    }
+  }
+  if (catalog?.apps?.ok) {
+    const installed = new Map((Array.isArray(catalog?.installedApps?.data?.apps) ? catalog.installedApps.data.apps : [])
+      .filter((app) => typeof app?.id === 'string').map((app) => [app.id, app]));
+    for (const app of Array.isArray(catalog.apps.data?.data) ? catalog.apps.data.data : []) {
+      const id = text(app?.id, 240);
+      const title = text(app?.name || id, 120);
+      if (!id || !title) continue;
+      const runtime = installed.get(id);
+      const callable = runtime?.callable === true;
+      items.push(normalizeCapability({
+        id: `codex:app:${id}`, kind: 'app', source: 'codex', title,
+        description: app.description || 'Codex app', enabled: callable,
+        reason: callable ? '' : 'App availability has not been confirmed for this runtime.',
+        state: {
+          discovery: 'discovered',
+          accessible: typeof app.isAccessible === 'boolean' ? app.isAccessible : null,
+          configuration: typeof runtime?.enabled === 'boolean' ? (runtime.enabled ? 'enabled' : 'disabled') : 'unknown',
+          runtime: typeof runtime?.callable === 'boolean' ? (runtime.callable ? 'callable' : 'unavailable') : 'unknown',
+          authorization: 'unknown',
+          scope: 'global',
+        },
       }));
     }
   }
@@ -349,20 +386,35 @@ function normalizeMcpNames(servers, { source, kind = 'mcp' }) {
   }).filter(Boolean);
 }
 
+export async function resolveCapabilitySessionProvider({ session = {}, providerProfileId = '', model = '' } = {}) {
+  const tool = text(session?.tool, 64).toLowerCase();
+  let selected = resolveNativeSelectionFromManifest({ tool, options: {
+    providerProfile: text(providerProfileId || session?.providerProfile || session?.providerProfileId),
+    model: text(model || session?.model),
+  } }).providerProfileId;
+  if (!selected && nativeProfileFamily(tool) === 'codex') {
+    const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
+    selected = await resolveDefaultProviderProfileId('codex', { configDir: CONFIG_DIR, registry, readFileImpl: readFile }).catch(() => '');
+  }
+  return selected;
+}
+
 export async function listHarnessCapabilities({
   session = {},
   cwd = process.cwd(),
   providerProfileId = '',
+  model = '',
   codexHomeDir = CODEX_CONTROL_HOME_DIR,
   claudeConfigDir = CLAUDE_MANAGED_HOME_DIR,
   platformSkillsDir = PLATFORM_SKILLS_DIR,
   listCodexCapabilities = listCodexAppServerCapabilities,
+  refresh = false,
 } = {}) {
   const tool = text(session?.tool, 64).toLowerCase();
   const root = resolve(text(cwd) || process.cwd());
   const items = [];
   const errors = {};
-  const requestedProviderProfile = text(providerProfileId || session?.providerProfile || session?.providerProfileId);
+  const requestedProviderProfile = await resolveCapabilitySessionProvider({ session, providerProfileId, model });
   let profileHome = '';
   if (requestedProviderProfile && nativeProfileFamily(tool)) {
     try {
@@ -374,12 +426,34 @@ export async function listHarnessCapabilities({
   }
   if (tool === 'codex' || tool === 'codex-cli' || tool === 'agentoc-codex-app-server') {
     try {
+      if (!requestedProviderProfile) throw new Error('provider-profile-not-selected');
       if (requestedProviderProfile && !profileHome) throw new Error('provider-profile-unavailable');
-      const selectedHome = profileHome ? join(profileHome, 'codex') : codexHomeDir;
-      const catalog = await listCodexCapabilities({ codexHomeDir: selectedHome, cwd: root });
-      items.push(...codexCapabilityItems(catalog));
+      const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
+      const profile = await registry.getProviderProfile(requestedProviderProfile);
+      const auth = profile?.authProfileId ? await registry.getAuthProfile(profile.authProfileId) : null;
+      const secret = auth?.storageRef ? await createSecretStore({ configDir: CONFIG_DIR }).resolveSecret(auth.storageRef) : null;
+      if (!secret?.ok) throw new Error('provider-credential-unavailable');
+      const expectedAccountId = secret.authType === 'oauth' ? nativeOAuthAccountId(secret.tokens) : '';
+      if (secret.authType === 'oauth' && (!expectedAccountId || !managedCodexMcpAccountBinding(secret))) throw new Error('provider-account-unverified');
+      const actualHomeRoot = secret.authType === 'oauth'
+        ? await resolveCodexAccountHomeRoot({ configDir: CONFIG_DIR, providerHomeRoot: profileHome,
+          providerProfileId: requestedProviderProfile, accountId: expectedAccountId })
+        : profileHome;
+      const selectedHome = actualHomeRoot ? join(actualHomeRoot, 'codex') : codexHomeDir;
+      const catalog = await listCodexCapabilities({ codexHomeDir: selectedHome, cwd: root, refresh,
+        expectedAccountId, existingBrokerOnly: secret.authType === 'oauth' });
+      if (secret.authType === 'oauth') {
+        await recordCodexCapabilitySyncResult(requestedProviderProfile, managedCodexMcpAccountBinding(secret), catalog,
+          { configDir: CONFIG_DIR, registry }).catch(() => {});
+      }
+      const choices = await listCodexSkillPreferences(CONFIG_DIR, requestedProviderProfile, managedCodexMcpAccountBinding(secret));
+      const desiredSkills = new Map(choices.map((choice) => [codexSkillId(choice.path), choice.enabled]));
+      items.push(...codexCapabilityItems(catalog).map((item) => item.kind === 'skill' && desiredSkills.has(item.id)
+        ? { ...item, state: { ...(item.state || {}), desiredConfiguration: desiredSkills.get(item.id) ? 'enabled' : 'disabled' } }
+        : item));
       for (const [key, result] of Object.entries(catalog || {})) {
-        if (result?.ok === false) errors[`codex.${key}`] = 'Codex capability catalog is unavailable.';
+        if (result?.ok === false) errors[`codex.${key}`] = result.unsupported
+          ? 'This capability is not supported in production.' : 'Codex capability catalog is unavailable.';
       }
     } catch { errors.codex = 'Codex capability catalog is unavailable.'; }
   } else if (tool === 'claude' || tool === 'claude-bidi') {
@@ -403,6 +477,9 @@ export async function listHarnessCapabilities({
   }
   return {
     tool: tool || 'unknown',
+    ...(requestedProviderProfile ? { providerProfileId: requestedProviderProfile } : {}),
+    ...(nativeProfileFamily(tool) === 'codex' && requestedProviderProfile
+      ? { context: { scope: 'provider', runtime: 'global' } } : {}),
     items: [...unique.values()],
     errors,
   };
@@ -435,6 +512,7 @@ export async function resolveHarnessCapabilityInstructions({
   session = {},
   cwd = process.cwd(),
   providerProfileId = '',
+  model = '',
   codexHomeDir = CODEX_CONTROL_HOME_DIR,
   claudeConfigDir = CLAUDE_MANAGED_HOME_DIR,
   platformSkillsDir = PLATFORM_SKILLS_DIR,
@@ -453,6 +531,7 @@ export async function resolveHarnessCapabilityInstructions({
     session,
     cwd,
     providerProfileId,
+    model,
     codexHomeDir,
     claudeConfigDir,
     platformSkillsDir,
@@ -479,6 +558,10 @@ export async function resolveHarnessCapabilityInstructions({
     }
     if (item.kind === 'plugin') {
       sections.push(`- Use the enabled ${item.source} plugin “${item.title}” when relevant to this request.`);
+      continue;
+    }
+    if (item.kind === 'app') {
+      sections.push(`- Use the available ${item.source} app “${item.title}” when relevant to this request. Do not claim it was used unless the harness reports a successful tool call.`);
       continue;
     }
     throw capabilityResolutionError('This harness capability cannot be attached to a message.', 'HARNESS_CAPABILITY_INVALID', 400);

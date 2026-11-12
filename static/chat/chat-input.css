@@ -1259,6 +1259,16 @@ body.composer-fullscreen-open .messages::-webkit-scrollbar {
   gap: 8px;
   align-items: center;
 }
+.composer-add-panel-row--capability {
+  grid-template-columns: minmax(0, 1fr);
+}
+.composer-add-panel-row--capability > * {
+  grid-column: 1;
+  min-width: 0;
+}
+.composer-add-panel-row--capability .composer-add-panel-row-detail {
+  white-space: normal;
+}
 .composer-add-panel-row-detail {
   grid-column: 1 / -1;
   overflow: hidden;
@@ -3762,6 +3772,9 @@ body.composer-fullscreen-open .messages::-webkit-scrollbar {
   .composer-add-panel--agent .composer-add-panel-row-detail,
   .composer-add-panel--connector .composer-add-panel-row-detail {
     display: none;
+  }
+  .composer-add-panel--connector .composer-add-panel-row--capability .composer-add-panel-row-detail {
+    display: block;
   }
 
   .composer-add-panel--agent .composer-add-panel-group-title,

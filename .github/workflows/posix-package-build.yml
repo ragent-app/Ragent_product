@@ -3,8 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: Three-part candidate version
+        description: Public release version (same as Windows)
         required: true
+        default: '0.0.1'
         type: string
 permissions:
   contents: read
@@ -67,6 +68,9 @@ jobs:
             sudo env "PATH=$PATH" "TMPDIR=$RUNNER_TEMP" node tests/test-linux-run-status-ownership.mjs
             bash scripts/build-deb.sh
             asset="ragent_${RELEASE_VERSION}_amd64.deb"
+            [ "$(dpkg-deb --field "$AGENTOC_DEB_OUTPUT_DIR/$asset" Package)" = ragent ]
+            [ "$(dpkg-deb --field "$AGENTOC_DEB_OUTPUT_DIR/$asset" Version)" = "$RELEASE_VERSION" ]
+            [ "$(dpkg-deb --field "$AGENTOC_DEB_OUTPUT_DIR/$asset" Architecture)" = amd64 ]
             package_check="$RUNNER_TEMP/ragent-package-check"
             dpkg-deb --extract "$AGENTOC_DEB_OUTPUT_DIR/$asset" "$package_check"
             account_env="$package_check/etc/agentoc/account-auth.env"
@@ -87,6 +91,17 @@ jobs:
             node tests/test-macos-package-preview.mjs
             bash scripts/build-dmg.sh
             asset="ragent_${RELEASE_VERSION}-darwin-arm64.dmg"
+            mountpoint="$RUNNER_TEMP/ragent-dmg-check"
+            mkdir -p "$mountpoint"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$AGENTOC_DMG_OUTPUT_DIR/$asset"
+            trap 'hdiutil detach "$mountpoint" >/dev/null || true' EXIT
+            app="$mountpoint/Ragent.app"
+            [ -d "$app" ]
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$app/Contents/Info.plist")" = Ragent ]
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$RELEASE_VERSION" ]
+            codesign --verify --deep --strict "$app"
+            hdiutil detach "$mountpoint"
+            trap - EXIT
             (cd "$AGENTOC_DMG_OUTPUT_DIR" && shasum -a 256 "$asset" > SHA256SUMS.txt)
           fi
           digest="$(awk '{print $1}' "$AGENTOC_DEB_OUTPUT_DIR/SHA256SUMS.txt")"

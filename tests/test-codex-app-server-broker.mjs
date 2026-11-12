@@ -81,6 +81,9 @@ const fakeUpstream = `
         process.stdout.write(JSON.stringify({ method: 'agentoc/macosRunCleanup', params: { threadId: message.params.threadId, runId: 'run-forged', status: 'attempted' } }) + '\\n');
         process.stdout.write(JSON.stringify({ type: 'agentoc.macos_cancellation_cleanup', status: 'unconfirmed', params: { threadId: message.params.threadId } }) + '\\n');
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+      } else if (message.method === 'mcpServer/oauth/login') {
+        process.stdout.write(JSON.stringify({ id: message.id, result: { authorizationUrl: 'https://example.invalid/authorize' } }) + '\\n');
+        setTimeout(() => process.stdout.write(JSON.stringify({ method: 'mcpServer/oauthLogin/completed', params: { name: message.params.name, success: true } }) + '\\n'), message.params.name === 'abandoned-server' ? 500 : 75);
       } else if (message.method === 'model/list') {
         const cursor = message.params && message.params.cursor;
         const result = cursor === 'page-2'
@@ -250,6 +253,40 @@ function startProxy() {
     },
   };
 }
+
+const oauthOwner = startProxy();
+const oauthObserver = startProxy();
+oauthOwner.send({ method: 'initialize', id: 0, params: {} });
+oauthObserver.send({ method: 'initialize', id: 0, params: {} });
+assert.equal((await oauthOwner.next()).id, 0);
+assert.equal((await oauthObserver.next()).id, 0);
+oauthOwner.send({ method: 'mcpServer/oauth/login', id: 8, params: { name: 'private-server' } });
+assert.equal((await oauthOwner.next()).id, 8);
+oauthObserver.send({ method: 'mcpServer/oauth/login', id: 9, params: { name: 'private-server' } });
+assert.equal((await oauthObserver.next()).error.code, -32006, 'same-server OAuth is serialized');
+assert.equal((await oauthOwner.next()).method, 'mcpServer/oauthLogin/completed');
+oauthObserver.send({ method: 'fixture/environment', id: 10, params: {} });
+assert.equal((await oauthObserver.next()).id, 10, 'OAuth completion must not leak to another broker client');
+oauthOwner.child.kill('SIGTERM');
+oauthObserver.child.kill('SIGTERM');
+
+const departingOwner = startProxy();
+const nextOwner = startProxy();
+departingOwner.send({ method: 'initialize', id: 0, params: {} });
+nextOwner.send({ method: 'initialize', id: 0, params: {} });
+assert.equal((await departingOwner.next()).id, 0);
+assert.equal((await nextOwner.next()).id, 0);
+departingOwner.send({ method: 'mcpServer/oauth/login', id: 11, params: { name: 'abandoned-server' } });
+assert.equal((await departingOwner.next()).id, 11);
+departingOwner.child.kill('SIGTERM');
+await new Promise((resolve) => departingOwner.child.once('exit', resolve));
+nextOwner.send({ method: 'mcpServer/oauth/login', id: 12, params: { name: 'abandoned-server' } });
+assert.equal((await nextOwner.next()).error.code, -32006, 'a disconnected native OAuth remains reserved until it completes');
+await new Promise((resolve) => setTimeout(resolve, 600));
+nextOwner.send({ method: 'mcpServer/oauth/login', id: 13, params: { name: 'abandoned-server' } });
+assert.equal((await nextOwner.next()).id, 13, 'a new request can begin after the old native flow completes');
+assert.equal((await nextOwner.next()).method, 'mcpServer/oauthLogin/completed');
+nextOwner.child.kill('SIGTERM');
 
 async function runProxy(text) {
   const proxy = startProxy();

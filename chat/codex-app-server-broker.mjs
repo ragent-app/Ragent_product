@@ -372,6 +372,10 @@ function runBroker() {
   const turnActivity = createCodexBrokerTurnActivity();
   const threadOwners = new Map();
   const pending = new Map();
+  // OAuth completion is app-scoped and must return only to its initiating
+  // connection. Serializing by name also supports older servers without a
+  // loginId and prevents ambiguous completion routing.
+  const mcpOAuthOwners = new Map();
   // Server-initiated requests use a separate id namespace from client
   // requests. Keep the original upstream id for the eventual response.
   const pendingServerRequests = new Map();
@@ -402,6 +406,17 @@ function runBroker() {
   };
 
   const routeNotification = (message) => {
+    if (message?.method === 'mcpServer/oauthLogin/completed') {
+      const name = trimString(message.params?.name);
+      const owner = mcpOAuthOwners.get(name);
+      const loginId = trimString(message.params?.loginId);
+      if (owner && (!owner.loginId || !loginId || owner.loginId === loginId)) {
+        clearTimeout(owner.timer);
+        mcpOAuthOwners.delete(name);
+        sendClient(owner.client, message);
+      }
+      return;
+    }
     const threadId = readThreadId(message);
     if (message?.method === 'hook/started' || message?.method === 'hook/completed') {
       hookRouters.get(threadOwners.get(threadId))?.observe(message);
@@ -510,6 +525,13 @@ function runBroker() {
     if (!message.method && isRequest(message) && pending.has(message.id)) {
       const request = pending.get(message.id);
       pending.delete(message.id);
+      if (request.mcpOAuthName) {
+        const owner = mcpOAuthOwners.get(request.mcpOAuthName);
+        if (owner?.client === request.client) {
+          if (message.error) { clearTimeout(owner.timer); mcpOAuthOwners.delete(request.mcpOAuthName); }
+          else owner.loginId = trimString(message.result?.loginId);
+        }
+      }
       const threadId = readResultThreadId(message);
       if (threadId && !request.client.destroyed) {
         threadOwners.set(threadId, request.client);
@@ -714,6 +736,11 @@ function runBroker() {
     // source. Ownership of the newly created thread comes from its response.
     if (threadId && message.method !== 'thread/fork' && message.method !== 'thread/resume') threadOwners.set(threadId, client);
     const startsThread = message.method === 'thread/start' || message.method === 'thread/resume' || message.method === 'thread/fork';
+    const mcpOAuthName = message.method === 'mcpServer/oauth/login' ? trimString(message.params?.name) : '';
+    if (message.method === 'mcpServer/oauth/login' && (!isRequest(message) || !mcpOAuthName || mcpOAuthOwners.has(mcpOAuthName))) {
+      if (isRequest(message)) sendClient(client, { id: message.id, error: { code: -32006, message: 'MCP authorization is invalid or already in progress' } });
+      return;
+    }
     const rewritten = { ...message };
     if (isRequest(message)) {
       const upstreamId = nextRequestId;
@@ -724,7 +751,15 @@ function runBroker() {
         sendNextThreadRequest();
         return;
       }
-      pending.set(upstreamId, { client, clientId: message.id });
+      pending.set(upstreamId, { client, clientId: message.id, ...(mcpOAuthName ? { mcpOAuthName } : {}) });
+      if (mcpOAuthName) {
+        const seconds = Number(message.params?.timeoutSecs);
+        const lifetime = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 3600;
+        const owner = { client, loginId: '', timer: null };
+        owner.timer = setTimeout(() => { if (mcpOAuthOwners.get(mcpOAuthName) === owner) mcpOAuthOwners.delete(mcpOAuthName); }, (lifetime + 30) * 1000);
+        owner.timer.unref?.();
+        mcpOAuthOwners.set(mcpOAuthName, owner);
+      }
       rewritten.id = upstreamId;
     }
     turnActivity.startRequest(rewritten);
@@ -746,6 +781,10 @@ function runBroker() {
     });
     client.on('close', () => {
       clients.delete(client);
+      // Closing the client does not cancel Codex's native OAuth flow. Retain a
+      // tombstone until completion/expiry so its notification cannot be sent
+      // to a later request for the same server, including older no-loginId APIs.
+      for (const owner of mcpOAuthOwners.values()) if (owner.client === client) owner.client = null;
       hookRouters.delete(client);
       for (const [id, call] of pendingHookCalls) {
         if (call.client !== client && call.owner !== client) continue;

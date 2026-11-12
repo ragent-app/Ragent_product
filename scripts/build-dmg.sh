@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build the AgentoC macOS DMG: a self-contained .app with a bundled Node
+# Build the Ragent macOS DMG: a self-contained .app with a bundled Node
 # runtime, production node_modules, the darwin P2P host sidecar, and bundled
 # codex/claude provider engines. Mirrors scripts/build-deb.sh: the installer
 # never depends on a system Node, npm, or Go at install time.
@@ -250,7 +250,7 @@ if [ "$CODEX_VERSION" != "$CODEX_ADAPTER_TARGET_VERSION" ]; then
     'import(process.argv[1]).then((m) => process.stdout.write(m.isAdapterCompatible("codex", process.argv[2]) ? "yes" : "no"))' \
     "$ROOT/chat/harness-compatibility.mjs" "$CODEX_VERSION")"
   if [ "$CODEX_ADAPTER_COMPATIBLE" != "yes" ]; then
-    echo "Codex $CODEX_VERSION is outside the validated AgentoC adapter range (target $CODEX_ADAPTER_TARGET_VERSION)." >&2
+    echo "Codex $CODEX_VERSION is outside the validated Ragent adapter range (target $CODEX_ADAPTER_TARGET_VERSION)." >&2
     exit 1
   fi
 fi
@@ -258,10 +258,10 @@ CLAUDE_ADAPTER_COMPATIBLE="$(node --input-type=module -e \
   'import(process.argv[1]).then((m) => process.stdout.write(m.isAdapterCompatible("claude", process.argv[2]) ? "yes" : "no"))' \
   "$ROOT/chat/harness-compatibility.mjs" "$CLAUDE_VERSION")"
 if [ "$CLAUDE_ADAPTER_COMPATIBLE" != "yes" ]; then
-  echo "Claude Code $CLAUDE_VERSION is outside the validated AgentoC adapter range." >&2
+  echo "Claude Code $CLAUDE_VERSION is outside the validated Ragent adapter range." >&2
   exit 1
 fi
-printf 'Building AgentoC %s (darwin/%s) with Codex %s and Claude Code %s\n' \
+printf 'Building Ragent %s (darwin/%s) with Codex %s and Claude Code %s\n' \
   "$VERSION" "$ARCH" "$CODEX_VERSION" "$CLAUDE_VERSION"
 
 STAGE="$WORK_DIR/stage"

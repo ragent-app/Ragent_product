@@ -23,7 +23,11 @@ const {
   validateAuthProfile,
 } = await import('../lib/provider-runtime/registry.mjs');
 const { createSecretStore } = await import('../lib/provider-runtime/secret-store.mjs');
-const { codexAppServerBrokerSocketPath } = await import('../chat/codex-app-server-broker.mjs');
+const { codexAppServerBrokerSocketPath, codexBrokerAccountDigest } = await import('../chat/codex-app-server-broker.mjs');
+const { managedCodexMcpHome, managedCodexMcpAccountBinding } = await import('../lib/provider-runtime/codex-mcp-config.mjs');
+const { saveCodexSkillPreference } = await import('../lib/provider-runtime/codex-skill-preferences.mjs');
+const { readCodexPluginPreference, readCodexPluginPreferenceState, writeCodexPluginPreference } = await import('../lib/provider-runtime/codex-plugin-preferences.mjs');
+const { resolveCodexAccountHomeRoot } = await import('../lib/provider-runtime/provider-home.mjs');
 const {
   resolveRuntimeConfig,
   sanitizeRuntimeEnvironment,
@@ -50,6 +54,14 @@ const registry = createNativeProviderRegistry({ configDir });
 const secretStore = createSecretStore({ configDir });
 
 try {
+  const legacyProviderRoot = join(root, 'legacy-provider');
+  mkdirSync(join(legacyProviderRoot, 'codex'), { recursive: true });
+  writeFileSync(join(legacyProviderRoot, 'codex', 'auth.json'), JSON.stringify({ tokens: { account_id: 'legacy-account' } }));
+  const alternateHome = await resolveCodexAccountHomeRoot({ configDir, providerHomeRoot: legacyProviderRoot,
+    providerProfileId: 'legacy-profile', accountId: 'new-account', initialize: true });
+  assert.notEqual(alternateHome, legacyProviderRoot, 'legacy home must remain bound to its original account');
+  assert.equal(await resolveCodexAccountHomeRoot({ configDir, providerHomeRoot: legacyProviderRoot,
+    providerProfileId: 'legacy-profile', accountId: 'legacy-account' }), legacyProviderRoot);
   // —— SecretStore: secrets live only in the vault ——
 
   await secretStore.writeSecret('cred-a', { authType: 'api-key', apiKey: 'sk-test-aaaaaaaa' });
@@ -595,6 +607,12 @@ try {
   chmodSync(homesRoot, 0o700);
   chmodSync(join(homesRoot, 'by-provider'), 0o700);
   chmodSync(staleKey, 0o700);
+  const lunaMcpBinding = managedCodexMcpAccountBinding({ authType: 'api-key', apiKey: 'sk-luna' });
+  const managedMcpHome = managedCodexMcpHome(configDir, 'newapi-luna', lunaMcpBinding);
+  mkdirSync(managedMcpHome, { recursive: true });
+  writeFileSync(join(managedMcpHome, '.agentoc-account-binding'), lunaMcpBinding + '\n');
+  writeFileSync(join(managedMcpHome, 'config.toml'), '[mcp_servers.docs]\nurl = "https://example.invalid/mcp"\n');
+  await saveCodexSkillPreference(configDir, 'newapi-luna', lunaMcpBinding, join(root, 'skills', 'review', 'SKILL.md'), false);
   const prepared = await prepareNativeRunProviderHome('run_300', {
     tool: 'codex',
     options: { providerProfile: 'newapi-luna', model: 'luna-model' },
@@ -622,6 +640,9 @@ try {
   const preparedHome = join(prepared.homeDir, 'codex');
   const preparedConfig = readFileSync(join(preparedHome, 'config.toml'), 'utf8');
   assert.ok(preparedConfig.includes('https://luna.example/v1'));
+  assert.match(preparedConfig, /mcp_oauth_credentials_store = "file"/, 'MCP OAuth must use the isolated native home');
+  assert.match(preparedConfig, /\[mcp_servers\.docs\]/, 'provider MCP must survive runtime config generation');
+  assert.match(preparedConfig, /\[\[skills\.config\]\][\s\S]*enabled = false/, 'account Skill choice must survive runtime config generation');
   assert.match(
     preparedConfig,
     /requires_openai_auth = true/,
@@ -646,6 +667,12 @@ try {
   assert.equal(preparedAuth.OPENAI_API_KEY, 'sk-luna');
   assert.equal(readFileSync(join(preparedHome, '.agentoc-provider-id'), 'utf8').trim(), 'newapi-luna');
   assert.ok(prepared.snapshot?.configHash, 'native prepare must return the frozen snapshot for provenance');
+  const readOnlyPrepared = await prepareNativeRunProviderHome('run_read_only_mcp', {
+    tool: 'codex', options: { providerProfile: 'newapi-luna', model: 'luna-model' },
+  }, { configDir, providerHomesRoot: homesRoot, forceRunScopedHome: true });
+  assert.equal(readOnlyPrepared.ok, true, readOnlyPrepared.error || readOnlyPrepared.reason);
+  assert.doesNotMatch(readFileSync(join(readOnlyPrepared.codexHomeDir, 'config.toml'), 'utf8'), /\[mcp_servers\.docs\]/,
+    'read-scoped runs must not inherit external MCP actions');
 
   // Native OAuth persistence: a provider refresh written by Codex into the
   // persistent home must be returned to the SecretStore before the next Run.
@@ -657,6 +684,16 @@ try {
   assert.ok(preparedOAuth1.oauthLock?.path, 'Codex OAuth preparation should return a handoff lock when requested');
   await preparedOAuth1.oauthLock.release();
   const oauthCodexHome = join(preparedOAuth1.homeDir, 'codex');
+  const pluginBinding = managedCodexMcpAccountBinding({ authType: 'oauth', tokens: { account_id: 'account-a' } });
+  assert.equal(await readCodexPluginPreference(configDir, pluginBinding), false);
+  await writeCodexPluginPreference(configDir, pluginBinding, true);
+  const withPlugins = await prepareNativeRunProviderHome('run_plugin_enabled', { tool: 'codex', options: { providerProfile: 'openai-official-a', model: 'gpt-5.5' } },
+    { configDir, providerHomesRoot: oauthHomeRoot });
+  assert.match(readFileSync(join(withPlugins.codexHomeDir, 'config.toml'), 'utf8'), /plugins = true/);
+  const privatePlugins = await prepareNativeRunProviderHome('run_plugin_read_only', { tool: 'codex', options: { providerProfile: 'openai-official-a', model: 'gpt-5.5' } },
+    { configDir, providerHomesRoot: oauthHomeRoot, forceRunScopedHome: true });
+  assert.match(readFileSync(join(privatePlugins.codexHomeDir, 'config.toml'), 'utf8'), /plugins = false/);
+  await writeCodexPluginPreference(configDir, pluginBinding, false);
   const oauthAuthPath = join(oauthCodexHome, 'auth.json');
   const oauthStatePath = join(oauthCodexHome, '.agentoc-oauth-state.json');
   const oauthAuth1 = JSON.parse(readFileSync(oauthAuthPath, 'utf8'));
@@ -707,7 +744,7 @@ try {
     const switched = await prepareNativeRunProviderHome('run_active_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
       { configDir, providerHomesRoot:oauthHomeRoot });
     assert.equal(switched.ok, true, switched.error || switched.reason);
-    assert.notEqual(switched.codexHomeDir, oauthCodexHome);
+    assert.notEqual(switched.codexHomeDir, oauthCodexHome, 'different accounts must not share a broker home');
     assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.account_id, 'account-a');
   } finally { await new Promise(resolve => fakeLiveBroker.close(resolve)); }
   const switchedAccount = await prepareNativeRunProviderHome('run_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
@@ -720,6 +757,94 @@ try {
     tokens: { access_token: 'at-3', refresh_token: 'rt-3', account_id: 'account-a', expiresAt: 3000 } });
   await prepareNativeRunProviderHome('run_account_restore', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
     { configDir, providerHomesRoot:oauthHomeRoot });
+
+  const oauthMcpBinding = managedCodexMcpAccountBinding({ authType: 'oauth', tokens: { account_id: 'account-a' } });
+  const oauthMcpHome = managedCodexMcpHome(configDir, 'openai-official-a', oauthMcpBinding);
+  mkdirSync(oauthMcpHome, { recursive: true });
+  writeFileSync(join(oauthMcpHome, '.agentoc-account-binding'), oauthMcpBinding + '\n');
+  const oauthMcpConfig = join(oauthMcpHome, 'config.toml');
+  writeFileSync(oauthMcpConfig, '[mcp_servers.example]\nurl = "https://example.invalid/mcp"\n');
+  let reloads = 0;
+  let failReload = false;
+  let retireAttempts = 0;
+  let allowRetirement = false;
+  const reloadBroker = createServer((socket) => {
+    let input = '';
+    socket.on('data', (chunk) => {
+      input += chunk.toString();
+      let newline;
+      while ((newline = input.indexOf('\n')) >= 0) {
+        const message = JSON.parse(input.slice(0, newline)); input = input.slice(newline + 1);
+        if (message.type === 'agentoc-codex-broker-ping') socket.write(JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true,
+          ...(message.expectedAccountDigest ? { accountMatches: message.expectedAccountDigest === codexBrokerAccountDigest('account-a') } : {}) }) + '\n');
+        else if (message.type === 'agentoc-codex-broker-retire') {
+          retireAttempts += 1;
+          assert.equal(message.expectedAccountDigest, codexBrokerAccountDigest('account-a'));
+          socket.end(JSON.stringify({ type: 'agentoc-codex-broker-retire-result', accepted: allowRetirement }) + '\n');
+        }
+        else if (message.method === 'initialize') socket.write(JSON.stringify({ id: message.id, result: {} }) + '\n');
+        else if (message.method === 'config/mcpServer/reload') {
+          reloads += 1;
+          socket.write(JSON.stringify(failReload
+            ? { id: message.id, error: { code: -32601, message: 'unsupported' } }
+            : { id: message.id, result: {} }) + '\n');
+        }
+      }
+    });
+  });
+  await new Promise((resolve, reject) => reloadBroker.once('error', reject).listen(brokerSocket, resolve));
+  try {
+    for (const run of ['reload-first', 'reload-unchanged']) {
+      const result = await prepareNativeRunProviderHome(run, { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+        { configDir, providerHomesRoot:oauthHomeRoot });
+      assert.equal(result.ok, true, result.error || result.reason);
+    }
+    assert.equal(reloads, 1, 'unchanged MCP config must not reload the shared broker on every Run');
+    writeFileSync(oauthMcpConfig, '[mcp_servers.example]\nurl = "https://example.invalid/other"\n');
+    const changed = await prepareNativeRunProviderHome('reload-changed', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+      { configDir, providerHomesRoot:oauthHomeRoot });
+    assert.equal(changed.ok, true, changed.error || changed.reason);
+    assert.equal(reloads, 2, 'changed MCP config must reload the shared broker');
+    writeFileSync(oauthMcpConfig, '[mcp_servers.example]\nurl = "https://example.invalid/retry"\n');
+    failReload = true;
+    const failedReload = await prepareNativeRunProviderHome('reload-failed', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+      { configDir, providerHomesRoot:oauthHomeRoot });
+    assert.equal(failedReload.ok, true, 'unsupported MCP reload must not block an ordinary Run');
+    failReload = false;
+    await prepareNativeRunProviderHome('reload-retry', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+      { configDir, providerHomesRoot:oauthHomeRoot });
+    assert.equal(reloads, 4, 'failed refresh must be retried');
+    const oldApplied = readFileSync(join(oauthCodexHome, '.agentoc-plugin-applied'), 'utf8').trim();
+    await writeCodexPluginPreference(configDir, pluginBinding, true);
+    const desiredRevision = (await readCodexPluginPreferenceState(configDir, pluginBinding)).revision;
+    const busy = await prepareNativeRunProviderHome('plugin-busy', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+      { configDir, providerHomesRoot:oauthHomeRoot });
+    assert.equal(busy.ok, true, 'a busy broker must not block normal work');
+    assert.equal(retireAttempts, 1);
+    assert.equal(readFileSync(join(oauthCodexHome, '.agentoc-plugin-applied'), 'utf8').trim(), oldApplied);
+    allowRetirement = true;
+    const retried = await prepareNativeRunProviderHome('plugin-retry', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+      { configDir, providerHomesRoot:oauthHomeRoot });
+    assert.equal(retried.ok, true, retried.error || retried.reason);
+    assert.equal(retireAttempts, 2, 'the next run must retry an idle restart');
+    assert.equal(readFileSync(join(oauthCodexHome, '.agentoc-plugin-applied'), 'utf8').trim(), desiredRevision);
+    await writeCodexPluginPreference(configDir, pluginBinding, false);
+  } finally { await new Promise(resolve => reloadBroker.close(resolve)); }
+  await secretStore.writeSecret('cred-oauth', { authType: 'oauth', tokens: {
+    access_token: 'switched', refresh_token: 'switched-refresh', account_id: 'account-other', expiresAt: 5000,
+  } });
+  const isolatedAccount = await prepareNativeRunProviderHome('run_other_account_mcp', {
+    tool: 'codex', options: { providerProfile: 'openai-official-a', model: 'gpt-5.5' },
+  }, { configDir, providerHomesRoot: oauthHomeRoot });
+  assert.equal(isolatedAccount.ok, true, isolatedAccount.error || isolatedAccount.reason);
+  assert.doesNotMatch(readFileSync(join(isolatedAccount.codexHomeDir, 'config.toml'), 'utf8'), /\[mcp_servers\.example\]/,
+    'a switched account must not inherit the prior account MCP configuration');
+  await secretStore.writeSecret('cred-oauth', { authType: 'oauth', tokens: {
+    access_token: 'at-3', refresh_token: 'rt-3', account_id: 'account-a', expiresAt: 3000,
+  } });
+  await prepareNativeRunProviderHome('run_account_restore_after_mcp', {
+    tool: 'codex', options: { providerProfile: 'openai-official-a', model: 'gpt-5.5' },
+  }, { configDir, providerHomesRoot: oauthHomeRoot });
 
   if (process.platform === 'linux' && process.getuid?.() === 0) {
     let migrationCall = null;
@@ -769,7 +894,7 @@ try {
   assert.equal(preparedNativeOnly.oauthOwner, 'agentoc');
   assert.equal(
     JSON.parse(readFileSync(join(preparedNativeOnly.homeDir, 'codex', 'auth.json'), 'utf8')).tokens.refresh_token,
-    'rt-old-refresh',
+    'rt-3',
   );
   // The old external-owner path must fail closed even when a caller explicitly
   // supplies ~/.codex/auth.json. Native Codex OAuth is machine-local and the

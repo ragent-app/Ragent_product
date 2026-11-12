@@ -82,7 +82,15 @@ data class WebMcpServer(
     val family: String,
     val name: String,
     val detail: String,
+    val providerId: String = "",
+    val authState: String = "unknown",
 )
+
+data class WebMcpOAuthJob(val id: String, val providerId: String, val serverName: String, val url: String, val state: String, val mobileCallbackSupported: Boolean = false, val callbackSubmitted: Boolean = false)
+data class WebCodexSkill(val id: String, val providerId: String, val name: String, val enabled: Boolean, val desiredEnabled: Boolean)
+data class WebCodexApp(val id: String, val providerId: String, val name: String, val runtime: String, val configuration: String, val accessible: Boolean?)
+data class WebCodexPluginPreference(val providerId: String, val desiredEnabled: Boolean)
+data class WebCodexSyncState(val providerId: String, val status: String, val mode: String = "approved-auto")
 
 data class WebProvider(
     val id: String,
@@ -222,6 +230,12 @@ data class WebParityUiState(
     val availableTools: List<String> = emptyList(),
     val connectors: List<WebConnector> = emptyList(),
     val mcpServers: List<WebMcpServer> = emptyList(),
+    val mcpOAuthJob: WebMcpOAuthJob? = null,
+    val codexSkills: List<WebCodexSkill> = emptyList(),
+    val codexApps: List<WebCodexApp> = emptyList(),
+    val codexPluginPreference: WebCodexPluginPreference? = null,
+    val codexSyncState: WebCodexSyncState? = null,
+    val codexManagementProviderId: String? = null,
     val providers: List<WebProvider> = emptyList(),
     val harnesses: List<WebHarness> = emptyList(),
     val providerHarnessesLoaded: Boolean = false,
@@ -285,8 +299,17 @@ sealed interface WebParityEvent {
     ) : WebParityEvent
     data class DeleteAgent(val id: String) : WebParityEvent
     data class StartAgent(val id: String, val projectId: String? = null) : WebParityEvent
-    data class AddMcpServer(val family: String, val name: String, val commandOrUrl: String) : WebParityEvent
-    data class DeleteMcpServer(val family: String, val name: String) : WebParityEvent
+    data class AddMcpServer(val family: String, val name: String, val commandOrUrl: String, val providerId: String = "", val args: List<String> = emptyList()) : WebParityEvent
+    data class DeleteMcpServer(val family: String, val name: String, val providerId: String = "") : WebParityEvent
+    data class StartMcpOAuth(val providerId: String, val serverName: String) : WebParityEvent
+    data class SubmitMcpOAuthCallback(val callbackUrl: String) : WebParityEvent
+    data object CheckMcpOAuth : WebParityEvent
+    data object ClearMcpOAuth : WebParityEvent
+    data class SetCodexSkill(val sessionId: String, val skill: WebCodexSkill, val enabled: Boolean) : WebParityEvent
+    data class SetCodexPluginPreference(val providerId: String, val enabled: Boolean) : WebParityEvent
+    data class RefreshCodexSync(val providerId: String) : WebParityEvent
+    data class SetCodexSyncPolicy(val providerId: String, val mode: String) : WebParityEvent
+    data class SelectCodexManagementProvider(val providerId: String) : WebParityEvent
     data class StartConnectorOAuth(val id: String) : WebParityEvent
     data class DisconnectConnector(val id: String) : WebParityEvent
     data class RevokeDevice(val id: String) : WebParityEvent
@@ -359,9 +382,9 @@ sealed interface WebParityEvent {
  */
 class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiResponse) {
     constructor(transport: AgentoCTransport) : this({ request -> transport.execute(request) })
-    suspend fun load(page: WebParityPage): WebParitySnapshot = when (page) {
+    suspend fun load(page: WebParityPage, sessionId: String? = null, codexProviderId: String? = null): WebParitySnapshot = when (page) {
         WebParityPage.Agents -> WebParitySnapshot(agents = loadAgents(), availableTools = loadTools())
-        WebParityPage.Connectors -> loadConnectors()
+        WebParityPage.Connectors -> loadConnectors(sessionId, codexProviderId)
         WebParityPage.ModelProviders -> {
             val providers = loadProviders()
             val harnesses = try { loadHarnesses() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
@@ -470,19 +493,71 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
         return root["session"]?.jsonObject?.string("id") ?: error("Session response did not include an id")
     }
 
-    suspend fun addMcpServer(family: String, name: String, commandOrUrl: String) {
-        val path = if (family == "claude") "/api/claude/mcp-servers" else "/api/codex/mcp-servers"
+    suspend fun addMcpServer(family: String, name: String, commandOrUrl: String, providerId: String = "", args: List<String> = emptyList()) {
+        val route = if (family == "claude") "/api/claude/mcp-servers" else {
+            require(providerId.isNotBlank()) { "Select a Codex account" }
+            "/api/providers/${path(providerId)}/codex/mcp-servers"
+        }
         val body = jsonObject {
             put("name", name.trim())
-            if (commandOrUrl.trim().startsWith("http", ignoreCase = true)) put("url", commandOrUrl.trim())
-            else put("command", commandOrUrl.trim())
+            val value = commandOrUrl.trim()
+            if (value.startsWith("http://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)) put("url", value)
+            else {
+                put("command", value)
+                if (family == "codex" && args.isNotEmpty()) put("args", buildJsonArray { args.forEach { add(JsonPrimitive(it)) } })
+            }
         }
-        request("POST", path, body)
+        request("POST", route, body)
     }
 
-    suspend fun deleteMcpServer(family: String, name: String) {
-        val path = if (family == "claude") "/api/claude/mcp-servers" else "/api/codex/mcp-servers"
-        request("DELETE", "$path/${path(name)}")
+    suspend fun deleteMcpServer(family: String, name: String, providerId: String = "") {
+        val route = if (family == "claude") "/api/claude/mcp-servers" else {
+            require(providerId.isNotBlank()) { "Select a Codex account" }
+            "/api/providers/${path(providerId)}/codex/mcp-servers"
+        }
+        request("DELETE", "$route/${path(name)}")
+    }
+
+    suspend fun startMcpOAuth(providerId: String, serverName: String): WebMcpOAuthJob {
+        require(providerId.isNotBlank()) { "Select a Codex account" }
+        val result = request("POST", "/api/providers/${path(providerId)}/codex/mcp-servers/${path(serverName)}/oauth")
+        val url = result.string("authorizationUrl") ?: error("Authorization URL was not returned")
+        require(url.startsWith("https://") || url.startsWith("http://")) { "Invalid authorization URL" }
+        return WebMcpOAuthJob(result.string("id") ?: error("Authorization job was not returned"), providerId, serverName, url, result.string("state") ?: "pending", result.boolean("mobileCallbackSupported"))
+    }
+
+    suspend fun checkMcpOAuth(job: WebMcpOAuthJob): WebMcpOAuthJob {
+        val route = "/api/providers/${path(job.providerId)}/codex/mcp-servers/${path(job.serverName)}/oauth/${path(job.id)}"
+        val result = request("GET", route)
+        return job.copy(state = result.string("state") ?: "unknown")
+    }
+
+    suspend fun cancelMcpOAuth(job: WebMcpOAuthJob) {
+        request("DELETE", "/api/providers/${path(job.providerId)}/codex/mcp-servers/${path(job.serverName)}/oauth/${path(job.id)}")
+    }
+
+    suspend fun submitMcpOAuthCallback(job: WebMcpOAuthJob, callbackUrl: String) {
+        val route = "/api/providers/${path(job.providerId)}/codex/mcp-servers/${path(job.serverName)}/oauth/${path(job.id)}"
+        request("POST", route, jsonObject { put("callbackUrl", callbackUrl) })
+    }
+
+    suspend fun setCodexSkill(sessionId: String, skill: WebCodexSkill, enabled: Boolean) {
+        request("POST", "/api/sessions/${path(sessionId)}/harness-capabilities/skills", jsonObject {
+            put("providerProfileId", skill.providerId); put("id", skill.id); put("enabled", enabled)
+        })
+    }
+
+    suspend fun setCodexPluginPreference(providerId: String, enabled: Boolean) {
+        request("POST", "/api/providers/${path(providerId)}/codex/plugin-preference", jsonObject { put("enabled", enabled) })
+    }
+
+    suspend fun refreshCodexSync(providerId: String) {
+        request("POST", "/api/providers/${path(providerId)}/codex/capability-sync")
+    }
+
+    suspend fun setCodexSyncPolicy(providerId: String, mode: String) {
+        require(mode in setOf("approved-auto", "manual", "disabled"))
+        request("POST", "/api/providers/${path(providerId)}/codex/capability-sync-policy", jsonObject { put("mode", mode) })
     }
 
     suspend fun startConnectorOAuth(id: String): String {
@@ -667,7 +742,7 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
         .filter { it.isNotEmpty() }
         .distinct()
 
-    private suspend fun loadConnectors(): WebParitySnapshot {
+    private suspend fun loadConnectors(sessionId: String?, selectedProviderId: String?): WebParitySnapshot {
         val surfaces = runCatching { request("GET", "/api/connectors/surfaces")["surfaces"]?.jsonArray.orEmpty() }.getOrDefault(emptyList())
         val connectors = surfaces.mapNotNull { value ->
             val item = value.jsonObject
@@ -693,18 +768,71 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
                 connectors += WebConnector(route, id, root.string("status") ?: if (ready) "Connected" else "Not connected", ready)
             }
         }
-        return WebParitySnapshot(connectors = connectors, mcpServers = loadMcpServers())
+        val providers = try { loadProviders() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { emptyList() }
+        val catalog = sessionId?.takeIf(String::isNotBlank)?.let { session ->
+            try { request("GET", "/api/sessions/${path(session)}/harness-capabilities?tool=codex") }
+            catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+        }
+        val sessionProvider = catalog?.string("providerProfileId").orEmpty()
+        val codexProviders = providers.filter { it.agentType == "codex" }
+        val provider = selectedProviderId?.takeIf { selected -> codexProviders.any { it.id == selected } }
+            ?: sessionProvider.takeIf { session -> codexProviders.any { it.id == session } }
+            ?: codexProviders.firstOrNull()?.id.orEmpty()
+        val skills = catalog?.takeIf { provider == sessionProvider }?.let {
+            it["items"]?.jsonArray.orEmpty().mapNotNull { value ->
+                val item = value as? JsonObject ?: return@mapNotNull null
+                val state = item["state"] as? JsonObject
+                if (provider.isBlank() || item.string("kind") != "skill" || item.string("source") != "codex" || state?.boolean("manageable") != true) return@mapNotNull null
+                val id = item.string("id") ?: return@mapNotNull null
+                val name = item.string("title") ?: return@mapNotNull null
+                val enabled = (item["enabled"] as? JsonPrimitive)?.booleanOrNull != false
+                val desired = when (state?.string("desiredConfiguration")) { "enabled" -> true; "disabled" -> false; else -> enabled }
+                WebCodexSkill(id, provider, name, enabled, desired)
+            }
+        }.orEmpty()
+        val apps = catalog?.takeIf { provider == sessionProvider }?.get("items")?.jsonArray.orEmpty().mapNotNull { value ->
+            val item = value as? JsonObject ?: return@mapNotNull null
+            if (provider.isBlank() || item.string("kind") != "app" || item.string("source") != "codex") return@mapNotNull null
+            val id = item.string("id") ?: return@mapNotNull null
+            val name = item.string("title") ?: return@mapNotNull null
+            val appState = item["state"] as? JsonObject
+            WebCodexApp(id, provider, name, appState?.string("runtime") ?: "unknown",
+                appState?.string("configuration") ?: "unknown", (appState?.get("accessible") as? JsonPrimitive)?.booleanOrNull)
+        }
+        val mcpAuth = catalog?.takeIf { provider == sessionProvider }?.get("items")?.jsonArray.orEmpty().mapNotNull { value ->
+            val item = value as? JsonObject ?: return@mapNotNull null
+            if (item.string("kind") != "mcp" || item.string("source") != "codex") return@mapNotNull null
+            val name = item.string("title") ?: return@mapNotNull null
+            name to ((item["state"] as? JsonObject)?.string("authorization") ?: "unknown")
+        }.toMap()
+        val servers = loadMcpServers(providers).map { server ->
+            if (provider.isNotBlank() && server.providerId == provider && server.family == "codex") server.copy(authState = mcpAuth[server.name] ?: "unknown") else server
+        }
+        val pluginPreference = if (provider.isBlank()) null else try {
+            val preference = request("GET", "/api/providers/${path(provider)}/codex/plugin-preference")
+            (preference["desiredEnabled"] as? JsonPrimitive)?.booleanOrNull?.let { WebCodexPluginPreference(provider, it) }
+        } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+        val syncState = if (pluginPreference == null) null else try {
+            val root = request("GET", "/api/providers/${path(provider)}/codex/capability-sync")
+            val sync = root["sync"] as? JsonObject
+            val mode = root.string("mode")?.takeIf { it in setOf("approved-auto", "manual", "disabled") } ?: "approved-auto"
+            WebCodexSyncState(provider, sync?.string("status") ?: "unchecked", mode)
+        } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+        return WebParitySnapshot(connectors = connectors, mcpServers = servers, providers = providers, codexSkills = skills, codexApps = apps, codexPluginPreference = pluginPreference, codexSyncState = syncState)
     }
 
-    private suspend fun loadMcpServers(): List<WebMcpServer> = buildList {
-        for ((family, route) in listOf("codex" to "/api/codex/mcp-servers", "claude" to "/api/claude/mcp-servers")) {
+    private suspend fun loadMcpServers(providers: List<WebProvider>): List<WebMcpServer> = buildList {
+        val routes = listOf(Triple("claude", "", "/api/claude/mcp-servers")) + providers.filter { it.agentType == "codex" }.map {
+            Triple("codex", it.id, "/api/providers/${path(it.id)}/codex/mcp-servers")
+        }
+        for ((family, providerId, route) in routes) {
             val root = runCatching { request("GET", route) }.getOrNull() ?: continue
             root["servers"]?.jsonArray.orEmpty().forEach { value ->
                 val item = value.jsonObject
                 val name = item.string("name") ?: return@forEach
                 val transport = item["transport"]?.jsonObject
-                val detail = transport?.string("url") ?: transport?.string("command") ?: item.string("command") ?: "Configured"
-                add(WebMcpServer(family, name, detail))
+                val detail = transport?.string("type") ?: transport?.string("url") ?: transport?.string("command") ?: item.string("command") ?: "Configured"
+                add(WebMcpServer(family, name, detail, providerId))
             }
         }
     }
@@ -841,6 +969,10 @@ data class WebParitySnapshot(
     val availableTools: List<String> = emptyList(),
     val connectors: List<WebConnector> = emptyList(),
     val mcpServers: List<WebMcpServer> = emptyList(),
+    val codexSkills: List<WebCodexSkill> = emptyList(),
+    val codexApps: List<WebCodexApp> = emptyList(),
+    val codexPluginPreference: WebCodexPluginPreference? = null,
+    val codexSyncState: WebCodexSyncState? = null,
     val providers: List<WebProvider> = emptyList(),
     val harnesses: List<WebHarness> = emptyList(),
     val providerHarnessesLoaded: Boolean = false,
@@ -873,6 +1005,10 @@ class WebParityViewModel(
     private var providerOAuthOpenedJobId: String? = null
     private var pageRefreshJob: Job? = null
     private var pageRefreshGeneration = 0L
+    private var mcpOAuthGeneration = 0L
+    private var mcpOAuthTargetId: String? = null
+    private var mcpOAuthStartPending = false
+    private var mcpCallbackSubmitting = false
     private var hasLoadedPage = false
     private var loadedPageTargetId: String? = null
     private var pageTargetId: String? = null
@@ -920,6 +1056,9 @@ class WebParityViewModel(
             is WebParityEvent.TargetChanged -> {
                 if (mutableState.value.page == WebParityPage.ModelProviders && providerRepositoryFactory != null) return
                 if (pageTargetId != null && pageTargetId != event.targetId) {
+                    ++mcpOAuthGeneration
+                    val wasStartingOAuth = mcpOAuthStartPending
+                    mcpOAuthStartPending = false
                     ++pageRefreshGeneration
                     pageRefreshJob?.cancel()
                     if (providerRepositoryFactory == null) providerOAuthMonitor?.cancel()
@@ -932,7 +1071,8 @@ class WebParityViewModel(
                         else WebParityUiState(page = old.page, providerCrossInstance = true,
                             providerInstances = old.providerInstances, providerTargetId = old.providerTargetId,
                             providerOAuthJob = old.providerOAuthJob, providerOAuthPolling = old.providerOAuthPolling,
-                            providerOAuthTargetLabel = old.providerOAuthTargetLabel, actionInProgress = old.actionInProgress)
+                            providerOAuthTargetLabel = old.providerOAuthTargetLabel,
+                            actionInProgress = if (wasStartingOAuth) false else old.actionInProgress)
                 }
             }
             is WebParityEvent.CreateAgent -> mutate { repository.createAgent(event.name, event.systemPrompt, event.tool, event.welcomeMessage, event.skills, event.perMessageSystemPrompt, event.templateContext, event.collaborationPolicy) }
@@ -953,8 +1093,104 @@ class WebParityViewModel(
                     }
                     .onFailure { error -> mutableState.update { it.copy(actionInProgress = false, error = error.message ?: "Agent session could not be created") } }
             }
-            is WebParityEvent.AddMcpServer -> mutate { repository.addMcpServer(event.family, event.name, event.commandOrUrl) }
-            is WebParityEvent.DeleteMcpServer -> mutate { repository.deleteMcpServer(event.family, event.name) }
+            is WebParityEvent.AddMcpServer -> mutate { repository.addMcpServer(event.family, event.name, event.commandOrUrl, event.providerId, event.args) }
+            is WebParityEvent.DeleteMcpServer -> mutate { repository.deleteMcpServer(event.family, event.name, event.providerId) }
+            is WebParityEvent.StartMcpOAuth -> viewModelScope.launch {
+                val generation = ++mcpOAuthGeneration
+                val targetId = currentTargetIdProvider?.invoke()
+                mcpOAuthStartPending = true
+                mutableState.update { it.copy(actionInProgress = true, error = null, mcpOAuthJob = null) }
+                try {
+                    val job = repository.startMcpOAuth(event.providerId, event.serverName)
+                    if (generation != mcpOAuthGeneration || targetId != currentTargetIdProvider?.invoke()) {
+                        if (generation == mcpOAuthGeneration) {
+                            mcpOAuthStartPending = false
+                            mutableState.update { it.copy(actionInProgress = false) }
+                        }
+                        cancelAbandonedMcpOAuth(job, targetId)
+                        return@launch
+                    }
+                    mcpOAuthStartPending = false
+                    mcpOAuthTargetId = targetId
+                    mutableState.update { it.copy(actionInProgress = false, mcpOAuthJob = job) }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    if (generation == mcpOAuthGeneration && targetId == currentTargetIdProvider?.invoke()) {
+                        mcpOAuthStartPending = false
+                        mutableState.update { it.copy(actionInProgress = false, error = error.message ?: "Authorization could not be started") }
+                    }
+                }
+            }
+            WebParityEvent.CheckMcpOAuth -> mutableState.value.mcpOAuthJob?.let { current -> viewModelScope.launch {
+                val generation = mcpOAuthGeneration
+                val targetId = currentTargetIdProvider?.invoke()
+                try {
+                    val job = repository.checkMcpOAuth(current)
+                    if (generation != mcpOAuthGeneration || targetId != currentTargetIdProvider?.invoke() || mutableState.value.mcpOAuthJob?.id != job.id) return@launch
+                    mutableState.update { state ->
+                        if (state.mcpOAuthJob?.id == job.id) state.copy(mcpOAuthJob = job.copy(callbackSubmitted = state.mcpOAuthJob?.callbackSubmitted == true)) else state
+                    }
+                    if (job.state == "connected" && mutableState.value.page == WebParityPage.Connectors) refresh(WebParityPage.Connectors)
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    if (generation == mcpOAuthGeneration && targetId == currentTargetIdProvider?.invoke() && mutableState.value.mcpOAuthJob?.id == current.id)
+                        mutableState.update { it.copy(error = error.message ?: "Authorization status could not be checked") }
+                }
+            } }
+            is WebParityEvent.SubmitMcpOAuthCallback -> mutableState.value.mcpOAuthJob?.takeIf { !mcpCallbackSubmitting && it.mobileCallbackSupported && !it.callbackSubmitted && it.state == "pending" }?.let { current ->
+                mcpCallbackSubmitting = true
+                viewModelScope.launch {
+                val generation = mcpOAuthGeneration
+                val targetId = currentTargetIdProvider?.invoke()
+                mutableState.update { it.copy(error = null) }
+                try {
+                    repository.submitMcpOAuthCallback(current, event.callbackUrl.trim())
+                    if (generation == mcpOAuthGeneration && targetId == currentTargetIdProvider?.invoke() && mutableState.value.mcpOAuthJob?.id == current.id) {
+                        mutableState.update { state -> state.copy(mcpOAuthJob = state.mcpOAuthJob?.copy(callbackSubmitted = true)) }
+                        onEvent(WebParityEvent.CheckMcpOAuth)
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    if (generation == mcpOAuthGeneration && targetId == currentTargetIdProvider?.invoke() && mutableState.value.mcpOAuthJob?.id == current.id)
+                        mutableState.update { it.copy(error = error.message ?: "Callback could not be submitted") }
+                }
+                finally { mcpCallbackSubmitting = false }
+            } }
+            WebParityEvent.ClearMcpOAuth -> {
+                ++mcpOAuthGeneration
+                mcpOAuthStartPending = false
+                val job = mutableState.value.mcpOAuthJob
+                mcpOAuthTargetId = null
+                mutableState.update { it.copy(mcpOAuthJob = null) }
+                if (job?.state in listOf("pending", "completed_unverified")) viewModelScope.launch {
+                    try { repository.cancelMcpOAuth(job!!) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { mutableState.update { it.copy(error = error.message ?: "Authorization could not be cancelled") } }
+                }
+            }
+            is WebParityEvent.SetCodexSkill -> mutate { repository.setCodexSkill(event.sessionId, event.skill, event.enabled) }
+            is WebParityEvent.SetCodexPluginPreference -> if (mutableState.value.codexPluginPreference?.providerId == event.providerId) {
+                mutate { repository.setCodexPluginPreference(event.providerId, event.enabled) }
+            }
+            is WebParityEvent.RefreshCodexSync -> if (mutableState.value.codexSyncState?.providerId == event.providerId) {
+                mutate { repository.refreshCodexSync(event.providerId) }
+            }
+            is WebParityEvent.SetCodexSyncPolicy -> if (mutableState.value.codexSyncState?.providerId == event.providerId) {
+                mutate { repository.setCodexSyncPolicy(event.providerId, event.mode) }
+            }
+            is WebParityEvent.SelectCodexManagementProvider -> if (mutableState.value.providers.any { it.id == event.providerId && it.agentType == "codex" }) {
+                val abandonedJob = mutableState.value.mcpOAuthJob
+                val targetId = mcpOAuthTargetId
+                mcpOAuthTargetId = null
+                ++mcpOAuthGeneration
+                val wasStartingOAuth = mcpOAuthStartPending
+                mcpOAuthStartPending = false
+                mutableState.update { it.copy(codexManagementProviderId = event.providerId, codexPluginPreference = null,
+                    codexSyncState = null, codexSkills = emptyList(), codexApps = emptyList(), mcpOAuthJob = null,
+                    actionInProgress = if (wasStartingOAuth) false else it.actionInProgress) }
+                abandonedJob?.let { cancelAbandonedMcpOAuth(it, targetId) }
+                refresh(WebParityPage.Connectors)
+            }
             is WebParityEvent.StartConnectorOAuth -> viewModelScope.launch {
                 mutableState.update { it.copy(actionInProgress = true, error = null, externalUrl = null) }
                 runCatching { repository.startConnectorOAuth(event.id) }
@@ -1140,7 +1376,34 @@ class WebParityViewModel(
     }
 
     fun setOpenSessionId(sessionId: String?) {
-        mutableState.update { it.copy(openSessionId = sessionId?.takeIf(String::isNotBlank)) }
+        val next = sessionId?.takeIf(String::isNotBlank)
+        val changed = mutableState.value.openSessionId != next
+        val abandonedJob = if (changed) mutableState.value.mcpOAuthJob else null
+        val targetId = mcpOAuthTargetId
+        val wasStartingOAuth = changed && mcpOAuthStartPending
+        if (changed) {
+            ++mcpOAuthGeneration
+            mcpOAuthStartPending = false
+            mcpOAuthTargetId = null
+        }
+        mutableState.update { it.copy(openSessionId = next, codexSkills = if (changed) emptyList() else it.codexSkills, codexApps = if (changed) emptyList() else it.codexApps,
+            codexPluginPreference = if (changed) null else it.codexPluginPreference, codexSyncState = if (changed) null else it.codexSyncState,
+            codexManagementProviderId = if (changed && next != null) null else it.codexManagementProviderId,
+            mcpOAuthJob = if (changed) null else it.mcpOAuthJob,
+            actionInProgress = if (wasStartingOAuth) false else it.actionInProgress) }
+        abandonedJob?.let { cancelAbandonedMcpOAuth(it, targetId) }
+        if (changed && mutableState.value.page == WebParityPage.Connectors) refresh(WebParityPage.Connectors)
+    }
+
+    private fun cancelAbandonedMcpOAuth(job: WebMcpOAuthJob, targetId: String?) {
+        if (job.state !in listOf("pending", "completed_unverified")) return
+        viewModelScope.launch {
+            // Never send an old job's cancellation to a different machine.
+            if (targetId != currentTargetIdProvider?.invoke()) return@launch
+            try { repository.cancelMcpOAuth(job) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* The job expires on the original host. */ }
+        }
     }
 
     fun setTriggerRuntime(tool: String, model: String?, effort: String?, thinking: Boolean = false) {
@@ -1219,6 +1482,11 @@ class WebParityViewModel(
                     agents = emptyList(),
                     connectors = emptyList(),
                     mcpServers = emptyList(),
+                    mcpOAuthJob = null,
+                    codexSkills = emptyList(),
+                    codexApps = emptyList(),
+                    codexPluginPreference = null,
+                    codexSyncState = null,
                     providers = emptyList(),
                     harnesses = emptyList(),
                     harnessTargets = emptyList(),
@@ -1252,7 +1520,7 @@ class WebParityViewModel(
                 } else if (page == WebParityPage.Files && directory.isNotBlank()) {
                     WebParitySnapshot(files = repository.loadWorkspaceFiles(directory))
                 } else {
-                    repository.load(page)
+                    repository.load(page, mutableState.value.openSessionId, mutableState.value.codexManagementProviderId)
                 }
             }
                 .onSuccess { snapshot ->
@@ -1381,7 +1649,7 @@ class WebParityViewModel(
 
     private fun WebParityUiState.merge(page: WebParityPage, snapshot: WebParitySnapshot): WebParityUiState = when (page) {
         WebParityPage.Agents -> copy(agents = snapshot.agents, availableTools = snapshot.availableTools)
-        WebParityPage.Connectors -> copy(connectors = snapshot.connectors, mcpServers = snapshot.mcpServers)
+        WebParityPage.Connectors -> copy(connectors = snapshot.connectors, mcpServers = snapshot.mcpServers, providers = snapshot.providers, codexSkills = snapshot.codexSkills, codexApps = snapshot.codexApps, codexPluginPreference = snapshot.codexPluginPreference, codexSyncState = snapshot.codexSyncState)
         WebParityPage.ModelProviders -> copy(providers = snapshot.providers, harnesses = snapshot.harnesses, providerHarnessesLoaded = snapshot.providerHarnessesLoaded)
         WebParityPage.Harnesses -> copy(harnesses = snapshot.harnesses, harnessTargets = snapshot.harnessTargets)
         WebParityPage.Devices -> copy(devices = snapshot.devices)

@@ -188,6 +188,7 @@ android {
 }
 
 dependencies {
+    screenshotTestImplementation("com.android.tools.screenshot:screenshot-validation-api:0.0.1-alpha16")
     constraints {
         implementation(libs.androidx.fragment) {
             because("Activity Result requires Fragment >= 1.3; align compile with the resolved 1.5.7 runtime")

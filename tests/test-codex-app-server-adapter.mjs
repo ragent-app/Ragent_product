@@ -503,6 +503,20 @@ assert.equal(managedMcpEvents.length, 1);
 assert.equal(managedMcpEvents[0].type, 'approval_request');
 assert.equal(managedMcpEvents[0].reason, 'Continue with the managed action.');
 
+const driveApprovalEvents = createCodexAppServerAdapter().parseLine(JSON.stringify({
+  method: 'mcpServer/elicitation/request', id: 'drive-approval',
+  params: {
+    serverName: 'codex_apps', mode: 'form',
+    message: 'Allow Google Drive to run tool "google_drive.create_folder"?',
+    _meta: { codex_approval_kind: 'mcp_tool_call', tool_params: { name: 'Ragent 能力验收', parent_folder: 'root' } },
+    requestedSchema: { type: 'object', properties: {} },
+  },
+}));
+assert.equal(driveApprovalEvents[0].type, 'approval_request');
+assert.match(driveApprovalEvents[0].reason, /google_drive\.create_folder/);
+assert.match(driveApprovalEvents[0].reason, /"name": "Ragent 能力验收"/);
+assert.match(driveApprovalEvents[0].reason, /"parent_folder": "root"/);
+
 const adapter = createCodexAppServerAdapter();
 
 const approvalEvents = adapter.parseLine(JSON.stringify(approvalRequestMessage));

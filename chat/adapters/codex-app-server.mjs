@@ -446,6 +446,21 @@ function parseApprovalRequest(approval) {
   const commandIsArgv = Array.isArray(params.command);
   const command = commandIsArgv ? `argv: ${JSON.stringify(params.command)}` : formatCommandValue(params.command);
   const filePaths = collectFileChangePaths(params);
+  const providerReason = approval.providerMethod === 'mcpServer/elicitation/request'
+    ? (params.message || params.reason || params.request?.message || params.request?.prompt || '')
+    : (params.reason || params.message || params.request?.message || params.request?.prompt || '');
+  let reason = typeof providerReason === 'string' ? providerReason : '';
+  // Codex emits MCP confirmations as elicitation requests. Its current
+  // protocol places the prompt at params.message and the actual tool input in
+  // _meta; without both, an owner sees an empty approval card.
+  if (approval.providerMethod === 'mcpServer/elicitation/request'
+      && params._meta?.codex_approval_kind === 'mcp_tool_call'
+      && params._meta.tool_params && typeof params._meta.tool_params === 'object'
+      && !Array.isArray(params._meta.tool_params)) {
+    const input = JSON.stringify(params._meta.tool_params, null, 2);
+    const limit = 16_000;
+    reason = [reason, `Tool arguments:\n${input.length > limit ? `${input.slice(0, limit)}\n[Arguments truncated]` : input}`].filter(Boolean).join('\n\n');
+  }
   return approvalRequestEvent({
     approvalId: approval.approvalId,
     providerRequestId: approval.providerRequestIdString,
@@ -455,10 +470,7 @@ function parseApprovalRequest(approval) {
     providerItemId,
     providerApprovalId,
     kind: approval.kind,
-    reason: params.reason
-      || params.request?.message
-      || params.request?.prompt
-      || '',
+    reason,
     command,
     cwd: params.cwd || '',
     filePaths,
@@ -466,7 +478,7 @@ function parseApprovalRequest(approval) {
     permissions: params.permissions || null,
     status: 'pending',
     source: 'codex-app-server',
-    explanation: commandIsArgv ? null : explanationForApproval({ command, cwd: params.cwd || '', providerDescription: params.reason || params.request?.message || params.request?.prompt }),
+    explanation: commandIsArgv ? null : explanationForApproval({ command, cwd: params.cwd || '', providerDescription: reason }),
   });
 }
 

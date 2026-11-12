@@ -5,10 +5,20 @@ set -eu
 # dpkg keeps both packages installed, and a later old-package removal can stop
 # the new service or remove its files. The packager embeds the exact staged
 # payload path list below this script; reject unknown/older layouts safely.
+legacy_requires_full_drain=0
 if [ "${DPKG_MAINTSCRIPT_PACKAGE:-}" = ragent ] && [ "${1:-}" = install ]; then
   legacy_status="$(dpkg-query -W -f='${db:Status-Status}' agentoc 2>/dev/null || true)"
   case "$legacy_status" in
     installed)
+      # Older agentoc prerm scripts stop the entire runner slice during a
+      # rename. Do not use the upgrade drain that permits independent Runs
+      # unless the installed script actually has the rename-specific guard.
+      legacy_prerm=/var/lib/dpkg/info/agentoc.prerm
+      if [ ! -f "$legacy_prerm" ] || [ -L "$legacy_prerm" ] ||
+        ! grep -Fq 'rename_migration=0' "$legacy_prerm" ||
+        ! grep -Fq 'if [ "$rename_migration" -ne 1 ]; then stop_unit agentoc-runners.slice; fi' "$legacy_prerm"; then
+        legacy_requires_full_drain=1
+      fi
       manifest="$(mktemp "${TMPDIR:-/tmp}/ragent-package-manifest.XXXXXXXX")"
       legacy_files="$(mktemp "${TMPDIR:-/tmp}/ragent-legacy-files.XXXXXXXX")"
       trap 'rm -f -- "$manifest" "$legacy_files"' EXIT HUP INT TERM
@@ -153,6 +163,13 @@ if [ "${1:-}" = upgrade ] \
   }
 
   run_upgrade_prepare() {
+    if [ "$legacy_requires_full_drain" -eq 1 ]; then
+      # The older prerm stops all Runs, even independently managed ones.
+      # restart-check creates an admission drain before checking that none
+      # remain; unlike upgrade-prepare it does not exclude the current Run.
+      run_node_as_service /opt/agentoc/app/cli.js restart-check --json
+      return
+    fi
     if [ -n "${AGENTOC_RESTART_EXCLUDE_SESSION:-}" ]; then
       run_node_as_service /opt/agentoc/app/cli.js upgrade-prepare --json \
         --exclude-session "$AGENTOC_RESTART_EXCLUDE_SESSION"

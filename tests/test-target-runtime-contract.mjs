@@ -145,6 +145,24 @@ assert.deepEqual(classifyTargetRuntimeRequest('GET', '/api/native-provider-oauth
   path: '/api/native-provider-oauth/jobs/job-1',
   operation: 'provider.read',
 });
+assert.deepEqual(classifyTargetRuntimeRequest('POST', '/api/providers/profile-1/codex/mcp-servers/docs/oauth'), {
+  method: 'POST', path: '/api/providers/profile-1/codex/mcp-servers/docs/oauth', operation: 'connector.write',
+});
+assert.deepEqual(classifyTargetRuntimeRequest('POST', '/api/sessions/session-1/harness-capabilities/skills'), {
+  method: 'POST', path: '/api/sessions/session-1/harness-capabilities/skills', operation: 'tool.write',
+});
+assert.deepEqual(classifyTargetRuntimeRequest('POST', '/api/providers/profile-1/codex/plugin-preference'), {
+  method: 'POST', path: '/api/providers/profile-1/codex/plugin-preference', operation: 'connector.write',
+});
+assert.deepEqual(classifyTargetRuntimeRequest('GET', '/api/providers/profile-1/codex/plugin-preference'), {
+  method: 'GET', path: '/api/providers/profile-1/codex/plugin-preference', operation: 'connector.read',
+});
+assert.deepEqual(classifyTargetRuntimeRequest('POST', '/api/providers/profile-1/codex/capability-sync'), {
+  method: 'POST', path: '/api/providers/profile-1/codex/capability-sync', operation: 'connector.write',
+});
+assert.deepEqual(classifyTargetRuntimeRequest('GET', '/api/providers/profile-1/codex/mcp-servers/docs/oauth/abcd'), {
+  method: 'GET', path: '/api/providers/profile-1/codex/mcp-servers/docs/oauth/abcd', operation: 'connector.read',
+});
 assert.deepEqual(classifyTargetRuntimeRequest('POST', '/api/native-provider-oauth/jobs/job-1/input'), {
   method: 'POST',
   path: '/api/native-provider-oauth/jobs/job-1/input',

@@ -2611,7 +2611,7 @@ private fun ChatSurface(
                         invocationText = item.invocationText,
                         enabled = item.enabled,
                         disabledReason = item.disabledReason,
-                        selectionMode = if (item.kind == "mcp" || item.kind == "plugin" || item.source == "agentoc") "attach" else "insert",
+                        selectionMode = if (item.kind == "mcp" || item.kind == "plugin" || item.kind == "app" || item.source == "agentoc") "attach" else "insert",
                     )
                 },
                 slashSuggestionsLoading = state.harnessCapabilitiesLoading,

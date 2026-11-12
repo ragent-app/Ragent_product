@@ -1292,7 +1292,9 @@ internal fun ApprovalCardContent(
         }
 
         val scopeDetails = buildList {
-            approval.reason.takeIf { it.isNotBlank() && it != description && it != "The agent is waiting for your decision before continuing." }
+            // A truncated provider summary must also appear in the scrollable
+            // detail area, including when it is the same text as the summary.
+            approval.reason.takeIf { it.isNotBlank() && (it != description || descriptionOverflows) && it != "The agent is waiting for your decision before continuing." }
                 ?.let { add(stringResource(R.string.approval_provider_description, it)) }
             approval.command?.takeIf(String::isNotBlank)?.let { add(stringResource(R.string.attention_command, it)) }
             approval.cwd?.takeIf(String::isNotBlank)?.let { add(stringResource(R.string.attention_directory, it)) }

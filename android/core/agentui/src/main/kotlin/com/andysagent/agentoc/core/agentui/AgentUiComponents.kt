@@ -2652,7 +2652,7 @@ private fun ComposerSlashPalettePopover(
     val colors = LocalAgentocColors.current
     val normalizedQuery = query.trim().removePrefix("/").lowercase()
     var selectedKind by remember(query) { mutableStateOf("all") }
-    val kinds = listOf("command", "skill", "mcp", "plugin")
+    val kinds = listOf("command", "skill", "mcp", "plugin", "app")
     val countsByKind = suggestions.groupingBy { it.kind.lowercase() }.eachCount()
     val filtered = suggestions.asSequence()
         .filter { selectedKind == "all" || it.kind.equals(selectedKind, ignoreCase = true) }
@@ -2843,7 +2843,8 @@ private fun slashCapabilityKindOrder(kind: String): Int = when (kind.lowercase()
     "skill" -> 1
     "mcp" -> 2
     "plugin" -> 3
-    else -> 4
+    "app" -> 4
+    else -> 5
 }
 
 @Composable
@@ -2852,6 +2853,7 @@ private fun slashCapabilityKindLabel(kind: String): String = when (kind.lowercas
     "skill" -> stringResource(R.string.agentui_slash_kind_skill)
     "mcp" -> stringResource(R.string.agentui_slash_kind_mcp)
     "plugin" -> stringResource(R.string.agentui_slash_kind_plugin)
+    "app" -> stringResource(R.string.agentui_slash_kind_app)
     else -> kind
 }
 

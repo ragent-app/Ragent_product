@@ -29,6 +29,16 @@
   let loadGeneration = 0;
   let codexMcpServers = [];
   let codexMcpLoadFailed = false;
+  let codexMcpErrorCode = "";
+  let codexMcpProvider = "";
+  let codexCapabilities = [];
+  let codexMcpCapabilities = [];
+  let codexCapabilityError = false;
+  let codexPluginsUnavailable = false;
+  let codexPluginPreference = null;
+  let codexSyncState = null;
+  let codexSyncMode = "";
+  let codexSyncGeneration = 0;
   let codexFormOpen = false;
   let codexRemoveCandidate = "";
   let claudeMcpServers = [];
@@ -159,38 +169,256 @@
   }
 
   function codexAuthBadge(server) {
-    const status = trimString(server?.auth_status);
-    if (!status || status === "unsupported") return "";
+    const capability = codexMcpCapabilities.find((item) => item?.title === server?.name);
+    const status = trimString(capability?.state?.authorization) || "unknown";
     const badge = document.createElement("span");
     badge.className = "composer-add-panel-pill";
-    if (status === "oauth_connected") badge.classList.add("is-ready");
-    badge.textContent = status === "oauth_connected"
-      ? i18n("compose.connectorPanel.codexOAuth", "OAuth")
-      : status;
+    if (status === "connected") badge.classList.add("is-ready");
+    badge.textContent = status === "connected" ? i18n("compose.connectorPanel.codexAuthReady", "Authorized")
+      : status === "authorization_required" ? i18n("compose.connectorPanel.codexAuthRequired", "Authorization required")
+        : status === "credential_configured" ? i18n("compose.connectorPanel.codexCredentialConfigured", "Credential configured")
+          : status === "unsupported" ? i18n("compose.connectorPanel.codexAuthUnsupported", "OAuth not supported")
+          : i18n("compose.connectorPanel.codexAuthUnknown", "Authorization unknown");
     return badge;
   }
 
   async function fetchCodexMcpServers() {
     codexMcpLoadFailed = false;
+    codexMcpErrorCode = "";
+    const isCodex = typeof selectedTool === "undefined" || ["codex", "codex-cli", "agentoc-codex-app-server"].includes(selectedTool);
+    codexMcpProvider = isCodex && typeof getComposerRuntimeSelectedProvider === "function"
+      ? trimString(getComposerRuntimeSelectedProvider("codex")) : "";
+    if (!codexMcpProvider) { codexMcpServers = []; return; }
+    const requestedProvider = codexMcpProvider;
+    const endpoint = `/api/providers/${encodeURIComponent(requestedProvider)}/codex/mcp-servers`;
     try {
       const data = typeof fetchJsonOrRedirect === "function"
-        ? await fetchJsonOrRedirect("/api/codex/mcp-servers", { cacheMaxAgeMs: 10_000 })
-        : await (window.agentocFetch || fetch)("/api/codex/mcp-servers").then((response) => response.json());
-      codexMcpServers = Array.isArray(data?.servers) ? data.servers.filter((s) => s && typeof s === "object") : [];
-    } catch {
-      codexMcpLoadFailed = true;
-      codexMcpServers = [];
+        ? await fetchJsonOrRedirect(endpoint, { cacheMaxAgeMs: 0 })
+        : await (window.agentocFetch || fetch)(endpoint).then((response) => { if (!response.ok) throw new Error("MCP list failed"); return response.json(); });
+      if (codexMcpProvider === requestedProvider) codexMcpServers = Array.isArray(data?.servers) ? data.servers.filter((s) => s && typeof s === "object") : [];
+    } catch (error) {
+      if (codexMcpProvider === requestedProvider) {
+        codexMcpLoadFailed = true; codexMcpErrorCode = trimString(error?.code); codexMcpServers = [];
+      }
+    }
+  }
+
+  async function fetchCodexCapabilities() {
+    const session = typeof currentSessionId === "undefined" ? "" : trimString(currentSessionId);
+    const provider = codexMcpProvider;
+    codexCapabilities = [];
+    codexMcpCapabilities = [];
+    codexCapabilityError = false;
+    codexPluginsUnavailable = false;
+    if (!session || !provider) return;
+    const query = new URLSearchParams({ tool: "codex", providerProfile: provider });
+    const endpoint = `/api/sessions/${encodeURIComponent(session)}/harness-capabilities?${query}`;
+    try {
+      const data = typeof fetchJsonOrRedirect === "function"
+        ? await fetchJsonOrRedirect(endpoint, { cacheMaxAgeMs: 0 })
+        : await (window.agentocFetch || fetch)(endpoint).then((response) => { if (!response.ok) throw new Error("Capability list failed"); return response.json(); });
+      if (session !== currentSessionId || provider !== codexMcpProvider || trimString(data?.providerProfileId) !== provider
+        || (typeof getComposerRuntimeSelectedProvider === "function" && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+      codexCapabilities = (Array.isArray(data?.items) ? data.items : []).filter((item) => item?.source === "codex" && ["skill", "app"].includes(item?.kind));
+      codexMcpCapabilities = (Array.isArray(data?.items) ? data.items : []).filter((item) => item?.source === "codex" && item?.kind === "mcp");
+      codexCapabilityError = Boolean(data?.errors?.codex || data?.errors?.["codex.skills"] || data?.errors?.["codex.apps"] || data?.errors?.["codex.installedApps"]);
+      codexPluginsUnavailable = Boolean(data?.errors?.["codex.plugins"]);
+    } catch { if (session === currentSessionId && provider === codexMcpProvider) codexCapabilityError = true; }
+  }
+
+  async function fetchCodexPluginPreference() {
+    const provider = codexMcpProvider;
+    codexPluginPreference = null;
+    if (!provider) return;
+    try {
+      const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/plugin-preference`;
+      const data = typeof fetchJsonOrRedirect === "function" ? await fetchJsonOrRedirect(endpoint, { cacheMaxAgeMs: 0 })
+        : await (window.agentocFetch || fetch)(endpoint).then((r) => { if (!r.ok) throw new Error("Plugin preference unavailable"); return r.json(); });
+      if (provider === codexMcpProvider && (typeof getComposerRuntimeSelectedProvider !== "function"
+        || trimString(getComposerRuntimeSelectedProvider("codex")) === provider) && typeof data?.desiredEnabled === "boolean") codexPluginPreference = data.desiredEnabled;
+    } catch { /* Older hosts and unsupported accounts do not offer this control. */ }
+  }
+
+  async function fetchCodexSyncState(refreshNow = false) {
+    const provider = codexMcpProvider;
+    const generation = ++codexSyncGeneration;
+    if (!provider) { codexSyncState = null; return; }
+    try {
+      const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/capability-sync`;
+      const options = refreshNow ? { method: "POST" } : { cacheMaxAgeMs: 0 };
+      const data = typeof fetchJsonOrRedirect === "function" ? await fetchJsonOrRedirect(endpoint, options)
+        : await (window.agentocFetch || fetch)(endpoint, options).then((r) => { if (!r.ok) throw new Error("Sync unavailable"); return r.json(); });
+      if (generation === codexSyncGeneration && provider === codexMcpProvider && (typeof getComposerRuntimeSelectedProvider !== "function"
+        || trimString(getComposerRuntimeSelectedProvider("codex")) === provider)) {
+        codexSyncState = data?.sync || null;
+        codexSyncMode = ["approved-auto", "manual", "disabled"].includes(data?.mode) ? data.mode : "";
+      }
+    } catch { if (generation === codexSyncGeneration && provider === codexMcpProvider) codexSyncState = refreshNow ? { status: "partial" } : null; }
+  }
+
+  async function setCodexSyncMode(mode) {
+    const provider = codexMcpProvider;
+    if (!provider || !["approved-auto", "manual", "disabled"].includes(mode)
+      || (typeof getComposerRuntimeSelectedProvider === "function" && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+    const generation = ++codexSyncGeneration;
+    const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/capability-sync-policy`;
+    const options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }) };
+    try {
+      if (typeof fetchJsonOrRedirect === "function") await fetchJsonOrRedirect(endpoint, options);
+      else { const r = await (window.agentocFetch || fetch)(endpoint, options); if (!r.ok) throw new Error("Sync policy failed"); }
+      if (generation !== codexSyncGeneration || provider !== codexMcpProvider || (typeof getComposerRuntimeSelectedProvider === "function"
+        && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+      codexSyncMode = mode;
+      if (mode === "disabled") codexSyncState = null;
+      setPanelStatus(i18n("compose.connectorPanel.codexSyncPolicySaved", "Synchronization policy saved."));
+      renderList();
+    } catch { if (generation === codexSyncGeneration) { setPanelStatus(i18n("compose.connectorPanel.codexSyncPolicyFailed", "Could not save synchronization policy.")); renderList(); } }
+  }
+
+  async function setCodexPluginPreference(enabled) {
+    const provider = codexMcpProvider;
+    if (!provider || (typeof getComposerRuntimeSelectedProvider === "function" && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+    const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/plugin-preference`;
+    const options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) };
+    try {
+      const result = typeof fetchJsonOrRedirect === "function" ? await fetchJsonOrRedirect(endpoint, options)
+        : await (window.agentocFetch || fetch)(endpoint, options).then((r) => { if (!r.ok) throw new Error("Plugin setting failed"); return r.json(); });
+      if (provider !== codexMcpProvider || (typeof getComposerRuntimeSelectedProvider === "function"
+        && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+      codexPluginPreference = enabled;
+      setPanelStatus(result?.restartStatus === "deferred"
+        ? i18n("compose.connectorPanel.codexPluginDeferred", "Saved. The runtime could not be restarted safely; retry when it is idle.")
+        : i18n("compose.connectorPanel.codexPluginSaved", "Plugin setting saved. It applies after the Codex runtime next restarts."));
+      renderList();
+    } catch { setPanelStatus(i18n("compose.connectorPanel.codexPluginFailed", "Could not save the Plugin setting.")); }
+  }
+
+  async function setCodexSkillEnabled(item, enabled) {
+    const session = typeof currentSessionId === "undefined" ? "" : trimString(currentSessionId);
+    const provider = codexMcpProvider;
+    if (!session || !provider || (typeof getComposerRuntimeSelectedProvider === "function"
+      && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+    const endpoint = `/api/sessions/${encodeURIComponent(session)}/harness-capabilities/skills`;
+    const options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providerProfileId: provider, id: item.id, enabled }) };
+    try {
+      if (typeof fetchJsonOrRedirect === "function") await fetchJsonOrRedirect(endpoint, options);
+      else {
+        const response = await (window.agentocFetch || fetch)(endpoint, options);
+        if (!response.ok) throw new Error("Skill update failed");
+      }
+      if (session !== currentSessionId || provider !== codexMcpProvider) return;
+      item.state = { ...(item.state || {}), desiredConfiguration: enabled ? "enabled" : "disabled" };
+      setPanelStatus(i18n("compose.connectorPanel.codexSkillSaved", "Skill setting saved. It applies when the next Codex task prepares its runtime."));
+      renderList();
+    } catch { setPanelStatus(i18n("compose.connectorPanel.codexSkillFailed", "Skill setting could not be saved. Start a Codex task for this account and refresh.")); }
+  }
+
+  function renderCodexCapabilities() {
+    if (!codexMcpProvider || (typeof currentSessionId === "undefined" || !currentSessionId)) return;
+    const title = document.createElement("div");
+    title.className = "composer-add-panel-group-title";
+    title.textContent = i18n("compose.connectorPanel.codexCapabilities", "Codex apps and skills");
+    listEl.appendChild(title);
+    for (const item of codexCapabilities) {
+      const row = document.createElement("div");
+      row.className = "composer-add-panel-row composer-add-panel-row--capability is-static";
+      const label = document.createElement("span");
+      label.className = "composer-add-panel-row-label";
+      label.textContent = trimString(item.title);
+      const detail = document.createElement("span");
+      detail.className = "composer-add-panel-row-detail";
+      const kind = item.kind === "app" ? i18n("compose.connectorPanel.codexApp", "App") : i18n("compose.connectorPanel.codexSkill", "Skill");
+      const status = item.kind === "app"
+        ? (item.state?.runtime === "callable" ? i18n("compose.connectorPanel.codexCallable", "Callable") : i18n("compose.connectorPanel.codexNotConfirmed", "Availability not confirmed"))
+        : (item.enabled ? i18n("compose.connectorPanel.codexEnabled", "Enabled") : i18n("compose.connectorPanel.codexDisabled", "Disabled"));
+      const desired = item.state?.desiredConfiguration;
+      const pending = item.kind === "skill" && ["enabled", "disabled"].includes(desired) && (desired === "enabled") !== (item.enabled === true);
+      detail.textContent = `${kind} · ${status}${pending ? ` · ${i18n("compose.connectorPanel.codexSkillPending", "Change pending")}` : ""}`;
+      row.append(label, detail);
+      if (item.kind === "skill" && item.state?.manageable === true) {
+        const effectiveChoice = ["enabled", "disabled"].includes(desired) ? desired === "enabled" : item.enabled === true;
+        const button = document.createElement("button");
+        button.type = "button"; button.className = "composer-add-panel-action";
+        button.textContent = effectiveChoice ? i18n("compose.connectorPanel.codexSkillDisable", "Disable") : i18n("compose.connectorPanel.codexSkillEnable", "Enable");
+        button.addEventListener("click", () => { button.disabled = true; void setCodexSkillEnabled(item, !effectiveChoice).finally(() => { button.disabled = false; }); });
+        row.appendChild(button);
+      }
+      listEl.appendChild(row);
+    }
+    if (codexCapabilityError || !codexCapabilities.length) {
+      const message = document.createElement("div");
+      message.className = "composer-add-panel-empty";
+      message.textContent = codexCapabilityError
+        ? i18n("compose.connectorPanel.codexCapabilitiesUnavailable", "Some Codex capabilities could not be loaded. Start a task with this account and refresh.")
+        : i18n("compose.connectorPanel.codexCapabilitiesEmpty", "No apps or skills discovered for this account.");
+      listEl.appendChild(message);
+    }
+    if (codexPluginsUnavailable) {
+      const notice = document.createElement("div");
+      notice.className = "composer-add-panel-empty";
+      notice.textContent = i18n("compose.connectorPanel.codexPluginsUnavailable", "Native Plugin management is not available in this integration yet.");
+      listEl.appendChild(notice);
+    }
+    if (typeof codexPluginPreference === "boolean") {
+      const row = document.createElement("div"); row.className = "composer-add-panel-row composer-add-panel-row--capability is-static";
+      const label = document.createElement("span"); label.className = "composer-add-panel-row-label";
+      label.textContent = i18n("compose.connectorPanel.codexPluginLoading", "Native Plugin loading");
+      const detail = document.createElement("span"); detail.className = "composer-add-panel-row-detail";
+      detail.textContent = codexPluginPreference ? i18n("compose.connectorPanel.codexPluginWantedOn", "Requested on · runtime restart required")
+        : i18n("compose.connectorPanel.codexPluginWantedOff", "Requested off · runtime restart may be required");
+      const button = document.createElement("button"); button.type = "button"; button.className = "composer-add-panel-action";
+      button.textContent = codexPluginPreference ? i18n("compose.connectorPanel.codexSkillDisable", "Disable") : i18n("compose.connectorPanel.codexSkillEnable", "Enable");
+      button.addEventListener("click", () => { button.disabled = true; void setCodexPluginPreference(!codexPluginPreference).finally(() => { button.disabled = false; }); });
+      const retry = document.createElement("button"); retry.type = "button"; retry.className = "composer-add-panel-action";
+      retry.textContent = i18n("compose.connectorPanel.codexPluginApply", "Apply when idle");
+      retry.addEventListener("click", () => { retry.disabled = true; void setCodexPluginPreference(codexPluginPreference).finally(() => { retry.disabled = false; }); });
+      row.append(label, detail, button, retry); listEl.appendChild(row);
+    }
+    if (typeof codexPluginPreference === "boolean") {
+      const row = document.createElement("div"); row.className = "composer-add-panel-row composer-add-panel-row--capability is-static";
+      const label = document.createElement("span"); label.className = "composer-add-panel-row-label";
+      label.textContent = i18n("compose.connectorPanel.codexSync", "Codex capability discovery");
+      const detail = document.createElement("span"); detail.className = "composer-add-panel-row-detail";
+      detail.textContent = codexSyncMode === "disabled" ? i18n("compose.connectorPanel.codexSyncDisabled", "Synchronization disabled")
+        : codexSyncState?.status === "discovered"
+        ? i18n("compose.connectorPanel.codexSyncDiscovered", "Discovered · authorization and tool access checked separately")
+        : codexSyncState?.status === "waiting_for_runtime"
+          ? i18n("compose.connectorPanel.codexSyncWaiting", "Waiting for a Codex task to start the runtime")
+          : codexSyncState?.status === "partial" ? i18n("compose.connectorPanel.codexSyncPartial", "Some capability status is unknown")
+            : i18n("compose.connectorPanel.codexSyncUnchecked", "Not checked yet");
+      const button = document.createElement("button"); button.type = "button"; button.className = "composer-add-panel-action";
+      button.textContent = i18n("compose.connectorPanel.refresh", "Refresh status");
+      button.disabled = codexSyncMode === "disabled";
+      button.addEventListener("click", () => { button.disabled = true; void fetchCodexSyncState(true).then(renderList).finally(() => { button.disabled = false; }); });
+      row.append(label, detail, button);
+      if (codexSyncMode) {
+        const select = document.createElement("select"); select.className = "composer-add-panel-codex-input";
+        select.setAttribute("aria-label", i18n("compose.connectorPanel.codexSyncPolicy", "Synchronization policy"));
+        for (const [value, title] of [["approved-auto", i18n("compose.connectorPanel.codexSyncAuto", "Automatic discovery")],
+          ["manual", i18n("compose.connectorPanel.codexSyncManual", "Manual")], ["disabled", i18n("compose.connectorPanel.codexSyncOff", "Disabled")]]) {
+          const option = document.createElement("option"); option.value = value; option.textContent = title; select.appendChild(option);
+        }
+        select.value = codexSyncMode;
+        select.addEventListener("change", () => { select.disabled = true; void setCodexSyncMode(select.value).finally(() => { select.disabled = false; }); });
+        row.appendChild(select);
+      }
+      listEl.appendChild(row);
     }
   }
 
   async function removeCodexServer(serverName) {
-    if (!serverName) return;
+    if (!serverName || !codexMcpProvider) return;
+    if (typeof getComposerRuntimeSelectedProvider === "function"
+      && trimString(getComposerRuntimeSelectedProvider("codex")) !== codexMcpProvider) {
+      await fetchCodexMcpServers(); renderList(); return;
+    }
     codexRemoveCandidate = "";
+    const endpoint = `/api/providers/${encodeURIComponent(codexMcpProvider)}/codex/mcp-servers/${encodeURIComponent(serverName)}`;
     try {
       if (typeof fetchJsonOrRedirect === "function") {
-        await fetchJsonOrRedirect(`/api/codex/mcp-servers/${encodeURIComponent(serverName)}`, { method: "DELETE" });
+        await fetchJsonOrRedirect(endpoint, { method: "DELETE" });
       } else {
-        await (window.agentocFetch || fetch)(`/api/codex/mcp-servers/${encodeURIComponent(serverName)}`, { method: "DELETE" });
+        await (window.agentocFetch || fetch)(endpoint, { method: "DELETE" });
       }
     } catch {
       // Keep the list as-is on failure; the row stays removable.
@@ -199,25 +427,108 @@
     renderList();
   }
 
-  async function submitCodexServer(nameInput, commandInput, errorEl) {
+  async function startCodexMcpAuthorization(serverName) {
+    const provider = codexMcpProvider;
+    if (!provider || !serverName || (typeof getComposerRuntimeSelectedProvider === "function"
+      && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
+    const runtime = window.AgentoCTargetRuntime;
+    const activeTarget = runtime?.getActiveTarget?.();
+    const localTargetId = runtime?.getLocalTargetId?.();
+    const localBrowser = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname)
+      && (!activeTarget || !localTargetId || activeTarget.targetId === localTargetId);
+    const popup = localBrowser ? window.open("about:blank", "_blank") : null;
+    if (popup) { try { popup.opener = null; } catch {} }
+    const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/mcp-servers/${encodeURIComponent(serverName)}/oauth`;
+    const fetchData = async (url, options = {}) => {
+      if (typeof fetchJsonOrRedirect === "function") return fetchJsonOrRedirect(url, options);
+      const response = await (window.agentocFetch || fetch)(url, options);
+      if (!response.ok) throw new Error("Authorization failed");
+      return response.json();
+    };
+    try {
+      const job = await fetchData(endpoint, { method: "POST" });
+      if (!job?.id || !job?.authorizationUrl) throw new Error("Invalid authorization response");
+      const destination = new URL(job.authorizationUrl);
+      if (!["http:", "https:"].includes(destination.protocol)) throw new Error("Invalid authorization URL");
+      if (popup) popup.location.href = destination.toString();
+      setPanelStatus(i18n("compose.connectorPanel.codexAuthStarted", "Complete authorization in a browser on the Ragent host. Then return here to check the connection."));
+      let cancelled = false;
+      if (statusEl) {
+        const link = document.createElement("a");
+        link.href = destination.toString(); link.target = "_blank"; link.rel = "noopener noreferrer";
+        link.textContent = i18n("compose.connectorPanel.codexAuthLink", "Open authorization link");
+        statusEl.append(" ", link);
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.textContent = i18n("compose.connectorPanel.codexAuthStop", "Stop tracking");
+        cancel.addEventListener("click", async () => {
+          try {
+            const state = await fetchData(`${endpoint}/${encodeURIComponent(job.id)}`, { method: "DELETE" });
+            cancelled = state?.state === "abandoned";
+            setPanelStatus(cancelled
+              ? i18n("compose.connectorPanel.codexAuthCancelled", "Stopped tracking. Do not use the authorization link; Codex may keep the request active until it expires.")
+              : i18n("compose.connectorPanel.codexAuthUnverified", "Authorization completed; checking the connection."));
+          } catch { setPanelStatus(i18n("compose.connectorPanel.codexAuthFailed", "MCP authorization did not complete. Try again.")); }
+        });
+        statusEl.append(" ", cancel);
+      }
+      let attempts = 0;
+      const poll = async () => {
+        if (cancelled || codexMcpProvider !== provider || attempts++ >= 200) return;
+        try {
+          const state = await fetchData(`${endpoint}/${encodeURIComponent(job.id)}`, { cacheMaxAgeMs: 0 });
+          if (cancelled) return;
+          if (state.state === "connected") {
+            setPanelStatus(i18n("compose.connectorPanel.codexAuthConnected", "MCP authorization is connected."));
+            await fetchCodexMcpServers(); await fetchCodexCapabilities(); renderList(); return;
+          }
+          if (["failed", "expired", "abandoned"].includes(state.state)) {
+            setPanelStatus(i18n("compose.connectorPanel.codexAuthFailed", "MCP authorization did not complete. Try again.")); return;
+          }
+          if (state.state === "completed_unverified") setPanelStatus(i18n("compose.connectorPanel.codexAuthUnverified", "Authorization completed; checking the connection."));
+          window.setTimeout(poll, 3000);
+        } catch { setPanelStatus(i18n("compose.connectorPanel.codexAuthFailed", "MCP authorization did not complete. Try again.")); }
+      };
+      window.setTimeout(poll, 3000);
+    } catch {
+      try { popup?.close(); } catch {}
+      setPanelStatus(i18n("compose.connectorPanel.codexAuthStartFailed", "Could not start authorization. Start a Codex task for this account and try again."));
+    }
+  }
+
+  async function submitCodexServer(nameInput, commandInput, argsInput, errorEl) {
     const name = trimString(nameInput.value);
     const command = trimString(commandInput.value);
-    if (!name || !command) {
+    if (!name || !command || !codexMcpProvider) {
       errorEl.textContent = i18n("compose.connectorPanel.codexFormError", "Name and command/URL are required.");
       return;
     }
+    if (typeof getComposerRuntimeSelectedProvider === "function"
+      && trimString(getComposerRuntimeSelectedProvider("codex")) !== codexMcpProvider) {
+      errorEl.textContent = i18n("compose.connectorPanel.codexAccountChanged", "The Codex account changed. Refresh this panel.");
+      return;
+    }
     errorEl.textContent = "";
+    let args = [];
+    try {
+      args = argsInput.value.trim() ? JSON.parse(argsInput.value) : [];
+      if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) throw new Error("Invalid arguments");
+    } catch { errorEl.textContent = i18n("compose.connectorPanel.codexArgsError", "Arguments must be a JSON array of strings."); return; }
+    if (/^https?:\/\//i.test(command) && args.length) {
+      errorEl.textContent = i18n("compose.connectorPanel.codexUrlArgsError", "Arguments are only supported for commands."); return;
+    }
     const payload = /^https?:\/\//i.test(command)
       ? { name, url: command }
-      : { name, command };
+      : { name, command, args };
+    const endpoint = `/api/providers/${encodeURIComponent(codexMcpProvider)}/codex/mcp-servers`;
     try {
       const response = typeof fetchJsonOrRedirect === "function"
-        ? await fetchJsonOrRedirect("/api/codex/mcp-servers", {
+        ? await fetchJsonOrRedirect(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           })
-        : await (window.agentocFetch || fetch)("/api/codex/mcp-servers", {
+        : await (window.agentocFetch || fetch)(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -281,6 +592,18 @@
     commandInput.setAttribute("aria-describedby", errorId);
     commandField.append(commandLabel, commandInput);
 
+    const argsField = document.createElement("label");
+    argsField.className = "composer-add-panel-field";
+    const argsLabel = document.createElement("span");
+    argsLabel.className = "composer-add-panel-field-label";
+    argsLabel.textContent = i18n("compose.connectorPanel.codexArgs", "Arguments (JSON array, optional)");
+    const argsInput = document.createElement("input");
+    argsInput.type = "text";
+    argsInput.name = "args";
+    argsInput.className = "composer-add-panel-codex-input";
+    argsInput.placeholder = '["-y", "package-name"]';
+    argsField.append(argsLabel, argsInput);
+
     const errorEl = document.createElement("div");
     errorEl.className = "composer-add-panel-codex-error";
     errorEl.id = errorId;
@@ -303,10 +626,10 @@
     });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void submitCodexServer(nameInput, commandInput, errorEl);
+      void submitCodexServer(nameInput, commandInput, argsInput, errorEl);
     });
     actions.append(cancel, submit);
-    form.append(nameField, commandField, errorEl, actions);
+    form.append(nameField, commandField, argsField, errorEl, actions);
     return form;
   }
 
@@ -316,10 +639,26 @@
     title.textContent = i18n("compose.connectorPanel.codexTitle", "Codex MCP servers");
     listEl.appendChild(title);
 
+    if (!codexMcpProvider) {
+      const hint = document.createElement("div");
+      hint.className = "composer-add-panel-empty";
+      hint.textContent = i18n("compose.connectorPanel.codexSelectAccount", "Select a Codex account for this session to manage its MCP servers.");
+      listEl.appendChild(hint);
+      return;
+    }
+    const scope = document.createElement("div");
+    scope.className = "composer-add-panel-row-detail";
+    scope.textContent = i18nWithVars("compose.connectorPanel.codexScope", { provider: codexMcpProvider }, `Codex account: ${codexMcpProvider} · Changes apply when the runtime refreshes.`);
+    listEl.appendChild(scope);
+
     if (codexMcpLoadFailed) {
       const failed = document.createElement("div");
       failed.className = "composer-add-panel-empty";
-      failed.textContent = i18n("compose.connectorPanel.codexLoadFailed", "Failed to load Codex MCP servers.");
+      failed.textContent = codexMcpErrorCode === "CODEX_MCP_ACCOUNT_CHANGED"
+        ? i18n("compose.connectorPanel.codexAccountIsolation", "This profile was previously used with another account. Its MCP configuration is isolated and cannot be used by this account.")
+        : codexMcpErrorCode === "CODEX_MCP_ACCOUNT_UNVERIFIED"
+          ? i18n("compose.connectorPanel.codexAccountUnverified", "The current Codex account could not be verified.")
+          : i18n("compose.connectorPanel.codexLoadFailed", "Failed to load Codex MCP servers.");
       listEl.appendChild(failed);
       const retry = document.createElement("button");
       retry.type = "button";
@@ -349,6 +688,14 @@
       }
       const badge = codexAuthBadge(server);
       if (badge) row.appendChild(badge);
+      if (["http", "streamable_http", "sse"].includes(trimString(server?.transport?.type))) {
+        const connectBtn = document.createElement("button");
+        connectBtn.type = "button";
+        connectBtn.className = "composer-add-panel-action";
+        connectBtn.textContent = i18n("compose.connectorPanel.codexConnect", "Connect");
+        connectBtn.addEventListener("click", (event) => { event.stopPropagation(); void startCodexMcpAuthorization(trimString(server?.name)); });
+        row.appendChild(connectBtn);
+      }
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       const serverName = trimString(server?.name) || server?.name || "";
@@ -1448,6 +1795,7 @@
     });
     listEl.appendChild(disclosure);
     if (!developerConnectionsOpen) return;
+    renderCodexCapabilities();
     renderCodexSection();
     renderClaudeSection();
   }
@@ -1456,6 +1804,11 @@
     if (!canManage()) {
       renderMessage(i18n("settings.connectors.ownerOnly", "Connector login is only available to the owner."));
       return;
+    }
+    if (codexMcpProvider && typeof getComposerRuntimeSelectedProvider === "function"
+      && trimString(getComposerRuntimeSelectedProvider("codex")) !== codexMcpProvider) {
+      codexMcpProvider = ""; codexMcpServers = []; codexCapabilities = []; codexMcpCapabilities = [];
+      codexCapabilityError = false; codexPluginsUnavailable = false; codexPluginPreference = null; codexSyncState = null; codexSyncMode = ""; codexSyncGeneration += 1;
     }
     const cache = typeof connectorSurfacesCache !== "undefined" ? connectorSurfacesCache : [];
     const visible = Array.isArray(cache) ? cache.filter((surface) => surface && typeof surface === "object") : [];
@@ -1501,6 +1854,8 @@
         fetchDriveStatus(),
         fetchGitHubStatus(),
         fetchMailStatus(),
+        fetchCodexCapabilities().then(() => fetchCodexSyncState()),
+        fetchCodexPluginPreference(),
       ]);
     }
   }

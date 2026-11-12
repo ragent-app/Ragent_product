@@ -6,9 +6,10 @@ import { spawnSync } from 'node:child_process';
 
 const preinst = (await readFile(new URL('../packaging/deb/preinst', import.meta.url))).toString('base64');
 const postrm = (await readFile(new URL('../packaging/deb/postrm', import.meta.url))).toString('base64');
+const prerm = (await readFile(new URL('../packaging/deb/prerm', import.meta.url))).toString('base64');
 const script = String.raw`set -eu
 mkdir -p /tmp/old/DEBIAN /tmp/old/etc/ragent-qa /tmp/old/opt/agentoc/runtime /tmp/old/opt/agentoc/app /tmp/old/lib/systemd/system
-printf 'Package: agentoc\nVersion: 1.0\nArchitecture: all\nMaintainer: QA\nDescription: isolated fixture\n' > /tmp/old/DEBIAN/control
+printf 'Package: agentoc\nVersion: 0.0.35\nArchitecture: all\nMaintainer: QA\nDescription: isolated fixture\n' > /tmp/old/DEBIAN/control
 printf '/etc/ragent-qa/config\n' > /tmp/old/DEBIAN/conffiles
 printf 'old-default\n' > /tmp/old/etc/ragent-qa/config
 printf 'fixture\n' > /tmp/old/opt/agentoc/app/cli.js
@@ -16,6 +17,8 @@ printf 'legacy\n' > /tmp/old/opt/agentoc/legacy-only
 printf '[Service]\nExecStart=/bin/true\n' > /tmp/old/lib/systemd/system/agentoc.service
 cat > /tmp/old/opt/agentoc/runtime/node <<'EOF'
 #!/bin/sh
+printf '%s\n' "$*" >> /tmp/preflight-calls
+if [ -e /tmp/independent-run ] && [ "$2" = restart-check ]; then echo 'active independent run'; exit 1; fi
 if [ -e /tmp/deny-upgrade ]; then echo 'blocked run'; exit 1; fi
 exit 0
 EOF
@@ -32,7 +35,7 @@ export AGENTOC_SERVICE_USER=nobody
 build_new() {
   rm -rf /tmp/new
   mkdir -p /tmp/new/DEBIAN /tmp/new/etc/ragent-qa /tmp/new/opt/agentoc/runtime /tmp/new/opt/agentoc/app /tmp/new/lib/systemd/system
-  printf 'Package: ragent\nVersion: 2.0\nArchitecture: all\nMaintainer: QA\nReplaces: agentoc\nDescription: isolated fixture\n' > /tmp/new/DEBIAN/control
+  printf 'Package: ragent\nVersion: 0.0.1\nArchitecture: all\nMaintainer: QA\nReplaces: agentoc\nDescription: isolated fixture\n' > /tmp/new/DEBIAN/control
   printf '/etc/ragent-qa/config\n' > /tmp/new/DEBIAN/conffiles
   printf 'new-default\n' > /tmp/new/etc/ragent-qa/config
   printf 'fixture-new\n' > /tmp/new/opt/agentoc/app/cli.js
@@ -64,12 +67,26 @@ build_new directory
 if dpkg --force-confold -i /tmp/new.deb >/tmp/directory.log 2>&1; then echo 'file-to-directory replacement was accepted' >&2; exit 1; fi
 grep -q 'absent from the Ragent package' /tmp/directory.log
 build_new complete
+touch /tmp/independent-run
+if dpkg --force-confold -i /tmp/new.deb >/tmp/independent.log 2>&1; then echo 'legacy prerm could interrupt an independent run' >&2; exit 1; fi
+grep -q 'active Runs are not proven restart-safe' /tmp/independent.log
+grep -q 'restart-check --json' /tmp/preflight-calls
+rm /tmp/independent-run
 touch /tmp/deny-upgrade
 if dpkg --force-confold -i /tmp/new.deb >/tmp/blocked.log 2>&1; then echo 'unsafe running task was accepted' >&2; exit 1; fi
 grep -q 'active Runs are not proven restart-safe' /tmp/blocked.log
 [ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' agentoc)" = 'ii ' ]
 rm /tmp/deny-upgrade
+# A migration-ready legacy package keeps independent Runs: use the actual
+# guarded prerm and verify the regular upgrade drain is selected.
+printf '%s' '${prerm}' | base64 -d > /var/lib/dpkg/info/agentoc.prerm
+printf '#!/bin/sh\nexit 0\n' > /var/lib/dpkg/info/agentoc.preinst
+chmod +x /var/lib/dpkg/info/agentoc.prerm /var/lib/dpkg/info/agentoc.preinst
+rm -f /tmp/preflight-calls
+touch /tmp/independent-run
 dpkg --force-confold -i /tmp/new.deb >/dev/null
+grep -q 'upgrade-prepare --json' /tmp/preflight-calls
+rm /tmp/independent-run
 [ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' ragent)" = 'ii ' ]
 if [ "$(dpkg-query -W -f='${'${db:Status-Status}'}' agentoc 2>/dev/null || true)" = installed ]; then echo 'legacy package still installed' >&2; exit 1; fi
 [ "$(cat /etc/ragent-qa/config)" = user-custom ]

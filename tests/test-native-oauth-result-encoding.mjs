@@ -13,6 +13,8 @@ await mkdir(configDir, { recursive: true });
 const { createNativeProviderRegistry } = await import('../lib/provider-runtime/registry.mjs');
 const { createSecretStore } = await import('../lib/provider-runtime/secret-store.mjs');
 const { createCredentialMutationLedger } = await import('../lib/provider-runtime/credential-mutation.mjs');
+const { managedCodexMcpAccountBinding } = await import('../lib/provider-runtime/codex-mcp-config.mjs');
+const { readCodexCapabilitySync } = await import('../chat/codex-capability-sync.mjs');
 const management = await import(process.env.AGENTOC_TEST_OAUTH_MODULE
   ? pathToFileURL(process.env.AGENTOC_TEST_OAUTH_MODULE).href
   : '../chat/native-provider-management.mjs');
@@ -30,7 +32,7 @@ for (const encoding of ['utf8', 'utf8-bom', 'utf16le', 'utf16be', 'malformed']) 
   await writeFile(helper, `
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-const text = JSON.stringify({tokens:{access_token:'fixture-access',refresh_token:'fixture-refresh'}});
+const text = JSON.stringify({tokens:{account_id:'fixture-account',access_token:'fixture-access',refresh_token:'fixture-refresh'}});
 let bytes = Buffer.from(text);
 if (${JSON.stringify(encoding)} === 'utf8-bom') bytes = Buffer.concat([Buffer.from([239,187,191]), bytes]);
 if (${JSON.stringify(encoding)} === 'utf16le') bytes = Buffer.concat([Buffer.from([255,254]), Buffer.from(text,'utf16le')]);
@@ -71,6 +73,16 @@ console.error('ABCD-EFGH1');
     const record = await context.credentialLedger.getRecord(auth.accountMetadata.accountKey);
     assert.equal(record.credentialVersion, auth.accountMetadata.credentialVersion);
     assert.doesNotMatch(await readFile(context.credentialLedger.path, 'utf8'), /fixture-access|fixture-refresh/);
+    if (encoding === 'utf8') {
+      const binding = managedCodexMcpAccountBinding(secret);
+      let sync = null;
+      const syncDeadline = Date.now() + 5_000;
+      while (!sync && Date.now() < syncDeadline) {
+        sync = await readCodexCapabilitySync(configDir, binding, current.providerId);
+        if (!sync) await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      assert.equal(sync?.status, 'waiting_for_runtime', 'successful login schedules discovery without starting another broker');
+    }
   }
   assert.doesNotMatch(JSON.stringify(current), /fixture-access|fixture-refresh|providerHome|stagingDir/);
   console.log(`PASS: native OAuth ${encoding} ${encoding === 'malformed' ? 'rejects without credential excerpt' : 'persists Provider and credential'}`);
