@@ -26,7 +26,7 @@ const { buildClaudeBidiArgs } = await import('../chat/adapters/claude-bidi.mjs')
 const { buildPlatformSpawnSpec } = await import('../lib/executable-resolution.mjs');
 const { buildClaudeBidiApprovalResponseMessage, buildClaudeBidiInitializeMessage, buildClaudeBidiUserMessage, readClaudeBidiApprovalRequest, serializeClaudeBidiMessage } = await import('../chat/claude-bidi-protocol.mjs');
 const { appendRunSpoolRecord, createRun, getRun, readRunSpoolRecords } = await import('../chat/runs.mjs');
-const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
+const { flushClaudeBidiApprovalResponses, trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 const { observeClaudePosixCwdResult } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
 const protectedCase = process.env.AGENTOC_QA_CLAUDE_PROTECTED === '1';
 const installCase = process.env.AGENTOC_QA_CLAUDE_INSTALL === '1';
@@ -138,8 +138,13 @@ const server = createServer((req, res) => {
       if (isApproval) {
         const current = await getRun(run.id); const response = current.appServerApprovalResponseQueue.find(entry => entry.approvalId === phoneApproval.approvalId);
         assert.equal(response?.decision, 'deny'); assert.equal(body?.approval?.decision, 'deny');
-        const message = buildClaudeBidiApprovalResponseMessage(phoneApproval, response.decision);
-        assert.equal(message?.response?.response?.behavior, 'deny'); child.stdin.write(serializeClaudeBidiMessage(message)); phoneQueued = true;
+        let writes = 0;
+        const trackedProcess = { stdin: { writable: true, write(value) { writes += 1; return child.stdin.write(value); } } };
+        await flushClaudeBidiApprovalResponses(trackedProcess, gateState, current);
+        await flushClaudeBidiApprovalResponses(trackedProcess, gateState, current);
+        assert.equal(writes, 1, 'repeated queue scans must send one provider response');
+        const delivered = (await getRun(run.id)).appServerApprovalResponseQueue.find(entry => entry.id === response.id);
+        assert.equal(delivered?.state, 'sent'); assert.equal(delivered?.response?.response?.response?.behavior, 'deny'); phoneQueued = true;
       }
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     })().catch(error => { console.error(error); if (!res.headersSent) res.writeHead(500).end(); });
@@ -216,7 +221,7 @@ const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 
   manifest: { sessionId: fixtureSessionId, requestId: 'fixture', folder: root, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: { riskMode: 'recommended', permissionMode: 'default' } } });
 if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
 const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, riskContextValid: boundContext?.valid ?? true,
-  riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
+  riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), sentApprovalResponseIds: new Set(), autoApprovedMcpRequestIds: new Set() };
 if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
 if (nativePowerShell) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
 if (guidanceCase) {
