@@ -31,6 +31,16 @@ function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeWorkspaceAccess(value) {
+  if (value == null) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== 'grantId,ownerAccountId'
+    || typeof value.ownerAccountId !== 'string' || !/^[A-Za-z0-9_-]{8,160}$/.test(value.ownerAccountId)
+    || typeof value.grantId !== 'string' || !/^iag_[A-Za-z0-9_-]{16,128}$/.test(value.grantId)) return { invalid: true };
+  return { ownerAccountId: value.ownerAccountId, grantId: value.grantId };
+}
+const sameWorkspaceAccess = (a, b) => JSON.stringify(normalizeWorkspaceAccess(a) || null) === JSON.stringify(normalizeWorkspaceAccess(b) || null);
+
 function normalizeDeviceAlias(value) {
   return trimString(value).replace(/[\r\n]+/g, ' ').trim().slice(0, 64);
 }
@@ -111,6 +121,7 @@ function normalizeState(value) {
             ? trimString(entry.enrollmentKind)
             : 'qr-scan',
           accountId: trimString(entry?.accountId),
+          ...(entry?.workspaceAccess != null ? { workspaceAccess: normalizeWorkspaceAccess(entry.workspaceAccess) } : {}),
           bindingAuthorityRevision: trimString(entry?.bindingAuthorityRevision),
           enrollmentId: trimString(entry?.enrollmentId),
           deviceName: trimString(entry?.deviceName),
@@ -178,6 +189,7 @@ function normalizeState(value) {
           expiresAt: trimString(entry?.expiresAt),
           status: trimString(entry?.status) || 'pending',
           accountId: trimString(entry?.accountId),
+          ...(entry?.workspaceAccess != null ? { workspaceAccess: normalizeWorkspaceAccess(entry.workspaceAccess) } : {}),
           bindingAuthorityRevision: trimString(entry?.bindingAuthorityRevision),
           completionRequestId: trimString(entry?.completionRequestId),
           completedAt: trimString(entry?.completedAt),
@@ -211,6 +223,7 @@ function publicDevice(device) {
     status: device.status,
     enrollmentKind: device.enrollmentKind || 'qr-scan',
     accountId: device.accountId || undefined,
+    ...(device.workspaceAccess ? { workspaceAccess: device.workspaceAccess } : {}),
     ...(device.bindingAuthorityRevision ? { bindingAuthorityRevision: device.bindingAuthorityRevision } : {}),
     boundAt: device.boundAt || undefined,
     temporaryExpiresAt: device.temporaryExpiresAt || undefined,
@@ -494,6 +507,7 @@ function replayAccountCompletionCredential(state, intent, device) {
     && entry.expiresAt === intent.completionCredentialExpiresAt);
   if (!token || !device || device.revokedAt || !isBoundDevice(device)
     || device.accountId !== intent.accountId || !retained
+    || !sameWorkspaceAccess(device.workspaceAccess, intent.workspaceAccess)
     || (intent.bindingAuthorityRevision && (device.bindingAuthorityRevision !== intent.bindingAuthorityRevision
       || retained.bindingAuthorityRevision !== intent.bindingAuthorityRevision))
     || !Number.isFinite(issuedAtMs) || issuedAtMs > Date.now()
@@ -520,6 +534,7 @@ export async function completeTrustedDeviceAccountIntent({
   // key fingerprint, and idempotency request. Never accept this from HTTP.
   verifiedAccountCompletion = false,
   bindingAuthorityRevision = '',
+  workspaceAccess,
 } = {}) {
   const normalizedIntentId = trimString(intentId);
   const normalizedAccountId = trimString(accountId);
@@ -529,10 +544,13 @@ export async function completeTrustedDeviceAccountIntent({
     error.statusCode = 400;
     throw error;
   }
-  if (bindingAuthorityRevision && verifiedAccountCompletion !== true) {
+  const workspace = normalizeWorkspaceAccess(workspaceAccess);
+  if ((workspace && (workspace.invalid || verifiedAccountCompletion !== true || !bindingAuthorityRevision))
+    || (bindingAuthorityRevision && verifiedAccountCompletion !== true)) {
     throw Object.assign(new Error('Verified Accounts authority is required'), { code: 'owner_auth_authority_required', statusCode: 403 });
   }
-  const authorityDevice = { accountId: normalizedAccountId, bindingAuthorityRevision };
+  const authorityDevice = { id: trimString(remoteIntent?.deviceId), accountId: normalizedAccountId, bindingAuthorityRevision,
+    ...(workspace ? { workspaceAccess: workspace } : {}) };
   await authorizeDeviceBinding(authorityDevice);
   const result = await mutateState((draft) => {
     assertDeviceBindingNow(authorityDevice);
@@ -587,6 +605,9 @@ export async function completeTrustedDeviceAccountIntent({
       throw error;
     }
     const alreadyCompleted = intent.status === 'completed';
+    if (alreadyCompleted && !sameWorkspaceAccess(intent.workspaceAccess, workspace)) {
+      throw Object.assign(new Error('Original workspace authority no longer matches'), { code: 'owner_auth_native_replay', statusCode: 409 });
+    }
     if (alreadyCompleted && intent.bindingAuthorityRevision !== bindingAuthorityRevision) {
       throw Object.assign(new Error('Original binding authority no longer matches'), { code: 'owner_auth_native_replay', statusCode: 409 });
     }
@@ -622,6 +643,7 @@ export async function completeTrustedDeviceAccountIntent({
     const canOverlapCredential = verifiedAccountCompletion === true && device
       && isBoundDevice(device) && device.accountId === normalizedAccountId
       && device.bindingAuthorityRevision === bindingAuthorityRevision
+      && sameWorkspaceAccess(device.workspaceAccess, workspace)
       && Boolean(device.devicePublicKey)
       && createDevicePublicKeyFingerprint(device.devicePublicKey) === intent.devicePublicKeyFingerprint;
     let keyRotated = false;
@@ -669,6 +691,7 @@ export async function completeTrustedDeviceAccountIntent({
         // 未扫码同账号加入的设备：bootstrap 连接模式判定依据。
         enrollmentKind: 'account-join',
         accountId: normalizedAccountId,
+        ...(workspace ? { workspaceAccess: workspace } : {}),
         bindingAuthorityRevision,
         deviceName: intent.deviceName,
         platform: intent.platform,
@@ -688,6 +711,7 @@ export async function completeTrustedDeviceAccountIntent({
     } else {
       device.status = 'bound';
       device.accountId = normalizedAccountId;
+      device.workspaceAccess = workspace;
       device.bindingAuthorityRevision = bindingAuthorityRevision;
       device.boundAt = device.boundAt || now;
       device.lastSeenAt = now;
@@ -696,6 +720,7 @@ export async function completeTrustedDeviceAccountIntent({
     }
     intent.status = 'completed';
     intent.accountId = normalizedAccountId;
+    intent.workspaceAccess = workspace;
     intent.bindingAuthorityRevision = bindingAuthorityRevision;
     intent.completionRequestId = normalizedRequestId;
     intent.completedAt = now;
@@ -743,6 +768,7 @@ export async function completeTrustedDeviceAccountIntent({
       keyRotated,
     };
   });
+  if (workspace) await authorizeDeviceBinding(result.device);
   notifyDeviceBindingAuthorized(result.device.id); return result;
 }
 
@@ -1065,7 +1091,8 @@ export async function authenticateTrustedDeviceToken(token) {
       principalKind: provisional ? 'provisional_device' : 'trusted_device',
       deviceId: device.id,
       deviceName: device.deviceName,
-      ...(authority ? { accountId: authority.accountId, bindingAuthorityRevision: authority.revision } : {}),
+      ...(authority ? { accountId: authority.accountId, bindingAuthorityRevision: authority.revision,
+        ...(authority.workspaceAccess ? { workspaceAccess: authority.workspaceAccess } : {}) } : {}),
       authMethod: provisional ? 'provisional_pairing' : 'trusted_device_challenge',
       scope: provisional ? 'provisional-google' : 'device-access',
       expiry: expiresAtMs,

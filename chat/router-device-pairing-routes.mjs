@@ -136,6 +136,7 @@ export async function handleDevicePairingPublicRoutes({ req, res, pathname, writ
         deviceSignature: payload?.deviceSignature,
         accountId: completed.accountId,
         bindingAuthorityRevision: completed.bindingAuthorityRevision,
+        workspaceAccess: completed.workspaceAccess,
         requestId,
         verifiedAccountCompletion: true,
       });
