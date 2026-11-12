@@ -32,6 +32,10 @@ try {
   assert.match(buildPlist(args), /app &amp; test/);
   assert.match(buildPlist(args), /<key>CHAT_PORT<\/key><string>47681<\/string>/);
   assert.doesNotMatch(buildPlist({ ...args, port: "7690" }), /<key>CHAT_PORT<\/key>/);
+  const instanceRoot = path.join(root, "instance & data");
+  const instanceArgs = { ...args, instanceRoot };
+  assert.match(buildPlist(instanceArgs), /<key>AGENTOC_INSTANCE_ROOT<\/key><string>.*instance &amp; data<\/string>/);
+  assert.throws(() => buildPlist({ ...args, instanceRoot: "relative/path" }), /absolute path/);
   assert.equal(invoke("status"), "disabled");
   occupied = true;
   assert.throws(() => invoke("enable"), /Port 47681 is in use/);
@@ -63,6 +67,17 @@ try {
   assert.equal(invoke("enable"), "enabled");
   assert.match(fs.readFileSync(plist, "utf8"), /<key>CHAT_PORT<\/key><string>47681<\/string>/);
   assert.equal(invoke("disable"), "disabled; configuration and logs retained");
+  // Older definitions that omitted a now-explicit instance root are still
+  // removable, but must not silently start with a different data directory.
+  fs.writeFileSync(plist, buildPlist(args));
+  loaded = true;
+  const invokeInstance = (action) => manage(action, { ...instanceArgs, run });
+  assert.match(invokeInstance("status"), /disable and re-enable/);
+  assert.throws(() => invokeInstance("enable"), /instance root/);
+  assert.equal(invokeInstance("disable"), "disabled; configuration and logs retained");
+  assert.equal(invokeInstance("enable"), "enabled");
+  assert.match(fs.readFileSync(plist, "utf8"), /<key>AGENTOC_INSTANCE_ROOT<\/key>/);
+  assert.equal(invokeInstance("disable"), "disabled; configuration and logs retained");
   fs.writeFileSync(plist, "user-owned definition");
   assert.throws(() => invoke("enable"), /not the expected Ragent definition/);
   assert.throws(() => invoke("disable"), /not the expected Ragent definition/);

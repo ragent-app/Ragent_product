@@ -12,21 +12,23 @@ function xml(value) {
   if (/[\u0000-\u001f\u007f]/u.test(text)) throw new Error("Paths may not contain control characters");
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
 }
-function buildPlist({ home, resources, config, port = "7690", legacyPort = false }) {
+function buildPlist({ home, resources, config, port = "7690", instanceRoot = "", legacyPort = false }) {
   for (const value of [home, resources, config]) {
     if (!path.isAbsolute(value)) throw new Error("Home, application and configuration paths must be absolute");
   }
   const string = (value) => `<string>${xml(value)}</string>`;
   if (!/^[0-9]{1,5}$/.test(port) || +port < 1 || +port > 65535) throw new Error("Invalid service port");
+  if (instanceRoot && !path.isAbsolute(instanceRoot)) throw new Error("Instance root must be an absolute path");
   // Keep the original default-port definition byte-for-byte compatible with
   // existing installations. Non-default ports must survive a fresh login.
   const portEntry = !legacyPort && Number(port) !== 7690 ? `<key>CHAT_PORT</key>${string(port)}` : "";
+  const instanceEntry = instanceRoot ? `<key>AGENTOC_INSTANCE_ROOT</key>${string(instanceRoot)}` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key>${string(LABEL)}
 <key>ProgramArguments</key><array>${string(path.join(resources, "agentoc-service"))}</array>
-<key>EnvironmentVariables</key><dict><key>HOME</key>${string(home)}<key>AGENTOC_CONFIG_DIR</key>${string(config)}${portEntry}</dict>
+<key>EnvironmentVariables</key><dict><key>HOME</key>${string(home)}<key>AGENTOC_CONFIG_DIR</key>${string(config)}${portEntry}${instanceEntry}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>Umask</key><integer>63</integer>
 <key>WorkingDirectory</key>${string(home)}
 <key>StandardOutPath</key>${string(path.join(config, "launch-agent.stdout.log"))}
@@ -34,11 +36,11 @@ function buildPlist({ home, resources, config, port = "7690", legacyPort = false
 </dict></plist>
 `;
 }
-function readOwnedFile(file, expected, uid, legacyExpected = expected) {
+function readOwnedFile(file, expected, uid, legacyExpected = []) {
   let st;
   try { st = fs.lstatSync(file); } catch (error) { if (error.code === "ENOENT") return false; throw error; }
   const content = st.isFile() && !st.isSymbolicLink() && st.uid === uid ? fs.readFileSync(file, "utf8") : "";
-  if (content !== expected && content !== legacyExpected) {
+  if (content !== expected && !legacyExpected.includes(content)) {
     throw new Error(`Existing login item is not the expected Ragent definition: ${file}`);
   }
   return content === expected ? "current" : "legacy";
@@ -62,12 +64,16 @@ function reportedPlist(output) {
   const matches = [...output.matchAll(/^\s*path = (.*)$/gm)];
   return matches.length === 1 ? matches[0][1].trim() : "";
 }
-function manage(action, { home, resources, config, port, uid, run = runCommand }) {
+function manage(action, { home, resources, config, port, instanceRoot = "", uid, run = runCommand }) {
   if (!["enable", "disable", "status"].includes(action)) throw new Error("Usage: agentoc-login enable|disable|status");
   if (!Number.isInteger(uid) || uid < 1) throw new Error("Run this as the desktop user, not root");
   if (!/^[0-9]{1,5}$/.test(port) || +port < 1 || +port > 65535) throw new Error("Invalid service port");
-  const expected = buildPlist({ home, resources, config, port });
-  const legacyExpected = buildPlist({ home, resources, config, port, legacyPort: true });
+  const expected = buildPlist({ home, resources, config, port, instanceRoot });
+  const legacyExpected = [
+    buildPlist({ home, resources, config, port, instanceRoot, legacyPort: true }),
+    buildPlist({ home, resources, config, port }),
+    buildPlist({ home, resources, config, port, legacyPort: true }),
+  ];
   const dir = path.join(home, "Library", "LaunchAgents");
   const file = path.join(dir, `${LABEL}.plist`);
   const domain = `gui/${uid}`;
@@ -85,8 +91,8 @@ function manage(action, { home, resources, config, port, uid, run = runCommand }
   }
   if (action === "status") {
     if (owned === "legacy") return loaded
-      ? "enabled; disable and re-enable to retain the configured port"
-      : "installed but not loaded; disable and re-enable to retain the configured port";
+      ? "enabled; disable and re-enable to retain the configured port and instance root"
+      : "installed but not loaded; disable and re-enable to retain the configured port and instance root";
     return loaded ? "enabled" : owned ? "installed but not loaded" : "disabled";
   }
   if (action === "disable") {
@@ -97,7 +103,7 @@ function manage(action, { home, resources, config, port, uid, run = runCommand }
     if (owned && readOwnedFile(file, expected, uid, legacyExpected)) fs.unlinkSync(file);
     return "disabled; configuration and logs retained";
   }
-  if (owned === "legacy") throw new Error("Existing login item does not retain the configured port; disable it and enable it again");
+  if (owned === "legacy") throw new Error("Existing login item does not retain the configured port or instance root; disable it and enable it again");
   if (loaded) return "already enabled";
   if (!fs.existsSync(path.join(resources, "agentoc-service"))) throw new Error("Application service is missing");
   const listener = run("/usr/sbin/lsof", ["-nP", "-ti", `TCP:${port}`, "-sTCP:LISTEN"]);
@@ -128,7 +134,8 @@ function manage(action, { home, resources, config, port, uid, run = runCommand }
 if (require.main === module) {
   try {
     const [action, resources, config, port] = process.argv.slice(2);
-    const result = manage(action, { home: process.env.HOME || "", resources, config, port, uid: process.getuid() });
+    const result = manage(action, { home: process.env.HOME || "", resources, config, port,
+      instanceRoot: process.env.AGENTOC_INSTANCE_ROOT || "", uid: process.getuid() });
     console.log(`Ragent login service: ${result}`);
   } catch (error) { console.error(`Ragent login service: ${error.message}`); process.exitCode = 1; }
 }
