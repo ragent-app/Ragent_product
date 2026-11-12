@@ -3421,6 +3421,20 @@ export function createOwnerAuthBroker({
     });
   }
 
+  // A signed instance proof selects the bound account; this is a policy hint,
+  // while every actual upload still requires its own atomic reservation.
+  async function getAccountFileUploadPolicy(input) {
+    const normalized = normalizeAccountFileUploadQuotaInput(input, 'policy', clock);
+    return store.mutate((draft) => {
+      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertAccountNotDeleting(draft, normalized.accountId);
+      assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
+      const entitlement = resolveEntitlement(draft, normalized.accountId, clock());
+      return { contractVersion: 2, policyVersion: ACCOUNT_FILE_UPLOAD_POLICY_VERSION,
+        limits: resolveAccountFileUploadLimits(entitlement.plan) };
+    });
+  }
+
   async function reserveAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'reserve', clock);
     const result = await store.mutate(async (draft) => {
@@ -4292,6 +4306,7 @@ export function createOwnerAuthBroker({
     listAccountDirectoryDevices,
     getAccountUsage,
     authenticateAccountAsr,
+    getAccountFileUploadPolicy,
     reserveAccountFileUpload,
     completeAccountFileUpload,
     releaseAccountFileUpload,

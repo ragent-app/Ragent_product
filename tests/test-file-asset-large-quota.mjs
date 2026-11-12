@@ -27,6 +27,13 @@ test('large upload requires an unlimited account quota reservation', async () =>
       assert.equal(handled, true);
       return res;
     }
+    async function contract(authSession = { role: 'owner' }) {
+      const req = new PassThrough(); req.method = 'GET'; req.headers = {}; req.end();
+      const res = { setHeader() {} };
+      await handleControlRoutes({ req, res, pathname: '/api/asset-upload-contract',
+        parsedUrl: { query: {} }, authSession, writeJson: (_res, status, body) => Object.assign(res, { status, body }) });
+      return res;
+    }
     const payload = { sessionId: 'large-session', requestId: 'large-unbound', quotaBatchId: 'large-batch',
       originalName: 'large.bin', mimeType: 'application/octet-stream', sizeBytes: 2 * 1024 * 1024 * 1024,
       sha256: 'a'.repeat(64), uploadMaximumBytes: Number.MAX_SAFE_INTEGER };
@@ -36,15 +43,19 @@ test('large upload requires an unlimited account quota reservation', async () =>
     let unlimited = false;
     let reservations = 0;
     globalThis.fetch = async (url) => {
-      assert.ok(String(url).endsWith('/instances/uploads/reserve'));
-      reservations++;
-      return new Response(JSON.stringify({ tracked: true, duplicate: false,
+      const policy = String(url).endsWith('/instances/uploads/policy');
+      assert.ok(policy || String(url).endsWith('/instances/uploads/reserve'));
+      if (!policy) reservations++;
+      return new Response(JSON.stringify({ contractVersion: 2, tracked: true, duplicate: false,
         limits: unlimited ? { unlimited: true, maxFileBytes: Number.MAX_SAFE_INTEGER } : { maxFileBytes: 1024 * 1024 * 1024 } }),
       { status: 200, headers: { 'content-type': 'application/json' } });
     };
     assert.equal((await route({ ...payload, requestId: 'large-limited' })).status, 400,
       'a reservation without unlimited authorization does not raise the transport cap');
+    assert.equal((await contract()).body.maximumBytes, 1024 * 1024 * 1024);
     unlimited = true;
+    assert.equal((await contract({ role: 'owner', accountId: 'acct-test' })).body.maximumBytes, Number.MAX_SAFE_INTEGER);
+    assert.equal((await contract({ role: 'owner', accountId: 'acct-other' })).body.maximumBytes, 1024 * 1024 * 1024);
     assert.equal((await route({ ...payload, requestId: 'large-other' }, { role: 'owner', accountId: 'acct-other' })).status, 403);
     const result = await route({ ...payload, requestId: 'large-unlimited' }, { role: 'owner', accountId: 'acct-test' });
     assert.equal(result.status, 200);

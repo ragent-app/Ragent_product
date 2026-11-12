@@ -539,7 +539,7 @@ export async function handleOwnerAuthRoutes({
     '/v1/owner-auth/account/session/logout', '/v1/owner-auth/account/turn/connections',
     '/v1/owner-auth/account/turn/connections/release'].includes(path)
     || /^\/v1\/owner-auth\/account\/devices\/[^/]+\/(rename|revoke)$/.test(path);
-  const isAccountFileUploadQuotaApi = /^\/v1\/owner-auth\/instances\/uploads\/(reserve|complete|release)$/.test(path);
+  const isAccountFileUploadQuotaApi = /^\/v1\/owner-auth\/instances\/uploads\/(policy|reserve|complete|release)$/.test(path);
   if (!trimString(googleWebClientId) && !isNativeApi && !isDemoStatusApi && !isDiscoveryApi && !isBindingAuthorityApi && !isInstanceAccessGrantApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi && !isAccountFileUploadQuotaApi) return false;
 
   try {
@@ -553,7 +553,8 @@ export async function handleOwnerAuthRoutes({
       return true;
     }
     if (isAccountFileUploadQuotaApi && req.method === 'POST') {
-      const method = path.endsWith('/reserve') ? broker.reserveAccountFileUpload
+      const method = path.endsWith('/policy') ? broker.getAccountFileUploadPolicy
+        : path.endsWith('/reserve') ? broker.reserveAccountFileUpload
         : path.endsWith('/complete') ? broker.completeAccountFileUpload : broker.releaseAccountFileUpload;
       const result = await method(await readJsonBody(req));
       jsonResponse(res, 200, result);

@@ -93,6 +93,7 @@ import {
 } from './file-assets.mjs';
 import { RESUMABLE_UPLOAD_CONTRACT, UPLOAD_CHUNK_REQUEST_TIMEOUT_MS,
   uploadChunkHeaders, MAX_STABLE_UPLOAD_BYTES } from './file-asset-upload-checkpoints.mjs';
+import { accountFileUploadMaximumBytes } from './file-asset-account-policy.mjs';
 import { fileAssetRelayJobs } from './file-asset-relay-jobs.mjs';
 import { pathExists } from './fs-utils.mjs';
 import { queryUsageLedger } from './usage-ledger.mjs';
@@ -1300,7 +1301,7 @@ export async function handleControlRoutes({
       writeJson(res, 403, { error: 'Owner upload access required', code: 'PERMISSION_DENIED' });
       return true;
     }
-    writeJson(res, 200, { version: 1, maximumBytes: MAX_STABLE_UPLOAD_BYTES, requestIdMaximumLength: 200,
+    writeJson(res, 200, { version: 1, maximumBytes: await accountFileUploadMaximumBytes(authSession), requestIdMaximumLength: 200,
       sha256Required: true, readonlyReceiptLookup: true,
       resumableUpload: RESUMABLE_UPLOAD_CONTRACT,
       ...(process.env.AGENTOC_ASSET_RELAY_ENABLED !== '0' && getOwnerAccountBrokerStatus().configured

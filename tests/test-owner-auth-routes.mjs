@@ -415,6 +415,12 @@ try {
     const signature = signAccountFileUploadQuotaProof(identity, fields);
     return { ...fields, instance: publicInstanceIdentity(identity), signature: signature.signature };
   }
+  const quotaPolicy = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/policy',
+    fileQuotaProof('policy', 'quota-policy', 'policy', 1, '0'.repeat(64)));
+  check('signed file upload policy route returns current plan limits', quotaPolicy.status === 200
+    && quotaPolicy.json?.limits?.maxFileBytes === 50 * 1024 * 1024
+    && quotaPolicy.json?.limits?.unlimited !== true);
+
   const quotaFirst = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',
     fileQuotaProof('reserve', 'file-quota-a', 'message-quota-a', 50 * 1024 * 1024, 'a'.repeat(64)));
   const quotaSecond = await request(port, 'POST', '/accounts/v1/owner-auth/instances/uploads/reserve',

@@ -42,6 +42,14 @@ function request(operation, requestId, sizeBytes, sha256 = digest('a'), actor = 
 
 try {
   const fiftyMiB = 50 * 1024 * 1024;
+  const beforePolicy = state.accountFileUploads.length;
+  const freePolicy = await broker.getAccountFileUploadPolicy(request('policy', 'policy-free', 1));
+  assert.equal(freePolicy.limits.maxFileBytes, fiftyMiB);
+  assert.notEqual(freePolicy.limits.unlimited, true);
+  assert.equal(state.accountFileUploads.length, beforePolicy, 'policy lookup does not create reservations');
+  const tamperedPolicy = request('policy', 'policy-tampered', 1);
+  tamperedPolicy.accountId = 'acct_other';
+  await assert.rejects(() => broker.getAccountFileUploadPolicy(tamperedPolicy), { code: 'owner_auth_proof_invalid' });
   const first = await broker.reserveAccountFileUpload(request('reserve', 'upload-first', fiftyMiB, digest('a'), identity, 'message-first'));
   assert.equal(first.duplicate, false);
   assert.equal(first.reservedBytes, fiftyMiB);
@@ -107,6 +115,12 @@ try {
   const testBroker = createOwnerAuthBroker({ store, clock: () => now, demoAccountAuth: demoAuth,
     resolveEntitlement: createAccountEntitlementResolver(demoAuth), signAssertion: async () => 'unused',
     verifyGoogleCredential: async () => ({ providerSubject: 'unused' }), resolveAccount: async () => ({ accountId }) });
+  const rowsBeforeTestPolicy = state.accountFileUploads.length;
+  const testPolicy = await testBroker.getAccountFileUploadPolicy(request('policy', 'policy-test', 1,
+    digest('c'), secondIdentity, 'policy', policy.accountId));
+  assert.equal(testPolicy.limits.unlimited, true);
+  assert.equal(testPolicy.limits.maxFileBytes, Number.MAX_SAFE_INTEGER);
+  assert.equal(state.accountFileUploads.length, rowsBeforeTestPolicy);
   const largeSize = 2 * 1024 * 1024 * 1024;
   const largeRequest = (op) => request(op, 'test-large', largeSize, digest('b'), secondIdentity, 'test-batch', policy.accountId);
   const testReservation = await testBroker.reserveAccountFileUpload(largeRequest('reserve'));

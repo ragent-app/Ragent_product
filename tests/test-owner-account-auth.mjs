@@ -21,6 +21,7 @@ const {
   getOwnerAccountBinding,
   getOwnerAccountBrokerStatus,
   getDemoSignInStatus,
+  getOwnerAccountFileUploadPolicy,
   getOwnerAccountBindingHistory,
   listOwnerAccountDevices,
   publishOwnerAccountEndpoint,
@@ -312,6 +313,22 @@ try {
     const op = deviceOps.at(-1);
     assert.equal(op.purpose, 'history');
     assert.match(op.path, /^\/v1\/owner-auth\/devices\/acct_owner_1\/history$/);
+  });
+
+  await check('upload policy request carries a valid account-bound instance proof', async () => {
+    const { buildAccountFileUploadQuotaMessage, verifyInstanceProofSignature } = await import('../lib/instance-proof-protocol.mjs');
+    const result = await getOwnerAccountFileUploadPolicy({ clock: () => now, fetchImpl: async (url, options) => {
+      assert.equal(new URL(url).pathname, '/v1/owner-auth/instances/uploads/policy');
+      const body = JSON.parse(options.body);
+      assert.equal(body.operation, 'policy');
+      assert.equal(body.accountId, 'acct_owner_1');
+      assert.equal(body.sizeBytes, 1);
+      assert.equal(body.sha256, '0'.repeat(64));
+      assert.ok(verifyInstanceProofSignature({ publicKey: body.instance.publicKey,
+        message: buildAccountFileUploadQuotaMessage({ ...body, instanceId: body.instance.instanceId }), signature: body.signature }));
+      return response(200, { contractVersion: 2, limits: { unlimited: true } });
+    } });
+    assert.equal(result.limits.unlimited, true);
   });
 
   const unbound = await unbindOwnerAccount({ fetchImpl: mockFetch, clock: () => now });
