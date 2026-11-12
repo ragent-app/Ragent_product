@@ -89,7 +89,7 @@ async function main() {
       serviceUser: currentUser,
       serviceGroup: currentUser,
       serviceHome: join(tmp, 'runner-home'),
-      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       environment: {
         PATH: '/usr/bin',
@@ -129,7 +129,7 @@ async function main() {
       serviceUser: currentUser,
       serviceGroup: currentUser,
       serviceHome: join(tmp, 'runner-home'),
-      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       environment: {
         PATH: '/usr/bin',

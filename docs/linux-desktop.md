@@ -31,6 +31,15 @@ The installer uses the invoking sudo user as the service user when it can
 establish that identity; otherwise it uses the `agentoc` system account. Runs
 have the configured service user's ordinary file access. Check
 `/etc/agentoc/service-user` before relying on access to an existing workspace.
+The systemd runner currently refuses accounts that belong to restricted
+system groups such as `sudo` or `docker`: systemd automatically inherits
+those memberships even when they are omitted from supplementary group settings.
+Configure an unprivileged runner account under the administrator's control;
+set `AGENTOC_RUNNER_SAME_USER=0`, `AGENTOC_RUNNER_USER` and
+`AGENTOC_RUNNER_GROUP` in `/etc/agentoc/agentoc.env`, then restart the lifecycle
+broker and service. Its workspace access must be set up separately.
+Transparent safe group removal for same-user runs remains to be implemented
+and validated.
 
 ## Optional runner sandbox
 

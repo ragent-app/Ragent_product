@@ -41,7 +41,7 @@ import {
   grantRunnerWorkspaceAccess,
   revokeRunnerWorkspaceAccess,
 } from './runner-workspace-access.mjs';
-import { normalizeRunnerInheritedGroups } from '../lib/runner-user-groups.mjs';
+import { normalizeRunnerInheritedGroups, RUNNER_DENIED_GROUPS } from '../lib/runner-user-groups.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 
 const execFileAsync = promisify(execFileCallback);
@@ -201,6 +201,24 @@ export async function resolveRunnerOwnership(runnerUser, runnerGroup, {
     uid: await resolveId('passwd', runnerUser),
     gid: await resolveId('group', runnerGroup),
   };
+}
+
+// systemd's SupplementaryGroups extends, rather than replaces, NSS group
+// membership. Filtering the property alone cannot remove a user's existing
+// sudo/docker/etc. memberships. Refuse such an identity until a native
+// launcher can drop groups before exec; never silently claim it is isolated.
+export async function verifyRunnerSystemGroups(runnerUser, runnerGroup, { execFileImpl = execFileAsync } = {}) {
+  let stdout;
+  try {
+    ({ stdout } = await execFileImpl('id', ['-Gn', runnerUser], { timeout: 2_000, maxBuffer: 16 * 1024 }));
+  } catch {
+    throw Object.assign(new Error('Cannot verify runner system groups'), { code: 'RUNNER_IDENTITY_INVALID' });
+  }
+  const groups = String(stdout || '').trim().split(/\s+/).filter(Boolean);
+  const denied = new Set(RUNNER_DENIED_GROUPS.map(group => group.toLowerCase()));
+  if (!groups.length || [...groups, runnerGroup].some(group => denied.has(String(group || '').toLowerCase()))) {
+    throw Object.assign(new Error('Runner account belongs to a restricted system group; configure an unprivileged runner account'), { code: 'RUNNER_IDENTITY_INVALID' });
+  }
 }
 
 async function resolveServiceHome(serviceUser) {
@@ -491,6 +509,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   serviceHome = null,
   controlUser = null,
   resolveRunnerOwnershipImpl = resolveRunnerOwnership,
+  verifyRunnerSystemGroupsImpl = verifyRunnerSystemGroups,
   resolveInheritedGroupsImpl = resolveRunnerInheritedGroups,
   readManifestImpl = readRunManifest,
   grantWorkspaceAccessImpl = grantRunnerWorkspaceAccess,
@@ -516,6 +535,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
   }
+  await verifyRunnerSystemGroupsImpl(resolvedServiceUser, resolvedServiceGroup);
   const existingUnit = await readUnitStateImpl(resolvedUnitName, { execFileImpl });
   if (!['loaded', 'not-found'].includes(existingUnit?.loadState)
       || !['active', 'activating', 'reloading', 'deactivating', 'inactive', 'failed'].includes(existingUnit?.activeState)

@@ -12,6 +12,7 @@ import {
   readWorkspaceAccessScope,
   resolveRunnerResourceProfile,
   resolveRunnerOwnership,
+  verifyRunnerSystemGroups,
   resolveRunnerInheritedGroups,
 } from '../scripts/runner-lifecycle-broker.mjs';
 import {
@@ -249,12 +250,22 @@ try {
   );
   assert.deepEqual(ownershipCalls.map(({ args }) => args[0]), ['passwd', 'group']);
 
+  await verifyRunnerSystemGroups('svc', 'svc', { execFileImpl: async () => ({ stdout: 'svc developers\n' }) });
+  for (const groups of ['svc sudo', 'svc docker', 'svc agentoc-privileged', '']) {
+    await assert.rejects(() => verifyRunnerSystemGroups('svc', 'svc', {
+      execFileImpl: async () => ({ stdout: groups }),
+    }), error => error.code === 'RUNNER_IDENTITY_INVALID');
+  }
+  await assert.rejects(() => verifyRunnerSystemGroups('svc', 'svc', {
+    execFileImpl: async () => { throw new Error('NSS unavailable'); },
+  }), error => error.code === 'RUNNER_IDENTITY_INVALID');
+
   await assert.rejects(() => readLifecycleSystemdUnitState('agentoc-runner-example', {
     execFileImpl: async () => { throw new Error('systemd unavailable'); },
   }), error => error.code === 'RUNNER_UNIT_STATUS_UNAVAILABLE');
   await assert.rejects(() => launchLifecycleRunner('run_unknownstate', {
     serviceUser: 'svc', serviceGroup: 'svc',
-    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'unknown', activeState: 'unknown' }),
     execFileImpl: async () => { throw new Error('runner must not launch'); },
   }), error => error.code === 'RUNNER_UNIT_STATUS_UNAVAILABLE');
@@ -359,7 +370,7 @@ try {
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
     controlUser: 'owner',
-    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
     environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
     readManifestImpl: async () => ({
@@ -383,7 +394,7 @@ try {
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
     controlUser: 'owner',
-    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
     environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
     readManifestImpl: async () => ({
@@ -415,7 +426,7 @@ try {
       AGENTOC_RUN_SPOOL_DIR: join(root, 'run-results'),
       AGENTOC_RUNNER_INHERITED_GROUPS: 'owner',
     },
-    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
     readManifestImpl: async () => ({ tool: 'agy', executionScope: { accessMode: 'read' }, options: { runtimeFamily: 'agy-json' } }),
     prepareNativeRunProviderHomeImpl: async (runId, manifest, options) => {
@@ -457,7 +468,7 @@ try {
       serviceUser: 'svc',
       serviceGroup: 'svc',
       serviceHome: '/home/svc',
-      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       readManifestImpl: async () => ({ executionScope: { cwd: { realPath: '/srv/work/app' } } }),
       grantWorkspaceAccessImpl: grantImpl,
@@ -481,7 +492,7 @@ try {
       serviceUser: 'svc',
       serviceGroup: 'svc',
       serviceHome: '/home/svc',
-      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
       launchAttempt: 2,
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       readManifestImpl: async () => ({ executionScope: { cwd: { realPath: '/srv/work/app' } } }),
@@ -504,7 +515,7 @@ try {
     serviceUser: 'svc',
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
-    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     launchAttempt: 1,
     readUnitStateImpl: async () => ({ loadState: 'loaded', activeState: 'active', pid: 45678, user: 'svc' }),
     grantWorkspaceAccessImpl: async () => {
@@ -521,7 +532,7 @@ try {
   for (const user of ['root', '']) {
     await assert.rejects(() => launchLifecycleRunner('run_reusebad', {
       serviceUser: 'svc', serviceGroup: 'svc',
-      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+      resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
       readUnitStateImpl: async () => ({ loadState: 'loaded', activeState: 'active', pid: 45678, user }),
     }), error => error.code === 'RUNNER_IDENTITY_INVALID');
   }
@@ -533,7 +544,7 @@ try {
     serviceGroup: 'svc',
     serviceHome: '/home/svc',
     launchAttempt: 3,
-    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     resolveInheritedGroupsImpl: async () => [],
     readManifestImpl: async () => ({}),
     readUnitStateImpl: async () => {
