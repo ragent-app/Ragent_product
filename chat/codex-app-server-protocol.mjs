@@ -219,10 +219,12 @@ export function buildCodexAppServerThreadMessage({
   threadId,
   useResume,
   rolloutPath,
+  executionEnvironment,
   id = CODEX_APP_SERVER_REQUEST_IDS.thread,
   ...options
 } = {}) {
   const threadOptions = buildCodexAppServerThreadOptions(options);
+  const environment = codexExecutionEnvironment(executionEnvironment);
   if (useResume === true && typeof threadId === 'string' && threadId.trim()) {
     return {
       method: 'thread/resume',
@@ -238,7 +240,7 @@ export function buildCodexAppServerThreadMessage({
   return {
     method: 'thread/start',
     id,
-    params: threadOptions,
+    params: { ...threadOptions, ...(environment ? { environments: [environment] } : {}) },
   };
 }
 
@@ -274,6 +276,36 @@ function validatedRolloutPath(value) {
   return value.trim();
 }
 
+// The runner owns this binding; never accept a model-supplied URL or token
+// as a thread option. Resume and fork do not accept environments in Codex
+// 0.167.2, so every turn must also carry the binding explicitly.
+function codexExecutionEnvironment(value) {
+  if (value === undefined || value === null) return null;
+  const id = typeof value?.environmentId === 'string' ? value.environmentId.trim() : '';
+  const cwd = typeof value?.cwd === 'string' ? value.cwd.trim() : '';
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id) || !cwd || /[\0\r\n]/.test(cwd)
+      || !(isAbsolute(cwd) || win32.isAbsolute(cwd))) {
+    throw new TypeError('Codex execution environment requires an id and absolute working directory');
+  }
+  return { environmentId: id, cwd };
+}
+
+export function buildCodexAppServerEnvironmentAddMessage({ id, environmentId, execServerUrl, authBearerToken } = {}) {
+  const environment = codexExecutionEnvironment({ environmentId, cwd: '/' });
+  let endpoint;
+  try { endpoint = new URL(execServerUrl); } catch { throw new TypeError('Invalid Codex execution endpoint'); }
+  if (!Number.isSafeInteger(id) || id < 0 || endpoint.protocol !== 'ws:'
+      || !['127.0.0.1', '[::1]'].includes(endpoint.hostname) || !endpoint.port || Number(endpoint.port) === 0
+      || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+      || (endpoint.pathname !== '/' && endpoint.pathname !== '')
+      || typeof authBearerToken !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(authBearerToken)) {
+    throw new TypeError('Codex execution endpoint must use authenticated loopback WebSocket');
+  }
+  return { id, method: 'environment/add', params: {
+    environmentId: environment.environmentId, execServerUrl: endpoint.toString(), authBearerToken,
+  } };
+}
+
 export function buildCodexAppServerInput(text) {
   return [{
     type: 'text',
@@ -293,9 +325,12 @@ export function buildCodexAppServerTurnStartMessage({
   permissionMode,
   agentocApprovalGate,
   namedPermissionProfile,
+  executionEnvironment,
 } = {}) {
   const permissionPolicy = resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode });
   const namedProfile = normalizeNamedPermissionProfile(namedPermissionProfile);
+  const environment = codexExecutionEnvironment(executionEnvironment);
+  if (environment && namedProfile) throw new TypeError('An external Codex execution environment cannot override a named permission profile');
   return {
     method: 'turn/start',
     id: CODEX_APP_SERVER_REQUEST_IDS.turn,
@@ -311,7 +346,8 @@ export function buildCodexAppServerTurnStartMessage({
       // A thread-local profile is inherited by turn/start. Selecting its
       // name again makes Codex 0.150 reload global configuration, where the
       // dynamically defined thread profile does not exist.
-      ...(namedProfile ? {} : { sandboxPolicy: permissionPolicy.sandboxPolicy?.type === 'workspaceWrite'
+      ...(environment ? { environments: [environment], sandboxPolicy: { type: 'externalSandbox' } }
+        : namedProfile ? {} : { sandboxPolicy: permissionPolicy.sandboxPolicy?.type === 'workspaceWrite'
         ? {
           ...permissionPolicy.sandboxPolicy,
           // turn/start carries an explicit policy: an empty roots list does
