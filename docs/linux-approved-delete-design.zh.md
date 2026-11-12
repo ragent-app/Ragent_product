@@ -411,8 +411,21 @@ runner UID/GID：runner 能读取和修改原有 0600 文件，创建文件在�
 IPC 或 `/proc` 获得别的任务的挂载视图；还需验证嵌套挂载、多所有者、
 现有 ACL、可执行文件、不同文件系统及系统版本。不能把 UID/GID 设为系统
 溢出身份，也不能在映射不支持时静默退回不安全的特权执行路径。此次不覆盖
-默认 Ubuntu 24.04 内核、实际 systemd 任务或真实提供商，因此不是发行验收。
+默认 Ubuntu 24.04 内核或真实提供商，因此不是发行验收。
 内核行为参见 [Linux 内核 ID 映射文档](https://docs.kernel.org/filesystems/idmappings.html)。
+
+随后在同机使用实际 systemd 单元组合了两个 `DynamicUser` 身份和私有映射
+挂载。任务在独立单元中以其中一个动态 UID 运行，`NoNewPrivs` 为 1，四组
+进程 capability 为空；另一 UID 无法经 `/proc/<pid>/root` 读取该任务的挂载。
+停止任务单元后进程退出，原文件的所有者和 ACL 保持不变。可重复夹具为
+`tests/test-linux-systemd-idmapped-workspace.sh`，没有调用真实提供商。
+
+该夹具还故意先停止为任务保留 UID 的独立单元：systemd 随后把相同 UID 分配
+给新单元，而旧任务仍在运行；同 UID 进程能够经 `/proc/<pid>/root` 读取旧
+任务的映射。因此**独立保留单元不能作为安全的 UID 租约**。生产设计必须让
+UID 的保留、任务 cgroup 和所有进程的退出形成同一可验证生命周期，并处理
+通过其他 IPC 逃逸及持久化文件残留，才能考虑复用该 UID。systemd 对动态
+用户释放及可写目录的限制见 [systemd.exec 文档](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)。
 
 同一物理机对 systemd 管理目录作了补充试验：动态用户可在自己的
 `RuntimeDirectory` 中读写，而控制用的 0600 凭据源文件不能被该 UID 直接
