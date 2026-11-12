@@ -1131,7 +1131,7 @@ async function collectRunOutputPreview(runId, maxLines = 3) {
 async function deriveStructuredRuntimeFailureReason(runId, previewText = '') {
   const preview = clipFailurePreview(previewText) || await collectRunOutputPreview(runId);
   if (preview && /(请登录|登录超时|auth|authentication|sso|sign in|login)/i.test(preview)) {
-    return `Provider requires interactive login before AgentoC can use it: ${preview}`;
+    return `Provider requires interactive login before Ragent can use it: ${preview}`;
   }
   if (preview) {
     return `Provider exited without emitting structured events: ${preview}`;
@@ -1266,7 +1266,7 @@ function buildDelegationContextOperation(task, childSession) {
     phase: 'applied',
     trigger: 'delegation',
     title: 'Parallel session spawned',
-    summary: `AgentoC handed off a focused subtask to ${childName}.`,
+    summary: `Ragent handed off a focused subtask to ${childName}.`,
     reason: normalizedTask || `Child session ${childId || childName} is running independently.`,
     ...(delegationTaskFingerprint ? { delegationTaskFingerprint } : {}),
     ...(childId ? { targetSessionId: childId } : {}),
@@ -2443,7 +2443,7 @@ function buildQueuedFollowUpTranscriptText(queue) {
     return formatQueuedFollowUpTextEntry(queue[0], null);
   }
   return [
-    'Queued follow-up messages sent while AgentoC was busy:',
+    'Queued follow-up messages sent while Ragent was busy:',
     '',
     ...queue.map((entry, index) => formatQueuedFollowUpTextEntry(entry, index)),
   ].join('\n\n');
@@ -7410,7 +7410,7 @@ async function prepareForkContextSnapshot(sessionId, snapshot, contextHead) {
       : [];
     let continuationBody = prepareSessionContinuationBody(recentEvents);
     if (summaryHistoryFromSeq > Math.max(1, activeFromSeq + 1)) {
-      continuationBody = `[AgentoC note: this handoff includes only the most recent ${recentEvents.length} events (seq ${summaryHistoryFromSeq}–${preparedThroughSeq}) after the active context boundary. Earlier events were omitted to keep context current.]\n\n${continuationBody}`;
+      continuationBody = `[Ragent note: this handoff includes only the most recent ${recentEvents.length} events (seq ${summaryHistoryFromSeq}–${preparedThroughSeq}) after the active context boundary. Earlier events were omitted to keep context current.]\n\n${continuationBody}`;
     }
     return {
       mode: 'summary',
@@ -7442,7 +7442,7 @@ async function prepareForkContextSnapshot(sessionId, snapshot, contextHead) {
     return null;
   }
   if (forkHistoryFromSeq > 1) {
-    continuationBody = `[AgentoC note: this handoff includes only the most recent ${priorHistory.length} events (seq ${forkHistoryFromSeq}–${preparedThroughSeq} of the session). Earlier history was omitted to keep context current — re-open the transcript or run a context compaction if you need it.]\n\n${continuationBody}`;
+    continuationBody = `[Ragent note: this handoff includes only the most recent ${priorHistory.length} events (seq ${forkHistoryFromSeq}–${preparedThroughSeq} of the session). Earlier history was omitted to keep context current — re-open the transcript or run a context compaction if you need it.]\n\n${continuationBody}`;
   }
 
   return {
@@ -7576,7 +7576,7 @@ function buildContinuityCheckpointPrompt(checkpoint) {
     };
     serialized = JSON.stringify(bounded);
   }
-  return `[AgentoC continuity checkpoint]\nThis deterministic checkpoint is authoritative for the current Session state. It is not a provider summary.\n${serialized.slice(0, MAX_CONTINUITY_CHECKPOINT_PROMPT_CHARS)}`;
+  return `[Ragent continuity checkpoint]\nThis deterministic checkpoint is authoritative for the current Session state. It is not a provider summary.\n${serialized.slice(0, MAX_CONTINUITY_CHECKPOINT_PROMPT_CHARS)}`;
 }
 
 export function buildProviderRuntimeFingerprint({ run = null, manifest = null, folder = '' } = {}) {
@@ -7880,7 +7880,7 @@ async function buildProviderResumeDeltaContinuation(sessionId, snapshot, covered
     ? [{ from: missingFromSeq, to: fromSeq - 1 }]
     : [];
   if (!checkpointCoversLatest && fromSeq > missingFromSeq) {
-    continuationBody = `[AgentoC note: this provider resume thread was behind the canonical Session history. This handoff includes only the most recent ${events.length} missing events (seq ${fromSeq}-${latestSeq}); earlier missing events were omitted to keep context current.]\n\n${continuationBody}`;
+    continuationBody = `[Ragent note: this provider resume thread was behind the canonical Session history. This handoff includes only the most recent ${events.length} missing events (seq ${fromSeq}-${latestSeq}); earlier missing events were omitted to keep context current.]\n\n${continuationBody}`;
   }
   return {
     text: buildSessionContinuationContextFromBody(continuationBody, {
@@ -8984,7 +8984,7 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
   });
   sessionChanged = sessionChanged || finalizedMeta.changed;
   if (staleClaudeResumeDetected && finalizedMeta.changed) {
-    await appendEvent(sessionId, statusEvent('Cleared stale Claude resume id — next message will continue from AgentoC history.'));
+    await appendEvent(sessionId, statusEvent('Cleared stale Claude resume id — next message will continue from Ragent history.'));
     historyChanged = true;
   }
 
@@ -9430,7 +9430,7 @@ function scheduleDetachedRunMemoryWriteback(sessionId, session, finalizedRun, ma
           phase: 'applied',
           trigger: 'automatic',
           title: 'Durable memory updated',
-          summary: `AgentoC promoted ${result.promotedCount} durable learning(s) for reuse in later turns.`,
+          summary: `Ragent promoted ${result.promotedCount} durable learning(s) for reuse in later turns.`,
           reason: paths.length > 0 ? `Updated: ${paths.join(', ')}` : '',
         }));
       }
@@ -12177,7 +12177,7 @@ function resolveSessionRiskMode(session) {
 
 function createUnsupportedRiskGateError({ sessionId, tool, runtimeFamily, riskMode }) {
   const error = new Error(
-    'The selected Harness cannot return permission decisions to AgentoC; choose an autonomous profile or a runtime with an approval channel',
+    'The selected Harness cannot return permission decisions to Ragent; choose an autonomous profile or a runtime with an approval channel',
   );
   error.code = 'PRIVILEGED_GATE_UNSUPPORTED_RUNTIME';
   error.statusCode = 409;
@@ -16074,7 +16074,7 @@ export async function dropToolUse(sessionId) {
   const transcript = [
     ...transcriptParts,
     ...(omittedMessages > 0
-      ? [`[AgentoC note: ${omittedMessages} additional message(s) were omitted while dropping tool results to keep the context bounded.]`]
+      ? [`[Ragent note: ${omittedMessages} additional message(s) were omitted while dropping tool results to keep the context bounded.]`]
       : []),
   ].join('\n\n');
 

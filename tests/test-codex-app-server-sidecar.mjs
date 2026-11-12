@@ -1509,7 +1509,7 @@ try {
   assert.ok(staleResumeIndex >= 0, 'recovery should first attempt the persisted thread');
   assert.ok(recoveredThreadStartIndex > staleResumeIndex, 'stale resume should fall back to thread/start');
   assert.ok(recoveredTurnStart, 'fresh recovery should start a new turn');
-  assert.match(JSON.stringify(recoveredTurnStart), /AgentoC continuity checkpoint/, 'fresh recovery turn must carry the authoritative checkpoint');
+  assert.match(JSON.stringify(recoveredTurnStart), /Ragent continuity checkpoint/, 'fresh recovery turn must carry the authoritative checkpoint');
 
   // The previous assertion exercises recovery while the original app-server
   // remains alive. Reproduce the field failure too: Codex can close directly

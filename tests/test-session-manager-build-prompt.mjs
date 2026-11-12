@@ -252,9 +252,9 @@ const checkpointEnvelope = await buildPromptEnvelope(
   null,
   { codexResume: true, runtimeFamily: 'codex-app-server-json' },
 );
-assert.match(checkpointEnvelope.prompt, /AgentoC continuity checkpoint/);
+assert.match(checkpointEnvelope.prompt, /Ragent continuity checkpoint/);
 assert.match(checkpointEnvelope.prompt, /Repair the durable continuity path/);
-assert.match(checkpointEnvelope.freshRecoveryPrompt, /AgentoC continuity checkpoint/);
+assert.match(checkpointEnvelope.freshRecoveryPrompt, /Ragent continuity checkpoint/);
 assert.match(checkpointEnvelope.freshRecoveryDeveloperInstructions, /Ragent system context:/);
 assert.match(checkpointEnvelope.freshRecoveryDeveloperInstructions, /TEMPLATE_INSTRUCTIONS/);
 assert.equal(checkpointEnvelope.metadata.runtimeContextCompiler, 'runtime-context-compiler-v1');
