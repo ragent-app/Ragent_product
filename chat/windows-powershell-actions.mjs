@@ -38,6 +38,17 @@ export function analyzeWindowsPureNode(programName, args) {
     : ['-p', '--print'].includes(args[0]) && NODE_PURE_EXPRESSION.test(args[1]);
   return valid ? { kind: 'read', program: 'node literal output', target: null } : null;
 }
+// Python's -c can execute arbitrary code. Only a literal print or an explicit
+// time.sleep followed by literal print is treated as an ordinary operation.
+const PY_LITERAL = String.raw`(?:'(?:[^'\\\r\n]|\\[^\r\n])*'|"(?:[^"\\\r\n]|\\[^\r\n])*"|\d+(?:\.\d+)?|True|False|None)`;
+const PY_PRINT = String.raw`print\s*\(\s*(?:${PY_LITERAL}(?:\s*,\s*${PY_LITERAL})*)?\s*\)`;
+const PY_PURE_SCRIPT = new RegExp(String.raw`^\s*(?:${PY_PRINT}(?:\s*;\s*${PY_PRINT})*|import\s+time\s*;\s*time\.sleep\s*\(\s*\d+(?:\.\d+)?\s*\)(?:\s*;\s*${PY_PRINT})?)\s*;?\s*$`);
+export function analyzeWindowsPurePython(programName, args) {
+  const program = String(programName || '').toLowerCase();
+  if (!['python', 'python.exe', 'python3', 'python3.exe'].includes(program) || !Array.isArray(args) || args.length !== 2 || args[0] !== '-c' ||
+      typeof args[1] !== 'string' || args[1].length > 8192 || !PY_PURE_SCRIPT.test(args[1])) return null;
+  return { kind: 'read', program: 'python literal output', target: null };
+}
 const FILE_COMMANDS = new Map([
   ['get-content', 'read'], ['get-item', 'read'], ['get-childitem', 'read'], ['get-filehash', 'read'], ['test-path', 'read'], ['resolve-path', 'read'],
   ['set-content', 'write'], ['add-content', 'write'], ['clear-content', 'write'], ['new-item', 'write'], ['out-file', 'write'], ['remove-item', 'delete'],
@@ -618,6 +629,8 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     if (version) { actions.push(version); continue; }
     const pureNode = entry.pipelineInput === false && analyzeWindowsPureNode(program, versionArgs);
     if (pureNode) { actions.push(pureNode); continue; }
+    const purePython = entry.pipelineInput === false && analyzeWindowsPurePython(program, versionArgs);
+    if (purePython) { actions.push(purePython); continue; }
     if (entry.pipelineInput === false && isWindowsPingProbe(program, versionArgs)) {
       actions.push({ kind: 'read', program: 'ping', target: null, caution: true }); continue;
     }

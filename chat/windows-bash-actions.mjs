@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsVersion, analyzeWindowsWorkspaceScriptTask, analyzeWindowsPureNode, isWindowsPingProbe } from './windows-powershell-actions.mjs';
+import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsVersion, analyzeWindowsWorkspaceScriptTask, analyzeWindowsPureNode, analyzeWindowsPurePython, isWindowsPingProbe } from './windows-powershell-actions.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 // Parse a literal simple command only. Anything requiring shell expansion,
@@ -299,6 +299,8 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   }
   const pureNode = analyzeWindowsPureNode(program, words.slice(1));
   if (pureNode) return withOutput({ complete: true, actions: [pureNode] });
+  const purePython = analyzeWindowsPurePython(program, words.slice(1));
+  if (purePython) return withOutput({ complete: true, actions: [purePython] });
   const workspaceTask = await analyzeWindowsWorkspaceScriptTask(program, words.slice(1), context, { pathResolver: gitBashPath });
   if (workspaceTask) {
     if (context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
@@ -333,6 +335,9 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   }
   if ((['pwd', 'true', 'false', ':'].includes(program) && words.length === 1) || program === 'echo') {
     return outputEntry.length ? analyzeFiles(outputEntry, context) : { complete: true, actions: [{ kind: 'read', program, target: null }] };
+  }
+  if (program === 'sleep' && words.length > 1 && words.slice(1).every(value => /^\d+(?:\.\d+)?[smhd]?$/.test(value))) {
+    return withOutput({ complete: true, actions: [{ kind: 'read', program, target: null }] });
   }
   if (isWindowsPingProbe(String(program).toLowerCase(), words.slice(1))) {
     return withOutput({ complete: true, actions: [{ kind: 'read', program: 'ping', target: null, caution: true }] });
