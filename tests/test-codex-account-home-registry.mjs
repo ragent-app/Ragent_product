@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { codexAccountHomeKey, resolveCanonicalCodexAccountHome } from '../lib/provider-runtime/codex-account-home-registry.mjs';
+import { codexAccountHomeKey, isCodexAccountHomeBound, resolveCanonicalCodexAccountHome } from '../lib/provider-runtime/codex-account-home-registry.mjs';
 
 test('verified accounts converge on one guarded home across provider profiles', async (t) => {
   const parent = resolve(tmpdir());
@@ -18,6 +18,7 @@ test('verified accounts converge on one guarded home across provider profiles', 
   const first = join(providerHomesRoot, 'by-provider', 'first');
   const second = join(providerHomesRoot, 'by-provider', 'second');
   const base = { configDir, providerHomesRoot, accountId: 'account-a' };
+  assert.equal(isCodexAccountHomeBound(null, first), false);
   assert.equal(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first }), null);
   assert.equal(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, initialize: true }), first);
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: second, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_MIGRATION_REQUIRED' });
@@ -31,7 +32,11 @@ test('verified accounts converge on one guarded home across provider profiles', 
       guarded = true;
     } }), first);
   assert.equal(guarded, true);
-  assert.deepEqual(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true }), { home: first, sources: [second], aliases: [second] });
+  const completed = await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true });
+  assert.deepEqual(completed, { home: first, sources: [second], aliases: [second] });
+  assert.equal(isCodexAccountHomeBound(completed, first), true);
+  assert.equal(isCodexAccountHomeBound(completed, second), true);
+  assert.equal(isCodexAccountHomeBound(completed, join(providerHomesRoot, 'other')), false);
   const emptyAlias = join(providerHomesRoot, 'by-provider', 'empty');
   await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: emptyAlias, initialize: true, assertMigrationSafe: async () => ({ retainLegacySource: false }) });
   assert.deepEqual(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true }), { home: first, sources: [second], aliases: [second, emptyAlias] });
