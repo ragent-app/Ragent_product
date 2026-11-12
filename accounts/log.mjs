@@ -9,6 +9,8 @@ const SENSITIVE_FIELDS = [
   'grantHash',
   'token',
   'tokenHash',
+  'writeToken',
+  'readToken',
   'bootstrap',
   'bootstrapHash',
   'csrf',

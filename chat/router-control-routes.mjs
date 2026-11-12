@@ -96,6 +96,7 @@ import { RESUMABLE_UPLOAD_CONTRACT, UPLOAD_CHUNK_REQUEST_TIMEOUT_MS,
 import { accountFileUploadMaximumBytes } from './file-asset-account-policy.mjs';
 import { fileAssetAccountContext, canAccessFileAssetUpload } from './file-asset-account-context.mjs';
 import { fileAssetRelayJobs } from './file-asset-relay-jobs.mjs';
+import { attachmentTiming } from './file-asset-timing.mjs';
 import { pathExists } from './fs-utils.mjs';
 import { queryUsageLedger } from './usage-ledger.mjs';
 import { broadcastAll } from './ws-clients.mjs';
@@ -483,6 +484,15 @@ function writeUploadFailure(res, error, writeJson, conditional, fallback) {
   const valid = known && Number.isInteger(error.statusCode) && error.statusCode >= 400 && error.statusCode <= 599;
   writeJson(res, valid ? error.statusCode : 503, { code: valid ? error.code : 'FILE_ASSET_UPLOAD_UNAVAILABLE',
     error: valid ? error.message : 'Conditional attachment upload is unavailable' });
+}
+
+function fileAssetUploadContract(maximumBytes = MAX_STABLE_UPLOAD_BYTES) {
+  return { version: 1, maximumBytes, requestIdMaximumLength: 200,
+    sha256Required: true, readonlyReceiptLookup: true,
+    resumableUpload: RESUMABLE_UPLOAD_CONTRACT,
+    ...(process.env.AGENTOC_ASSET_RELAY_ENABLED !== '0' && getOwnerAccountBrokerStatus().configured
+      ? { encryptedRelay: { version: 1, recordBytes: 256 * 1024, finalizeWaitsForRelay: true } } : {}),
+    scopeConditionVersion: 1, scopeContractPath: '/api/session-scope-contract' };
 }
 
 export async function handleControlRoutes({
@@ -1302,12 +1312,7 @@ export async function handleControlRoutes({
       writeJson(res, 403, { error: 'Owner upload access required', code: 'PERMISSION_DENIED' });
       return true;
     }
-    writeJson(res, 200, { version: 1, maximumBytes: await accountFileUploadMaximumBytes(authSession), requestIdMaximumLength: 200,
-      sha256Required: true, readonlyReceiptLookup: true,
-      resumableUpload: RESUMABLE_UPLOAD_CONTRACT,
-      ...(process.env.AGENTOC_ASSET_RELAY_ENABLED !== '0' && getOwnerAccountBrokerStatus().configured
-        ? { encryptedRelay: { version: 1, recordBytes: 256 * 1024, finalizeWaitsForRelay: true } } : {}),
-      scopeConditionVersion: 1, scopeContractPath: '/api/session-scope-contract' });
+    writeJson(res, 200, fileAssetUploadContract(await accountFileUploadMaximumBytes(authSession)));
     return true;
   }
 
@@ -1344,7 +1349,14 @@ export async function handleControlRoutes({
     return true;
   }
 
-  if (pathname === '/api/assets/upload-intents' && req.method === 'POST') {
+  const combinedUploadIntent = pathname === '/api/assets/combined-upload-intents';
+  if ((pathname === '/api/assets/upload-intents' || combinedUploadIntent) && req.method === 'POST') {
+    // Scoped and delegated uploads use the established scope negotiation path.
+    if (combinedUploadIntent && (Object.hasOwn(req.headers || {}, SESSION_API_SCOPE_HEADER) ||
+        authSession?.role !== 'owner' || isRunCapability(authSession))) {
+      writeJson(res, 403, { error: 'Unscoped owner upload required', code: 'PERMISSION_DENIED' });
+      return true;
+    }
     let payload = {};
     try {
       const body = await readBody(req, 32768);
@@ -1354,6 +1366,12 @@ export async function handleControlRoutes({
       return true;
     }
 
+    if (combinedUploadIntent && (typeof payload?.requestId !== 'string' || !payload.requestId.trim() ||
+        typeof payload?.quotaBatchId !== 'string' || !payload.quotaBatchId.trim() ||
+        typeof payload?.sha256 !== 'string')) {
+      writeJson(res, 400, { error: 'Stable upload identity is required', code: 'FILE_ASSET_STABLE_UPLOAD_REQUIRED' });
+      return true;
+    }
     const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
     if (!sessionId) {
       writeJson(res, 400, { error: 'sessionId is required' });
@@ -1419,7 +1437,9 @@ export async function handleControlRoutes({
         await completeOwnerAccountFileUpload({ requestId: payload.requestId, ...uploadAccount.quotaOptions,
           quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 });
       }
-      writeJson(res, 200, intent);
+      writeJson(res, 200, combinedUploadIntent ? { ...intent, combinedUploadContract: fileAssetUploadContract(
+        quotaReservation?.limits?.unlimited === true && quotaReservation.limits.maxFileBytes === Number.MAX_SAFE_INTEGER
+          ? Number.MAX_SAFE_INTEGER : MAX_STABLE_UPLOAD_BYTES) } : intent);
     } catch (error) {
       writeUploadFailure(res, error, writeJson, conditionalUpload, 'Failed to create upload intent');
     }
@@ -1569,26 +1589,32 @@ export async function handleControlRoutes({
       return true;
     }
 
+    const timingStart = attachmentTiming.start();
+    let timingOutcome = 'error';
     try {
-      await fileAssetRelayJobs.waitForReceived(asset.id);
-      const next = await finalizeFileAssetUpload(asset.id, {
+      await attachmentTiming.measure(asset.id, 'relay_wait', () => fileAssetRelayJobs.waitForReceived(asset.id),
+        { bytes: asset.sizeBytes });
+      const next = await attachmentTiming.measure(asset.id, 'finalize_local', () => finalizeFileAssetUpload(asset.id, {
         sizeBytes: payload?.sizeBytes,
         etag: typeof payload?.etag === 'string' ? payload.etag : '',
         scopeCondition: readSessionApiScopeHeader(req, asset.sessionId),
-      });
+      }), { bytes: asset.sizeBytes });
       if (next?.status === 'ready' && asset.uploadRequest?.key) {
-        const binding = await getOwnerAccountBinding();
+        const binding = await attachmentTiming.measure(asset.id, 'quota_binding', () => getOwnerAccountBinding());
         if (binding?.accountId && (authSession?.workspaceAccess || !authSession?.accountId || authSession.accountId === binding.accountId)) {
-          await completeOwnerAccountFileUpload({ requestId: asset.uploadRequest.key,
+          await attachmentTiming.measure(asset.id, 'quota_complete', () => completeOwnerAccountFileUpload({ requestId: asset.uploadRequest.key,
             ...fileAssetAccountContext(authSession).quotaOptions,
             quotaBatchId: asset.uploadRequest.quotaBatchId || asset.uploadRequest.key,
-            sizeBytes: asset.sizeBytes, sha256: asset.sha256 });
+            sizeBytes: asset.sizeBytes, sha256: asset.sha256 }), { bytes: asset.sizeBytes });
         }
       }
       if (next?.status === 'ready') fileAssetRelayJobs.forgetReceived(asset.id);
+      timingOutcome = 'ok';
       writeJson(res, 200, { asset: next });
     } catch (error) {
       writeUploadFailure(res, error, writeJson, conditionalUpload, 'Failed to finalize asset upload');
+    } finally {
+      attachmentTiming.end(asset.id, 'finalize_total', timingStart, { bytes: asset.sizeBytes, outcome: timingOutcome });
     }
     return true;
   }

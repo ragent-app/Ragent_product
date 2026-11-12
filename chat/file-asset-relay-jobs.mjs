@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { openRelayAsset } from './file-asset-relay-receiver.mjs';
 import { ingestFileAssetUpload } from './file-assets.mjs';
+import { attachmentTiming } from './file-asset-timing.mjs';
 
 // A job holds only ephemeral transport credentials. The ordinary asset ingest
 // validates the complete plaintext digest and publishes its private snapshot.
@@ -27,9 +28,11 @@ export function createFileAssetRelayJobs({ open = openRelayAsset, ingest = inges
     timeout.unref?.();
     job.promise = (async () => {
       try {
-        const input = await open({ accountsBaseUrl, relayId, readToken, key: decodedKey, transferId,
-          totalBytes: asset.sizeBytes, signal: controller.signal });
-        await ingest(asset.id, input, { scopeCondition, signal: controller.signal });
+        const input = await attachmentTiming.measure(asset.id, 'relay_open', () => open({ accountsBaseUrl,
+          relayId, readToken, key: decodedKey, transferId, totalBytes: asset.sizeBytes, signal: controller.signal }),
+        { bytes: asset.sizeBytes });
+        await attachmentTiming.measure(asset.id, 'relay_receive', () =>
+          ingest(asset.id, input, { scopeCondition, signal: controller.signal }), { bytes: asset.sizeBytes });
         job.status = 'received';
       } catch {
         job.status = controller.signal.aborted ? 'cancelled' : 'failed';

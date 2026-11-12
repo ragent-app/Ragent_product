@@ -317,10 +317,14 @@ for name in main.cjs preload.cjs update-check.cjs wait.html; do
   install -m 0644 "$ROOT/desktop/$name" "$MANAGER_APP/$name"
 done
 install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$MANAGER_APP/assets/agentoc-android-logo.png"
+install -m 0644 "$ROOT/static/icon-512.png" "$MANAGER_APP/assets/ragent-icon.png"
+install -m 0644 "$ROOT/static/desktop/ragent-trayTemplate.png" "$MANAGER_APP/assets/ragent-trayTemplate.png"
+install -m 0644 "$ROOT/static/desktop/ragent-trayTemplate@2x.png" "$MANAGER_APP/assets/ragent-trayTemplate@2x.png"
 DESKTOP_VERSION="$(node -p "require('$ROOT/desktop/package.json').version")"
-printf '{"name":"ragent-desktop-manager","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$MANAGER_APP/package.json"
+printf '{"name":"ragent-desktop-manager","productName":"Ragent","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$MANAGER_APP/package.json"
 plutil -replace CFBundleIdentifier -string cloud.agenton.ragent.manager "$MANAGER/Contents/Info.plist"
 plutil -replace CFBundleName -string Ragent "$MANAGER/Contents/Info.plist"
+plutil -replace CFBundleDisplayName -string Ragent "$MANAGER/Contents/Info.plist" 2>/dev/null || plutil -insert CFBundleDisplayName -string Ragent "$MANAGER/Contents/Info.plist"
 
 # ── 3. Bundled Node runtime ──────────────────────────────────────────────────
 NODE_DIST="node-${NODE_VERSION}-darwin-${NODE_ARCH}"
@@ -338,6 +342,7 @@ ACTUAL_SHA="$(shasum -a 256 "$NODE_CACHE_DIR/$NODE_TARBALL" | awk '{ print $1 }'
 mkdir -p "$CONTENTS/Resources/runtime"
 tar -xzf "$NODE_CACHE_DIR/$NODE_TARBALL" -C "$WORK_DIR"
 install -m 0755 "$WORK_DIR/$NODE_DIST/bin/node" "$CONTENTS/Resources/runtime/node"
+bash "$ROOT/scripts/stage-posix-node-toolchain.sh" "$WORK_DIR/$NODE_DIST" "$CONTENTS/Resources/runtime"
 lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/node"
 lipo -verify_arch "$ARCH" "$MANAGER/Contents/MacOS/Electron"
 xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=13.0 \
@@ -440,19 +445,23 @@ install -m 0644 "$ROOT/packaging/macos/README.txt" "$CONTENTS/Resources/README.t
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$STAGE/README.txt"
 ln -s /Applications "$STAGE/Applications"
 
-# App icon (best effort: sips + iconutil are stock macOS tools).
-if [ -f "$ROOT/static/icon-512.png" ] && command -v iconutil >/dev/null 2>&1 && command -v sips >/dev/null 2>&1; then
-  ICONSET="$WORK_DIR/AppIcon.iconset"
-  mkdir -p "$ICONSET"
-  for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" "$ROOT/static/icon-512.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-    doubled=$((size * 2))
-    sips -z "$doubled" "$doubled" "$ROOT/static/icon-512.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
-  done
-  if iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns" >/dev/null 2>&1; then
-    plutil -insert CFBundleIconFile -string AppIcon "$CONTENTS/Info.plist" >/dev/null
-  fi
-fi
+# Both the outer launcher and the visible Electron manager need the product
+# icon.  Failing the build is preferable to shipping a default Electron icon.
+[ -f "$ROOT/static/icon-512.png" ] && command -v iconutil >/dev/null 2>&1 && command -v sips >/dev/null 2>&1 || {
+  echo 'Ragent icon source or macOS icon tools are missing.' >&2; exit 1;
+}
+ICONSET="$WORK_DIR/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$ROOT/static/icon-512.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  doubled=$((size * 2))
+  sips -z "$doubled" "$doubled" "$ROOT/static/icon-512.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
+install -m 0644 "$CONTENTS/Resources/AppIcon.icns" "$MANAGER/Contents/Resources/AppIcon.icns"
+plutil -insert CFBundleIconFile -string AppIcon "$CONTENTS/Info.plist"
+plutil -replace CFBundleIconFile -string AppIcon "$MANAGER/Contents/Info.plist" || \
+  plutil -insert CFBundleIconFile -string AppIcon "$MANAGER/Contents/Info.plist"
 
 # Set the final bundle permissions before signing. Do not change the signed
 # app's resources or executable bits after the signature has been verified.

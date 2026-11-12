@@ -5,11 +5,16 @@ import java.io.OutputStream
 import java.security.MessageDigest
 
 /** Capabilities are intentionally not a data class: they must not enter logs. */
-class AttachmentRelayTicket(val id: String, val writeToken: String, val readToken: String, val sizeBytes: Long)
+class AttachmentRelayTicket(val id: String, val writeToken: String, val readToken: String, val sizeBytes: Long,
+    val epoch: String? = null, val deadline: Long? = null)
 
 interface AttachmentRelayTransport {
     /** Null means the server does not support the optional fast route. */
     suspend fun reserve(sizeBytes: Long): AttachmentRelayTicket?
+    /** A v2 reservation supports cancellation even when its response is lost. */
+    suspend fun reserveSpeculative(sizeBytes: Long): AttachmentRelayTicket? = null
+    /** Best-effort, capability-bound release; old Accounts servers may ignore it. */
+    suspend fun cancel(ticket: AttachmentRelayTicket) {}
     suspend fun send(ticket: AttachmentRelayTicket, source: ApiRequestBodySource, key: ByteArray,
         transferId: String, onProgress: (Long) -> Unit)
 }

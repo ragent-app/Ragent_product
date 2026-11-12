@@ -12,6 +12,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.NonCancellable
@@ -109,7 +111,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
 
     private suspend fun uploadVerified(sessionId: String, frozen: FileUploadInput, source: ApiRequestBodySource,
         legacyBytes: ByteArray?, scope: SessionScopeCondition?, onProgress: (FileUploadProgress) -> Unit,
-        checkAccess: suspend () -> Unit): TargetFileAsset {
+        checkAccess: suspend () -> Unit): TargetFileAsset = supervisorScope {
         fun report(phase: FileUploadPhase, writtenBytes: Long? = null) {
             try { onProgress(FileUploadProgress(phase, frozen.sizeBytes, writtenBytes)) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -119,106 +121,155 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         currentCoroutineContext().ensureActive()
         checkAccess()
         report(FileUploadPhase.CHECKING)
-        // These two operations are read-only. With no scope condition, issue
-        // them together so a high-latency TURN path costs one round trip less.
-        // Scoped requests must discover the scope contract before lookup.
-        val (contract, previous) = if (scope == null) coroutineScope {
-            val contractRequest = async { requireContract() }
-            val receiptRequest = async { lookup(sessionId, frozen, null) }
-            contractRequest.await() to receiptRequest.await()
-        } else {
-            val discovered = requireContract(scope)
-            checkAccess()
-            discovered to lookup(sessionId, frozen, scope)
-        }
-        val targetMaximumBytes = contract.maximumBytes
-        require(frozen.sizeBytes <= targetMaximumBytes) {
-            "This computer accepts attachments up to ${sizeLabel(targetMaximumBytes)}"
-        }
-        checkAccess()
-        if (previous?.ready == true) { report(FileUploadPhase.CONFIRMED); return previous }
-        report(FileUploadPhase.PREPARING)
-        val intentBody = buildJsonObject {
-            put("sessionId", sessionId); put("requestId", frozen.requestId)
-            put("quotaBatchId", frozen.quotaBatchId?.takeIf { it.isNotBlank() } ?: frozen.requestId)
-            put("originalName", frozen.originalName); put("mimeType", frozen.mimeType)
-            put("sizeBytes", frozen.sizeBytes); put("sha256", frozen.sha256)
-            put("resumableChunkBytes", UPLOAD_BATCH_BYTES)
-        }.toString()
-        val intent = json(execute(ApiRequest("POST", "/api/assets/upload-intents", intentBody,
-            headers = scope?.headers().orEmpty(), contentType = "application/json")))
-        checkAccess()
-        check(intent["uploadContractVersion"]?.jsonPrimitive?.intOrNull == 1) { "Target did not acknowledge stable upload identity" }
-        val asset = parseAsset(sessionId, frozen, intent, scope)
-        check(previous == null || previous.assetId == asset.assetId) { "Upload identity changed at the target" }
-        if (asset.ready) { report(FileUploadPhase.CONFIRMED); return asset }
-        val upload = intent["upload"] as? JsonObject ?: error("Pending upload has no upload destination")
-        val path = string(upload, "url")
-        val method = string(upload, "method")
-        val headers = (upload["headers"] as? JsonObject).orEmpty().mapValues { (_, value) ->
-            (value as? JsonPrimitive)?.contentOrNull ?: error("Invalid upload header")
-        }
-        check(headers.keys.all { it.equals("Content-Type", ignoreCase = true) }) { "Unexpected upload credential header" }
-        check(headers.values.none { '\r' in it || '\n' in it }) { "Invalid upload header value" }
-        val mime = headers.entries.firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }?.value ?: frozen.mimeType
-        check(mime == frozen.mimeType) { "Upload content type differs from frozen metadata" }
-        if (path.startsWith('/')) {
-            check(method == "POST" && path == "/api/assets/${asset.assetId}/upload") { "Unexpected control-plane upload destination" }
-        } else {
-            val uri = URI(path)
-            check(method == "PUT" && uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank()
-                && uri.userInfo == null && uri.fragment == null) { "Invalid signed object upload destination" }
-        }
-        checkAccess()
-        // Object-store credentials are not a PC control-plane delegation.
-        val bodyHeaders = if (path.startsWith('/')) headers + scope?.headers().orEmpty() else headers
-        report(FileUploadPhase.TRANSFERRING)
-        val resumable = intent["resumableUpload"] as? JsonObject
-        var relayFinalized: ApiResponse? = null
-        val uploaded = if (resumable != null) {
-            require(path == "/api/assets/${asset.assetId}/upload" && method == "POST") {
-                "Resumable upload contract advertised an unexpected upload destination"
-            }
-            val fast = if (contract.encryptedRelay && relay != null &&
-                runCatching { AttachmentRelayPayload.wireSize(frozen.sizeBytes) }.isSuccess) {
-                uploadViaRelay(asset.assetId, source, scope, contract.finalizeWaitsForRelay, ::report, checkAccess)
+        val speculativeSize = if (scope == null && relay != null)
+            runCatching { AttachmentRelayPayload.wireSize(frozen.sizeBytes) }.getOrNull() else null
+        val speculative = speculativeSize?.let { size -> async {
+            try { relay?.reserveSpeculative(size) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null } // The established path remains available.
+        } }
+        var speculativeConsumed = false
+        try {
+            val intentBody = buildJsonObject {
+                put("sessionId", sessionId); put("requestId", frozen.requestId)
+                put("quotaBatchId", frozen.quotaBatchId?.takeIf { it.isNotBlank() } ?: frozen.requestId)
+                put("originalName", frozen.originalName); put("mimeType", frozen.mimeType)
+                put("sizeBytes", frozen.sizeBytes); put("sha256", frozen.sha256)
+                put("resumableChunkBytes", UPLOAD_BATCH_BYTES)
+            }.toString()
+            // New peers combine negotiation and the idempotent intent into one
+            // operation. A genuinely absent endpoint falls back to the old path.
+            // Never retry a timeout or an application error as an unsupported peer:
+            // the server may already have created the stable upload intent.
+            val combined = if (scope == null && relay != null && combinedIntentAvailability.mayProbe(instanceId)) {
+                try {
+                    json(execute(ApiRequest("POST", "/api/assets/combined-upload-intents", intentBody,
+                        contentType = "application/json")))
+                } catch (error: ApiException) {
+                    if (error.statusCode == 404 && (error.code == null || error.code == "NOT_FOUND")) {
+                        combinedIntentAvailability.markAbsent(instanceId)
+                        null
+                    } else throw error
+                }
             } else null
-            if (fast == null) uploadLocalChunks(asset.assetId, frozen, source, resumable, scope, ::report, checkAccess)
-            else relayFinalized = fast.finalized
-            ApiResponse(200, "")
-        } else if (path.startsWith('/')) {
-            val bytes = legacyBytes ?: error("Target does not support bounded resumable uploads")
-            execute(ApiRequest(method, path, headers = bodyHeaders, bodyBytes = bytes, contentType = mime,
-                onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
-        } else {
-            if (legacyBytes != null) execute(ApiRequest(method, path, headers = bodyHeaders, bodyBytes = legacyBytes,
-                contentType = mime, onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
-            else execute(ApiRequest(method, path, headers = bodyHeaders, bodySource = source, contentType = mime,
-                onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
+            var previous: TargetFileAsset? = null
+            val contract: UploadContract
+            val intent: JsonObject
+            if (combined != null) {
+                contract = parseContract(combined["combinedUploadContract"] as? JsonObject
+                    ?: error("Target did not supply the combined upload contract"))
+                intent = combined
+            } else {
+                // The fallback preserves scope negotiation and recovery behavior.
+                val fallback = if (scope == null) coroutineScope {
+                    val contractRequest = async { requireContract() }
+                    val receiptRequest = async { lookup(sessionId, frozen, null) }
+                    contractRequest.await() to receiptRequest.await()
+                } else {
+                    val discovered = requireContract(scope)
+                    checkAccess()
+                    discovered to lookup(sessionId, frozen, scope)
+                }
+                contract = fallback.first
+                previous = fallback.second
+                require(frozen.sizeBytes <= contract.maximumBytes) {
+                    "This computer accepts attachments up to ${sizeLabel(contract.maximumBytes)}"
+                }
+                checkAccess()
+                if (previous?.ready == true) { report(FileUploadPhase.CONFIRMED); return@supervisorScope previous }
+                report(FileUploadPhase.PREPARING)
+                intent = json(execute(ApiRequest("POST", "/api/assets/upload-intents", intentBody,
+                    headers = scope?.headers().orEmpty(), contentType = "application/json")))
+            }
+            require(frozen.sizeBytes <= contract.maximumBytes) {
+                "This computer accepts attachments up to ${sizeLabel(contract.maximumBytes)}"
+            }
+            checkAccess()
+            check(intent["uploadContractVersion"]?.jsonPrimitive?.intOrNull == 1) { "Target did not acknowledge stable upload identity" }
+            val asset = parseAsset(sessionId, frozen, intent, scope)
+            check(previous == null || previous.assetId == asset.assetId) { "Upload identity changed at the target" }
+            if (asset.ready) { report(FileUploadPhase.CONFIRMED); return@supervisorScope asset }
+            val upload = intent["upload"] as? JsonObject ?: error("Pending upload has no upload destination")
+            val path = string(upload, "url")
+            val method = string(upload, "method")
+            val headers = (upload["headers"] as? JsonObject).orEmpty().mapValues { (_, value) ->
+                (value as? JsonPrimitive)?.contentOrNull ?: error("Invalid upload header")
+            }
+            check(headers.keys.all { it.equals("Content-Type", ignoreCase = true) }) { "Unexpected upload credential header" }
+            check(headers.values.none { '\r' in it || '\n' in it }) { "Invalid upload header value" }
+            val mime = headers.entries.firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }?.value ?: frozen.mimeType
+            check(mime == frozen.mimeType) { "Upload content type differs from frozen metadata" }
+            if (path.startsWith('/')) {
+                check(method == "POST" && path == "/api/assets/${asset.assetId}/upload") { "Unexpected control-plane upload destination" }
+            } else {
+                val uri = URI(path)
+                check(method == "PUT" && uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank()
+                    && uri.userInfo == null && uri.fragment == null) { "Invalid signed object upload destination" }
+            }
+            checkAccess()
+            // Object-store credentials are not a PC control-plane delegation.
+            val bodyHeaders = if (path.startsWith('/')) headers + scope?.headers().orEmpty() else headers
+            report(FileUploadPhase.TRANSFERRING)
+            val resumable = intent["resumableUpload"] as? JsonObject
+            var relayFinalized: ApiResponse? = null
+            val uploaded = if (resumable != null) {
+                require(path == "/api/assets/${asset.assetId}/upload" && method == "POST") {
+                    "Resumable upload contract advertised an unexpected upload destination"
+                }
+                val fast = if (contract.encryptedRelay && relay != null &&
+                    runCatching { AttachmentRelayPayload.wireSize(frozen.sizeBytes) }.isSuccess) {
+                    val ticket = speculative?.await()
+                    uploadViaRelay(asset.assetId, source, scope, contract.finalizeWaitsForRelay, ::report, checkAccess,
+                        ticket, allowEarlyWriter = combined != null)
+                        .also { if (it != null && ticket != null) speculativeConsumed = true }
+                } else null
+                if (fast == null) uploadLocalChunks(asset.assetId, frozen, source, resumable, scope, ::report, checkAccess)
+                else relayFinalized = fast.finalized
+                ApiResponse(200, "")
+            } else if (path.startsWith('/')) {
+                val bytes = legacyBytes ?: error("Target does not support bounded resumable uploads")
+                execute(ApiRequest(method, path, headers = bodyHeaders, bodyBytes = bytes, contentType = mime,
+                    onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
+            } else {
+                if (legacyBytes != null) execute(ApiRequest(method, path, headers = bodyHeaders, bodyBytes = legacyBytes,
+                    contentType = mime, onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
+                else execute(ApiRequest(method, path, headers = bodyHeaders, bodySource = source, contentType = mime,
+                    onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
+            }
+            checkAccess()
+            // All bytes have reached the destination; readiness still requires the
+            // authoritative finalize receipt. Preserve progress during verification.
+            report(FileUploadPhase.VERIFYING, frozen.sizeBytes)
+            val finalizeBody = buildJsonObject {
+                put("sizeBytes", frozen.sizeBytes)
+                put("etag", uploaded.headers.entries.firstOrNull { it.key.equals("ETag", ignoreCase = true) }?.value.orEmpty())
+            }.toString()
+            val finalized = parseAsset(sessionId, frozen, json(relayFinalized ?: execute(
+                ApiRequest("POST", "/api/assets/${asset.assetId}/finalize", finalizeBody,
+                    headers = scope?.headers().orEmpty(), contentType = "application/json"),
+            )), scope)
+            checkAccess()
+            check(finalized.assetId == asset.assetId && finalized.ready) { "Target did not acknowledge the verified file" }
+            report(FileUploadPhase.CONFIRMED)
+            return@supervisorScope finalized
+        } finally {
+            if (speculative != null && !speculativeConsumed) withContext(NonCancellable) {
+                // A response may race a cancellation; either collect and
+                // release the ticket or cancel the request, whose v2 transport
+                // fences the client-generated identity before returning.
+                speculative.cancel()
+                val unused = runCatching { speculative.await() }.getOrNull()
+                if (unused != null) withTimeoutOrNull(5_000L) { runCatching { relay?.cancel(unused) } }
+            }
         }
-        checkAccess()
-        // All bytes have reached the destination; readiness still requires the
-        // authoritative finalize receipt. Preserve progress during verification.
-        report(FileUploadPhase.VERIFYING, frozen.sizeBytes)
-        val finalizeBody = buildJsonObject {
-            put("sizeBytes", frozen.sizeBytes)
-            put("etag", uploaded.headers.entries.firstOrNull { it.key.equals("ETag", ignoreCase = true) }?.value.orEmpty())
-        }.toString()
-        val finalized = parseAsset(sessionId, frozen, json(relayFinalized ?: execute(
-            ApiRequest("POST", "/api/assets/${asset.assetId}/finalize", finalizeBody,
-                headers = scope?.headers().orEmpty(), contentType = "application/json"),
-        )), scope)
-        checkAccess()
-        check(finalized.assetId == asset.assetId && finalized.ready) { "Target did not acknowledge the verified file" }
-        report(FileUploadPhase.CONFIRMED)
-        return finalized
     }
 
     private data class RelayUploadResult(val finalized: ApiResponse? = null)
 
     private suspend fun uploadViaRelay(assetId: String, source: ApiRequestBodySource, scope: SessionScopeCondition?,
         finalizeWaitsForRelay: Boolean,
-        report: (FileUploadPhase, Long?) -> Unit, checkAccess: suspend () -> Unit): RelayUploadResult? {
+        report: (FileUploadPhase, Long?) -> Unit, checkAccess: suspend () -> Unit,
+        preallocated: AttachmentRelayTicket? = null, allowEarlyWriter: Boolean = false): RelayUploadResult? {
         val relayTransport = relay ?: return null
         if (scope != null) requireSessionScopeEffects(transport, mapOf(
             "asset.upload.relay.start" to ("POST" to "/api/assets/{assetId}/relay"),
@@ -227,7 +278,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         ))
         checkAccess()
         val wireSize = AttachmentRelayPayload.wireSize(source.sizeBytes)
-        val ticket = relayTransport.reserve(wireSize) ?: return null
+        val ticket = preallocated ?: relayTransport.reserve(wireSize) ?: return null
         check(ticket.id.matches(Regex("[a-f0-9]{32}")) && ticket.sizeBytes == wireSize &&
             ticket.readToken.matches(Regex("[A-Za-z0-9_-]{43}")) && ticket.writeToken.matches(Regex("[A-Za-z0-9_-]{43}"))) {
             "Invalid relay reservation"
@@ -241,56 +292,76 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
                 put("relayId", ticket.id); put("readToken", ticket.readToken); put("transferId", transferId)
                 put("key", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(key))
             }.toString()
-            val started = try { json(execute(ApiRequest("POST", "/api/assets/$assetId/relay", body,
-                headers = scope?.headers().orEmpty(), contentType = "application/json"))) }
-            catch (error: ApiException) {
-                if (error.code == "FILE_ASSET_UPLOAD_MODE_CONFLICT") return null
-                throw error
-            }
-            jobId = string(started, "jobId")
-            check(jobId.matches(Regex("[a-f0-9]{32}")) && started["version"]?.jsonPrimitive?.intOrNull == 1 &&
-                string(started, "status") == "receiving") { "Invalid relay job" }
-            checkAccess()
-            if (finalizeWaitsForRelay) {
-                val response = supervisorScope {
-                    val finish = async {
-                        val body = buildJsonObject { put("sizeBytes", source.sizeBytes); put("etag", "") }.toString()
-                        execute(ApiRequest("POST", "/api/assets/$assetId/finalize", body,
-                            headers = scope?.headers().orEmpty(), contentType = "application/json"))
+            return coroutineScope {
+                // The central relay accepts an encrypted writer before the PC
+                // reader attaches. Start it after the intent has authorized the
+                // upload, while the PC's relay-start request is in flight.
+                // Scoped uploads keep their existing sequential permission path.
+                checkAccess()
+                val sending = if (allowEarlyWriter && scope == null && finalizeWaitsForRelay) async {
+                    relayTransport.send(ticket, source, key, transferId) { report(FileUploadPhase.TRANSFERRING, it) }
+                } else null
+                try {
+                    val started = try { json(execute(ApiRequest("POST", "/api/assets/$assetId/relay", body,
+                        headers = scope?.headers().orEmpty(), contentType = "application/json"))) }
+                    catch (error: ApiException) {
+                        if (error.code == "FILE_ASSET_UPLOAD_MODE_CONFLICT") return@coroutineScope null
+                        throw error
+                    }
+                    jobId = string(started, "jobId")
+                    check(jobId!!.matches(Regex("[a-f0-9]{32}")) && started["version"]?.jsonPrimitive?.intOrNull == 1 &&
+                        string(started, "status") == "receiving") { "Invalid relay job" }
+                    checkAccess()
+                    if (finalizeWaitsForRelay) {
+                        val response = supervisorScope {
+                            val finish = async {
+                                val body = buildJsonObject { put("sizeBytes", source.sizeBytes); put("etag", "") }.toString()
+                                execute(ApiRequest("POST", "/api/assets/$assetId/finalize", body,
+                                    headers = scope?.headers().orEmpty(), contentType = "application/json"))
+                            }
+                            if (sending != null) sending.await()
+                            else relayTransport.send(ticket, source, key, transferId) { report(FileUploadPhase.TRANSFERRING, it) }
+                            report(FileUploadPhase.VERIFYING, source.sizeBytes)
+                            try { finish.await() }
+                            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (_: Exception) { null } // Retry the idempotent finalize after the transfer.
+                        }
+                        received = true
+                        return@coroutineScope RelayUploadResult(response)
                     }
                     relayTransport.send(ticket, source, key, transferId) { report(FileUploadPhase.TRANSFERRING, it) }
                     report(FileUploadPhase.VERIFYING, source.sizeBytes)
-                    try { finish.await() }
-                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (_: Exception) { null } // Retry the idempotent finalize after the transfer.
-                }
-                received = true
-                return RelayUploadResult(response)
-            }
-            relayTransport.send(ticket, source, key, transferId) { report(FileUploadPhase.TRANSFERRING, it) }
-            report(FileUploadPhase.VERIFYING, source.sizeBytes)
-            withTimeout(45_000L) {
-                while (true) {
-                    checkAccess()
-                    val status = json(execute(ApiRequest("GET", "/api/assets/$assetId/relay?jobId=$jobId",
-                        headers = scope?.headers().orEmpty())))
-                    check(string(status, "jobId") == jobId && status["version"]?.jsonPrimitive?.intOrNull == 1)
-                    when (string(status, "status")) {
-                        "received" -> break
-                        "receiving" -> delay(500)
-                        else -> error("Computer did not receive the encrypted attachment")
+                    withTimeout(45_000L) {
+                        while (true) {
+                            checkAccess()
+                            val status = json(execute(ApiRequest("GET", "/api/assets/$assetId/relay?jobId=$jobId",
+                                headers = scope?.headers().orEmpty())))
+                            check(string(status, "jobId") == jobId && status["version"]?.jsonPrimitive?.intOrNull == 1)
+                            when (string(status, "status")) {
+                                "received" -> break
+                                "receiving" -> delay(500)
+                                else -> error("Computer did not receive the encrypted attachment")
+                            }
+                        }
                     }
+                    received = true
+                    RelayUploadResult()
+                } finally {
+                    sending?.cancelAndJoin()
                 }
             }
-            received = true
-            return RelayUploadResult()
         } finally {
             key.fill(0)
             val startedJob = jobId
-            if (startedJob != null && !received) withContext(NonCancellable) {
+            if (!received) withContext(NonCancellable) {
                 withTimeoutOrNull(5_000L) {
-                    runCatching { execute(ApiRequest("DELETE", "/api/assets/$assetId/relay?jobId=$startedJob",
-                        headers = scope?.headers().orEmpty())) }
+                    supervisorScope {
+                        if (startedJob != null) launch {
+                            runCatching { execute(ApiRequest("DELETE", "/api/assets/$assetId/relay?jobId=$startedJob",
+                                headers = scope?.headers().orEmpty())) }
+                        }
+                        launch { runCatching { relayTransport.cancel(ticket) } }
+                    }
                 }
             }
         }
@@ -481,7 +552,10 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
             scope.validate()
             requireUploadScope()
         }
-        val contract = json(execute(ApiRequest("GET", "/api/asset-upload-contract")))
+        return parseContract(json(execute(ApiRequest("GET", "/api/asset-upload-contract"))))
+    }
+
+    private fun parseContract(contract: JsonObject): UploadContract {
         val targetMaximumBytes = contract["maximumBytes"]?.jsonPrimitive?.longOrNull ?: 0L
         check(contract["version"]?.jsonPrimitive?.intOrNull == 1
             && contract["sha256Required"]?.jsonPrimitive?.booleanOrNull == true
@@ -565,6 +639,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         else -> "$bytes bytes"
     }
     companion object {
+        private val combinedIntentAvailability = CombinedIntentAvailability()
         const val MAXIMUM_BYTES = 1024L * 1024 * 1024
         // JSON numbers must remain exact on the JavaScript instance. The target's
         // account-authorized upload contract supplies the actual allowance.

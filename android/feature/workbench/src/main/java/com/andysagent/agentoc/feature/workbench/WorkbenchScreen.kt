@@ -507,7 +507,68 @@ fun WorkbenchScreen(
     var composerActionSheetOpen by remember(state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var agentPanelOpen by remember(state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var connectorPanelOpen by remember(state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var attachments by remember(state.chatTargetId, state.sessionId) { mutableStateOf<List<ComposerAttachment>>(emptyList()) }
+    // The system picker can outlive a ChatSurface during a session transition.
+    // Keep its registry and drafts in the retained workbench, keyed by owner.
+    val attachmentDrafts = rememberSaveable(saver = AttachmentDraftStore.Saver) { AttachmentDraftStore() }
+    val attachmentOwner = AttachmentDraftOwner(state.chatTargetId, state.sessionId,
+        state.selectedProjectId.takeIf { state.sessionId == null })
+    val attachments = attachmentDrafts[attachmentOwner]
+    val attachmentContext = LocalContext.current
+    var pendingPhoto by rememberSaveable { mutableStateOf(false) }
+    var photoTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    var photoSession by rememberSaveable { mutableStateOf<String?>(null) }
+    var photoProject by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDocument by rememberSaveable { mutableStateOf(false) }
+    var documentTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    var documentSession by rememberSaveable { mutableStateOf<String?>(null) }
+    var documentProject by rememberSaveable { mutableStateOf<String?>(null) }
+    val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(5),
+    ) { uris ->
+        val owner = if (pendingPhoto) AttachmentDraftOwner(photoTarget, photoSession, photoProject) else null
+        pendingPhoto = false
+        photoTarget = null; photoSession = null; photoProject = null
+        if (owner != null && uris.isNotEmpty()) {
+            val selected = uris.mapIndexed { index, uri ->
+                persistAttachmentReadPermission(attachmentContext, uri)
+                val metadata = queryAttachmentMetadata(attachmentContext, uri, "image_$index.png", "image/png")
+                ComposerAttachment(name = metadata.name, mimeType = metadata.mimeType,
+                    sizeBytes = metadata.sizeBytes, localPath = uri.toString())
+            }
+            attachmentDrafts.append(owner, selected)
+        }
+    }
+    val documentPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        val owner = if (pendingDocument) AttachmentDraftOwner(documentTarget, documentSession, documentProject) else null
+        pendingDocument = false
+        documentTarget = null; documentSession = null; documentProject = null
+        if (owner != null && uris.isNotEmpty()) {
+            val selected = uris.mapIndexed { index, uri ->
+                persistAttachmentReadPermission(attachmentContext, uri)
+                val metadata = queryAttachmentMetadata(attachmentContext, uri, "document_$index.txt", "application/octet-stream")
+                ComposerAttachment(name = metadata.name, mimeType = metadata.mimeType,
+                    sizeBytes = metadata.sizeBytes, localPath = uri.toString())
+            }
+            attachmentDrafts.append(owner, selected)
+        }
+    }
+    val pickPhoto = {
+        photoTarget = attachmentOwner.targetId; photoSession = attachmentOwner.sessionId
+        photoProject = attachmentOwner.newSessionProjectId; pendingPhoto = true
+        runCatching { photoPickerLauncher.launch(androidx.activity.result.PickVisualMediaRequest(
+            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+            .onFailure { pendingPhoto = false }
+        Unit
+    }
+    val pickDocument = {
+        documentTarget = attachmentOwner.targetId; documentSession = attachmentOwner.sessionId
+        documentProject = attachmentOwner.newSessionProjectId; pendingDocument = true
+        runCatching { documentPickerLauncher.launch(arrayOf("*/*")) }
+            .onFailure { pendingDocument = false }
+        Unit
+    }
     var editingTurnId by remember(state.chatTargetId, state.sessionId) { mutableStateOf<String?>(null) }
     var editingTurnText by remember(state.chatTargetId, state.sessionId) { mutableStateOf<String?>(null) }
     val queuedMessages = state.queuedMessages
@@ -653,7 +714,9 @@ fun WorkbenchScreen(
                     connectorPanelOpen = connectorPanelOpen,
                     onSetConnectorPanelOpen = { connectorPanelOpen = it },
                     attachments = attachments,
-                    onSetAttachments = { attachments = it },
+                    onSetAttachments = { attachmentDrafts[attachmentOwner] = it },
+                    onPickPhoto = pickPhoto,
+                    onPickDocument = pickDocument,
                     editingTurnId = editingTurnId,
                     editingTurnText = editingTurnText,
                     onSetEditingTurn = { id, text -> editingTurnId = id; editingTurnText = text },
@@ -708,7 +771,9 @@ fun WorkbenchScreen(
                         connectorPanelOpen = connectorPanelOpen,
                         onSetConnectorPanelOpen = { connectorPanelOpen = it },
                         attachments = attachments,
-                        onSetAttachments = { attachments = it },
+                        onSetAttachments = { attachmentDrafts[attachmentOwner] = it },
+                        onPickPhoto = pickPhoto,
+                        onPickDocument = pickDocument,
                         editingTurnId = editingTurnId,
                         editingTurnText = editingTurnText,
                         onSetEditingTurn = { id, text -> editingTurnId = id; editingTurnText = text },
@@ -898,6 +963,8 @@ private fun TabletDetailSurface(
     onSetConnectorPanelOpen: (Boolean) -> Unit = {},
     attachments: List<ComposerAttachment>,
     onSetAttachments: (List<ComposerAttachment>) -> Unit,
+    onPickPhoto: () -> Unit,
+    onPickDocument: () -> Unit,
     editingTurnId: String?,
     editingTurnText: String?,
     onSetEditingTurn: (String?, String?) -> Unit,
@@ -954,6 +1021,8 @@ private fun TabletDetailSurface(
                 onSetConnectorPanelOpen = onSetConnectorPanelOpen,
                 attachments = attachments,
                 onSetAttachments = onSetAttachments,
+                onPickPhoto = onPickPhoto,
+                onPickDocument = onPickDocument,
                 editingTurnId = editingTurnId,
                 editingTurnText = editingTurnText,
                 onSetEditingTurn = onSetEditingTurn,
@@ -1486,6 +1555,8 @@ private fun ChatSurface(
     onSetConnectorPanelOpen: (Boolean) -> Unit = {},
     attachments: List<ComposerAttachment> = emptyList(),
     onSetAttachments: (List<ComposerAttachment>) -> Unit = {},
+    onPickPhoto: () -> Unit = {},
+    onPickDocument: () -> Unit = {},
     editingTurnId: String? = null,
     editingTurnText: String? = null,
     onSetEditingTurn: (String?, String?) -> Unit = { _, _ -> },
@@ -1557,42 +1628,6 @@ private fun ChatSurface(
             if (pasted.isNotEmpty()) {
                 onSetAttachments(currentAttachments.value + pasted)
             }
-        }
-    }
-
-    val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(5),
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            val newAttachments = uris.mapIndexed { index, uri ->
-                persistAttachmentReadPermission(context, uri)
-                val metadata = queryAttachmentMetadata(context, uri, "image_$index.png", "image/png")
-                ComposerAttachment(
-                    name = metadata.name,
-                    mimeType = metadata.mimeType,
-                    sizeBytes = metadata.sizeBytes,
-                    localPath = uri.toString(),
-                )
-            }
-            onSetAttachments(attachments + newAttachments)
-        }
-    }
-
-    val documentPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            val newAttachments = uris.mapIndexed { index, uri ->
-                persistAttachmentReadPermission(context, uri)
-                val metadata = queryAttachmentMetadata(context, uri, "document_$index.txt", "application/octet-stream")
-                ComposerAttachment(
-                    name = metadata.name,
-                    mimeType = metadata.mimeType,
-                    sizeBytes = metadata.sizeBytes,
-                    localPath = uri.toString(),
-                )
-            }
-            onSetAttachments(attachments + newAttachments)
         }
     }
 
@@ -3331,20 +3366,8 @@ private fun ChatSurface(
         if (composerActionSheetOpen) {
             ComposerActionSheet(
                 onDismiss = { onSetComposerActionSheetOpen(false) },
-                onPickImage = {
-                    runCatching {
-                        photoPickerLauncher.launch(
-                            androidx.activity.result.PickVisualMediaRequest(
-                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
-                            )
-                        )
-                    }.onFailure { onSetComposerActionSheetOpen(false) }
-                },
-                onPickDocument = {
-                    runCatching {
-                        documentPickerLauncher.launch(arrayOf("*/*"))
-                    }.onFailure { onSetComposerActionSheetOpen(false) }
-                },
+                onPickImage = onPickPhoto,
+                onPickDocument = onPickDocument,
                 planMode = planMode,
                 onTogglePlanMode = { onSetPlanMode(it) },
                 goalMode = state.goalMode,

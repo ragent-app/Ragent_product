@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, shell, Tray, Menu } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs/promises");
@@ -28,6 +28,41 @@ let managerLoaded = false;
 let updateState = { status: "checking" };
 let updatePending = null;
 let updateTimer = null;
+let tray = null;
+let quitting = false;
+let trayServiceReady = false;
+
+function updateTrayMenu() {
+  if (!tray) return;
+  tray.setToolTip(trayServiceReady ? "Ragent · 服务运行中" : "Ragent · 服务未连接");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: trayServiceReady ? "服务运行中" : "服务未连接", enabled: false },
+    { label: "打开 Ragent", click: showMainWindow },
+  ]));
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  try {
+    const isMac = process.platform === "darwin";
+    const icon = nativeImage.createFromPath(path.join(app.getAppPath(), "assets", isMac ? "ragent-trayTemplate.png" : "ragent-icon.png"));
+    if (icon.isEmpty()) throw new Error("Ragent tray icon is missing");
+    if (isMac) icon.setTemplateImage(true);
+    tray = new Tray(isMac ? icon : icon.resize({ width: 32, height: 32 }));
+    updateTrayMenu();
+    tray.on("click", showMainWindow);
+  } catch (error) {
+    if (tray) tray.destroy();
+    tray = null;
+    console.error("Ragent tray unavailable:", error.message);
+  }
+}
 
 async function refreshUpdate() {
   if (updatePending) return updatePending;
@@ -53,20 +88,19 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   });
 
   app.whenReady().then(() => {
     app.setAppUserModelId("com.agentoc.desktop-manager");
     createMainWindow();
+    createTray();
     void refreshUpdate();
     updateTimer = setInterval(() => void refreshUpdate(), 6 * 60 * 60 * 1000);
   });
 
   app.on("window-all-closed", () => app.quit());
+  app.on("before-quit", () => { quitting = true; });
 }
 
 function isLocalServiceUrl(value) {
@@ -170,6 +204,12 @@ function createMainWindow() {
   });
 
   guardWebContents(mainWindow.webContents, { isMain: true });
+  mainWindow.on("close", (event) => {
+    if (!quitting && tray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
   mainWindow.webContents.on("did-create-window", (childWindow) => {
     childWindow.setMenuBarVisibility(false);
     guardWebContents(childWindow.webContents);
@@ -233,6 +273,8 @@ async function checkService() {
   pollInProgress = true;
   try {
     const ready = await serviceIsReady();
+    trayServiceReady = ready;
+    updateTrayMenu();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (ready && !managerLoaded) {
       managerLoaded = true;

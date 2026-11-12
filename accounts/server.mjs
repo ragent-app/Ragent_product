@@ -563,6 +563,61 @@ export async function startAccountsServer(options = {}) {
         }
       });
     }
+    for (const path of asrPath('/v1/owner-auth/account/attachment-relay/reservations/:id')) {
+      fastify.delete(path, { config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
+        reply.headers({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+        if (!/^[a-f0-9]{32}$/.test(request.params.id) || !attachmentRelay.cancel(request.params.id, bearer(request))) {
+          return reply.code(404).send();
+        }
+        return reply.code(204).send();
+      });
+    }
+    for (const path of asrPath('/v1/owner-auth/account/attachment-relay/capabilities')) {
+      fastify.get(path, { config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
+        reply.headers({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+        try {
+          await app.broker.authenticateAccountAsr({ credential: bearer(request) });
+          return reply.send(attachmentRelay.capabilities());
+        } catch (error) {
+          return reply.code(error?.statusCode === 401 ? 401 : 403).send({ code: 'attachment_relay_unavailable' });
+        }
+      });
+    }
+    for (const path of asrPath('/v1/owner-auth/account/attachment-relay/reservations-v2')) {
+      fastify.post(path, { config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
+        reply.headers({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+        const body = request.body;
+        if (!body || Array.isArray(body) || typeof body !== 'object' ||
+            Object.keys(body).sort().join(',') !== 'deadline,epoch,id,readToken,sizeBytes,writeToken') {
+          return reply.code(400).send({ code: 'attachment_relay_invalid' });
+        }
+        try {
+          const account = await app.broker.authenticateAccountAsr({ credential: bearer(request) });
+          return reply.code(201).send(attachmentRelay.reserveV2(account.accountId, body));
+        } catch (error) {
+          const status = error?.message === 'Relay capacity exhausted' ? 429 :
+            Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 409;
+          return reply.code(status).send({ code: status === 429 ? 'attachment_relay_capacity' : 'attachment_relay_unavailable' });
+        }
+      });
+    }
+    for (const path of asrPath('/v1/owner-auth/account/attachment-relay/reservations-v2/cancel')) {
+      fastify.post(path, { config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
+        reply.headers({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+        const body = request.body;
+        if (!body || Array.isArray(body) || typeof body !== 'object' ||
+            Object.keys(body).sort().join(',') !== 'deadline,epoch,id,writeToken') {
+          return reply.code(400).send({ code: 'attachment_relay_invalid' });
+        }
+        try {
+          const account = await app.broker.authenticateAccountAsr({ credential: bearer(request) });
+          return attachmentRelay.cancelV2(account.accountId, body) ? reply.code(204).send() : reply.code(404).send();
+        } catch (error) {
+          const status = Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 409;
+          return reply.code(status).send({ code: 'attachment_relay_unavailable' });
+        }
+      });
+    }
     for (const path of asrPath('/v1/owner-auth/account/attachment-relay/:id/content')) {
       fastify.put(path, { bodyLimit: 64 * 1024 * 1024,
         config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {

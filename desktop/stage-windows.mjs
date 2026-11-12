@@ -62,6 +62,7 @@ for (const name of ['main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html'])
   await cp(join(desktopRoot, name), join(appRoot, name));
 }
 await cp(join(repositoryRoot, 'static', 'desktop', 'agentoc-android-logo.png'), join(assetsRoot, 'agentoc-android-logo.png'));
+await cp(join(repositoryRoot, 'static', 'icon-512.png'), join(assetsRoot, 'ragent-icon.png'));
 await writeFile(join(appRoot, 'package.json'), `${JSON.stringify({
   name: 'agentoc-desktop-manager',
   version,

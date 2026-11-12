@@ -2092,6 +2092,7 @@ class RoomSessionRepository(
         initial: PendingOperationEntity,
     ): Pair<PendingOperationEntity, List<AttachmentItemDto>> {
         var operation = initial.copy(state = "sending", updatedAt = System.currentTimeMillis())
+        val operationId = initial.requestId
         var payload = AgentocProtocol.json.parseToJsonElement(operation.payload).jsonObject
         val specs = payload["attachments"]?.jsonArray.orEmpty()
         val messageRequestId = payload.string("requestId") ?: operation.requestId
@@ -2099,16 +2100,27 @@ class RoomSessionRepository(
         val totals = AttachmentProgressTotals(specs.map { element ->
             element.jsonObject["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
         })
-        val refs = mutableListOf<AttachmentItemDto>()
+        // Keep each message below the account relay's four-transfer limit.
+        val persistenceMutex = Mutex()
+        val progressLock = Any()
+        val phases = MutableList(specs.size) { FileUploadPhase.PREPARING }
         var lastProgressAt = 0L
         var lastProgress: AttachmentUploadProgress? = null
-        fun publishProgress(phase: FileUploadPhase, transferredBytes: Long, force: Boolean = false) {
+        fun publishProgress(force: Boolean = false) {
             val totalBytes = totals.total() ?: return
             if (sessionId.isBlank()) return
+            val phase = when {
+                phases.all { it == FileUploadPhase.CONFIRMED } -> FileUploadPhase.CONFIRMED
+                phases.any { it == FileUploadPhase.RETRYING } -> FileUploadPhase.RETRYING
+                phases.any { it == FileUploadPhase.TRANSFERRING } -> FileUploadPhase.TRANSFERRING
+                phases.any { it == FileUploadPhase.VERIFYING } -> FileUploadPhase.VERIFYING
+                phases.any { it == FileUploadPhase.CHECKING } -> FileUploadPhase.CHECKING
+                else -> FileUploadPhase.PREPARING
+            }
             val progress = AttachmentUploadProgress(
                 sessionId = sessionId,
                 phase = phase,
-                transferredBytes = transferredBytes.coerceIn(0L, totalBytes),
+                transferredBytes = totals.transferred().coerceIn(0L, totalBytes),
                 totalBytes = totalBytes,
             )
             val now = System.currentTimeMillis()
@@ -2116,11 +2128,11 @@ class RoomSessionRepository(
                 && progress.transferredBytes - (lastProgress?.transferredBytes ?: 0L) < 1024L * 1024L) return
             lastProgressAt = now
             lastProgress = progress
-            attachmentUploadProgressState.update { it + (operation.requestId to progress) }
+            attachmentUploadProgressState.update { it + (operationId to progress) }
         }
-        publishProgress(FileUploadPhase.PREPARING, 0L, force = true)
+        synchronized(progressLock) { publishProgress(force = true) }
         try {
-            specs.forEachIndexed { index, element ->
+            val refs = mapAttachmentBatch(specs) { index, element ->
                 val spec = element.jsonObject
                 val attachmentSize = spec["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
                 val existing = attachmentRefFromPendingSpec(spec)
@@ -2137,24 +2149,35 @@ class RoomSessionRepository(
                         assetId = spec.string("assetId"),
                     ),
                     onProgress = { uploadProgress ->
-                        totals.discover(index, uploadProgress.totalBytes)
-                        val currentBytes = if (uploadProgress.phase == FileUploadPhase.CONFIRMED) uploadProgress.totalBytes
-                            else uploadProgress.writtenBytes ?: 0L
-                        publishProgress(uploadProgress.phase, totals.transferred(currentBytes))
+                        synchronized(progressLock) {
+                            totals.discover(index, uploadProgress.totalBytes)
+                            // A confirmed upload becomes complete only after its
+                            // durable local operation has recorded the receipt.
+                            phases[index] = if (uploadProgress.phase == FileUploadPhase.CONFIRMED)
+                                FileUploadPhase.VERIFYING else uploadProgress.phase
+                            uploadProgress.writtenBytes?.let { totals.update(index, it) }
+                            publishProgress()
+                        }
                     },
                 )
-                refs += ref
-                ref.sizeBytes?.let { totals.discover(index, it) }
-                totals.complete(index)
-                if (existing != null) publishProgress(FileUploadPhase.TRANSFERRING, totals.transferred(0))
-                payload = payloadWithAttachmentRef(payload, index, ref)
-                operation = operation.copy(payload = payload.toString(), updatedAt = System.currentTimeMillis(), lastError = null)
-                dao.upsertOperation(operation)
+                // Concurrent completions must merge into the latest operation.
+                // Finish recording a received asset even if a sibling fails.
+                withContext(NonCancellable) { persistenceMutex.withLock {
+                    payload = payloadWithAttachmentRef(payload, index, ref)
+                    operation = operation.copy(payload = payload.toString(), updatedAt = System.currentTimeMillis(), lastError = null)
+                    dao.upsertOperation(operation)
+                } }
+                synchronized(progressLock) {
+                    ref.sizeBytes?.let { totals.discover(index, it) }
+                    totals.complete(index)
+                    phases[index] = FileUploadPhase.CONFIRMED
+                    publishProgress(force = true)
+                }
+                ref
             }
-            totals.total()?.let { publishProgress(FileUploadPhase.CONFIRMED, it, force = true) }
             return operation to refs
         } finally {
-            attachmentUploadProgressState.update { it - operation.requestId }
+            attachmentUploadProgressState.update { it - operationId }
         }
     }
 
@@ -2198,50 +2221,57 @@ class RoomSessionRepository(
         attachment: OutboundAttachment,
         onProgress: (FileUploadProgress) -> Unit = {},
     ): AttachmentItemDto {
-        val resolver = contentResolver
-            ?: error("Attachment upload is unavailable until the Android file resolver is configured")
-        val fixedTargetId = targetId?.takeIf { it.isNotBlank() }
-            ?: error("Attachment upload requires a fixed connected computer")
-        val uri = Uri.parse(attachment.contentUri)
-        val descriptor = withContext(Dispatchers.IO) {
-            resolver.openInputStream(uri)?.use { input ->
-                val digest = MessageDigest.getInstance("SHA-256")
-                val buffer = ByteArray(DEFAULT_ATTACHMENT_BUFFER_BYTES)
-                var total = 0L
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    require(total <= MAX_ATTACHMENT_BYTES) {
-                        "Attachment exceeds the maximum supported size"
+        val timing = AttachmentUploadTiming.enabled()
+        try {
+            val resolver = contentResolver
+                ?: error("Attachment upload is unavailable until the Android file resolver is configured")
+            val fixedTargetId = targetId?.takeIf { it.isNotBlank() }
+                ?: error("Attachment upload requires a fixed connected computer")
+            val uri = Uri.parse(attachment.contentUri)
+            val descriptor = withContext(Dispatchers.IO) {
+                resolver.openInputStream(uri)?.use { input ->
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    val buffer = ByteArray(DEFAULT_ATTACHMENT_BUFFER_BYTES)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        require(total <= MAX_ATTACHMENT_BYTES) {
+                            "Attachment exceeds the maximum supported size"
+                        }
+                        digest.update(buffer, 0, read)
                     }
-                    digest.update(buffer, 0, read)
-                }
-                total to digest.digest().joinToString("") { "%02x".format(it) }
-            } ?: error("Attachment file could not be opened")
+                    total to digest.digest().joinToString("") { "%02x".format(it) }
+                } ?: error("Attachment file could not be opened")
+            }
+            val sizeBytes = attachment.sizeBytes.takeIf { it > 0 } ?: descriptor.first
+            require(sizeBytes == descriptor.first) { "Attachment changed after it was selected" }
+            require(sizeBytes in 1..MAX_ATTACHMENT_BYTES) { "Attachment size is unsupported" }
+            timing?.mark("hash_complete", sizeBytes)
+            val mimeType = attachment.mimeType.ifBlank { "application/octet-stream" }
+            val source = ApiRequestBodySource(sizeBytes, descriptor.second) {
+                resolver.openInputStream(uri) ?: error("Attachment file could not be reopened")
+            }
+            onProgress(FileUploadProgress(FileUploadPhase.PREPARING, sizeBytes, 0L))
+            val uploaded = FileAssetUploadClient(fixedTargetId, transport, attachmentRelay).upload(
+                sessionId,
+                FileUploadInput(uploadRequestId, attachment.originalName, mimeType, sizeBytes, descriptor.second,
+                    quotaBatchId = quotaBatchId),
+                source,
+                onProgress = { progress -> timing?.progress(progress); onProgress(progress) },
+            )
+            return AttachmentItemDto(
+                assetId = uploaded.assetId,
+                originalName = uploaded.originalName,
+                mimeType = uploaded.mimeType,
+                sizeBytes = uploaded.sizeBytes,
+                renderAs = "file".takeIf { attachment.renderAsFile },
+            )
+        } catch (error: Throwable) {
+            timing?.mark("failed")
+            throw error
         }
-        val sizeBytes = attachment.sizeBytes.takeIf { it > 0 } ?: descriptor.first
-        require(sizeBytes == descriptor.first) { "Attachment changed after it was selected" }
-        require(sizeBytes in 1..MAX_ATTACHMENT_BYTES) { "Attachment size is unsupported" }
-        val mimeType = attachment.mimeType.ifBlank { "application/octet-stream" }
-        val source = ApiRequestBodySource(sizeBytes, descriptor.second) {
-            resolver.openInputStream(uri) ?: error("Attachment file could not be reopened")
-        }
-        onProgress(FileUploadProgress(FileUploadPhase.PREPARING, sizeBytes, 0L))
-        val uploaded = FileAssetUploadClient(fixedTargetId, transport, attachmentRelay).upload(
-            sessionId,
-            FileUploadInput(uploadRequestId, attachment.originalName, mimeType, sizeBytes, descriptor.second,
-                quotaBatchId = quotaBatchId),
-            source,
-            onProgress = onProgress,
-        )
-        return AttachmentItemDto(
-            assetId = uploaded.assetId,
-            originalName = uploaded.originalName,
-            mimeType = uploaded.mimeType,
-            sizeBytes = uploaded.sizeBytes,
-            renderAs = "file".takeIf { attachment.renderAsFile },
-        )
     }
 
     private fun stableAttachmentUploadRequestId(messageRequestId: String, index: Int): String {

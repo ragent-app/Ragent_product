@@ -352,7 +352,15 @@ internal class BoundTargetConnection(
                             connectionDebugTrace(application, instanceId, "bootstrap-ready")
                             // A fresh verified fixed-target plan is the recovery
                             // boundary. Pending authorization must retain AuthRequired.
-                            val selectedPlan = if (preferTcpOnNextBootstrap) preferSignedTcpRelay(nextPlan) else nextPlan
+                            // Debug-only transport A/B: keep the verified signed
+                            // TURN candidates and do not enable direct ICE.
+                            val tcpProbe = application.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+                                android.util.Log.isLoggable("AgentoC.TurnTcpProbe", android.util.Log.DEBUG)
+                            val selectedPlan = if (preferTcpOnNextBootstrap || tcpProbe) preferSignedTcpRelay(nextPlan) else nextPlan
+                            if (tcpProbe) {
+                                val servers = selectedPlan.turnCarrier?.p2pCandidate?.iceServers.orEmpty()
+                                android.util.Log.d("AgentoC.Upload", "stage=turn_tcp_probe signedServers=${servers.size} tcpOnly=${servers.isNotEmpty() && servers.all { isTcpTurnRelay(it.url) }}")
+                            }
                             preferTcpOnNextBootstrap = false
                             refreshPlanApplied = true
                             plan = selectedPlan
