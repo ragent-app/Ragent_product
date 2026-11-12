@@ -578,6 +578,9 @@ hdiutil detach "$MOUNT_DIR" >/dev/null
 assert_source_unchanged
 [ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
 mv "$DMG_PATH" "$FINAL_OUTPUT"
+if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && [ "$ARCH" = arm64 ]; then
+  node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT"
+fi
 printf '%s\n' "$SIGNING_STATUS" > "$OUTPUT_DIR/${OUTPUT_NAME}.signing-status.txt"
 if [ -n "$NOTARY_PROFILE" ]; then
   cp "$WORK_DIR/notary-result.json" "$OUTPUT_DIR/${OUTPUT_NAME}.notary-result.json"
