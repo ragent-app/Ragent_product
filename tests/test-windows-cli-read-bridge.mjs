@@ -22,6 +22,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal(help?.updatedCommand, "& 'C:\\Program Files\\AgentoC\\bin\\agentoc-cli-read-bridge.exe' trigger-help 'http://127.0.0.1:7690'");
 }
 assert.ok(await bridge('agentoc trigger list'));
+assert.ok(await bridge('ragent trigger list --json'));
 for (const command of [
   'agentoc trigger delete x', 'agentoc trigger list --base-url http://attacker',
   'agentoc trigger list --json; Remove-Item secret', 'agentoc trigger list --json > output.txt',
@@ -59,8 +60,8 @@ try {
   const route = '"/api/sessions/$AGENTOC_SESSION_ID/assets"';
   const body = JSON.stringify({ localPath: file, mimeType: 'text/plain', originalName: 'fixture.txt', text: 'fixture' });
   const asset = (command, overrides = {}) => buildWindowsCliAssetBridge({ approval: assetRequest(command), state: assetState, helperPath, port: 7690, runId: 'fixture-run', ...overrides }, { inspect });
-  for (const riskMode of ['recommended', 'full-auto']) for (const prefix of ['agentoc', 'node "$AGENTOC_PROJECT_ROOT/cli.js"', 'MSYS_NO_PATHCONV=1 node "$AGENTOC_PROJECT_ROOT/cli.js"']) {
-    const result = await asset(`${prefix} api POST ${route} --body '${body}'`, { state: { ...assetState, riskMode } });
+  for (const riskMode of ['recommended', 'full-auto']) for (const [prefix, target] of [['agentoc', route], ['ragent', '/api/sessions/$AGENTOC_SESSION_ID/assets'], ['node "$AGENTOC_PROJECT_ROOT/cli.js"', route], ['MSYS_NO_PATHCONV=1 node "$AGENTOC_PROJECT_ROOT/cli.js"', route]]) {
+    const result = await asset(`${prefix} api POST ${target} --body '${body}'`, { state: { ...assetState, riskMode } });
     assert.ok(result?.updatedCommand.includes(' asset-publish '), `${riskMode}: ${prefix}`);
     assert.deepEqual(JSON.parse(Buffer.from(result.updatedCommand.match(/'([A-Za-z0-9_-]+)'$/)[1], 'base64url').toString()), JSON.parse(body));
   }

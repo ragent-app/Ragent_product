@@ -124,6 +124,7 @@ import { verifyCodexWindowsInstallBridgeApproval } from './codex-windows-install
 import { createCodexManagedHookSetup } from './codex-managed-hook-setup.mjs';
 import { buildWindowsSafeDeleteBridge } from './windows-safe-delete-bridge.mjs';
 import { verifyCodexWindowsSafeDeleteApproval } from './codex-windows-safe-delete-hook.mjs';
+import { verifyCodexWindowsCliAssetApproval } from './codex-windows-cli-asset-hook.mjs';
 import { buildPrivilegedBatch } from './privileged-ops.mjs';
 import {
   appendRunSpoolRecord,
@@ -2695,7 +2696,7 @@ function withCurrentCodexFileChanges(approval, state) {
   return { ...approval, params: { ...params, changes: item.changes } };
 }
 
-export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe') } = {}) {
+export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe') } = {}) {
   if (!state || !parsed) return null;
   const approval = readCodexAppServerApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
@@ -2757,7 +2758,11 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
       scriptPath: join(PROJECT_ROOT, 'scripts', 'agentoc-windows-install-bridge.mjs') });
   const controlledDelete = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsSafeDeleteApproval({ approval, state, runId, helperPath: safeDeleteHelperPath });
-  const gateDecision = controlledDelete
+  const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+    && await verifyCodexWindowsCliAssetApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
+  const gateDecision = controlledAsset
+    ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session asset publication' }
+    : controlledDelete
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'handle-bound workspace deletion' }
     : controlledInstall
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled Windows installation' }
@@ -3737,6 +3742,13 @@ async function main() {
       spawnEnv.AGENTOC_SESSION_ID === manifest.sessionId && spawnEnv.AGENTOC_SESSION_CONTROL_TURN_ID);
     claudeBidiState.sessionControlReadRunId = claudeBidiState.sessionControlReadAvailable ? runId : '';
   }
+  if (appServerState) {
+    appServerState.sessionControlReadAvailable = Boolean(spawnEnv.AGENTOC_SESSION_CONTROL_TOKEN &&
+      spawnEnv.AGENTOC_SESSION_CONTROL_RUN_ID === runId &&
+      spawnEnv.AGENTOC_SESSION_CONTROL_SESSION_ID === manifest.sessionId &&
+      spawnEnv.AGENTOC_SESSION_ID === manifest.sessionId && spawnEnv.AGENTOC_SESSION_CONTROL_TURN_ID);
+    appServerState.sessionControlReadRunId = appServerState.sessionControlReadAvailable ? runId : '';
+  }
   // —— 2026-08-06 防污染兜底：codex run 启动前把 managed home 镜像到 DB current 行 ——
   // 切换可走平台端点或 cc-switch 自身，两者都可能不同步 managed home；
   // 官方形态下顺带停掉代理 daemon，杜绝按陈旧 backup 转发 401。
@@ -3826,7 +3838,9 @@ async function main() {
   }
   if (process.platform === 'win32' && appServerState && !WORKBENCH_EXECUTION_POLICY && appServerState.riskContextValid === true &&
       ['recommended', 'full-auto'].includes(appServerState.riskMode) && appServerState.interactionMode !== 'plan' && appServerState.permissionMode !== 'plan') {
-    spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId, helperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), state: { riskMode: appServerState.riskMode, riskContextValid: true,
+    spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId, helperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'),
+      assetHelperPath: join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), port: Number(CHAT_PORT), state: { riskMode: appServerState.riskMode, riskContextValid: true,
+      sessionControlReadAvailable: appServerState.sessionControlReadAvailable, sessionControlReadRunId: appServerState.sessionControlReadRunId,
       interactionMode: appServerState.interactionMode, permissionMode: appServerState.permissionMode,
       riskContext: { platform: 'win32', trustedWorkspaceRoot: appServerState.riskContext.trustedWorkspaceRoot,
         programDataRoot: appServerState.riskContext.programDataRoot || '',

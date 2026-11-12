@@ -17,7 +17,7 @@ export const WINDOWS_APPROVAL_PAYLOAD_FILES = Object.freeze([
   'native/windows-safe-delete/tree_windows.go', 'native/windows-safe-delete/cmd/agentoc-safe-delete/main_windows.go',
   'packaging/windows/build-safe-delete.ps1', 'chat/windows-safe-delete-plan.mjs', 'chat/windows-safe-delete-bridge.mjs', 'chat/codex-windows-safe-delete-hook.mjs',
   'native/windows-cli-read-bridge/go.mod', 'native/windows-cli-read-bridge/main.go',
-  'packaging/windows/build-cli-read-bridge.ps1', 'chat/windows-cli-read-bridge.mjs',
+  'packaging/windows/build-cli-read-bridge.ps1', 'chat/windows-cli-read-bridge.mjs', 'chat/codex-windows-cli-asset-hook.mjs',
   'packaging/windows/stage-powershell-runtime.ps1', 'packaging/windows/stage-winget-client.ps1',
 ]);
 

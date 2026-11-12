@@ -5,6 +5,7 @@ import { buildCodexWindowsInstallHookDecision } from '../chat/codex-windows-inst
 import { buildCodexWindowsSafeDeleteHookDecision } from '../chat/codex-windows-safe-delete-hook.mjs';
 import { buildCodexWindowsRipgrepHookDecision } from '../chat/windows-ripgrep-bridge.mjs';
 import { buildCodexWindowsElevationGuidance } from '../chat/windows-elevation-guidance.mjs';
+import { buildCodexWindowsCliAssetHookDecision } from '../chat/codex-windows-cli-asset-hook.mjs';
 
 // A malformed event or unavailable control plane leaves the original command
 // to the normal approval path. Never print credentials or diagnostics to stdout.
@@ -12,6 +13,9 @@ export async function evaluateCodexWindowsHook(event, env = process.env) {
   let safeDeleteContext;
   try { safeDeleteContext = JSON.parse(env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT || 'null'); } catch { safeDeleteContext = null; }
   if (safeDeleteContext) {
+    const asset = await buildCodexWindowsCliAssetHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
+      helperPath: safeDeleteContext.assetHelperPath, port: safeDeleteContext.port });
+    if (asset.hookSpecificOutput) return asset;
     const decision = await buildCodexWindowsSafeDeleteHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
       helperPath: safeDeleteContext.helperPath });
     if (decision.hookSpecificOutput) return decision;
