@@ -70,17 +70,19 @@ PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS="${AGENTOC_PACKAGE_GOOGLE_NATIVE_SERVER_
 # OUTPUT_DIR, or an explicit AGENTOC_ONLINE_VERSION seed). AGENTOC_PACKAGE_VERSION
 # keeps its old meaning as a manual override.
 resolve_package_version() {
-  local pkg_version best candidate name
+  local pkg_version best candidate name package
   pkg_version="$(node -p "require('$ROOT/package.json').version")"
   best="${AGENTOC_ONLINE_VERSION:-}"
 
   if command -v dpkg-query >/dev/null 2>&1; then
-    candidate="$(dpkg-query -W -f='${Version}' agentoc 2>/dev/null || true)"
-    if [ -n "$candidate" ]; then
-      if [ -z "$best" ] || dpkg --compare-versions "$candidate" gt "$best"; then
-        best="$candidate"
+    for package in ragent agentoc; do
+      candidate="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null || true)"
+      if [ -n "$candidate" ]; then
+        if [ -z "$best" ] || dpkg --compare-versions "$candidate" gt "$best"; then
+          best="$candidate"
+        fi
       fi
-    fi
+    done
   fi
 
   for name in "$OUTPUT_DIR"/ragent_*_"$ARCH".deb "$OUTPUT_DIR"/agentoc_*_"$ARCH".deb; do

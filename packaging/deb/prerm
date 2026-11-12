@@ -1,6 +1,19 @@
 #!/bin/sh
 set -eu
 
+# dpkg treats a package rename as removal of the old package, not an upgrade.
+# Run the installed upgrade guard before stopping anything when the new Ragent
+# package replaces this transitional package. This guard must ship in an
+# AgentoC upgrade before the renamed package is installed.
+if [ "${1:-}" = remove ] && [ "${2:-}" = in-favour ] && [ "${3:-}" = ragent ]; then
+  installed_preinst=/var/lib/dpkg/info/agentoc.preinst
+  if [ ! -x "$installed_preinst" ]; then
+    echo 'Cannot verify the installed upgrade guard; refusing the Ragent package migration.' >&2
+    exit 1
+  fi
+  "$installed_preinst" upgrade
+fi
+
 # A removed executable must not leave its service or detached Runs alive.
 # Older installations may lack a unit, so tolerate a failed stop only when
 # systemd can still confirm that the unit is inactive or failed.

@@ -6,6 +6,14 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "${1:-}" = purge ]; then
+  # dpkg keeps the old package in config-files state after a rename. A later
+  # purge of that obsolete record must not erase data now owned by Ragent.
+  if [ "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" = agentoc ]; then
+    replacement_status="$(dpkg-query -W -f='${db:Status-Status}' ragent 2>/dev/null || true)"
+    case "$replacement_status" in
+      installed|unpacked|half-installed|half-configured|triggers-awaited|triggers-pending|config-files) exit 0 ;;
+    esac
+  fi
   # Finish an interrupted global-command diversion only when our marker and
   # exact empty target match; keep unrelated administrator diversions intact.
   for tool in codex claude; do
