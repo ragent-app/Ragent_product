@@ -27,13 +27,18 @@ const provision = spawnSync(process.execPath, [provisionPath, provisionFile], {
 assert.equal(provision.status, 0); assert.equal(provision.stdout.includes(password), false);
 const provisionedBytes = await readFile(provisionFile, 'utf8');
 assert.equal(provisionedBytes.includes(password), false);
+const provisionedPolicy = JSON.parse(provisionedBytes);
+assert.equal(provisionedPolicy.accessMode, 'full');
+assert.equal(provisionedPolicy.instanceAccess, 'account');
+assert.equal(provisionedPolicy.unlimitedConnections, false);
 const repeat = spawnSync(process.execPath, [provisionPath, provisionFile], {
   input: JSON.stringify({ username: 'review-fixture', password, instanceId: 'inst_demo_server' }), encoding: 'utf8', timeout: 10_000,
 });
 assert.equal(repeat.status, 1); assert.equal(await readFile(provisionFile, 'utf8'), provisionedBytes);
 
 async function run(store) {
-  const policy = await createDemoAccountPolicy({ username: 'review-fixture', password, instanceId: 'inst_demo_server' });
+  const policy = await createDemoAccountPolicy({ username: 'review-fixture', password, instanceId: 'inst_demo_server',
+    accessMode: 'restricted', instanceAccess: 'allowlist' });
   const file = join(dir, store ? 'pg-policy.json' : 'file-policy.json');
   await writeFile(file, JSON.stringify(policy), { mode: 0o600 });
   const options = { dataFile: join(dir, 'accounts.json'), signingKeyFile: join(dir, 'signing.json'),

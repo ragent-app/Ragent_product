@@ -12,10 +12,10 @@ const unavailable = () => Object.assign(new Error('Demo account is unavailable.'
 });
 
 /** Operator-created policy, kept outside the checkout and runtime payload. */
-export async function createDemoAccountPolicy({ username, password, instanceId, accessMode = 'restricted', instanceAccess = 'allowlist', unlimitedConnections = false }) {
+export async function createDemoAccountPolicy({ username, password, instanceId, accessMode = 'full', instanceAccess = 'account', unlimitedConnections = false }) {
   if (typeof unlimitedConnections !== 'boolean' || !['allowlist', 'account'].includes(instanceAccess) || !['restricted', 'full'].includes(accessMode) || !/^[a-z0-9._-]{3,80}$/.test(username || '') || typeof password !== 'string'
     || password.length < 16 || password.length > 256 || !/^inst_[A-Za-z0-9_-]{4,156}$/.test(instanceId || '')) {
-    throw new Error('A demo username, 16–256 character password and exact isolated instance ID are required.');
+    throw new Error('A username, 16–256 character password and exact default instance ID are required.');
   }
   const salt = randomBytes(32);
   const key = await derive(password, salt, 64, parameters);

@@ -12,7 +12,11 @@ import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protoc
 
 const username = 'review-fixture', password = 'fixture-password-not-for-deployment';
 const instanceId = 'inst_demo_fixture';
-const policy = await createDemoAccountPolicy({ username, password, instanceId });
+const defaultPolicy = await createDemoAccountPolicy({ username, password, instanceId });
+assert.equal(defaultPolicy.accessMode, 'full');
+assert.equal(defaultPolicy.instanceAccess, 'account');
+assert.equal(defaultPolicy.unlimitedConnections, false, 'ordinary account entitlements apply by default');
+const policy = await createDemoAccountPolicy({ username, password, instanceId, accessMode: 'restricted', instanceAccess: 'allowlist' });
 assert.equal(JSON.stringify(policy).includes(password), false);
 assert.equal(await loadDemoAccountAuth(''), null);
 const invalidPolicyDir = await mkdtemp(join(tmpdir(), 'ragent-demo-invalid-'));
@@ -34,9 +38,9 @@ assert.throws(() => createDemoAccountAuth({ ...policy, accessMode: 'invalid' }))
 assert.throws(() => createDemoAccountAuth({ ...policy, accountId: 'acct_google_personal' }));
 assert.throws(() => createDemoAccountAuth({ ...policy, allowedInstanceIds: ['inst_demo_fixture', 'inst_personal'] }));
 let now = Date.now();
-function fixture(enabled = true, accessMode = "restricted") {
+function fixture(enabled = true, accessMode = "restricted", fixturePolicy = policy) {
   let state = {}, googleCalls = 0;
-  const auth = createDemoAccountAuth({ ...policy, accessMode }, { clock: () => now });
+  const auth = createDemoAccountAuth({ ...fixturePolicy, accessMode }, { clock: () => now });
   const store = { mutate: async fn => {
     const draft = structuredClone(state); const result = await fn(draft);
     // File/HTTP boundaries serialize broker Date values as ISO strings.
@@ -62,7 +66,8 @@ async function challenge(f, suffix) {
       deviceId, publicKeyFingerprint: createDevicePublicKeyFingerprint(publicKey), nonce: result.nonce })), key.privateKey).toString('base64url') } };
 }
 {
-  const f = fixture(true, 'full'), c = await challenge(f, 'full_access');
+  const f = fixture(true, 'full', defaultPolicy), c = await challenge(f, 'full_access');
+  assert.equal(f.broker.demoSignInStatus, 'configured');
   const session = await f.broker.completeDemoAccountSession(c.body);
   assert.equal(session.demoAccessMode, 'full');
   assert.deepEqual(await f.broker.completeDemoAccountSession(c.body), session);
@@ -73,7 +78,7 @@ async function challenge(f, suffix) {
   assert.equal(renewed.demoAccessMode, 'full');
   await assert.rejects(f.broker.createAccountRendezvous({ requestId: 'request_demo_full_wrong_target', targetInstanceId: 'inst_personal',
     device: { deviceId: c.deviceId, publicKey: c.publicKey, devicePublicKeyFingerprint: createDevicePublicKeyFingerprint(c.publicKey) } },
-    { credential: renewed.credential.token }), { code: 'owner_auth_demo_unavailable' });
+    { credential: renewed.credential.token }), { code: 'owner_auth_binding_mismatch' });
 }
 {
   const f = fixture(false), c = await challenge(f, 'disabled');

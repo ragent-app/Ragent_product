@@ -4,7 +4,7 @@ import { isAbsolute } from 'node:path';
 import { createDemoAccountPolicy } from './demo-credentials.mjs';
 
 // The operator supplies credentials on stdin. Never echo input or overwrite an
-// existing policy; choosing the isolated instance remains an explicit step.
+// existing policy; choosing the default instance remains an explicit step.
 try {
   const target = process.argv[2];
   if (process.argv.length !== 3 || !target || !isAbsolute(target)) throw new Error('Provide an absolute output path.');
