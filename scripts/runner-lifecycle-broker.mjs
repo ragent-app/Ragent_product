@@ -42,6 +42,7 @@ import {
   revokeRunnerWorkspaceAccess,
 } from './runner-workspace-access.mjs';
 import { normalizeRunnerInheritedGroups, RUNNER_DENIED_GROUPS } from '../lib/runner-user-groups.mjs';
+import { resolveRestrictedRunnerGroupIds } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 
 const execFileAsync = promisify(execFileCallback);
@@ -219,22 +220,8 @@ export async function verifyRunnerSystemGroups(runnerUser, runnerGroup, { runner
     throw Object.assign(new Error('Cannot verify runner system groups'), { code: 'RUNNER_IDENTITY_INVALID' });
   }
   const deniedNames = [...new Set(RUNNER_DENIED_GROUPS)];
-  const restrictedIds = await Promise.all(deniedNames.map(async (name) => {
-    let entry;
-    try {
-      ({ stdout: entry } = await execFileImpl('/usr/bin/getent', ['group', name], { timeout: 2_000, maxBuffer: 16 * 1024 }));
-    } catch (error) {
-      if (error?.code === 2) return null; // This well-known group is absent.
-      throw Object.assign(new Error('Cannot verify restricted system groups'), { code: 'RUNNER_IDENTITY_INVALID' });
-    }
-    const fields = String(entry || '').trim().split(':');
-    if (fields.length < 3 || fields[0] !== name || !/^\d+$/.test(fields[2]) || !Number.isSafeInteger(Number(fields[2]))) {
-      throw Object.assign(new Error('Cannot verify restricted system groups'), { code: 'RUNNER_IDENTITY_INVALID' });
-    }
-    return Number(fields[2]);
-  }));
-  const denied = new Set(restrictedIds.filter(id => id !== null));
-  if (!denied.has(0) || groups.some(group => denied.has(Number(group)))
+  const denied = await resolveRestrictedRunnerGroupIds({ execFileImpl });
+  if (groups.some(group => denied.has(Number(group)))
       || (Number.isSafeInteger(runnerGid) && denied.has(runnerGid))
       || deniedNames.includes(String(runnerGroup || '').toLowerCase())) {
     throw Object.assign(new Error('Runner account belongs to a restricted system group; configure an unprivileged runner account'), { code: 'RUNNER_IDENTITY_INVALID' });
