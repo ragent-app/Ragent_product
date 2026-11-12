@@ -9,6 +9,7 @@ import { createDemoAccountAuth, createDemoAccountPolicy } from '../accounts/demo
 import { normalizeDevicePublicKey, createDevicePublicKeyFingerprint, buildAccountJoinIntentMessage } from '../lib/device-auth-protocol.mjs';
 import { createInstancePublicKeyFingerprint, buildAccountJoinIntentProofMessage } from '../lib/instance-proof-protocol.mjs';
 import { inboxWaitFixture } from './fixtures/rendezvous-inbox-wait.mjs';
+import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
 
 const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 test('scoped creation preserves replay, revocation, rollback and retention in PostgreSQL', { skip: !url }, async t => {
@@ -150,6 +151,19 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     await assert.rejects(broker.createAccountRendezvous({ ...request, requestId: 'qa_foreign_bound_request_0001',
       device: foreign.device }, foreign.credential), { code: 'owner_auth_binding_mismatch' });
   }
+  const access = await b.mutate(draft => issueInstanceAccessGrant(draft, { instanceId: f.instance.instanceId,
+    ownerAccountId: 'acct_inbox_qa', accountId: 'acct_foreign_qa', requestId: 'qa_workspace_grant_request_001', now }));
+  for (const [index, broker] of [f.broker, baselineBroker].entries()) {
+    const result = await broker.createAccountRendezvous({ ...request, requestId: `qa_shared_rendezvous_request_000${index}`,
+      device: foreign.device }, foreign.credential);
+    assert.equal(result.intent.instanceKeyFingerprint, f.instance.keyFingerprint);
+  }
+  await b.mutate(draft => revokeInstanceAccessGrant(draft, { grantId: access.grant.grantId,
+    ownerAccountId: 'acct_inbox_qa', now }));
+  for (const [index, broker] of [f.broker, baselineBroker].entries()) {
+    await assert.rejects(broker.createAccountRendezvous({ ...request, requestId: `qa_revoked_workspace_request_000${index}`,
+      device: foreign.device }, foreign.credential), { code: 'owner_auth_binding_mismatch' });
+  }
   const claim = `rpi_${randomBytes(32).toString('base64url')}`;
   for (const [index, broker] of [f.broker, baselineBroker].entries()) {
     const qrTarget = target(`inst_qr_claim_qa_${index}`);
@@ -195,14 +209,15 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     const permitted = await broker.createAccountRendezvous({ requestId: `qa_demo_allowed_request_000${index}`,
       targetInstanceId: allowed.instanceId, device: demo.device }, demo.credential);
     assert.equal(permitted.intent.instanceKeyFingerprint, allowed.keyFingerprint);
-    await assert.rejects(broker.createAccountRendezvous({ requestId: `qa_demo_denied_request_000${index}`,
-      targetInstanceId: extra.instanceId, targetInstance: extra, accountClaimToken: claim, device: demo.device }, demo.credential),
-    { code: 'owner_auth_demo_unavailable' });
+    const claimable = await broker.createAccountRendezvous({ requestId: `qa_demo_denied_request_000${index}`,
+      targetInstanceId: extra.instanceId, targetInstance: extra, accountClaimToken: claim, device: demo.device }, demo.credential);
+    assert.equal(claimable.intent.instanceKeyFingerprint, extra.keyFingerprint);
   }
   await b.mutate(draft => { draft.instanceBindings.push(bind(extra)); });
   for (const [index, broker] of [restrictedFast, restrictedFull].entries()) {
-    await assert.rejects(broker.createAccountRendezvous({ requestId: `qa_demo_extra_binding_000${index}`,
-      targetInstanceId: allowed.instanceId, device: demo.device }, demo.credential), { code: 'owner_auth_demo_unavailable' });
+    const permitted = await broker.createAccountRendezvous({ requestId: `qa_demo_extra_binding_000${index}`,
+      targetInstanceId: allowed.instanceId, device: demo.device }, demo.credential);
+    assert.equal(permitted.intent.instanceKeyFingerprint, allowed.keyFingerprint);
   }
   const fullAccess = createDemoAccountAuth({ ...policy, instanceAccess: 'account' });
   for (const [index, broker] of [brokerFor(a, fullAccess), brokerFor(store(false), fullAccess)].entries()) {

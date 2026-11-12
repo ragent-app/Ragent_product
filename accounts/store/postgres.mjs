@@ -309,6 +309,14 @@ function rowToBinding(row) {
   };
 }
 
+function rowToInstanceAccessGrant(row) {
+  return { grantId: String(row.grant_id), requestId: String(row.request_id || `legacy_${row.grant_id}`),
+    instanceId: String(row.instance_id), ownerAccountId: String(row.owner_account_id), accountId: String(row.account_id),
+    bindingKeyFingerprint: String(row.binding_key_fingerprint), bindingBoundAt: toIso(row.binding_bound_at),
+    bindingHistoryFingerprint: String(row.binding_history_fingerprint), scope: String(row.scope),
+    createdAt: toIso(row.created_at), revokedAt: toIso(row.revoked_at) };
+}
+
 function deviceToRow(device) {
   return {
     device_id: String(device.deviceId),
@@ -797,11 +805,7 @@ async function readSnapshot(client) {
       browserStateHash: browserStateBySource.get(JSON.stringify([row.transaction_id, row.nonce, row.bootstrap_hash])) || '',
     })),
     instanceBindings: bindings.rows.map(rowToBinding),
-    instanceAccessGrants: instanceAccessGrants.rows.map(row => ({ grantId: String(row.grant_id), requestId: String(row.request_id || `legacy_${row.grant_id}`),
-      instanceId: String(row.instance_id), ownerAccountId: String(row.owner_account_id), accountId: String(row.account_id),
-      bindingKeyFingerprint: String(row.binding_key_fingerprint), bindingBoundAt: toIso(row.binding_bound_at),
-      bindingHistoryFingerprint: String(row.binding_history_fingerprint),
-      scope: String(row.scope), createdAt: toIso(row.created_at), revokedAt: toIso(row.revoked_at) })),
+    instanceAccessGrants: instanceAccessGrants.rows.map(rowToInstanceAccessGrant),
     devices: devices.rows.map(rowToDevice),
     bindingHistory: history.rows.map(rowToHistory),
     nativeAuthRequests: nativeAuthRequests.rows.map(rowToNativeAuthRequest),
@@ -1253,8 +1257,9 @@ export function createPostgresStore({
 
   // Opt-in until isolated equivalence and installed-release compatibility are
   // verified. The same queue/lock protects replay and account revocation.
-  function mutateRendezvousCreation({ tokenHash, requestId }, mutator) {
+  function mutateRendezvousCreation({ tokenHash, requestId, targetInstanceId }, mutator) {
     if (!/^[a-f0-9]{64}$/.test(tokenHash || '') || typeof requestId !== 'string' || !requestId
+      || typeof targetInstanceId !== 'string' || !/^[\x21-\x7e]{8,160}$/.test(targetInstanceId)
       || typeof mutator !== 'function') throw new TypeError('Fixed rendezvous authority is required');
     const run = queue.then(() => withClient(async client => {
       await client.query('begin');
@@ -1276,6 +1281,21 @@ export function createPostgresStore({
           draft.accountDevices = devices.rows.map(rowToAccountDevice);
           draft.accountDeviceKeys = keys.rows.map(rowToAccountDeviceKey);
           draft.instanceBindings = bindings.rows.map(rowToBinding);
+          if (!draft.instanceBindings.some(binding => binding.instanceId === targetInstanceId)) {
+            const target = await client.query('select * from instance_bindings where instance_id = $1', [targetInstanceId]);
+            if (target.rows.length) {
+              const targetBinding = rowToBinding(target.rows[0]);
+              draft.instanceBindings.push(targetBinding);
+              const targetOwner = await client.query('select * from accounts where account_id = $1', [targetBinding.accountId]);
+              draft.accounts.push(...targetOwner.rows.map(rowToAccount));
+              const storage = await instanceAccessGrantStorageVersion(client);
+              const grants = storage ? await client.query('select * from instance_access_grants where instance_id = $1 and account_id = $2',
+                [targetInstanceId, credential.account_id]) : { rows: [] };
+              draft.instanceAccessGrants = grants.rows.map(rowToInstanceAccessGrant);
+              const history = await client.query('select * from binding_history where instance_id = $1 order by occurred_at, instance_id', [targetInstanceId]);
+              draft.bindingHistory = history.rows.map(rowToHistory);
+            }
+          }
         }
         const intents = await client.query('select * from account_join_intents where rendezvous_request_id = $1', [requestId]);
         draft.accountJoinIntents = intents.rows.map(rowToAccountJoinIntent);

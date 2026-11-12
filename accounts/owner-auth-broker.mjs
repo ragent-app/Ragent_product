@@ -2176,7 +2176,7 @@ export function createOwnerAuthBroker({
     }
     const token = trimString(rawCredential);
     const mutate = typeof store.mutateRendezvousCreation === 'function' && /^rac_[A-Za-z0-9_-]{32,}$/.test(token)
-      ? mutator => store.mutateRendezvousCreation({ tokenHash: hashSecret(token), requestId }, mutator)
+      ? mutator => store.mutateRendezvousCreation({ tokenHash: hashSecret(token), requestId, targetInstanceId }, mutator)
       : mutator => store.mutate(mutator);
     const result = await mutate(async (draft, scoped) => {
       const pruneAt = clock();
@@ -2186,16 +2186,24 @@ export function createOwnerAuthBroker({
       const authenticated = authenticateAccountCredential(draft, rawCredential, 'account-directory');
       const existing = getAccountJoinIntents(draft).find((item) => item.rendezvousRequestId === requestId);
       assertDemoAccount(draft, authenticated.credential.accountId, targetInstanceId);
+      const targetBinding = getInstanceBindings(draft).find((item) => item.instanceId === targetInstanceId && !item.revokedAt);
+      const shared = targetBinding && targetBinding.accountId !== authenticated.credential.accountId
+        ? resolveInstanceWorkspaceAccess(draft, { instanceId: targetInstanceId, accountId: authenticated.credential.accountId })
+        : null;
       if (existing) {
         if (existing.accountId !== authenticated.credential.accountId || existing.instanceId !== targetInstanceId
           || existing.deviceId !== deviceId || existing.devicePublicKeyFingerprint !== devicePublicKeyFingerprint
           || normalizeDeviceAlias(existing.computerAlias) !== computerAlias) {
           throw createError('owner_auth_rendezvous_replay', 'Rendezvous request was already used with different material.', 409);
         }
+        if ((!targetBinding && !existing.accountClaimTokenHash) ||
+            (targetBinding && targetBinding.accountId !== authenticated.credential.accountId && !shared))
+          throw createError('owner_auth_binding_mismatch', 'Target computer is not accessible to this account.', 403);
         return { intent: publicRendezvousIntent(existing), replayed: true };
       }
-      const binding = getInstanceBindings(draft).find((item) => item.instanceId === targetInstanceId
-        && item.accountId === authenticated.credential.accountId && !item.revokedAt);
+      if (targetBinding && targetBinding.accountId !== authenticated.credential.accountId && !shared)
+        throw createError('owner_auth_binding_mismatch', 'Target computer is not accessible to this account.', 403);
+      const binding = targetBinding;
       const targetPublicKey = trimString(binding?.instancePublicKey || targetInstance.publicKey);
       const targetKeyFingerprint = trimString(binding?.instanceKeyFingerprint || targetInstance.keyFingerprint);
       const claimHash = accountClaimToken ? hashSecret(accountClaimToken) : '';
@@ -2503,6 +2511,7 @@ export function createOwnerAuthBroker({
       }
       if (intent.deviceId !== deviceId || intent.devicePublicKeyFingerprint !== devicePublicKeyFingerprint
         || intent.nonceHash !== hashSecret(nonce) || intent.issuedAt !== issuedAt
+        || (intent.accountId && intent.accountId !== authenticated.credential.accountId)
         || authenticated.credential.accountId !== authenticated.device.accountId
         || authenticated.key.fingerprint !== devicePublicKeyFingerprint) {
         throw createError('owner_auth_account_join_mismatch', 'Account session does not match this device join intent.', 403);
@@ -2524,8 +2533,11 @@ export function createOwnerAuthBroker({
       // credential-bound, signed, 60-second grant path.  An existing binding
       // must still belong to the same Account; no grant can transfer it.
       const reenrolling = freshAccountQrReenrollment(binding, intent, authenticated.credential.accountId, clock());
+      const workspaceAccess = binding && binding.accountId !== authenticated.credential.accountId
+        ? resolveInstanceWorkspaceAccess(draft, { instanceId: intent.instanceId, accountId: authenticated.credential.accountId })
+        : null;
       if ((binding?.revokedAt && !reenrolling)
-        || (binding && binding.accountId !== authenticated.credential.accountId)
+        || (binding && binding.accountId !== authenticated.credential.accountId && !workspaceAccess)
         || (binding && accountBindingTime(intent.createdAt) < accountBindingTime(binding.boundAt))) {
         throw createError('owner_auth_binding_mismatch', 'The selected computer no longer belongs to this Account.', 403);
       }
