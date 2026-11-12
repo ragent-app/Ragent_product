@@ -119,7 +119,7 @@ if (process.platform === 'win32') {
   const file = bashPath(path.join(workspace, '中文 文件.md'));
   const secret = bashPath(path.join(workspace, 'secret'));
   const request = command => ({ kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command } } });
-  for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline']) {
+  for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline', "git log -1 --format='%h %s'"]) {
     assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
   }
   for (const command of ['git diff', 'git add .', 'git commit -m test']) assert.equal((await inspect(command)).decision, 'allow');
@@ -130,6 +130,7 @@ if (process.platform === 'win32') {
   for (const riskMode of ['recommended', 'full-auto']) {
     const state = { riskMode, cwd: workspace, riskContext: context };
     assert.equal((await decideWindowsApproval(request('git status --short'), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request("git log -1 --format='%h %s'"), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`cat -n '${file}'`), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`ls -lah '${secret}'`), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`ls -R '${secret}'`), state)).decision, 'prompt');

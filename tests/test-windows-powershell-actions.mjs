@@ -113,7 +113,7 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
 let result = await inspect('Get-Content readme.txt | Select-Object -First 1');
 assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
-for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline']) {
+for (const command of ['git status --short', 'git status -sb --ignored=matching', 'git diff --stat', 'git branch --show-current', 'git log -n 5 --oneline', "git log -1 --format='%h %s'"]) {
   assert.equal((await inspect(command)).decision, 'allow', `${command} is a read-only Git query`);
 }
 for (const command of ['git diff', 'git add .', 'git commit -m test']) assert.equal((await inspect(command)).decision, 'allow');

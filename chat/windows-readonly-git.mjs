@@ -29,6 +29,10 @@ function isReadOnlyLogArgs(args) {
       if (!/^\d{1,6}$/.test(args[++index] || '')) return false;
       continue;
     }
+    // Git's pretty format controls output text only. Keep it a single
+    // literal argument; shell expansion and other options are handled by the
+    // caller's parser and must not become part of this allowance.
+    if (/^--(?:pretty|format)=(?:format:|tformat:)?[^\0\r\n]{1,1024}$/.test(arg)) continue;
     if (['--oneline', '--decorate', '--decorate=short', '--decorate=full', '--no-decorate', '--no-pager', '--no-color', '--color=never', '--all'].includes(arg)
         || /^-(?:n\d{1,6}|\d{1,6})$/.test(arg) || /^--max-count=\d{1,6}$/.test(arg)
         || /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller)$/.test(arg)

@@ -61,7 +61,7 @@ if (managedRipgrep) {
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
-if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'git-diff', 'git-show', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
+if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
@@ -70,8 +70,8 @@ const outsideWriteRoot = outsideWrite ? await mkdtemp(path.join(tmpdir(), 'agent
 const fileFixture = path.join(outsideWriteRoot || home, 'ordinary-fixture.txt');
 if (fileCommand) await writeFile(fileFixture, 'fixture content');
 if (fileCommand === 'git-c') { await mkdir(alternateCwd); execFileSync('git', ['init', '-q'], { cwd: alternateCwd, windowsHide: true }); await writeFile(path.join(alternateCwd, 'ordinary-fixture.txt'), 'fixture content'); }
-if (['git-status', 'git-diff', 'git-show', 'git-diff-file'].includes(fileCommand)) execFileSync('git', ['init', '-q'], { cwd: home, windowsHide: true });
-if (['git-show', 'git-diff-file'].includes(fileCommand)) {
+if (['git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) execFileSync('git', ['init', '-q'], { cwd: home, windowsHide: true });
+if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
   execFileSync('git', ['add', 'ordinary-fixture.txt'], { cwd: home, windowsHide: true });
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture'], { cwd: home, windowsHide: true });
   if (fileCommand === 'git-diff-file') await writeFile(fileFixture, 'changed fixture');
@@ -82,6 +82,7 @@ const safeFileCommand = fileCommand === 'rename'
   : fileCommand === 'git-status' ? 'git status --short'
   : fileCommand === 'git-diff' ? 'git diff'
   : fileCommand === 'git-show' ? 'git show --stat HEAD'
+  : fileCommand === 'git-log-format' ? "git log -1 --format='%h %s'"
   : fileCommand === 'git-diff-file' ? 'git diff HEAD -- ordinary-fixture.txt'
   : fileCommand === 'git-c' ? `git -C '${alternateCwd.replace(/'/g, "''")}' status --short`
   : fileCommand === 'dotnet'
@@ -445,15 +446,15 @@ createInterface({ input: child.stdout }).on('line', async line => {
       ? await readFile(path.join(home, 'renamed-fixture.txt'), 'utf8').catch(() => null) === 'fixture content' && !await access(fileFixture).then(() => true, () => false)
       : fileCommand === 'clear' ? await readFile(fileFixture, 'utf8').catch(() => null) === ''
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
-    if (msg.params.item.exitCode !== 0 || !fileResult || (['git-show', 'git-diff-file', 'git-c'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || (managedInstall && submissions !== 1)) {
+    if (msg.params.item.exitCode !== 0 || !fileResult || (['git-show', 'git-diff-file', 'git-c'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || (managedInstall && submissions !== 1)) {
       process.stderr.write('approved harmless command failed\n'); process.exitCode = 1;
     } else process.stdout.write(fileCommand ? `codex-windows-local-gate: ${fileCommand} executed on isolated fixture\n` : managedDelete ? 'codex-windows-local-gate: bound deletion used the approved absolute target\n' : managedInstall ? 'codex-windows-local-gate: managed install bridge reached mock control plane\n' : hookShouldFail ? 'codex-windows-local-gate: failed hook; original passed gate\n' : hookExpectedRun ? 'codex-windows-local-gate: hook rewrote approved harmless command\n' : hookExperiment ? 'codex-windows-local-gate: untrusted hook skipped; original passed gate\n' : 'codex-windows-local-gate: auto-allow executed harmless command\n');
     child.kill(); server.close();
   } else if (stage === 2 && msg.method === 'item/completed' && msg.params?.item?.type === 'commandExecution') {
     if (managedElevation) { fixtureError('direct elevation unexpectedly executed'); return; }
     if (managedDeleteRelative && msg.params.item.id === 'call_fixture') return;
-    if (['git-status', 'git-diff', 'git-show', 'git-diff-file', 'git-c'].includes(fileCommand) && process.env.AGENTOC_QA_EXPECT_DECISION === 'auto-allow') {
-      if (msg.params.item.exitCode !== 0 || !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) {
+    if (['git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c'].includes(fileCommand) && process.env.AGENTOC_QA_EXPECT_DECISION === 'auto-allow') {
+      if (msg.params.item.exitCode !== 0 || (fileCommand === 'git-log-format' ? !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || '')) : !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt'))) {
         fixtureError('read-only Git status did not return the isolated fixture entry'); return;
       }
       stage = 5;
