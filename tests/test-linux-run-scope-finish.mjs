@@ -72,7 +72,8 @@ test('runner terminal write invalidates only its protected control binding',
         let release, locked;
         const acquired = new Promise((resolve) => { locked = resolve; });
         const held = new Promise((resolve) => { release = resolve; });
-        const operation = withLinuxRunOperationLock({ directory: `${root}/contexts`, runId, launchAttempt: 0 }, async () => {
+        // A still-draining earlier or later generation shares the Run lock.
+        const operation = withLinuxRunOperationLock({ directory: `${root}/contexts`, runId, launchAttempt: 1 }, async () => {
           locked(); await held;
         });
         await acquired;

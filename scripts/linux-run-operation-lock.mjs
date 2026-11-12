@@ -1,4 +1,4 @@
-// Cross-process serialization for one root-controlled Run generation. Lock
+// Cross-process serialization for all generations of one root-controlled Run. Lock
 // files must never be unlinked while the installation is active. Linux flock
 // locks the open file description: the helper inherits a duplicate of that
 // descriptor so a parent crash cannot release the lock before the helper exits.
@@ -36,7 +36,9 @@ export async function withLinuxRunOperationLock({ directory, runId, launchAttemp
   if (!binary.isFile() || binary.isSymbolicLink() || binary.uid !== 0 || binary.gid !== 0 ||
       binary.nlink !== 1 || (binary.mode & 0o022) || !(binary.mode & 0o100)) fail();
   const hash = createHash('sha256').update(runId, 'utf8').digest('hex');
-  const filename = path.join(directory, `${hash}-${launchAttempt}.operation.lock`);
+  // Revocation intent applies to the whole Run. A new generation must not
+  // execute concurrently while an earlier generation's revocation is waiting.
+  const filename = path.join(directory, `${hash}.operation.lock`);
   let file;
   try {
     try {

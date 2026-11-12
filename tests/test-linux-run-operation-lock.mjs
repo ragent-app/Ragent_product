@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { lstat, mkdtemp, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import { revokeLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
+import { withLinuxRunOperationLock } from '../scripts/linux-run-operation-lock.mjs';
 
 test('revocation waits for an inherited helper lock even if its parent dies',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0, timeout: 15000 }, async () => {
@@ -26,8 +27,13 @@ await withLinuxRunOperationLock(JSON.parse(process.argv[1]), async fd => {
       descendantPid = Number(String(chunk).trim());
       assert.ok(Number.isInteger(descendantPid) && descendantPid > 1);
       let completed = false;
-      const revoke = revokeLinuxRunContext({ directory, runId, launchAttempt }).then(() => { completed = true; });
-      const marker = `${directory}/${createHash('sha256').update(runId).digest('hex')}-2.revoked`;
+      // A different Run remains independent, but revocation for a different
+      // generation of this Run must wait for the inherited helper lock.
+      let otherRunEntered = false;
+      await withLinuxRunOperationLock({ directory, runId: 'run_otherfixture1', launchAttempt: 0 }, async () => { otherRunEntered = true; });
+      assert.equal(otherRunEntered, true);
+      const revoke = revokeLinuxRunContext({ directory, runId, launchAttempt: 3 }).then(() => { completed = true; });
+      const marker = `${directory}/${createHash('sha256').update(runId).digest('hex')}-3.revoked`;
       for (let i = 0; i < 100; i++) {
         try { await lstat(marker); break; } catch (error) { if (error.code !== 'ENOENT' || i === 99) throw error; }
         await new Promise((resolve) => setTimeout(resolve, 10));
