@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer as createUnixServer } from 'node:net';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 test('runner terminal write invalidates only its protected control binding',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
@@ -320,6 +322,10 @@ test('runner terminal write invalidates only its protected control binding',
         await assert.rejects(readFile(snapshot, 'utf8'), { code: 'ENOENT' });
         await assert.rejects(readFile(abandonedTemporary, 'utf8'), { code: 'ENOENT' });
         const peerId = 'run_peerboundfixture1';
+        process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET = `${root}/peer-result.sock`;
+        process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER = `${root}/peercred`;
+        execFileSync('/usr/bin/gcc', ['-Wall', '-Wextra', '-Werror', '-O2',
+          fileURLToPath(new URL('../native/privileged-peercred.c', import.meta.url)), '-o', process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER]);
         await createRun({ status: { id: peerId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
         await issueLinuxRunScopeGrant(peerId, 0, { resultChannel: 'peer-v1' });
         const { readLinuxRunControlBindingRecord } = await import('../chat/linux-run-control-binding.mjs');
@@ -352,6 +358,56 @@ test('runner terminal write invalidates only its protected control binding',
         process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
         await assert.rejects(removeRunsForSession('s1'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.ok(await readFile(runStatusPath(peerId), 'utf8'));
+        const peerId2 = 'run_peerboundfixture2';
+        await createRun({ status: { id: peerId2, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+        await issueLinuxRunScopeGrant(peerId2, 0, { resultChannel: 'peer-v1' });
+        const { persistLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
+        await persistLinuxRunCancelIntent(peerId2, 0);
+        await persistLinuxRunCompletionReceipt(peerId2, 0);
+        const sessionManager = await import('../chat/session-manager.mjs');
+        const session = await sessionManager.createSession(`${root}/workspace`, 'codex', 'Peer removal fixture');
+        const sessionScope = { ...scope, sessionId: session.id };
+        const sessionManifest = { ...manifest, sessionId: session.id, executionScope: sessionScope,
+          executionScopeDigest: computeExecutionScopeDigest(sessionScope) };
+        const sessionRunId = 'run_peerrealfixture1';
+        await createRun({ status: { id: sessionRunId, sessionId: session.id, requestId: 't1', state: 'running' }, manifest: sessionManifest });
+        await issueLinuxRunScopeGrant(sessionRunId, 0, { resultChannel: 'peer-v1' });
+        await persistLinuxRunCancelIntent(sessionRunId, 0);
+        await persistLinuxRunCompletionReceipt(sessionRunId, 0);
+        await assert.rejects(sessionManager.deleteSession(session.id), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        assert.ok(await sessionManager.getSession(session.id), 'failed cleanup keeps the session retryable');
+        const calls = [];
+        const resultBroker = createUnixServer(socket => {
+          let input = '';
+          socket.on('error', () => {});
+          socket.on('data', chunk => {
+            input += chunk.toString('utf8');
+            if (!input.endsWith('\n')) return;
+            const request = JSON.parse(input);
+            calls.push(request);
+            socket.end('{"ok":true,"value":{"discarded":true}}\n');
+          });
+        });
+        try {
+          await new Promise((resolve, reject) => { resultBroker.once('error', reject); resultBroker.listen(process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET, resolve); });
+          await chmod(process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET, 0o666);
+          const removed = await removeRunsForSession('s1');
+          assert.deepEqual(new Set(removed), new Set([peerId, peerId2]));
+          assert.deepEqual(new Set(calls.map(request => request.runId)), new Set([peerId, peerId2]));
+          assert.ok(calls.every(request => request.type === 'discard' && request.launchAttempt === 0));
+          await assert.rejects(readFile(runStatusPath(peerId), 'utf8'), { code: 'ENOENT' });
+          await assert.rejects(readFile(runStatusPath(peerId2), 'utf8'), { code: 'ENOENT' });
+          const deleted = await sessionManager.deleteSession(session.id);
+          assert.equal(deleted.id, session.id);
+          assert.ok(deleted.removedRunIds.includes(sessionRunId));
+          assert.equal(await sessionManager.getSession(session.id), null);
+          assert.ok(calls.some(request => request.type === 'discard' && request.runId === sessionRunId));
+        } finally {
+          await new Promise(resolve => resultBroker.close(resolve));
+          sessionManager.killAll();
+          delete process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET;
+          delete process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER;
+        }
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });

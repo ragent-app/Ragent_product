@@ -44,6 +44,8 @@ const HOSTILE_PRODUCTION_ENV = {
   AGENTOC_PRIVILEGED_EXECUTOR_AUDIT_FILE: '/var/log/agentoc-privileged/audit.jsonl',
   AGENTOC_RUNNER_SUPERVISOR_SOCKET: '/var/lib/agentoc/config/runner-supervisor.sock',
   AGENTOC_RUNNER_LIFECYCLE_SOCKET: '/var/lib/agentoc/config/runner-lifecycle.sock',
+  AGENTOC_LINUX_PEER_RESULT_SOCKET: '/run/agentoc-peer-result/result.sock',
+  AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: '/usr/lib/agentoc/privileged-peercred',
   AGENTOC_RUNNER_LIFECYCLE_REQUIRED: '1',
   AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '1',
   AGENTOC_PUBLIC_BASE_URL: 'https://example.com',
@@ -72,6 +74,7 @@ async function main() {
     serviceUser: 'agentoc-runner',
     serviceGroup: 'agentoc-runners',
     serviceHome: '/home/agentoc-runner',
+    readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive' }),
     environment: HOSTILE_PRODUCTION_ENV,
     execFileImpl: async (bin, args) => {
       if (bin === 'systemctl') return { stdout: '4242\n' };

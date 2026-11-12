@@ -11046,12 +11046,12 @@ export async function deleteSession(id) {
         const base = await getHistoryBase(meta?.id);
         if (base?.sourceSessionId === sessionId) dependents.push(meta);
       }
+      const materialized = [];
       if (dependents.length > 0) {
         // Shared-prefix forks are optimized for reads, but deleting their
         // source must not make the child unreadable. Materialize each live
         // child before removing the source; the child's local tail remains
         // untouched and lineage metadata is retained for display.
-        const materialized = [];
         try {
           for (const dependent of dependents) {
             const result = await materializeSharedHistory(dependent.id);
@@ -11070,9 +11070,18 @@ export async function deleteSession(id) {
           throw error;
         }
       }
+      // Root-backed Run results must be cleared before removing the session
+      // record. If the broker is unavailable, keep the session addressable so
+      // the owner can retry instead of leaving inaccessible retained data.
+      let removedRunIds;
+      try { removedRunIds = await removeRunsForSession(sessionId); }
+      catch (error) {
+        if (materialized.length > 0) await saveSessionsMeta(metas, { immediate: true });
+        throw error;
+      }
       metas.splice(index, 1);
       await saveSessionsMeta(metas, { immediate: true });
-      return true;
+      return { removedRunIds };
     });
     if (!removed) return null;
 
@@ -11080,11 +11089,10 @@ export async function deleteSession(id) {
     await releaseSessionRuntimeState(sessionId, { force: true });
     releaseSessionTimelineCache(sessionId);
     await removeSessionHistory(sessionId);
-    const removedRunIds = await removeRunsForSession(sessionId);
     if (shouldExposeSession(current)) {
       broadcastSessionsInvalidation();
     }
-    return { id: sessionId, removedRunIds };
+    return { id: sessionId, removedRunIds: removed.removedRunIds };
   } finally {
     deletingSessionIds.delete(sessionId);
   }

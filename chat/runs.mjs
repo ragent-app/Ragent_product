@@ -1086,6 +1086,13 @@ function linuxScopeResultUnavailable() {
   return Object.assign(new Error('Run result is awaiting scope revocation'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
 }
 
+function linuxPeerResultClientOptions() {
+  return {
+    socketPath: process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET || '/run/agentoc-peer-result/result.sock',
+    peerHelper: process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER || '/usr/lib/agentoc/privileged-peercred',
+  };
+}
+
 async function requireRunnerScopeFinalization(run, manifest) {
   let invalidated = false;
   try {
@@ -2216,7 +2223,7 @@ export async function getRunResult(runId) {
               let result = await readLinuxRunResultSnapshot(runId, attempt);
               if (!result) {
                 const { readProtectedLinuxRunResult } = await import('./linux-run-peer-result-client.mjs');
-                const record = await readProtectedLinuxRunResult({ socketPath: '/run/agentoc-peer-result/result.sock', runId, launchAttempt: attempt });
+                const record = await readProtectedLinuxRunResult({ ...linuxPeerResultClientOptions(), runId, launchAttempt: attempt });
                 if (!record) return null;
                 if (record.sessionId !== binding.sessionId || record.turnId !== binding.turnId) throw linuxScopeResultUnavailable();
                 result = record.result;
@@ -2385,8 +2392,7 @@ export async function writeRunResult(runId, result) {
   return getRunResultUnlocked(runId);
 }
 
-export async function clearRunResult(runId) {
-  await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
+async function clearRunResultUnderLock(runId) {
     let protectedAttempt = null;
     let peerAttempts = [];
     if (process.platform === 'linux' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
@@ -2438,7 +2444,7 @@ export async function clearRunResult(runId) {
         const { discardProtectedLinuxRunResult } = await import('./linux-run-peer-result-client.mjs');
         for (const attempt of peerAttempts) await persistLinuxPeerResultClearIntent(runId, attempt);
         for (const attempt of peerAttempts)
-          await discardProtectedLinuxRunResult({ socketPath: '/run/agentoc-peer-result/result.sock', runId, launchAttempt: attempt });
+          await discardProtectedLinuxRunResult({ ...linuxPeerResultClientOptions(), runId, launchAttempt: attempt });
       } catch { throw linuxScopeResultUnavailable(); }
     }
     await removePath(runResultPath(runId));
@@ -2451,7 +2457,10 @@ export async function clearRunResult(runId) {
     }
     runResultCache.delete(runId);
     runResultCacheMeta.delete(runId);
-  }));
+}
+
+export async function clearRunResult(runId) {
+  await runMutationQueue(runId, () => withRunMutationLock(runId, () => clearRunResultUnderLock(runId)));
   return null;
 }
 
@@ -3081,6 +3090,29 @@ export async function listRunIds() {
   return [...runIndexById.keys()].sort();
 }
 
+// Ensure every peer-bound attempt has crossed the root revocation barrier
+// before session deletion can start. The persistent cancel intent prevents a
+// later launch from creating another generation while deletion is in flight.
+async function validatePeerSessionRemoval(runId, sessionId) {
+  if (process.platform !== 'linux' || !/^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) return false;
+  const { listLinuxRunControlBindings, matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+  const bindings = await listLinuxRunControlBindings(runId);
+  const peers = bindings.filter(binding => binding.resultChannel === 'peer-v1');
+  if (!peers.length) return false;
+  const run = await getRunAcceptanceEvidence(runId), latest = bindings.at(-1);
+  if (!run || run.sessionId !== sessionId || latest.resultChannel !== 'peer-v1' || linuxScopeAttempt(run) !== latest.launchAttempt)
+    throw linuxScopeResultUnavailable();
+  const { hasLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+  const { hasLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+  const manifest = await getRunManifestUnlocked(runId);
+  for (const binding of peers) {
+    if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: binding.launchAttempt }) ||
+        !await hasLinuxRunCompletionReceipt(runId, binding.launchAttempt) ||
+        !await hasLinuxRunCancelIntent(runId, binding.launchAttempt)) throw linuxScopeResultUnavailable();
+  }
+  return true;
+}
+
 // Run storage is keyed by run id rather than session id. Remove terminal run
 // records with their session so permanent session deletion cannot leave
 // orphaned prompts, spool output, or artifacts behind.
@@ -3094,37 +3126,31 @@ export async function removeRunsForSession(sessionId) {
   // authority before removal so a stale/legacy index entry cannot delete a Run
   // that was rebound by an external repair.
   const indexedCandidates = await listRunIndexEntries({ sessionId: normalizedSessionId });
-  if (process.platform === 'linux') {
-    const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
-    for (const indexed of indexedCandidates) {
-      if (/^run_[A-Za-z0-9_-]{8,128}$/.test(indexed?.id || '') &&
-          (await listLinuxRunControlBindings(indexed.id)).some(binding => binding.resultChannel === 'peer-v1'))
-        throw linuxScopeResultUnavailable(); // Root-held results cannot yet be removed safely.
-    }
-  }
+  for (const indexed of indexedCandidates) await validatePeerSessionRemoval(indexed?.id || '', normalizedSessionId);
   for (const indexed of indexedCandidates) {
     const runId = indexed?.id;
     if (!runId) continue;
     const run = await getRun(runId);
     if (run?.sessionId !== normalizedSessionId) continue;
-    await runMutationQueue(runId, async () => {
+    await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
+      const current = await getRun(runId);
+      if (current?.sessionId !== normalizedSessionId) throw linuxScopeResultUnavailable();
+      const peerBound = await validatePeerSessionRemoval(runId, normalizedSessionId);
       if (process.platform === 'linux' && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
-        const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
-        if ((await listLinuxRunControlBindings(runId)).some(binding => binding.resultChannel === 'peer-v1'))
-          throw linuxScopeResultUnavailable();
+        if (peerBound) await clearRunResultUnderLock(runId);
         const { removeLinuxRunResultSnapshots } = await import('./linux-run-result-snapshot.mjs');
         await removeLinuxRunResultSnapshots(runId);
       }
       await removePath(runDir(runId));
-      await appendRequestIndexRecord(run, 'delete');
-      await appendRunIndexRecord(run, 'delete');
+      await appendRequestIndexRecord(current, 'delete');
+      await appendRunIndexRecord(current, 'delete');
       runStatusCache.delete(runId);
       runStatusCacheMeta.delete(runId);
       runManifestCache.delete(runId);
       runResultCache.delete(runId);
       runResultCacheMeta.delete(runId);
       runArtifactCache.delete(runId);
-    });
+    }));
     removedRunIds.push(runId);
   }
   return removedRunIds;
