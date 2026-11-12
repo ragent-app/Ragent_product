@@ -84,8 +84,15 @@ const {
   getRunManifest,
 } = await import('../chat/runs.mjs');
 const { createProject } = await import('../chat/projects.mjs');
+const { forkCodexAppServerThread } = await import('../chat/codex-app-server-client.mjs');
 
 try {
+  // A missing native provider must not launch the built-in alias directly
+  // with an unmanaged home. Custom test tools can still use their own CLI.
+  await assert.rejects(
+    forkCodexAppServerThread({ toolId: 'codex-cli', cwd: workspace, threadId: 'missing-provider-thread' }),
+    /No codex provider profile is registered/,
+  );
   // Two projects may intentionally share a root. Forking must preserve the
   // explicit project binding instead of re-resolving the folder to the first
   // project created for that root.

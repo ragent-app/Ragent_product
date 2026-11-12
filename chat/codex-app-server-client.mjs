@@ -489,7 +489,7 @@ async function runCodexAppServerForkRequest({
         ...(providerProfileId ? { providerProfile: providerProfileId } : {}), ...(model ? { model } : {}) },
     }, { configDir: CONFIG_DIR, providerHomesRoot: dirname(CODEX_MANAGED_HOME_DIR), externalOAuthOwnership: false, holdNativeOAuthLock: false });
     if (prepared?.ok && prepared.codexHomeDir) codexHomeDir = prepared.codexHomeDir;
-    else if (toolId === 'codex' || providerProfileId) throw new Error(prepared?.error || prepared?.reason || 'Codex provider home is unavailable');
+    else if (toolId === 'codex' || toolId === 'codex-cli' || providerProfileId) throw new Error(prepared?.error || prepared?.reason || 'Codex provider home is unavailable');
   }
   const { command, env } = await resolveCodexToolInvocation(toolId, { codexHomeDir });
   const forkMessage = buildCodexAppServerThreadForkMessage({
