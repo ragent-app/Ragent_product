@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { WORKBENCH_EXECUTION_POLICY, applyWorkbenchRunPolicy, buildWorkbenchCodexEnvironment } from '../lib/workbench-execution-policy.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'child_process';
 import { accessSync, constants, rmSync, statSync } from 'fs';
 import { createInterface } from 'readline';
@@ -1705,6 +1705,8 @@ function createClaudeBidiRunState({ prompt, manifest, cwd } = {}) {
     nextControlRequestId: 2,
     startedTurn: false,
     turnActive: false,
+    approvalTurnSequence: 0,
+    approvalProcessId: randomUUID(),
     terminalSeen: false,
     interruptSent: false,
     pendingInterruptRequestId: '',
@@ -1750,6 +1752,7 @@ function startClaudeBidiTurn(proc, state, text, sessionId = '') {
   if (written) {
     state.startedTurn = true;
     state.turnActive = true;
+    state.approvalTurnSequence = (state.approvalTurnSequence || 0) + 1;
   }
   return written;
 }
@@ -3088,6 +3091,9 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   // retain the same provider-neutral audit dimensions as auto-allow.
   const record = serializeCodexAppServerApprovalForRun(approval, gateDecision.risk);
   if (!record) return null;
+  if (state.turnActive === true && state.riskContextValid === true && state.approvalTurnSequence > 0 && state.requestId && state.cwd && state.approvalProcessId) {
+    record.approvalGroupScope = { turnId: state.requestId, turnSequence: state.approvalTurnSequence, processId: state.approvalProcessId, cwd: state.cwd };
+  }
   state.pendingApprovals.set(approval.approvalId, record);
   await updateRun(runId, (current) => {
     const existing = Array.isArray(current?.appServerPendingApprovals) ? current.appServerPendingApprovals : [];

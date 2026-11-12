@@ -44,9 +44,11 @@ const protectedCase = process.env.AGENTOC_QA_CLAUDE_PROTECTED === '1';
 const installCase = process.env.AGENTOC_QA_CLAUDE_INSTALL === '1';
 const uninstallCase = process.env.AGENTOC_QA_CLAUDE_UNINSTALL === '1';
 const phoneQueueCase = process.env.AGENTOC_QA_SAMSUNG_CLAUDE_QUEUE === '1';
+const phoneGroupCase = phoneQueueCase && process.env.AGENTOC_QA_CLAUDE_GROUP === '1';
 if (phoneQueueCase && (!uninstallCase || process.env.AGENTOC_QA_MODE !== 'recommended' || !askAll)) throw new Error('phone queue fixture requires the isolated recommended uninstall case');
 const phoneSessionId = 'samsung-fixture';
-let phoneApproval = null; let phoneQueued = false; let phoneToolResultObserved = false;
+let phoneApproval = null; const phoneApprovals = []; let phoneQueued = false; let phoneToolResultObserved = false;
+let resolvePhoneStatus; const phoneStatusObserved = new Promise(resolve => { resolvePhoneStatus = resolve; });
 const { handleSessionMainRoutes } = phoneQueueCase ? await import('../chat/router-session-main-routes.mjs') : {};
 const { getHistory } = phoneQueueCase ? await import('../chat/session-manager.mjs') : {};
 const { withSessionsMetaMutation, mutateSessionMeta } = phoneQueueCase ? await import('../chat/session-meta-store.mjs') : {};
@@ -155,19 +157,24 @@ const server = createServer((req, res) => {
       if (isApproval) {
         const current = await getRun(run.id); const response = current.appServerApprovalResponseQueue.find(entry => entry.approvalId === phoneApproval.approvalId);
         assert.equal(response?.decision, 'deny'); assert.equal(body?.approval?.decision, 'deny');
+        if (phoneGroupCase) assert.equal(current.appServerApprovalResponseQueue.filter(entry => entry.decision === 'deny').length, 2);
         let writes = 0;
-        const trackedProcess = { stdin: { writable: true, write(value) { writes += 1; return child.stdin.write(value); } } };
+        const trackedProcess = { stdin: { writable: true, write(value) { writes += 1;
+          if (phoneGroupCase && JSON.parse(String(value))?.response?.request_id === 'synthetic-group-request') return true;
+          return child.stdin.write(value); } } };
         await flushClaudeBidiApprovalResponses(trackedProcess, gateState, current);
         await flushClaudeBidiApprovalResponses(trackedProcess, gateState, current);
-        assert.equal(writes, 1, 'repeated queue scans must send one provider response');
+        assert.equal(writes, phoneGroupCase ? 2 : 1, 'repeated queue scans must send one response per provider request');
         const delivered = (await getRun(run.id)).appServerApprovalResponseQueue.find(entry => entry.id === response.id);
         assert.equal(delivered?.state, 'sent'); assert.equal(delivered?.response?.response?.response?.behavior, 'deny'); phoneQueued = true;
+        res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+        return;
       }
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     })().catch(error => { console.error(error); if (!res.headersSent) res.writeHead(500).end(); });
     return;
   }
-  if (phoneQueueCase && req.method === 'GET' && req.url === '/fixture/status') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ queued: phoneQueued })); return; }
+  if (phoneQueueCase && req.method === 'GET' && req.url === '/fixture/status') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ queued: phoneQueued })); if (phoneQueued) resolvePhoneStatus(); return; }
   if (cliReadCase && req.method === 'GET' && req.url === '/api/triggers?sessionId=claude-local-fixture') {
     if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture') { res.writeHead(403).end(); return; }
     cliReads++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ triggers: [{ id: 'fixture-trigger' }] })); return;
@@ -258,7 +265,7 @@ const fixtureSessionId = phoneQueueCase ? phoneSessionId : 'claude-local-fixture
 const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 'fixture', state: 'running', tool: 'claude' },
   manifest: { sessionId: fixtureSessionId, requestId: 'fixture', folder: root, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: { riskMode: 'recommended', permissionMode: 'default' } } });
 if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
-const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, riskContextValid: boundContext?.valid ?? true,
+const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, requestId: 'fixture', approvalTurnSequence: 1, approvalProcessId: 'fixture-process', riskContextValid: boundContext?.valid ?? true,
   riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), sentApprovalResponseIds: new Set(), autoApprovedMcpRequestIds: new Set() };
 let cliReadHelperPath = '';
 if (cliReadCase) {
@@ -341,10 +348,19 @@ output.on('line', (line) => {
         const current = await getRun(run.id);
         assert.ok(current.appServerPendingApprovals?.some((item) => item.approvalId === approval.approvalId), 'protected operation must wait for the owner');
         if (phoneQueueCase) {
-          phoneApproval = approval; await appendRunSpoolRecord(run.id, { stream: 'stdout', json: event });
-          const history = await getHistory(phoneSessionId);
-          assert.ok(history.some(item => item.type === 'approval_request' && item.approvalId === approval.approvalId));
-          console.log('SAMSUNG_CLAUDE_PROVIDER_READY');
+          phoneApprovals.push(approval); phoneApproval ||= approval; await appendRunSpoolRecord(run.id, { stream: 'stdout', json: event });
+          if (phoneGroupCase) {
+            const duplicate = { ...event, request_id: 'synthetic-group-request', request: { ...event.request, tool_use_id: 'synthetic-group-tool' } };
+            await trackClaudeBidiApprovalRequest(run.id, gateState, duplicate, gatedChild);
+            phoneApprovals.push(readClaudeBidiApprovalRequest(duplicate));
+            await appendRunSpoolRecord(run.id, { stream: 'stdout', json: duplicate });
+          }
+          if (phoneApprovals.length === (phoneGroupCase ? 2 : 1)) {
+            const history = await getHistory(phoneSessionId);
+            assert.ok(history.some(item => item.type === 'approval_request' && item.approvalId === phoneApproval.approvalId));
+            if (phoneGroupCase) assert.equal(history.filter(item => item.type === 'approval_request').length, 1, 'matching pending requests must share one card');
+            console.log('SAMSUNG_CLAUDE_PROVIDER_READY');
+          }
         } else child.stdin.write(serializeClaudeBidiMessage(buildClaudeBidiApprovalResponseMessage(approval, 'deny')));
       }
     }
@@ -355,6 +371,7 @@ child.stdin.write(serializeClaudeBidiMessage(buildClaudeBidiInitializeMessage('f
 child.stdin.write(serializeClaudeBidiMessage(buildClaudeBidiUserMessage({ text: 'Write the requested fixture.' })));
 try {
   const code = await completed;
+  if (phoneQueueCase) await Promise.race([phoneStatusObserved, new Promise((_, reject) => { const timeout = setTimeout(() => reject(new Error('phone did not observe delivery status')), 30000); timeout.unref(); })]);
   if (handlerFailure) throw handlerFailure;
   assert.equal(code, 0, `Claude exited unexpectedly: ${errors}`);
   if (readCase) assert.ok(approvals <= (cwdChangeCase ? 2 : 1), 'read fixture must not emit unnecessary approvals');

@@ -34,6 +34,35 @@ assert.equal(approvalEquivalenceKey({ ...a, riskTier: 'safe' }), '');
 assert.equal(approvalEquivalenceKey({ ...a, params: { ...a.params, cwd: '.' } }), '');
 assert.deepEqual(equivalentPendingApprovals({ appServerPendingApprovals: [a, b, c] }, a.approvalId).map(x => x.approvalId), [a.approvalId, b.approvalId]);
 assert.deepEqual(equivalentPendingApprovals({ appServerPendingApprovals: [a, b], appServerApprovalResponseQueue: [{ approvalId: a.approvalId }] }, b.approvalId).map(x => x.approvalId), [b.approvalId]);
+const claudeRecord = (id, overrides = {}) => ({ approvalId: `claude:${id}`, providerMethod: 'can_use_tool',
+  providerRequestId: id, providerRequestIdString: id, kind: 'command', state: 'pending', riskTier: 'danger',
+  approvalGroupScope: { turnId: 'turn', turnSequence: 1, processId: 'process-1', cwd: 'C:\\workspace' },
+  params: { subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: `tool-${id}`, input: { command: 'dangerous command' }, ...overrides } });
+const ca = claudeRecord('a'); const cb = claudeRecord('b');
+assert.ok(approvalEquivalenceKey(ca));
+assert.equal(approvalEquivalenceKey(ca), approvalEquivalenceKey(cb));
+assert.notEqual(approvalEquivalenceKey(ca), approvalEquivalenceKey({ ...cb, approvalGroupScope: { ...cb.approvalGroupScope, turnSequence: 2 } }));
+assert.notEqual(approvalEquivalenceKey(ca), approvalEquivalenceKey({ ...cb, approvalGroupScope: { ...cb.approvalGroupScope, processId: 'process-2' } }));
+assert.notEqual(approvalEquivalenceKey(ca), approvalEquivalenceKey({ ...cb, approvalGroupScope: { ...cb.approvalGroupScope, cwd: 'C:\\other' } }));
+assert.equal(approvalEquivalenceKey({ ...cb, approvalGroupScope: null }), '');
+assert.equal(approvalEquivalenceKey(claudeRecord('c', { permission_suggestions: [{ type: 'addRules' }] })), '');
+assert.notEqual(approvalEquivalenceKey(ca), approvalEquivalenceKey(claudeRecord('d', { input: { command: 'different' } })));
+assert.equal(approvalEquivalenceKey({ ...ca, kind: 'question' }), '');
+assert.deepEqual(equivalentPendingApprovals({ appServerPendingApprovals: [ca, cb] }, ca.approvalId).map(x => x.approvalId), [ca.approvalId, cb.approvalId]);
+const { createClaudeBidiAdapter } = await import('../chat/adapters/claude-bidi.mjs');
+const claudeFrames = [ca, cb].map(entry => ({ type: 'control_request', request_id: entry.providerRequestId, request: entry.params }));
+const claudeProjection = createRunProjectionService({
+  buildCodexContextMetricsPayload: () => null, clipPreview: value => String(value || ''),
+  createToolInvocation: async () => ({ provider: 'claude', runtimeFamily: 'claude-stream-json-bidi', capabilities: [], adapter: createClaudeBidiAdapter() }),
+  materializeRunSpoolLine: async (_id, value) => JSON.stringify(value.json),
+  normalizeRunEvents: (_run, events) => events, readLatestCodexSessionMetrics: async () => null,
+  readRunSpoolRecords: async () => claudeFrames.map(json => ({ stream: 'stdout', json })),
+  readRunSpoolDelta: async () => ({ records: claudeFrames.map(json => ({ stream: 'stdout', json })), nextOffset: 2, processedLineCount: 2, skippedLineCount: 0 }),
+});
+const claudeProjected = await claudeProjection.collectNormalizedRunEventDelta({ id: 'claude-group-projection', sessionId: 's', runtimeFamily: 'claude-stream-json-bidi',
+  approvalSuppressionSeeded: true, appServerPendingApprovals: [ca, cb] }, { tool: 'claude', options: { runtimeFamily: 'claude-stream-json-bidi' } });
+assert.deepEqual(claudeProjected.normalizedEvents.filter(event => event.type === 'approval_request').map(event => event.approvalId), [ca.approvalId]);
+assert.equal(claudeProjected.normalizedEventCount, 2);
 
 let frames = [a, b, c].map(entry => ({ id: entry.providerRequestId, method, params: entry.params }));
 const service = createRunProjectionService({
@@ -68,6 +97,15 @@ assert.equal(previouslyPresented.normalizedEventCount, 1, 'cross-tick suppressio
 const { appendRunSpoolRecord, createRun, getRun, updateRun } = await import('../chat/runs.mjs');
 const { createSession, getHistory, submitRuntimeApproval } = await import('../chat/session-manager.mjs');
 const { mutateSessionMeta } = await import('../chat/session-meta-store.mjs');
+const claudeRun = await createRun({ status: { sessionId: 'claude-group', requestId: 'turn', state: 'running', tool: 'claude', runtimeFamily: 'claude-stream-json-bidi' },
+  manifest: { sessionId: 'claude-group', requestId: 'turn', folder: workspace, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: {} } });
+await updateRun(claudeRun.id, current => ({ ...current, appServerPendingApprovals: [ca, cb] }));
+await submitRuntimeApproval(claudeRun.id, ca.approvalId, { decision: 'deny', requestId: 'owner-decision' });
+const claudeSaved = await getRun(claudeRun.id);
+assert.deepEqual(claudeSaved.appServerApprovalResponseQueue.map(entry => [entry.approvalId, entry.decision]), [[ca.approvalId, 'deny'], [cb.approvalId, 'deny']]);
+const { buildClaudeBidiApprovalResponseMessage } = await import('../chat/claude-bidi-protocol.mjs');
+assert.deepEqual(claudeSaved.appServerApprovalResponseQueue.map(entry => buildClaudeBidiApprovalResponseMessage(
+  claudeSaved.appServerPendingApprovals.find(item => item.approvalId === entry.approvalId), entry.decision).response.request_id), ['a', 'b']);
 const run = await createRun({ status: { sessionId: 'group-fixture', requestId: 'group-turn', state: 'running', tool: 'codex', runtimeFamily: 'codex-app-server-json' },
   manifest: { sessionId: 'group-fixture', requestId: 'group-turn', folder: workspace, tool: 'codex', runtimeFamily: 'codex-app-server-json', prompt: 'fixture', options: {} } });
 await updateRun(run.id, current => ({ ...current, appServerPendingApprovals: [a, b, c] }));

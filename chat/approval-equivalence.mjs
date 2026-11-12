@@ -1,16 +1,29 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-// Only currently pending Codex command requests with an explicit, identical
+// Only currently pending command requests with an explicit, identical
 // execution context can share a decision. Keep questions, capability grants,
 // file changes, unknown protocol shapes and persistent grants independent.
 export function approvalEquivalenceKey(approval) {
   if (approval?.state !== 'pending' || approval?.kind !== 'command'
-      || approval?.providerMethod !== 'item/commandExecution/requestApproval'
+      || !['item/commandExecution/requestApproval', 'can_use_tool'].includes(approval?.providerMethod)
       || !['danger', 'unknown'].includes(approval?.riskTier)) return '';
   const params = approval.params;
-  if (!params || typeof params !== 'object' || Array.isArray(params)
-      || typeof params.threadId !== 'string' || !params.threadId.trim()
+  if (!params || typeof params !== 'object' || Array.isArray(params) || approval.privileged === true) return '';
+  const claude = approval.providerMethod === 'can_use_tool';
+  if (claude) {
+    const scope = approval.approvalGroupScope;
+    if (!scope || typeof scope.turnId !== 'string' || !scope.turnId.trim()
+        || typeof scope.processId !== 'string' || !scope.processId.trim()
+        || !Number.isSafeInteger(scope.turnSequence) || scope.turnSequence < 1
+        || typeof scope.cwd !== 'string' || !(path.win32.isAbsolute(scope.cwd) || path.posix.isAbsolute(scope.cwd))
+        || params.subtype !== 'can_use_tool' || !['Bash', 'PowerShell'].includes(params.tool_name)
+        || typeof params.tool_use_id !== 'string' || !params.tool_use_id.trim()
+        || !params.input || typeof params.input !== 'object' || Array.isArray(params.input)
+        || typeof params.input.command !== 'string' || !params.input.command.trim()
+        || (params.permission_suggestions != null && (!Array.isArray(params.permission_suggestions) || params.permission_suggestions.length))
+        || params.additionalPermissions || params.additional_permissions || params.networkApprovalContext || params.network_approval_context) return '';
+  } else if (typeof params.threadId !== 'string' || !params.threadId.trim()
       || typeof params.turnId !== 'string' || !params.turnId.trim()
       || typeof params.itemId !== 'string' || !params.itemId.trim()
       || typeof params.cwd !== 'string' || !(path.win32.isAbsolute(params.cwd) || path.posix.isAbsolute(params.cwd))
@@ -18,7 +31,7 @@ export function approvalEquivalenceKey(approval) {
       || params.networkApprovalContext || params.network_approval_context
       || params.additionalPermissions || params.additional_permissions
       || params.grantRoot || params.grant_root || params.proposedExecpolicyAmendment
-      || params.proposed_execpolicy_amendment || approval.privileged === true) return '';
+      || params.proposed_execpolicy_amendment) return '';
   // All fields except the individual item identity are compared, including
   // future fields. Canonical keys avoid differences caused by object order.
   let size = 0;
@@ -40,8 +53,10 @@ export function approvalEquivalenceKey(approval) {
     return Object.fromEntries(keys.sort().map(key => [key, canonical(value[key], depth + 1)]));
   }
   try {
-    const { itemId, ...shared } = params;
-    const payload = JSON.stringify(canonical({ params: shared, riskTier: approval.riskTier,
+    const shared = { ...params };
+    if (claude) delete shared.tool_use_id; else delete shared.itemId;
+    const payload = JSON.stringify(canonical({ providerMethod: approval.providerMethod, scope: claude ? approval.approvalGroupScope : null,
+      params: shared, riskTier: approval.riskTier,
       riskPolicyVersion: approval.riskPolicyVersion || '', riskReasonCodes: approval.riskReasonCodes || [],
       riskTargetScope: approval.riskTargetScope || '', riskPlatform: approval.riskPlatform || '',
       riskConfidence: approval.riskConfidence || '', riskNeedsPrivilegedExecution: approval.riskNeedsPrivilegedExecution ?? null }));
