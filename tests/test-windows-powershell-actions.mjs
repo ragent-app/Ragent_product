@@ -125,6 +125,11 @@ let result = await inspect('Get-Content readme.txt | Select-Object -First 1');
 assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
 assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
+for (const type of ['Any', 'Container', 'Leaf']) {
+  assert.equal((await inspect(`if (Test-Path -LiteralPath 'readme.txt' -PathType ${type}) { Get-Item -LiteralPath 'readme.txt' | Select-Object Name | Format-List | Out-String }`)).decision, 'allow', `literal path type ${type}`);
+}
+assert.equal((await inspect("Test-Path -LiteralPath 'readme.txt' -PathType Unknown")).decision, 'review');
+assert.equal((await inspect("if (Test-Path -LiteralPath 'readme.txt' -PathType Leaf) { Get-Content -LiteralPath '..\\protected\\secret' }")).decision, 'review', 'path type does not bypass protected file checks');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
 assert.equal((await inspect("Get-ChildItem -Path 'glob-read\\*.md' | Select-Object Name")).decision, 'review',
   'unbound wildcard listing may follow a newly matched directory link, including a network link');

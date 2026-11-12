@@ -235,6 +235,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - 再次对可读取的 34 条历史 `windows_analysis_incomplete` 请求进行只读回放：推荐与全自动的自动通过判断无差异；11 条由分类器直接放行、9 条匹配回放所覆盖的固定助手、14 条未由这些路径放行（其中 3 条被分类为高风险目标）。回放未执行命令，没有覆盖全部专用桥，也没有逐条证明线上结果；这些原本被拦截的样本不能推算生产通过率。未放行项仍包括 PowerShell 动态变量、循环及复杂条件等普通场景，应继续分析，不能宣称已满足 99% 目标。
 
+- PowerShell `Test-Path` 现识别字面量 `-PathType Any|Container|Leaf`，并继续逐项判断条件分支中的实际操作。历史记录中一条 `Leaf` 检查由语法不支持变为自动通过，属于只读回放而非实际执行；两种模式使用相同判断。Windows PowerShell 动作回归通过，真实 Claude 和 Codex CLI 使用本地模拟模型在两种模式下执行带 `-PathType Leaf` 的隔离条件写入均通过，未消耗官方额度。该源码尚未部署到正式实例，单条样本不能证明总体审批频率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
