@@ -66,6 +66,24 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   eq('empty approval yields no command', readGateCommand({}), '');
 }
 
+// Ambiguous argv must not be flattened into a different managed command.
+for (const argv of [
+  ['/bin/bash', '-c', 'rm /tmp/a'],
+  ['rm', '/tmp/a b'],
+  ['echo', ''],
+  ['echo', '$(touch /tmp/a)'],
+  ['PATH=/tmp', 'sudo', 'id'],
+  ['echo', 42],
+  [],
+]) {
+  eq(`ambiguous argv requires review in privileged mode: ${JSON.stringify(argv)}`,
+    decidePrivilegedGate(codexApproval(argv), { privilegedMode: true }).decision, PRIVILEGED_GATE_DECISION.PROMPT);
+  for (const riskMode of ['safe', 'recommended', 'full-auto']) {
+    eq(`ambiguous argv requires review in ${riskMode}: ${JSON.stringify(argv)}`,
+      decideRiskGate(codexApproval(argv), { riskMode }).decision, PRIVILEGED_GATE_DECISION.PROMPT);
+  }
+}
+
 // --- gated permission-mode recognition (plan/on-request emit per-tool requests) ---
 {
   for (const gated of ['default', 'plan', 'acceptEdits', 'on-request', 'on-request-workspace-write',

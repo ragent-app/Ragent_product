@@ -190,6 +190,16 @@ function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+// Joining argv with spaces is only lossless for this conservative subset.
+// In particular, shell scripts, empty arguments and quoted paths cannot be
+// safely reconstructed from the joined string for managed execution.
+function hasAmbiguousCommandArgv(approval) {
+  const command = approval?.params?.command;
+  return Array.isArray(command) && (command.length === 0
+    || (typeof command[0] === 'string' && command[0].includes('='))
+    || command.some((part) => typeof part !== 'string' || !/^[A-Za-z0-9_./:@=+%,-]+$/.test(part)));
+}
+
 // Pull the shell command out of a gate request. The two runtimes shape this
 // differently:
 //   Claude bidi        — { tool_name: 'Bash', input: { command } }
@@ -230,6 +240,10 @@ export function decidePrivilegedGate(approval, options = {}) {
   }
   if (!approval?.approvalId) {
     return { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'not an approval request' };
+  }
+
+  if (hasAmbiguousCommandArgv(approval)) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: 'command argument boundaries require owner review' };
   }
 
   const command = readGateCommand(approval);
@@ -345,6 +359,10 @@ export function decideRiskGate(approval, options = {}) {
   }
   if (!approval?.approvalId) {
     return { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'not an approval request' };
+  }
+
+  if (hasAmbiguousCommandArgv(approval)) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: 'command argument boundaries require owner review' };
   }
 
   const { toolName, toolInput, command } = readGateToolContext(approval);
