@@ -5,6 +5,7 @@
 ## 2026-11-11 Windows 与三星补充进展
 
 - Windows 审批器已支持一部分静态 Bash 管道和常见 Git 只读参数，并区分上下文不足、配置不可信、额外权限等原因；`recommended` 与 `full-auto` 继续使用同一自动放行标准。
+- 2026-11-12 在本机 Windows 重跑 `test-windows-approval-gate.mjs`、`test-windows-bash-actions.mjs`、`test-windows-powershell-actions.mjs` 和 `test-windows-sidecar-approval-live.mjs`，四项均通过，最后一项覆盖 Claude 和 Codex 的 sidecar 决策。这些是本地回归，不能代表真实生产工作负载的审批频率；执行期间共享工作区另有并行修改。
 - 本机发现 ripgrep 配置可以改变默认搜索范围或运行预处理器。对于受支持的绝对路径搜索，托管桥接会先禁用隐式配置，再重新通过风险门；真实 Windows Codex App Server 使用本地模拟模型服务验证了两种档位，未使用官方账号额度。Codex Hook 的相对路径搜索仍缺少可靠的实际工作目录；Claude 的受支持相对路径搜索现已使用运行时目录校验。
 - 三星 SM-S9060、Android 16 上，审批界面和事件重放合计 18 项全部通过。该测试使用设备上的合成数据，不能证明手机经真实服务提交审批的链路已经通过。
 - 2026-11-12 再次用同一三星和已有隔离测试 APK，连接当前 Windows 审批分类和队列：Claude 危险请求拒绝回传 1/1 通过，Codex 同组两个请求的一次拒绝回传 1/1 通过。两次使用本机 HTTP 测试适配器和 USB 反向端口，未调用真实账号；测试后已移除测试包和端口映射。
