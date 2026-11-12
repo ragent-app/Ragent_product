@@ -1072,6 +1072,13 @@ function hasUnresolvedResultApproval(run, result) {
     run?.actionPause?.kind === 'approved_action' && run?.actionPause?.state === 'waiting_user');
 }
 
+function linuxScopeAttempt(run) {
+  const attempt = run?.runnerLaunchAttempt;
+  if (attempt === undefined || attempt === null) return 0;
+  if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt > 10000) throw new Error('Invalid Run launch attempt');
+  return attempt;
+}
+
 async function requireRunnerScopeFinalization(run, manifest) {
   let invalidated = false;
   try {
@@ -2055,15 +2062,47 @@ export async function getRunResult(runId) {
     // A disabled feature must not strand results staged by the previous
     // control-service process. Recovery only revokes; it cannot grant scope.
     try { await lstat(runPendingResultPath(runId)); recoverPending = true; }
-    catch (error) { if (error.code !== 'ENOENT') return null; }
+    catch (error) {
+      if (error.code !== 'ENOENT') return null;
+      try {
+        const run = await getRunUnlocked(runId);
+        if (run) {
+          const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+          recoverPending = await hasLinuxRunControlBinding(runId, linuxScopeAttempt(run));
+        }
+      } catch { return null; }
+    }
   }
   if (recoverPending) {
     return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
+      const confirmCompletion = async (run, manifest, attempt) => {
+        const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+        if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: attempt })) return false;
+        const { hasLinuxRunCompletionReceipt, persistLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+        if (await hasLinuxRunCompletionReceipt(runId, attempt)) return true;
+        const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+        await persistLinuxRunCancelIntent(runId, attempt);
+        const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
+        if ((await revokeLinuxRunScope(run, { enabled: true, timeoutMs: 10_000 })).state !== 'revoked') return false;
+        await persistLinuxRunCompletionReceipt(runId, attempt);
+        return true;
+      };
       let handle;
       try {
         handle = await open(runPendingResultPath(runId), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
       } catch (error) {
-        if (error.code === 'ENOENT') return getRunResultUnlocked(runId);
+        if (error.code === 'ENOENT') {
+          const result = await getRunResultUnlocked(runId);
+          if (!result) return result;
+          const run = await getRunUnlocked(runId);
+          if (!run || hasUnresolvedResultApproval(run, result)) return result;
+          try {
+            const attempt = linuxScopeAttempt(run);
+            const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+            if (!await hasLinuxRunControlBinding(runId, attempt)) return result;
+            return await confirmCompletion(run, await getRunManifestUnlocked(runId), attempt) ? result : null;
+          } catch { return null; }
+        }
         return null;
       }
       let pending;
@@ -2074,18 +2113,14 @@ export async function getRunResult(runId) {
       } catch { return null; }
       finally { await handle.close(); }
       const run = await getRunUnlocked(runId), manifest = await getRunManifestUnlocked(runId);
-      const attempt = Number.isSafeInteger(run?.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
+      let attempt;
+      try { attempt = linuxScopeAttempt(run); } catch { return null; }
       if (!pending || Object.keys(pending).sort().join(',') !== 'launchAttempt,publicationId,result,runId,version' ||
           pending.version !== 1 || pending.runId !== runId || pending.launchAttempt !== attempt ||
           pending.publicationId !== run?.runPublication?.publicationId || !pending.result ||
           typeof pending.result !== 'object' || Array.isArray(pending.result) || hasUnresolvedResultApproval(run, pending.result)) return null;
       try {
-        const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
-        if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: attempt })) return null;
-        const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
-        await persistLinuxRunCancelIntent(runId, attempt);
-        const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
-        if ((await revokeLinuxRunScope(run, { enabled: true, timeoutMs: 10_000 })).state !== 'revoked') return null;
+        if (!await confirmCompletion(run, manifest, attempt)) return null;
         await writeJsonAtomic(runResultPath(runId), pending.result, { ...COMPACT_JSON_OPTIONS, durable: true });
         runResultCache.set(runId, pending.result);
         await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);

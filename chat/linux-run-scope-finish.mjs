@@ -1,6 +1,7 @@
 import { verifyLinuxRunControlBinding } from './linux-run-control-binding.mjs';
 import { persistLinuxRunCancelIntent } from './linux-run-cancel-intent.mjs';
 import { revokeLinuxRunScope } from './linux-run-scope-lifecycle.mjs';
+import { persistLinuxRunCompletionReceipt } from './linux-run-completion-receipt.mjs';
 export { LINUX_RUN_SCOPE_FINISH_PATH } from './linux-run-scope-finish-path.mjs';
 
 // A runner can only invalidate its own bound scope. It cannot create or
@@ -17,4 +18,5 @@ export async function finishLinuxRunScope(input, { enabled = process.env.AGENTOC
   // that no earlier registered operation remains in flight.
   const result = await revokeLinuxRunScope({ id: input.runId, runnerLaunchAttempt: input.launchAttempt }, { timeoutMs: 10_000 });
   if (result.state !== 'revoked') throw new Error('Run scope revocation unavailable');
+  await persistLinuxRunCompletionReceipt(input.runId, input.launchAttempt);
 }

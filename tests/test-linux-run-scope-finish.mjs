@@ -16,7 +16,7 @@ test('runner terminal write invalidates only its protected control binding',
       process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
-      const { createRun, getRunResult, runPendingResultPath, runResultPath, runStatusPath, updateRun } = await import('../chat/runs.mjs');
+      const { createRun, getRunResult, runPendingResultPath, runResultPath, runStatusPath, updateRun, writeRunResult } = await import('../chat/runs.mjs');
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
       const { notifyLinuxRunScopeFinished } = await import('../chat/linux-run-scope-finish-client.mjs');
@@ -161,6 +161,34 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(pausedCode, 0, pausedError);
         assert.deepEqual(await getRunResult(pausedId), outcome);
         assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), false);
+        await updateRun(pausedId, { state: 'running', approvedActionPending: null, actionPause: null });
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        assert.equal(await getRunResult(pausedId), null);
+        assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), true);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        assert.deepEqual(await getRunResult(pausedId), outcome);
+        const receipt = `${root}/config/linux-run-cancel-intents/${createHash('sha256').update(pausedId).digest('hex')}-0.completion.json`;
+        const savedReceipt = JSON.parse(await readFile(receipt, 'utf8'));
+        assert.equal(savedReceipt.runId, pausedId);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        assert.deepEqual(await getRunResult(pausedId), outcome);
+        await writeFile(receipt, JSON.stringify({ ...savedReceipt, publicationId: 'tampered' }));
+        assert.equal(await getRunResult(pausedId), null);
+        await writeFile(receipt, JSON.stringify(savedReceipt));
+        assert.deepEqual(await getRunResult(pausedId), outcome);
+        const pausedStatus = JSON.parse(await readFile(runStatusPath(pausedId), 'utf8'));
+        await writeFile(runStatusPath(pausedId), JSON.stringify({ ...pausedStatus, runnerLaunchAttempt: 'invalid' }));
+        assert.equal(await getRunResult(pausedId), null);
+        await writeFile(runStatusPath(pausedId), JSON.stringify(pausedStatus));
+        assert.deepEqual(await getRunResult(pausedId), outcome);
+        const ordinaryId = 'run_ordinaryfixture1';
+        await createRun({ status: { id: ordinaryId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+        await writeRunResult(ordinaryId, outcome);
+        assert.deepEqual(await getRunResult(ordinaryId), outcome);
+        const legacyId = 'old-run';
+        await createRun({ status: { id: legacyId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+        await writeRunResult(legacyId, outcome);
+        assert.deepEqual(await getRunResult(legacyId), outcome);
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });

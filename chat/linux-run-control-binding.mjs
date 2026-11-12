@@ -2,7 +2,7 @@
 // It contains a token hash, never the bearer token. The configured control
 // directory must be inaccessible to the distinct runner identity.
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { lstat, open } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { CONFIG_DIR } from '../lib/config.mjs';
@@ -92,4 +92,21 @@ export async function matchesLinuxRunControlBinding({ run, manifest, launchAttem
       binding.scopeDigest === computeExecutionScopeDigest(manifest?.executionScope) &&
       binding.tokenHash === manifest?.options?.approvedActionChannel?.tokenHash);
   } catch { return false; }
+}
+
+export async function hasLinuxRunControlBinding(runId, launchAttempt) {
+  // Older ordinary Runs cannot have been registered by this protocol.
+  if (typeof runId !== 'string' || !/^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) return false;
+  if (!Number.isSafeInteger(launchAttempt) || launchAttempt < 0 || launchAttempt > 10000) invalid();
+  try { await lstat(pathFor(runId, launchAttempt)); return true; }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+}
+
+// The caller still verifies the live Run and manifest separately. This is only
+// for persisting an immutable completion receipt in the same protected store.
+export async function readLinuxRunControlBindingRecord(runId, launchAttempt) {
+  await ensureLinuxRunCancelIntentStore();
+  const binding = await readBinding(pathFor(runId, launchAttempt));
+  if (!validBindingShape(binding) || binding.runId !== runId || binding.launchAttempt !== launchAttempt) invalid();
+  return binding;
 }
