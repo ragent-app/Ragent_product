@@ -6,6 +6,7 @@ import { createRendezvousInboxWait } from './rendezvous-inbox-wait.mjs';
 import {
   buildAccountJoinIntentProofMessage,
   buildInstanceProofMessage,
+  buildInstanceAccessGrantMessage,
   buildOwnerAuthDeviceMessage,
   buildProviderSyncPeerMessage,
   buildAccountRendezvousPollMessage,
@@ -41,6 +42,7 @@ import { getTurnConnectionLeases, resolveAccountEntitlement, effectiveDeviceKind
 import { prepareTurnHandoff, commitTurnHandoff, expireTurnHandoffs } from './turn-handoff-policy.mjs';
 import { issueTurnBrokerCapability } from '../lib/turn-broker-capability.mjs';
 import { assertAccountNotDeleting } from './account-deletion-policy.mjs';
+import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from './instance-access-grants.mjs';
 import { isTurnLeaseId, matchesTurnLeasePair, createTurnOperationRequestId, canAdmitTurnLeaseId, pruneTurnLeases,
   turnLeaseObservedAt, turnLeasePairClock } from '../lib/turn-lease-identity.mjs';
 import {
@@ -3101,6 +3103,53 @@ export function createOwnerAuthBroker({
     return binding;
   }
 
+  // A remote account ID alone never authorizes a grant. The owning instance
+  // signs the exact account, operation, request and its retained key.
+  async function manageInstanceAccessGrant(input) {
+    const instance = input?.instance && typeof input.instance === 'object' ? input.instance : {};
+    const instanceId = trimString(instance.instanceId), publicKey = trimString(instance.publicKey);
+    const keyFingerprint = trimString(instance.keyFingerprint), ownerAccountId = trimString(input?.ownerAccountId);
+    const accountId = trimString(input?.accountId), operation = trimString(input?.operation);
+    const grantId = trimString(input?.grantId), requestId = trimString(input?.requestId);
+    const issuedAt = trimString(input?.issuedAt), audience = trimString(input?.audience);
+    const issuedMs = Date.parse(issuedAt);
+    if (![instanceId, ownerAccountId, accountId].every(value => /^[A-Za-z0-9_-]{8,160}$/.test(value))
+      || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !publicKey || publicKey.length > 4096
+      || !['issue', 'revoke'].includes(operation) || !/^[A-Za-z0-9_-]{16,128}$/.test(requestId)
+      || (operation === 'issue' ? Boolean(grantId) : !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId))
+      || audience !== 'agentoc-instance-access-grant' || !isProtocolField(issuedAt, { min: 20, max: 64 })
+      || !Number.isFinite(issuedMs) || Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
+      throw createError('instance_access_proof_invalid', 'Invalid instance access authorization proof.', 400);
+    }
+    let keyMatches = false;
+    try { keyMatches = createInstancePublicKeyFingerprint(publicKey) === keyFingerprint; } catch {}
+    const message = buildInstanceAccessGrantMessage({ instanceId, keyFingerprint, ownerAccountId,
+      accountId, operation, grantId, requestId, issuedAt, audience });
+    if (!keyMatches || !verifyInstanceProofSignature({ publicKey, message, signature: input?.signature })) {
+      throw createError('instance_access_proof_invalid', 'Invalid instance access authorization proof.', 401);
+    }
+    const result = await store.mutate(draft => {
+      if (Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
+        throw createError('instance_access_proof_invalid', 'Instance access authorization proof expired.', 401);
+      }
+      assertAccountNotDeleting(draft, ownerAccountId);
+      assertAccountNotDeleting(draft, accountId);
+      assertBoundAccount(draft, { instanceId, publicKey, keyFingerprint }, ownerAccountId);
+      if (operation === 'issue') {
+        const issued = issueInstanceAccessGrant(draft, { instanceId, ownerAccountId, accountId, requestId, now: clock() });
+        return { grantId: issued.grant.grantId, instanceId, accountId, scope: issued.grant.scope,
+          created: issued.created, revokedAt: issued.grant.revokedAt || null };
+      }
+      const grant = (draft.instanceAccessGrants || []).find(item => item.grantId === grantId);
+      if (!grant || grant.instanceId !== instanceId || grant.accountId !== accountId || grant.ownerAccountId !== ownerAccountId) {
+        throw createError('instance_access_unavailable', 'Instance access authorization is unavailable.', 403);
+      }
+      return { ...revokeInstanceAccessGrant(draft, { grantId, ownerAccountId, now: clock() }), instanceId, accountId };
+    });
+    audit({ event: `instance_access.${operation}`, instanceId, ownerAccountId, accountId, grantId: result.grantId });
+    return result;
+  }
+
   function removeAccountComputerAssociation(draft, accountId, instanceId, now) {
     const intentIds = new Set(getAccountJoinIntents(draft).filter((item) => item.instanceId === instanceId).map((item) => item.intentId));
     const releasedConnections = releaseRevokedInstanceTurnConnections(draft, {
@@ -4260,5 +4309,6 @@ export function createOwnerAuthBroker({
     publishAccountSyncCatalog,
     listBindingHistory,
     discoverInstances,
+    manageInstanceAccessGrant,
   };
 }
