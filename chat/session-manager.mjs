@@ -608,6 +608,8 @@ let orphanRunSweepPromise = null;
 let orphanRunSweepTimer = null;
 let linuxRunScopeRecoveryTimer = null;
 let linuxRunScopeRecoveryPromise = null;
+let linuxRunScopeRenewalTimer = null;
+let linuxRunScopeRenewalPromise = null;
 
 // Memory registry (DS-06): active detached-run watchers.
 registerCache('observedRuns', {
@@ -9615,6 +9617,19 @@ export async function startDetachedRunObservers() {
     recover(true);
     linuxRunScopeRecoveryTimer = setInterval(() => recover(false), 15_000);
     linuxRunScopeRecoveryTimer.unref?.();
+  }
+  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeRenewalTimer) {
+    const renewalSweep = import('./linux-run-scope-renewal.mjs')
+      .then(({ createLinuxRunScopeRenewalSweep }) => createLinuxRunScopeRenewalSweep());
+    const renew = (scanAll = false) => {
+      if (linuxRunScopeRenewalPromise) return;
+      linuxRunScopeRenewalPromise = renewalSweep.then((sweep) => sweep({ scanAll }))
+        .catch((error) => console.error(`[runs] privileged scope renewal failed: ${error.message}`))
+        .finally(() => { linuxRunScopeRenewalPromise = null; });
+    };
+    renew(true);
+    linuxRunScopeRenewalTimer = setInterval(() => renew(false), 30_000);
+    linuxRunScopeRenewalTimer.unref?.();
   }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {
