@@ -10,6 +10,8 @@ const { prepareNativeRunProviderHome } = await import(process.env.RAGENT_TEST_CO
   ? pathToFileURL(process.env.RAGENT_TEST_CODEX_PREP_ENTRY).href
   : '../lib/provider-runtime/run-provider-prepare.mjs');
 import { codexRunBindingPath, verifyCodexRunBinding } from '../lib/provider-runtime/codex-run-binding.mjs';
+import { createHash } from 'node:crypto';
+import { resolveCanonicalCodexAccountHome } from '../lib/provider-runtime/codex-account-home-registry.mjs';
 
 test('native preparation writes distinct account-bound records for concurrent runs', async (t) => {
   const parent = resolve(tmpdir());
@@ -39,4 +41,19 @@ test('native preparation writes distinct account-bound records for concurrent ru
   assert.equal(verifyCodexRunBinding(firstBinding, { runId: 'run_binding_first', providerId: 'profile-a', accountId: 'account-a' }), true);
   assert.equal(verifyCodexRunBinding(secondBinding, { runId: 'run_binding_second', providerId: 'profile-a', accountId: 'account-a' }), true);
   assert.equal(verifyCodexRunBinding(firstBinding, { runId: 'run_binding_second', providerId: 'profile-a', accountId: 'account-a' }), false);
+
+  await registry.upsertProviderProfile({ id: 'profile-b', agentType: 'codex', protocol: 'openai-responses',
+    baseUrl: 'https://chatgpt.com/backend-api/codex', authProfileId: 'auth-a', modelPolicy: { defaultModel: 'gpt-5.5' } });
+  const candidate = join(options.providerHomesRoot, 'by-provider', createHash('sha256').update('codex:profile-b').digest('hex').slice(0, 32));
+  const account = { configDir, providerHomesRoot: options.providerHomesRoot, accountId: 'account-a' };
+  await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: first.homeDir, initialize: true });
+  const otherManifest = { tool: 'codex', options: { providerProfile: 'profile-b', model: 'gpt-5.5' } };
+  await assert.rejects(prepareNativeRunProviderHome('run_binding_third', otherManifest, options), { code: 'CODEX_ACCOUNT_HANDOFF_REQUIRED' });
+  await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: candidate, initialize: true,
+    assertMigrationSafe: async () => ({ retainLegacySource: false }) });
+  const other = await prepareNativeRunProviderHome('run_binding_third', otherManifest, options);
+  assert.equal(other.ok, true);
+  assert.equal(other.homeDir, first.homeDir);
+  const otherBinding = JSON.parse(await readFile(codexRunBindingPath(home, 'run_binding_third'), 'utf8'));
+  assert.equal(verifyCodexRunBinding(otherBinding, { runId: 'run_binding_third', providerId: 'profile-b', accountId: 'account-a' }), true);
 });
