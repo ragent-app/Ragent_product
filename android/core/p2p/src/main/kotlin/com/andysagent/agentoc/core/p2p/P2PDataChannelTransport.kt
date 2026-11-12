@@ -283,7 +283,7 @@ class WebRTCDataChannelTransport(
         override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
             connectionStateWakeup.signal()
-            Log.i(TAG, "ice_connection_state=" + state)
+            Log.i(TAG, "ice_connection_state=$state channel=$debugCarrierId")
             when (state) {
                 PeerConnection.IceConnectionState.DISCONNECTED -> {
                     iceDisconnected = true
@@ -328,7 +328,7 @@ class WebRTCDataChannelTransport(
                     // opened. Start the same bounded recovery in that order.
                     iceDisconnectWatchdog.channelOpened(iceDisconnected)
                     traceConnect("channel_open")
-                    Log.i(TAG, "datachannel_open")
+                    Log.i(TAG, "datachannel_open channel=$debugCarrierId")
                 }
                 DataChannel.State.CLOSING, DataChannel.State.CLOSED -> {
                     failConnection("DataChannel entered ${dataChannel?.state()}")
@@ -458,7 +458,7 @@ class WebRTCDataChannelTransport(
         }
 
         override fun onError(error: String) {
-            Log.e(TAG, "signaling_error=" + error)
+            Log.e(TAG, "signaling_error=$error channel=$debugCarrierId")
             if (!isOpen) failConnection(error)
         }
     }
@@ -663,7 +663,7 @@ class WebRTCDataChannelTransport(
                                 sendDataChannelFrame(channel, frame)
                             }
                             if (trace) Log.w(TAG, "projects_trace id=$id stage=sent")
-                            Log.i(TAG, "datachannel_request_sent id=$id wireBytes=${payload.size}")
+                            Log.i(TAG, "datachannel_request_sent id=$id wireBytes=${payload.size} channel=$debugCarrierId")
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {
@@ -1032,7 +1032,7 @@ class WebRTCDataChannelTransport(
             val response = json.decodeFromString(P2PHttpResponse.serializer(), raw)
             val pendingRequest = pending.remove(response.id) ?: return
             responseStreams.discard(response.id)
-            Log.i(TAG, "datachannel_response id=${response.id} status=${response.status} error=${response.error != null}")
+            Log.i(TAG, "datachannel_response id=${response.id} status=${response.status} error=${response.error != null} channel=$debugCarrierId")
             if (response.error == null && response.status in 200..299) successfulResponses.incrementAndGet()
             pendingRequest.onResponse(response)
         } catch (_: Exception) {
