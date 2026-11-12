@@ -94,6 +94,7 @@ import {
 import { RESUMABLE_UPLOAD_CONTRACT, UPLOAD_CHUNK_REQUEST_TIMEOUT_MS,
   uploadChunkHeaders, MAX_STABLE_UPLOAD_BYTES } from './file-asset-upload-checkpoints.mjs';
 import { accountFileUploadMaximumBytes } from './file-asset-account-policy.mjs';
+import { fileAssetAccountContext, canAccessFileAssetUpload } from './file-asset-account-context.mjs';
 import { fileAssetRelayJobs } from './file-asset-relay-jobs.mjs';
 import { pathExists } from './fs-utils.mjs';
 import { queryUsageLedger } from './usage-ledger.mjs';
@@ -1323,12 +1324,15 @@ export async function handleControlRoutes({
       return true;
     }
     try {
+      const uploadAccount = fileAssetAccountContext(authSession);
       const receipt = await findFileAssetUploadReceipt({ sessionId, requestId: parsedUrl?.query?.requestId,
+        principalScope: uploadAccount.principalScope,
         scopeCondition: readSessionApiScopeHeader(req, sessionId) });
       if (receipt?.asset?.status === 'ready') {
         const binding = await getOwnerAccountBinding();
-        if (binding?.accountId && (!authSession?.accountId || authSession.accountId === binding.accountId)) {
+        if (binding?.accountId && (authSession?.workspaceAccess || !authSession?.accountId || authSession.accountId === binding.accountId)) {
           await completeOwnerAccountFileUpload({ requestId: parsedUrl?.query?.requestId,
+            ...uploadAccount.quotaOptions,
             quotaBatchId: receipt.quotaBatchId || parsedUrl?.query?.requestId,
             sizeBytes: receipt.asset.sizeBytes, sha256: receipt.asset.sha256 });
         }
@@ -1367,9 +1371,15 @@ export async function handleControlRoutes({
         return true;
       }
       const accountBinding = await getOwnerAccountBinding();
+      const uploadAccount = fileAssetAccountContext(authSession);
+      if (authSession?.workspaceAccess && !accountBinding?.accountId) {
+        writeJson(res, 403, { error: 'Workspace account binding is unavailable.', code: 'PERMISSION_DENIED' });
+        return true;
+      }
       let quotaReservation = null;
       if (accountBinding?.accountId) {
-        if (authSession?.accountId && authSession.accountId !== accountBinding.accountId) {
+        if (authSession?.workspaceAccess ? authSession.workspaceAccess.ownerAccountId !== accountBinding.accountId
+          : (authSession?.accountId && authSession.accountId !== accountBinding.accountId)) {
           writeJson(res, 403, { error: 'The signed-in account does not match this computer.', code: 'PERMISSION_DENIED' });
           return true;
         }
@@ -1381,13 +1391,14 @@ export async function handleControlRoutes({
           writeJson(res, 400, { error: 'This account requires a message attachment batch identity.', code: 'FILE_ASSET_QUOTA_BATCH_REQUIRED' });
           return true;
         }
-        quotaReservation = await reserveOwnerAccountFileUpload({ requestId: payload.requestId,
+        quotaReservation = await reserveOwnerAccountFileUpload({ requestId: payload.requestId, ...uploadAccount.quotaOptions,
           quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 });
       }
       let intent;
       try {
         intent = await createFileAssetUploadIntent({
           sessionId,
+          principalScope: uploadAccount.principalScope,
           originalName: typeof payload?.originalName === 'string' ? payload.originalName : '',
           mimeType: typeof payload?.mimeType === 'string' ? payload.mimeType : '',
           sizeBytes: payload?.sizeBytes,
@@ -1399,13 +1410,13 @@ export async function handleControlRoutes({
         });
       } catch (error) {
         if (quotaReservation && !quotaReservation.duplicate) {
-          await releaseOwnerAccountFileUpload({ requestId: payload.requestId,
+          await releaseOwnerAccountFileUpload({ requestId: payload.requestId, ...uploadAccount.quotaOptions,
             quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 }).catch(() => {});
         }
         throw error;
       }
       if (intent?.asset?.status === 'ready' && accountBinding?.accountId) {
-        await completeOwnerAccountFileUpload({ requestId: payload.requestId,
+        await completeOwnerAccountFileUpload({ requestId: payload.requestId, ...uploadAccount.quotaOptions,
           quotaBatchId: payload.quotaBatchId, sizeBytes: payload.sizeBytes, sha256: payload.sha256 });
       }
       writeJson(res, 200, intent);
@@ -1443,7 +1454,7 @@ export async function handleControlRoutes({
     const asset = await getFileAsset(fileAssetRoute.assetId);
     if (!asset) { req.resume?.(); writeJson(res, 404, { code: 'FILE_ASSET_NOT_FOUND' }); return true; }
     if (!await requireSessionAccess(res, authSession, asset.sessionId, { metadataOnly: true })) { req.resume?.(); return true; }
-    if (asset.uploadRequest?.principalScope !== 'owner' || !getGrantedCapability(authSession, 'uploadAttachments', true)) {
+    if (!canAccessFileAssetUpload(authSession, asset) || !getGrantedCapability(authSession, 'uploadAttachments', true)) {
       req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true;
     }
     try {
@@ -1490,7 +1501,7 @@ export async function handleControlRoutes({
     if (!await requireSessionAccess(res, authSession, asset.sessionId, { metadataOnly: true })) {
       req.resume?.(); return true;
     }
-    if (asset.uploadRequest?.principalScope !== 'owner' ||
+    if (!canAccessFileAssetUpload(authSession, asset) ||
         !getGrantedCapability(authSession, 'uploadAttachments', true)) {
       req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true;
     }
@@ -1516,6 +1527,7 @@ export async function handleControlRoutes({
       return true;
     }
     if (!await requireSessionAccess(res, authSession, asset.sessionId, conditionalUpload ? { metadataOnly: true } : undefined)) return true;
+    if (!canAccessFileAssetUpload(authSession, asset, { allowLegacy: true })) { req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true; }
     if (!getGrantedCapability(authSession, 'uploadAttachments', true)) {
       writeJson(res, 403, { error: 'Access denied' });
       return true;
@@ -1542,6 +1554,7 @@ export async function handleControlRoutes({
       return true;
     }
     if (!await requireSessionAccess(res, authSession, asset.sessionId, conditionalUpload ? { metadataOnly: true } : undefined)) return true;
+    if (!canAccessFileAssetUpload(authSession, asset, { allowLegacy: true })) { req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true; }
     if (!getGrantedCapability(authSession, 'uploadAttachments', true)) {
       writeJson(res, 403, { error: 'Access denied' });
       return true;
@@ -1565,8 +1578,9 @@ export async function handleControlRoutes({
       });
       if (next?.status === 'ready' && asset.uploadRequest?.key) {
         const binding = await getOwnerAccountBinding();
-        if (binding?.accountId && (!authSession?.accountId || authSession.accountId === binding.accountId)) {
+        if (binding?.accountId && (authSession?.workspaceAccess || !authSession?.accountId || authSession.accountId === binding.accountId)) {
           await completeOwnerAccountFileUpload({ requestId: asset.uploadRequest.key,
+            ...fileAssetAccountContext(authSession).quotaOptions,
             quotaBatchId: asset.uploadRequest.quotaBatchId || asset.uploadRequest.key,
             sizeBytes: asset.sizeBytes, sha256: asset.sha256 });
         }

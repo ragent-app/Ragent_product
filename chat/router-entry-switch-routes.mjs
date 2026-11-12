@@ -107,6 +107,12 @@ export async function handleEntrySwitchRoutes({ req, res, pathname, authSession,
       writeJson(res, 403, { error: 'Owner access required' });
       return true;
     }
+    // The introduction protocol currently creates an unrestricted owner
+    // cookie on the destination. A shared member must not inherit it.
+    if (authSession.workspaceAccess) {
+      writeJson(res, 403, { error: 'Entry switching is unavailable for shared workspaces', code: 'workspace_capability_unsupported' });
+      return true;
+    }
     let body;
     try {
       body = JSON.parse(await readBody(req, MAX_INVITE_BODY_BYTES));

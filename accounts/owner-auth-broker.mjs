@@ -77,7 +77,7 @@ const TARGET_RUNTIME_AUTH_MAX_LIFETIME_MS = 5 * 60 * 1000;
 const DELIVERY_MODES = new Set(['browser_callback', 'instance_poll']);
 
 /** Revocation releases only this account's leases for the exact computer. */
-export function releaseRevokedInstanceTurnConnections(draft, { accountId, instanceId, nowMs }) {
+export function releaseRevokedInstanceTurnConnections(draft, { accountId, instanceId, nowMs, reason = 'computer-unbound' }) {
   if (!accountId || !instanceId || !Number.isFinite(nowMs)) throw new TypeError('Revoked computer identity and time are required');
   let released = 0;
   for (const lease of getTurnConnectionLeases(draft)) {
@@ -86,7 +86,7 @@ export function releaseRevokedInstanceTurnConnections(draft, { accountId, instan
     lease.status = 'released';
     lease.updatedAt = now;
     lease.releasedAt = now;
-    lease.releaseReason = 'computer-unbound';
+    lease.releaseReason = reason;
     released++;
   }
   return released;
@@ -3255,7 +3255,11 @@ export function createOwnerAuthBroker({
       if (!grant || grant.instanceId !== instanceId || grant.accountId !== accountId || grant.ownerAccountId !== ownerAccountId) {
         throw createError('instance_access_unavailable', 'Instance access authorization is unavailable.', 403);
       }
-      return { ...revokeInstanceAccessGrant(draft, { grantId, ownerAccountId, now: clock() }), instanceId, accountId };
+      const wasActive = !grant.revokedAt, now = clock();
+      const revoked = revokeInstanceAccessGrant(draft, { grantId, ownerAccountId, now });
+      const releasedConnections = wasActive ? releaseRevokedInstanceTurnConnections(draft,
+        { accountId, instanceId, nowMs: now, reason: 'workspace-access-revoked' }) : 0;
+      return { ...revoked, instanceId, accountId, releasedConnections };
     });
     audit({ event: `instance_access.${operation}`, instanceId, ownerAccountId, accountId, grantId: result.grantId });
     return result;
@@ -3263,8 +3267,13 @@ export function createOwnerAuthBroker({
 
   function removeAccountComputerAssociation(draft, accountId, instanceId, now) {
     const intentIds = new Set(getAccountJoinIntents(draft).filter((item) => item.instanceId === instanceId).map((item) => item.intentId));
-    const releasedConnections = releaseRevokedInstanceTurnConnections(draft, {
+    let releasedConnections = releaseRevokedInstanceTurnConnections(draft, {
       accountId, instanceId, nowMs: new Date(now).getTime(),
+    });
+    const memberIds = new Set((draft.instanceAccessGrants || []).filter(grant => grant.instanceId === instanceId
+      && grant.ownerAccountId === accountId && !grant.revokedAt).map(grant => grant.accountId));
+    for (const memberId of memberIds) releasedConnections += releaseRevokedInstanceTurnConnections(draft, {
+      accountId: memberId, instanceId, nowMs: new Date(now).getTime(), reason: 'workspace-owner-unbound',
     });
     draft.accountJoinGrants = getAccountJoinGrants(draft).filter((grant) => grant.instanceId !== instanceId && !intentIds.has(grant.intentId));
     draft.accountJoinIntents = getAccountJoinIntents(draft).filter((intent) => !intentIds.has(intent.intentId));
@@ -3532,7 +3541,7 @@ export function createOwnerAuthBroker({
     });
   }
 
-  function assertUploadAccount(draft, normalized) {
+  function assertQuotaAccount(draft, normalized) {
     if (!normalized.grantId) return assertBoundAccount(draft, normalized.instance, normalized.accountId);
     const access = resolveInstanceWorkspaceAccess(draft, { instanceId: normalized.instance.instanceId, accountId: normalized.accountId });
     if (access?.kind !== 'workspace' || access.grant.grantId !== normalized.grantId) {
@@ -3540,6 +3549,7 @@ export function createOwnerAuthBroker({
     }
     assertBoundInstanceKey(access.binding, normalized.instance);
     assertDemoAccount(draft, access.binding.accountId, normalized.instance.instanceId);
+    assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
     return access.binding;
   }
 
@@ -3548,7 +3558,7 @@ export function createOwnerAuthBroker({
   async function getAccountFileUploadPolicy(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'policy', clock);
     return store.mutate((draft) => {
-      assertUploadAccount(draft, normalized);
+      assertQuotaAccount(draft, normalized);
       assertAccountNotDeleting(draft, normalized.accountId);
       assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
       const entitlement = resolveEntitlement(draft, normalized.accountId, clock());
@@ -3560,7 +3570,7 @@ export function createOwnerAuthBroker({
   async function reserveAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'reserve', clock);
     const result = await store.mutate(async (draft) => {
-      assertUploadAccount(draft, normalized);
+      assertQuotaAccount(draft, normalized);
       assertAccountNotDeleting(draft, normalized.accountId);
       assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
       const now = clock();
@@ -3611,7 +3621,7 @@ export function createOwnerAuthBroker({
   async function completeAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'complete', clock);
     const result = await store.mutate(async (draft) => {
-      assertUploadAccount(draft, normalized);
+      assertQuotaAccount(draft, normalized);
       assertAccountNotDeleting(draft, normalized.accountId);
       assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
       const now = clock();
@@ -3648,7 +3658,7 @@ export function createOwnerAuthBroker({
   async function releaseAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'release', clock);
     const result = await store.mutate(async (draft) => {
-      assertUploadAccount(draft, normalized);
+      assertQuotaAccount(draft, normalized);
       const now = clock();
       const row = getAccountFileUploads(draft).find((item) => item.accountId === normalized.accountId
         && item.requestId === normalized.requestId);
@@ -3860,6 +3870,7 @@ export function createOwnerAuthBroker({
       clock,
     });
     const accountId = trimString(input?.accountId);
+    const grantId = trimString(input?.grantId);
     const deviceId = trimString(input?.deviceId);
     const connectionId = trimString(input?.connectionId);
     const deviceKind = normalizeTurnDeviceKind(input?.deviceKind, 'phone');
@@ -3872,15 +3883,18 @@ export function createOwnerAuthBroker({
       deviceId,
     });
     const protocolVersion = input?.protocolVersion === 3 ? 3 : input?.protocolVersion === 2 ? 2 : 1;
+    if (grantId && (protocolVersion < 2 || !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId))) {
+      throw createError('turn_connection_request_invalid', 'Invalid workspace TURN authorization.', 400);
+    }
     if (!expectedConnectionId || (protocolVersion >= 2
       ? !matchesTurnLeasePair(connectionId, expectedConnectionId) : expectedConnectionId !== connectionId)) {
       throw createError('turn_connection_identity_invalid', 'TURN connection identity is invalid.', 400);
     }
     const expectedRequestId = protocolVersion >= 2 ? createTurnOperationRequestId({ purpose, protocolVersion,
-      accountId, instanceId: instance.instanceId, deviceId, deviceKind, connectionId,
+      accountId, grantId, instanceId: instance.instanceId, deviceId, deviceKind, connectionId,
       expiresAt: input?.expiresAt, reason: input?.reason }) : connectionId;
     if (requestId !== expectedRequestId) throw createError('turn_connection_proof_mismatch', 'TURN operation parameters differ from the signed proof.', 401);
-    return { requestId, instance, accountId, deviceId, connectionId, deviceKind, protocolVersion };
+    return { requestId, instance, accountId, grantId, deviceId, connectionId, deviceKind, protocolVersion };
   }
 
   function publicTurnLease(lease, authorization) {
@@ -3950,7 +3964,7 @@ export function createOwnerAuthBroker({
       throw createError('turn_connection_expiry_invalid', 'TURN connection expiry is invalid.', 400);
     }
     const result = await store.mutate(async (draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertQuotaAccount(draft, normalized);
       const nowMs = clock();
       pruneUnrefreshableAccountPhoneSessions(draft, normalized.accountId, nowMs);
       releaseInactiveAccountPhoneLeases(draft, normalized.accountId, nowMs);
@@ -4146,7 +4160,7 @@ export function createOwnerAuthBroker({
   async function releaseTurnConnection(input) {
     const normalized = normalizeTurnConnectionInput(input, 'turn-release');
     const result = await store.mutate(async (draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertQuotaAccount(draft, normalized);
       const lease = getTurnConnectionLeases(draft).find((entry) => (
         entry.connectionId === normalized.connectionId
         && entry.accountId === normalized.accountId
@@ -4178,7 +4192,7 @@ export function createOwnerAuthBroker({
     const normalized = normalizeTurnConnectionInput(input, 'turn-handoff-commit');
     if (normalized.protocolVersion !== 3) throw createError('turn_handoff_request_invalid', 'Handoff protocol is required.', 400);
     return store.mutate(async (draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertQuotaAccount(draft, normalized);
       const now = clock();
       pruneUnrefreshableAccountPhoneSessions(draft, normalized.accountId, now);
       releaseInactiveAccountPhoneLeases(draft, normalized.accountId, now);

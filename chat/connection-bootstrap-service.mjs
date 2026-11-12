@@ -35,6 +35,7 @@ import {
 import { requestTurnCredentials } from '../lib/turn-credential-broker-client.mjs';
 import { createTurnLeaseId, matchesTurnLeasePair } from '../lib/turn-lease-identity.mjs';
 import { reserveRendezvousTurnConnection } from '../lib/rendezvous-turn-reservation.mjs';
+import { authorizeDeviceBinding, assertDeviceBindingNow } from '../lib/binding-authority-runtime.mjs';
 import {
   listActiveTurnConnectionDeviceIds,
   listActiveTurnConnectionInstanceIds,
@@ -63,8 +64,12 @@ async function resolveInstanceTurnRouting({ device, instanceId, turnAuthorizatio
   } catch {
     accountBinding = null;
   }
-  const accountMatches = Boolean(accountId && trimString(accountBinding?.accountId)
+  let accountMatches = Boolean(accountId && trimString(accountBinding?.accountId)
     && accountId === trimString(accountBinding.accountId));
+  if (device?.workspaceAccess) {
+    const authority = await authorizeDeviceBinding(device);
+    accountMatches = authority?.accountId === accountId && authority.workspaceAccess?.ownerAccountId === accountBinding?.accountId;
+  }
   const accountPlan = trimString(accountBinding?.plan || accountBinding?.tier || accountBinding?.subscriptionPlan) || 'free';
   const deviceKind = trimString(accountBinding?.deviceKind) || 'phone';
   const accountLimits = accountBinding?.limits && typeof accountBinding.limits === 'object'
@@ -296,6 +301,16 @@ export async function buildDeviceConnectionBootstrapContract({ deviceId, turnAut
     error.code = turnResult.authorization?.reasonCode || 'turn_bootstrap_unavailable';
     error.statusCode = 503;
     throw error;
+  }
+  if (device.workspaceAccess) {
+    try { assertDeviceBindingNow(device); }
+    catch (error) {
+      await releaseTurnConnectionLease({ deviceId: normalizedDeviceId, connectionId: turnResult.turn.connectionId,
+        reason: 'workspace-authority-expired' }).catch(() => {});
+      await releaseOwnerAccountTurnConnection({ deviceId: normalizedDeviceId, connectionId: turnResult.turn.connectionId,
+        reason: 'workspace-authority-expired' }).catch(() => {});
+      throw error;
+    }
   }
   const contract = buildConnectionBootstrapContract({
     instanceId,
