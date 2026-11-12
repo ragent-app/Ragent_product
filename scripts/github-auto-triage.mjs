@@ -1464,9 +1464,9 @@ function actionSummary(action) {
   if (action.mode === 'posted') return `posted at ${action.commentUrl}`;
   if (action.mode === 'submitted') return action.duplicate === true
     ? `reused existing run ${action.runId}`
-    : `submitted to AgentoC run ${action.runId}`;
-  if (action.mode === 'processing') return action.reason || 'waiting for AgentoC run';
-  if (action.mode === 'dry-run') return 'AgentoC reply ready (dry-run)';
+    : `submitted to Ragent run ${action.runId}`;
+  if (action.mode === 'processing') return action.reason || 'waiting for Ragent run';
+  if (action.mode === 'dry-run') return 'Ragent reply ready (dry-run)';
   if (action.mode === 'failed') return action.reason || 'automation failed';
   return action.reason;
 }
@@ -1614,7 +1614,7 @@ async function main() {
         latestExternalActivity,
         latestMaintainerActivity,
         latestTaggedReplyAt: taggedReply?.updated_at || taggedReply?.created_at || null,
-        actionLabel: needsReply ? 'preparing AgentoC submission' : actionSummary(action),
+        actionLabel: needsReply ? 'preparing Ragent submission' : actionSummary(action),
         relevantContext,
         replyBody: trimString(automation?.replyBody),
         automation,
@@ -1632,7 +1632,7 @@ async function main() {
         } else if (sameEvent && ['processing_for_reply', 'reply_ready'].includes(automation?.status)) {
           action = automation.status === 'reply_ready'
             ? { mode: 'processing', reason: 'reply ready pending publish' }
-            : { mode: 'processing', reason: 'awaiting AgentoC run' };
+            : { mode: 'processing', reason: 'awaiting Ragent run' };
         } else if (sameEvent && automation?.status === 'reply_failed') {
           action = { mode: 'failed', reason: automation.lastError || 'previous automation failed' };
         } else {
@@ -1653,7 +1653,7 @@ async function main() {
             sessionId: automation.sessionId,
             runId: automation.runId,
             duplicate: automation.duplicate === true,
-            reason: automation.duplicate === true ? 'reused existing run' : 'submitted to AgentoC',
+            reason: automation.duplicate === true ? 'reused existing run' : 'submitted to Ragent',
           };
         }
       }
