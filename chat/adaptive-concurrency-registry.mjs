@@ -217,6 +217,11 @@ export function getAdaptiveHarnessBudget(provider) {
     budget = createAdaptiveConcurrencyBudget({
       name,
       ...budgetOptions.harnessProvider,
+      // Ordinary Codex runs multiplex threads over one account broker. Keep
+      // two lanes available so transient failures cannot make the shared
+      // process behave like an exclusive per-account lock. The global budget
+      // still enforces host pressure, and an explicit max of one is respected.
+      ...(normalized === 'codex' ? { minLimit: Math.min(2, budgetOptions.harnessProvider.initialLimit, budgetOptions.harnessProvider.maxLimit) } : {}),
     });
     providerBudgets.set(name, budget);
     registerBudget(name, budget);

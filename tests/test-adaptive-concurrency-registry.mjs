@@ -20,6 +20,10 @@ foregroundLease.release({ durationMs: 1 });
 backgroundLease.release({ durationMs: 1 });
 
 const codex = getAdaptiveHarnessBudget('Codex');
+assert.equal(codex.snapshot().minLimit, Math.min(2, codex.snapshot().initialLimit, codex.snapshot().maxLimit));
+codex.setLimit(1, { reason: 'test_failure_backoff' });
+assert.equal(codex.currentLimit, codex.snapshot().minLimit, 'Codex keeps the configured minimum during backoff');
+codex.setLimit(codex.snapshot().initialLimit, { reason: 'test_restore' });
 const first = codex.tryAcquire({ priority: 'interactive' });
 const second = codex.tryAcquire({ priority: 'interactive' });
 const third = codex.tryAcquire({ priority: 'background' });
