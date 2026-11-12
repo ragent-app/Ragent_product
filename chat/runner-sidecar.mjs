@@ -21,6 +21,7 @@ import {
   codexAppServerBrokerLockPath,
   codexAppServerBrokerSocketPath,
   codexBrokerAccountDigest,
+  codexBrokerPolicyDigest,
   ensureCodexAppServerBroker,
 } from './codex-app-server-broker.mjs';
 import {
@@ -3968,10 +3969,14 @@ async function main() {
     ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
     : null;
   const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
+  if (appServerState && WORKBENCH_EXECUTION_POLICY?.codexPermissionProfile) {
+    // The operator profile supplies the approval policy through requirements.
+    appServerState.agentocApprovalGate = false;
+  }
   const sharedReadOnlyCodex = Boolean(process.platform === 'linux' && appServerState && codexOAuthRuntime
     && readOnlyRequested && !WORKBENCH_EXECUTION_POLICY);
   const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime
-    && (!readOnlyRequested || sharedReadOnlyCodex) && !WORKBENCH_EXECUTION_POLICY);
+    && (!readOnlyRequested || sharedReadOnlyCodex));
   const threadScopedCodexMcp = sharedCodexThreadSupported;
   const windowsBrokerChannel = manifest.options?.windowsBrokerChannel;
   const windowsBrokerMcpRequested = !readOnlyRequested && Boolean(
@@ -4327,9 +4332,11 @@ async function main() {
         upstreamWindowsVerbatimArguments: brokerCommand.windowsVerbatimArguments === true,
         cwd: resolvedFolder.cwd,
         env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, AGENTOC_CODEX_BROKER_BASE_PATH: codexBrokerBasePath,
+          ...(WORKBENCH_EXECUTION_POLICY ? { AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE: process.env.AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE } : {}),
           AGENTOC_CODEX_BROKER_SERVICE_MODE: process.platform === 'win32' && process.env.AGENTOC_RUNNER_LAUNCH_MODE === 'runner-supervisor' ? '1' : '0' },
         scriptPath: CODEX_APP_SERVER_BROKER_SCRIPT,
         assertLaunchBoundary: () => assertRunLaunchBoundary(runId),
+        expectedPolicyDigest: codexBrokerPolicyDigest(WORKBENCH_EXECUTION_POLICY),
       });
       spawnCommand = process.execPath;
       spawnArgs = [
@@ -4338,6 +4345,7 @@ async function main() {
         brokerSocketPath,
       ];
       spawnArgs.push('--account-digest', expectedAccountDigest);
+      if (WORKBENCH_EXECUTION_POLICY) spawnArgs.push('--policy-digest', codexBrokerPolicyDigest(WORKBENCH_EXECUTION_POLICY));
       spawnShell = false;
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;

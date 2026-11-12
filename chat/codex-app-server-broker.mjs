@@ -11,7 +11,7 @@
 // provider home on one machine; it is never part of peer synchronization.
 
 import { createHash } from 'node:crypto';
-import { buildWorkbenchCodexEnvironment, constrainCodexBrokerRequest } from '../lib/workbench-execution-policy.mjs';
+import { WORKBENCH_EXECUTION_POLICY, buildWorkbenchCodexEnvironment, constrainCodexBrokerRequest } from '../lib/workbench-execution-policy.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { connect, createServer } from 'node:net';
@@ -38,6 +38,12 @@ const BROKER_INTERNAL_INITIALIZE_ID = -1;
 export function codexBrokerAccountDigest(value) {
   const id = typeof value === 'string' ? value.trim() : '';
   return id ? createHash('sha256').update(`agentoc-codex-account:${id}`).digest('hex') : '';
+}
+
+export function codexBrokerPolicyDigest(policy = WORKBENCH_EXECUTION_POLICY) {
+  if (!policy) return '';
+  const keys = Object.keys(policy).sort();
+  return createHash('sha256').update(JSON.stringify(Object.fromEntries(keys.map(key => [key, policy[key]])))).digest('hex');
 }
 
 function codexAuthAccountId(tokens) {
@@ -161,7 +167,7 @@ function writeLine(socket, value) {
   }
 }
 
-async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied = false } = {}) {
+async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied = false, expectedPolicyDigest = '' } = {}) {
   const normalized = normalizeSocketPath(socketPath);
   if (!normalized) return false;
   return new Promise((resolve, reject) => {
@@ -198,7 +204,15 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
         buffer = buffer.slice(newline + 1);
         try {
           const message = JSON.parse(line);
-          if (message?.type === BROKER_PONG && message.ready === true) finish(true);
+          if (message?.type === BROKER_PONG && message.ready === true) {
+            if (expectedPolicyDigest && message.policyDigest !== expectedPolicyDigest) {
+              if (settled) return;
+              settled = true; clearTimeout(timer); socket.destroy();
+              const error = new Error('The existing Codex broker does not enforce the required workbench policy');
+              error.code = 'CODEX_BROKER_POLICY_MISMATCH'; reject(error); return;
+            }
+            finish(true);
+          }
         } catch {}
       }
     });
@@ -236,10 +250,10 @@ export async function spawnCodexAppServerProcess({
   });
 }
 
-async function waitForBroker(socketPath, timeoutMs = BROKER_READY_TIMEOUT_MS) {
+async function waitForBroker(socketPath, timeoutMs = BROKER_READY_TIMEOUT_MS, expectedPolicyDigest = '') {
   const deadline = Date.now() + Math.max(1_000, timeoutMs);
   while (Date.now() < deadline) {
-    if (await probeBroker(socketPath, 1_500)) return true;
+    if (await probeBroker(socketPath, 1_500, { expectedPolicyDigest })) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -263,6 +277,7 @@ export async function ensureCodexAppServerBroker({
   spawnImpl = spawn,
   acquireLockImpl = acquireNativeOAuthLock,
   assertLaunchBoundary = null,
+  expectedPolicyDigest = '',
 } = {}) {
   const normalizedSocket = normalizeSocketPath(socketPath);
   const file = trimString(upstreamFile);
@@ -272,7 +287,7 @@ export async function ensureCodexAppServerBroker({
     throw error;
   }
   if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
-  if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true })) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
+  if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true, expectedPolicyDigest })) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
 
   if (!isWindowsNamedPipePath(normalizedSocket)) {
     await mkdir(dirname(normalizedSocket), { recursive: true, mode: 0o770 });
@@ -286,7 +301,7 @@ export async function ensureCodexAppServerBroker({
       pollMs: 50,
     });
     if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
-    if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true })) {
+    if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true, expectedPolicyDigest })) {
       return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
     }
     // A refused connection means the previous broker is gone. Only remove the
@@ -311,7 +326,10 @@ export async function ensureCodexAppServerBroker({
     brokerPid = brokerChild.pid ?? null;
     // Keep creation serialized through initialize. A second caller otherwise
     // sees an unready socket, unlinks it, and starts a second refresh owner.
-    if (!(await waitForBroker(normalizedSocket, waitMs))) {
+    let ready;
+    try { ready = await waitForBroker(normalizedSocket, waitMs, expectedPolicyDigest); }
+    catch (error) { try { brokerChild?.kill?.('SIGTERM'); } catch {} throw error; }
+    if (!ready) {
       try { brokerChild?.kill?.('SIGTERM'); } catch {}
       const error = new Error('Codex app-server broker did not become ready');
       error.code = 'CODEX_APP_SERVER_BROKER_UNAVAILABLE';
@@ -639,7 +657,7 @@ function runBroker() {
     }
     if (stopping) return;
     if (message.type === BROKER_PING) {
-      sendClient(client, { type: BROKER_PONG, ready: upstreamReady,
+      sendClient(client, { type: BROKER_PONG, ready: upstreamReady, policyDigest: codexBrokerPolicyDigest(),
         ...(typeof message.expectedAccountDigest === 'string'
           ? { accountMatches: Boolean(accountDigest && message.expectedAccountDigest === accountDigest) } : {}) });
       return;

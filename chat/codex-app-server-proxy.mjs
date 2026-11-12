@@ -15,6 +15,8 @@ function readSocketPath() {
 const socketPath = readSocketPath();
 const accountIndex = process.argv.indexOf('--account-digest');
 const expectedAccountDigest = accountIndex >= 0 ? String(process.argv[accountIndex + 1] || '') : '';
+const policyIndex = process.argv.indexOf('--policy-digest');
+const expectedPolicyDigest = policyIndex >= 0 ? String(process.argv[policyIndex + 1] || '') : '';
 if (!socketPath) {
   console.error('Codex app-server proxy socket is required');
   process.exit(1);
@@ -23,11 +25,15 @@ if (accountIndex >= 0 && !/^[a-f0-9]{64}$/.test(expectedAccountDigest)) {
   console.error('Codex app-server proxy account binding is invalid');
   process.exit(1);
 }
+if (policyIndex >= 0 && !/^[a-f0-9]{64}$/.test(expectedPolicyDigest)) {
+  console.error('Codex app-server proxy policy binding is invalid');
+  process.exit(1);
+}
 
 const socket = connect(socketPath);
 let buffer = '';
 let connected = false;
-let verified = !expectedAccountDigest;
+let verified = !expectedAccountDigest && !expectedPolicyDigest;
 let inputClosed = false;
 let handshakeTimer;
 // Do not forward even an initialize request until this same connection has
@@ -44,7 +50,7 @@ function failHandshake() {
 
 socket.on('connect', () => {
   connected = true;
-  if (!expectedAccountDigest) {
+  if (!expectedAccountDigest && !expectedPolicyDigest) {
     process.stdin.resume();
     return;
   }
@@ -65,7 +71,9 @@ socket.on('data', (chunk) => {
     if (!verified) {
       let reply;
       try { reply = JSON.parse(line); } catch { failHandshake(); return; }
-      if (reply?.type !== 'agentoc-codex-broker-pong' || reply.ready !== true || reply.accountMatches !== true) {
+      if (reply?.type !== 'agentoc-codex-broker-pong' || reply.ready !== true
+          || (expectedAccountDigest && reply.accountMatches !== true)
+          || (expectedPolicyDigest && reply.policyDigest !== expectedPolicyDigest)) {
         failHandshake();
         return;
       }
