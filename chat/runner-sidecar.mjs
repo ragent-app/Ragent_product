@@ -62,6 +62,7 @@ import {
   readLatestCodexSessionMetrics,
 } from './codex-session-metrics.mjs';
 import { codexRolloutAccountId, findAccountCodexRollout, findManagedCodexRollout } from './codex-managed-rollout.mjs';
+import { codexRunBindingPath, verifyCodexRunBinding } from '../lib/provider-runtime/codex-run-binding.mjs';
 import {
   buildCodexAppServerInitializeMessage,
   buildCodexAppServerInitializedNotification,
@@ -3821,9 +3822,13 @@ async function main() {
       : '';
     const marker = providerHome ? (await readFile(join(providerHome, '.agentoc-provider-id'), 'utf8').catch(() => '')).trim() : '';
     if (targetProviderId && marker !== targetProviderId) {
-      throw new Error('Codex provider home is not prepared for selected provider ' + targetProviderId);
+      const binding = providerHome ? await readJsonIfPresent(codexRunBindingPath(providerHome, runId), readFile) : null;
+      const auth = providerHome ? await readJsonIfPresent(join(providerHome, 'auth.json'), readFile) : null;
+      if (!verifyCodexRunBinding(binding, { runId, providerId: targetProviderId, accountId: codexRolloutAccountId(auth) })) {
+        throw new Error('Codex provider home is not prepared for selected provider ' + targetProviderId);
+      }
     }
-    await updateRun(runId, (current) => ({ ...current, resolvedProviderId: marker || targetProviderId || '', resolvedProviderModel: appServerState.model, providerSync: { ok: true, providerId: marker || targetProviderId || '', configuredModel: appServerState.model, preparedBy: 'runner-lifecycle' } }));
+    await updateRun(runId, (current) => ({ ...current, resolvedProviderId: targetProviderId || marker || '', resolvedProviderModel: appServerState.model, providerSync: { ok: true, providerId: targetProviderId || marker || '', configuredModel: appServerState.model, preparedBy: 'runner-lifecycle' } }));
   } else if (isClaudeBidiFamily) {
     const targetProviderId = typeof manifest.options?.providerProfile === 'string'
       ? manifest.options.providerProfile.trim()
