@@ -219,6 +219,7 @@ import {
   BROWSER_MCP_ENV_KEYS,
   MCP_OVERLAY_ERROR_CODES,
   MCP_OVERLAY_MAX_ATTEMPTS,
+  prepareCodexThreadMcp,
   prepareManagedMcpOverlay,
 } from './approved-action-mcp-overlay.mjs';
 import {
@@ -3767,6 +3768,12 @@ async function main() {
   const windowsElevationHook = shouldInstallWindowsElevationHook({ platform: process.platform, runtimeFamily,
     interactionMode: manifest.options?.interactionMode, permissionMode: manifest.options?.permissionMode,
     workbenchPolicy: WORKBENCH_EXECUTION_POLICY });
+  const runtimeAuth = isCodexAppServerFamily && runnerCodexHomeDir
+    ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
+    : null;
+  const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
+  const threadScopedCodexMcp = Boolean(appServerState && codexOAuthRuntime && !readOnlyRequested && !WORKBENCH_EXECUTION_POLICY
+    && !windowsElevationHook && !appServerState.agentocApprovalGate);
   const windowsBrokerChannel = manifest.options?.windowsBrokerChannel;
   const windowsBrokerMcpRequested = !readOnlyRequested && Boolean(
     windowsBrokerChannel?.token && windowsBrokerChannel?.endpoint,
@@ -3889,7 +3896,9 @@ async function main() {
           envKeys: BROWSER_MCP_ENV_KEYS,
         });
       }
-      managedMcpOverlay = await prepareManagedMcpOverlay({
+      managedMcpOverlay = threadScopedCodexMcp
+        ? await prepareCodexThreadMcp({ runId, spawnEnv, servers: managedMcpServers })
+        : await prepareManagedMcpOverlay({
         runtimeFamily,
         runId,
         spawnEnv,
@@ -3899,6 +3908,7 @@ async function main() {
         codexWindowsInstallHook: windowsElevationHook
           ? join(PROJECT_ROOT, 'scripts', 'agentoc-codex-windows-install-hook.mjs') : '',
       });
+      if (threadScopedCodexMcp && managedMcpOverlay) appServerState.threadMcpConfig = managedMcpOverlay.config;
 
       if (managedMcpOverlay) {
         const readyPreparation = readyMcpOverlayPreparation(managedMcpOverlay);
@@ -4074,12 +4084,8 @@ async function main() {
   // home. Each Run still gets a private stdio proxy and a private thread, but
   // only the broker process can observe/refresh auth.json. This removes the
   // refresh-token race without forbidding same-account concurrency.
-  const runtimeAuth = isCodexAppServerFamily && runnerCodexHomeDir
-    ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
-    : null;
-  const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
   const runSpecificCodexMcp = isCodexAppServerFamily
-    && (Boolean(managedMcpOverlay) || appServerState?.agentocApprovalGate === true);
+    && ((Boolean(managedMcpOverlay) && !threadScopedCodexMcp) || appServerState?.agentocApprovalGate === true);
   let codexAppServerBrokered = false;
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
       && !sandboxRequired) {
@@ -4105,8 +4111,9 @@ async function main() {
       spawnShell = false;
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;
-      appServerState.threadShellEnvironment = buildCodexRunShellEnvironment(buildWorkbenchCodexEnvironment(spawnEnv));
+      if (!WORKBENCH_EXECUTION_POLICY) appServerState.threadShellEnvironment = buildCodexRunShellEnvironment(spawnEnv);
     } catch (error) {
+      if (threadScopedCodexMcp && managedMcpOverlay) throw error;
       await logSidecarDiagnostic(runId, 'Machine-local Codex app-server broker unavailable; using the safe exclusive fallback', {
         error: normalizeErrorMessage(error),
         code: error?.code || 'CODEX_APP_SERVER_BROKER_UNAVAILABLE',

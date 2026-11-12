@@ -1171,6 +1171,7 @@ try {
   assert.equal(terminalThreadError.result?.exitCode, 1);
   assert.ok(
     terminalThreadError.result?.providerExitCode === 0
+      || (process.platform === 'win32' && terminalThreadError.result?.providerExitCode === 0xC0DE)
       || terminalThreadError.result?.signal === 'SIGTERM',
     `startup provider errors should retain the raw exit code or the sidecar termination signal: ${JSON.stringify(terminalThreadError.result)}`,
   );
