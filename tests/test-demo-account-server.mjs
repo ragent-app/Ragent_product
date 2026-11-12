@@ -31,6 +31,12 @@ const provisionedPolicy = JSON.parse(provisionedBytes);
 assert.equal(provisionedPolicy.accessMode, 'full');
 assert.equal(provisionedPolicy.instanceAccess, 'account');
 assert.equal(provisionedPolicy.unlimitedConnections, false);
+const independentFile = join(dir, 'independent-policy.json');
+const independentProvision = spawnSync(process.execPath, [provisionPath, independentFile], {
+  input: JSON.stringify({ username: 'independent-fixture', password }), encoding: 'utf8', timeout: 10_000,
+});
+assert.equal(independentProvision.status, 0);
+assert.deepEqual(JSON.parse(await readFile(independentFile, 'utf8')).allowedInstanceIds, []);
 const repeat = spawnSync(process.execPath, [provisionPath, provisionFile], {
   input: JSON.stringify({ username: 'review-fixture', password, instanceId: 'inst_demo_server' }), encoding: 'utf8', timeout: 10_000,
 });

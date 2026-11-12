@@ -12,6 +12,11 @@ import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protoc
 
 const username = 'review-fixture', password = 'fixture-password-not-for-deployment';
 const instanceId = 'inst_demo_fixture';
+const independentPolicy = await createDemoAccountPolicy({ username, password });
+assert.deepEqual(independentPolicy.allowedInstanceIds, []);
+assert.equal(createDemoAccountAuth(independentPolicy).defaultInstanceId, '');
+await assert.rejects(createDemoAccountPolicy({ username, password, instanceId: 'invalid' }));
+await assert.rejects(createDemoAccountPolicy({ username, password, instanceAccess: 'allowlist' }));
 const defaultPolicy = await createDemoAccountPolicy({ username, password, instanceId });
 assert.equal(defaultPolicy.accessMode, 'full');
 assert.equal(defaultPolicy.instanceAccess, 'account');
@@ -64,6 +69,12 @@ async function challenge(f, suffix) {
   return { key, publicKey, deviceId, result, body: { username, password, transactionId: result.transactionId, requestId,
     signature: sign('sha256', Buffer.from(buildAccountSessionMessage({ transactionId: result.transactionId, requestId,
       deviceId, publicKeyFingerprint: createDevicePublicKeyFingerprint(publicKey), nonce: result.nonce })), key.privateKey).toString('base64url') } };
+}
+{
+  const f = fixture(true, 'full', independentPolicy), c = await challenge(f, 'without_instance');
+  const session = await f.broker.completeDemoAccountSession(c.body);
+  assert.equal(session.accountId, independentPolicy.accountId);
+  assert.deepEqual((await f.broker.discoverInstances({}, { credential: session.credential.token })).instances, []);
 }
 {
   const f = fixture(true, 'full', defaultPolicy), c = await challenge(f, 'full_access');

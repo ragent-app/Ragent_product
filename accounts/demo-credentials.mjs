@@ -14,14 +14,16 @@ const unavailable = () => Object.assign(new Error('Demo account is unavailable.'
 /** Operator-created policy, kept outside the checkout and runtime payload. */
 export async function createDemoAccountPolicy({ username, password, instanceId, accessMode = 'full', instanceAccess = 'account', unlimitedConnections = false }) {
   if (typeof unlimitedConnections !== 'boolean' || !['allowlist', 'account'].includes(instanceAccess) || !['restricted', 'full'].includes(accessMode) || !/^[a-z0-9._-]{3,80}$/.test(username || '') || typeof password !== 'string'
-    || password.length < 16 || password.length > 256 || !/^inst_[A-Za-z0-9_-]{4,156}$/.test(instanceId || '')) {
-    throw new Error('A username, 16–256 character password and exact default instance ID are required.');
+    || password.length < 16 || password.length > 256
+    || (instanceId != null && instanceId !== '' && !/^inst_[A-Za-z0-9_-]{4,156}$/.test(instanceId))
+    || (instanceAccess === 'allowlist' && !instanceId)) {
+    throw new Error('A username, 16–256 character password and valid optional default instance ID are required.');
   }
   const salt = randomBytes(32);
   const key = await derive(password, salt, 64, parameters);
   return { version: 1, username, accessMode, instanceAccess, unlimitedConnections, accountId: `acct_demo_${randomBytes(24).toString('hex')}`,
     passwordHash: { algorithm: 'scrypt-32768-8-1', salt: salt.toString('hex'), key: key.toString('hex') },
-    allowedInstanceIds: [instanceId] };
+    allowedInstanceIds: instanceId ? [instanceId] : [] };
 }
 
 export async function loadDemoAccountAuth(path, options = {}) {
@@ -51,8 +53,8 @@ export function createDemoAccountAuth(policy, { clock = Date.now } = {}) {
     || policy.passwordHash?.algorithm !== 'scrypt-32768-8-1'
     || !/^[a-f0-9]{64}$/.test(policy.passwordHash?.salt || '')
     || !/^[a-f0-9]{128}$/.test(policy.passwordHash?.key || '')
-    || !Array.isArray(policy.allowedInstanceIds) || policy.allowedInstanceIds.length !== 1
-    || !/^inst_[A-Za-z0-9_-]{4,156}$/.test(policy.allowedInstanceIds[0])) {
+    || !Array.isArray(policy.allowedInstanceIds) || policy.allowedInstanceIds.length > 1
+    || (policy.allowedInstanceIds.length === 1 && !/^inst_[A-Za-z0-9_-]{4,156}$/.test(policy.allowedInstanceIds[0]))) {
     throw new Error('Invalid demo account policy.');
   }
   // Copy the policy: caller mutation cannot change authority after startup.
@@ -60,7 +62,7 @@ export function createDemoAccountAuth(policy, { clock = Date.now } = {}) {
   // Old review-only flags are retained on disk for compatibility; login is now
   // an ordinary account and access is determined by actual instance authority.
   const accessMode = 'full';
-  const targetId = policy.allowedInstanceIds[0];
+  const targetId = policy.allowedInstanceIds[0] || '';
   const instanceAccess = 'account';
   const salt = Buffer.from(policy.passwordHash.salt, 'hex');
   const expected = Buffer.from(policy.passwordHash.key, 'hex');
