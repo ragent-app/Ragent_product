@@ -45,6 +45,9 @@ export const SEMANTIC_CAPABILITY_AUTH_MODE_OWNER_CLICK = 'owner-click';
 // operation bindings remain mandatory and are revalidated by the executor.
 export const SEMANTIC_CAPABILITY_AUTH_MODE_POLICY_AUTO = 'policy-auto';
 export const SEMANTIC_ADAPTER_APT_INSTALL_V1 = 'linux-apt-install/v1';
+// Capability schema only. The Linux privileged executor must independently
+// verify the root observation, policy and replay state before enabling it.
+export const SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1 = 'linux-file-delete/v1';
 export const SEMANTIC_ADAPTER_WINDOWS_SERVICE_CONTROL_V1 = 'windows-service-control/v1';
 
 export const SEMANTIC_CAPABILITY_ERROR = Object.freeze({
@@ -278,12 +281,28 @@ function canonicalBoundOperation(policyDecision) {
         definitionHash: operation.target.resourceSnapshot.definitionHash,
       } : {}),
       ...(operation.target?.resourceSnapshot?.linuxTargetAttestation !== undefined
-        ? { linuxTargetAttestation: linuxDeleteObservation(operation) } : {}),
+        ? { linuxTargetAttestation: linuxDeleteObservation(operation), linuxDeleteOperation: clone(operation) } : {}),
     },
   };
 }
 
 function adapterAllows(adapter, operations) {
+  if (adapter === SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1) {
+    if (operations.length !== 1) return false;
+    const entry = operations[0];
+    const operation = entry?.adapterInput?.linuxDeleteOperation;
+    if (entry?.primaryAction !== 'fs.delete' || entry.platform !== 'linux' || entry.executionClass !== 'host' ||
+        JSON.stringify(entry.effects) !== JSON.stringify(['process.execute']) || !operation ||
+        operation.scope?.computed !== true || !['project', 'project_generated', 'project_root', 'tmp'].includes(operation.scope?.kind) ||
+        operation.scope?.selfProtection?.computed !== true ||
+        operation.scope?.selfProtection?.matched !== false || operation.impact?.estimatedItems !== 1 ||
+        operation.impact?.containsSensitiveMaterial !== false || operation.impact?.containsGitMetadata !== false ||
+        !Array.isArray(operation.analysis?.unknowns) || operation.analysis.unknowns.length !== 0) return false;
+    try {
+      const rebuilt = canonicalBoundOperation({ decision: 'ASK', operation, unknowns: [], operationManifestHash: entry.operationManifestHash });
+      return canonicalSemanticJson(rebuilt) === canonicalSemanticJson(entry);
+    } catch { return false; }
+  }
   if (adapter === SEMANTIC_ADAPTER_WINDOWS_SERVICE_CONTROL_V1) {
     return operations.length === 1 && operations.every(entry => {
       const input = entry?.adapterInput || {};

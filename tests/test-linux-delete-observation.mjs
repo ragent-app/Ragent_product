@@ -3,7 +3,8 @@ import { generateKeyPairSync } from 'node:crypto';
 import { compileSemanticOperations } from '../chat/semantic-compiler.mjs';
 import { computeSemanticManifestHash } from '../chat/semantic-operation.mjs';
 import { evaluateSemanticOperation } from '../chat/semantic-policy.mjs';
-import { buildSemanticCapabilitySelection, createSemanticCapability } from '../chat/semantic-capability.mjs';
+import { buildSemanticCapabilitySelection, createSemanticCapability, SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1, signSemanticCapability, validateSemanticCapability, verifySemanticCapability } from '../chat/semantic-capability.mjs';
+import { authorizeSemanticApproval } from '../chat/semantic-approval.mjs';
 import { signLinuxTargetAttestation } from '../chat/linux-target-attestation.mjs';
 import { bindLinuxDeleteObservation } from '../chat/linux-delete-observation.mjs';
 
@@ -37,8 +38,31 @@ assert.deepEqual(bound.operation.target.resourceSnapshot.linuxTargetAttestation,
 const selected = buildSemanticCapabilitySelection([bound]);
 assert.notEqual(selected.selectionManifestHash, buildSemanticCapabilitySelection([decision]).selectionManifestHash);
 assert.deepEqual(selected.operations[0].adapterInput.linuxTargetAttestation, attestation);
-assert.throws(() => createSemanticCapability({ selectedDecisions: [bound], adapter: 'linux-file-delete/v1', sessionId: 's1', runId: 'r1', turnId: 't1', kid: 'test', credentialId: 'owner', now }),
-  { code: 'SEMANTIC_CAPABILITY_ADAPTER_DENIED' });
+assert.deepEqual(selected.operations[0].adapterInput.linuxDeleteOperation, bound.operation);
+const serviceKeys = generateKeyPairSync('ed25519');
+let consumed = false;
+const unsigned = await authorizeSemanticApproval({
+  prepared: { binding: { sessionId: 's1', runId: 'r1', turnId: 't1', requestKey: 'q1' }, projection: { decisions: [bound] } },
+  selectedOperationIds: [bound.operationId], proofToken: 'proof', credentialId: 'owner', kid: 'service-key',
+  adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1, now,
+  consumeOwnerProof: async (proof) => {
+    assert.equal(consumed, false);
+    assert.equal(proof.manifestHash, selected.selectionManifestHash);
+    assert.equal(proof.sessionId, 's1');
+    assert.equal(proof.requestId, 'q1');
+    consumed = true;
+    return true;
+  },
+});
+assert.equal(consumed, true);
+const signedCapability = signSemanticCapability(unsigned, serviceKeys.privateKey);
+assert.equal(verifySemanticCapability(signedCapability, { publicKey: serviceKeys.publicKey, now }).ok, true);
+const modifiedCapability = structuredClone(signedCapability);
+modifiedCapability.operations[0].adapterInput.linuxTargetAttestation.binding.inode = '101';
+assert.equal(verifySemanticCapability(modifiedCapability, { publicKey: serviceKeys.publicKey, now }).ok, false);
+const automatic = createSemanticCapability({ selectedDecisions: [bound], adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1,
+  sessionId: 's1', runId: 'r1', turnId: 't1', kid: 'test', authMode: 'policy-auto', now });
+assert.equal(validateSemanticCapability(automatic, { now }).code, 'SEMANTIC_CAPABILITY_OWNER_SELECTION_REQUIRED');
 attestation.binding.inode = '101';
 assert.equal(bound.operation.target.resourceSnapshot.linuxTargetAttestation.binding.inode, '100');
 

@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { inspectAndAttestLinuxTarget } from '../scripts/linux-target-inspection.mjs';
 import { loadOrCreateLinuxTargetKey } from '../chat/linux-target-key-store.mjs';
 import { bindLinuxDeleteObservation } from '../chat/linux-delete-observation.mjs';
-import { buildSemanticCapabilitySelection } from '../chat/semantic-capability.mjs';
+import { buildSemanticCapabilitySelection, createSemanticCapability, SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1, signSemanticCapability } from '../chat/semantic-capability.mjs';
+import { authorizeSemanticApproval } from '../chat/semantic-approval.mjs';
+import { computeSemanticManifestHash } from '../chat/semantic-operation.mjs';
 import { revalidateLinuxDeleteSelection } from '../scripts/linux-delete-revalidation.mjs';
+import { verifyLinuxDeleteCapability } from '../scripts/linux-delete-capability.mjs';
+import { handleSemanticRequest } from '../scripts/privileged-executor.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.argv[2]) throw new Error('requires Linux root and native helper');
 const sourceStat = await lstat(process.argv[2]);
@@ -60,9 +64,42 @@ process.stdout.write(JSON.stringify(result.projection));`;
   assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, trustedContext: { ...revalidation.trustedContext, projectRoot: '/srv' } })).ok, false);
   assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, trustedProtectedRoots: [{ path: target }] })).ok, false);
   assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, expectedHelperSha256: '0'.repeat(64) })).ok, false);
+  const serviceKeys = generateKeyPairSync('ed25519');
+  let proofConsumed = false;
+  const unsigned = await authorizeSemanticApproval({
+    prepared: { binding: { sessionId: 's1', runId: 'r1', turnId: 't1', requestKey: 'q1' }, projection: { decisions: [bound] } },
+    selectedOperationIds: [bound.operationId], proofToken: 'fixture-proof', credentialId: 'fixture-owner',
+    kid: 'fixture-service', adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1,
+    consumeOwnerProof: async (proof) => { assert.equal(proof.manifestHash, selection.selectionManifestHash); proofConsumed = true; return true; },
+  });
+  assert.equal(proofConsumed, true);
+  const capability = signSemanticCapability(unsigned, serviceKeys.privateKey);
+  const capabilityInput = { capability, servicePublicKey: serviceKeys.publicKey, rootPublicKey: keys.publicKey,
+    rootPrivateKey: keys.privateKey, helperPath: helper, expectedHelperSha256: digest, expectedContext: context,
+    trustedContext: revalidation.trustedContext, trustedProtectedRoots: revalidation.trustedProtectedRoots };
+  assert.equal((await verifyLinuxDeleteCapability(capabilityInput)).ok, true);
+  // Verification alone is not nonce consumption; the real executor must
+  // durably consume before execution, and currently rejects this adapter.
+  assert.equal((await verifyLinuxDeleteCapability(capabilityInput)).ok, true);
+  assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, servicePublicKey: generateKeyPairSync('ed25519').publicKey })).ok, false);
+  assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, rootPublicKey: generateKeyPairSync('ed25519').publicKey })).ok, false);
+  assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, expectedContext: { ...context, runId: 'other' } })).ok, false);
+  assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, trustedProtectedRoots: [{ path: target }] })).ok, false);
+  const tampered = structuredClone(capability);
+  tampered.operations[0].adapterInput.linuxDeleteOperation.target.root = `${root}/other`;
+  assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, capability: tampered })).ok, false);
+  const forgedDecision = structuredClone(bound);
+  forgedDecision.operation.target.resourceSnapshot.linuxTargetAttestation.signature = 'A'.repeat(86);
+  forgedDecision.operationManifestHash = computeSemanticManifestHash(forgedDecision.operation);
+  const forgedUnsigned = createSemanticCapability({ selectedDecisions: [forgedDecision], adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1,
+    sessionId: 's1', runId: 'r1', turnId: 't1', credentialId: 'fixture-owner', kid: 'fixture-service' });
+  const forgedCapability = signSemanticCapability(forgedUnsigned, serviceKeys.privateKey);
+  assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, capability: forgedCapability })).ok, false);
+  assert.equal((await handleSemanticRequest({ id: 'fixture', capability })).code, 'SEMANTIC_CAPABILITY_ADAPTER_DENIED');
   assert.equal(await readFile(target, 'utf8'), 'fixture');
   await writeFile(target, 'changed');
   assert.equal((await revalidateLinuxDeleteSelection(revalidation)).ok, false);
+  assert.equal((await verifyLinuxDeleteCapability(capabilityInput)).ok, false);
   assert.equal(await readFile(target, 'utf8'), 'changed');
   console.log('linux delete observation: native, resolver and root revalidation checks passed');
 } finally {
