@@ -193,7 +193,7 @@ try {
   );
   assert.match(
     planActionManifest?.prompt || '',
-    /AgentoC plan action: execute/,
+    /Ragent plan action: execute/,
     'plan execute prompts should include a private plan action header',
   );
   assert.match(

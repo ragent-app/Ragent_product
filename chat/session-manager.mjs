@@ -2195,20 +2195,20 @@ function buildPlanActionPrompt({ action, artifact, userText = '' } = {}) {
   const normalizedAction = normalizePlanAction(action);
   const normalizedUserText = trimString(userText);
   const planMarkdown = formatPlanArtifactMarkdown(artifact);
-  const title = trimString(artifact?.title) || 'Codex plan';
+  const title = trimString(artifact?.title) || 'Ragent plan';
   const planId = normalizePlanId(artifact?.planId);
   const instructions = normalizedAction === 'execute'
     ? [
-        'The user approved this AgentoC plan artifact.',
+        'The user approved this Ragent plan artifact.',
         'Execute the approved plan now. Do not ask for another approval unless a real blocker appears.',
       ]
     : [
-        'The user wants this AgentoC plan artifact revised.',
+        'The user wants this Ragent plan artifact revised.',
         'Stay in planning mode. Return an updated plan for approval and do not implement it yet.',
       ];
   return [
     '<private>',
-    `AgentoC plan action: ${normalizedAction || 'unknown'}`,
+    `Ragent plan action: ${normalizedAction || 'unknown'}`,
     planId ? `Plan artifact id: ${planId}` : '',
     title ? `Plan title: ${title}` : '',
     ...instructions,
