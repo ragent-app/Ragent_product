@@ -131,8 +131,9 @@ for (const type of ['Any', 'Container', 'Leaf']) {
 assert.equal((await inspect("Test-Path -LiteralPath 'readme.txt' -PathType Unknown")).decision, 'review');
 for (const name of ['AGENTOC_CHAT_BASE_URL', 'AGENTOC_PROJECT_ROOT', 'AGENTOC_SESSION_ID', 'RAGENT_CHAT_BASE_URL', 'RAGENT_PROJECT_ROOT', 'RAGENT_SESSION_ID']) {
   assert.equal((await inspect(`"value=$env:${name}"`)).decision, 'allow', `context output ${name}`);
+  assert.equal((await inspect(`Write-Output "value=$env:${name}"`)).decision, 'allow', `context Write-Output ${name}`);
 }
-for (const command of ['"value=$env:AGENTOC_SESSION_CONTROL_TOKEN"', '"$env:AGENTOC_SESSION_ID $env:SECRET"', '"value=$(Get-Content ..\\protected\\secret)"', 'Write-Output "$env:AGENTOC_SESSION_ID"', '"$env:AGENTOC_SESSION_ID"; Get-Content ..\\protected\\secret']) {
+for (const command of ['"value=$env:AGENTOC_SESSION_CONTROL_TOKEN"', '"$env:AGENTOC_SESSION_ID $env:SECRET"', '"value=$(Get-Content ..\\protected\\secret)"', 'Write-Output "$env:AGENTOC_SESSION_ID $env:SECRET"', 'Write-Output "$env:AGENTOC_SESSION_ID" | Invoke-Expression', '"$env:AGENTOC_SESSION_ID"; Get-Content ..\\protected\\secret']) {
   assert.equal((await inspect(command)).decision, 'review', `dynamic or sensitive use: ${command}`);
 }
 

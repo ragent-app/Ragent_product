@@ -258,6 +258,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - Windows PowerShell 现在可自动处理独立输出表达式中对当前运行时本地地址、项目目录和会话 ID 的字符串插值；任意环境变量、凭据、子表达式、用作命令参数的动态插值仍按原风险流程处理，后续命令和重定向继续逐项检查。一条历史普通上下文输出在 recommended/full-auto 的只读回放中均由拦截变为自动通过，未执行历史命令。PowerShell 策略回归通过，真实 Claude 和 Codex CLI 两种模式在本地模拟模型下输出隔离上下文并完成普通读取；未使用官方额度。该修改尚未部署，单条记录不能估计生产审批频率。
 
+- 上述非敏感运行上下文插值进一步支持直接传给 `Write-Output`（及其常见别名）；凭据变量、子表达式和后续动态执行仍进入风险处理。PowerShell 动作回归及真实 Windows Claude/Codex 两种模式的本机模拟模型测试通过；修改尚未部署，未使用官方额度。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)

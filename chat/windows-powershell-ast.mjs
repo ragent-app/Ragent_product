@@ -134,12 +134,15 @@ function Test-InSafeWhereBlock($node) {
   }
   return $false
 }
-# Expansions are safe only as standalone output expressions and only for
-# non-secret context values supplied to the current agent process.
+# Expansions are safe only in direct output expressions or Write-Output,
+# and only for non-secret context values supplied to the agent process.
 function Test-SafeContextExpansion($node) {
   if ($node -isnot [System.Management.Automation.Language.ExpandableStringExpressionAst] -or
-      $node.Parent -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
-      $node.Parent.Expression -ne $node -or @($node.NestedExpressions).Count -eq 0) { return $false }
+      @($node.NestedExpressions).Count -eq 0) { return $false }
+  $outputExpression = $node.Parent -is [System.Management.Automation.Language.CommandExpressionAst] -and $node.Parent.Expression -eq $node
+  $outputCommand = $node.Parent -is [System.Management.Automation.Language.CommandAst] -and
+      $node.Parent.GetCommandName() -iin @('Write-Output','echo','write')
+  if (-not $outputExpression -and -not $outputCommand) { return $false }
   foreach ($part in @($node.NestedExpressions)) {
     if ($part -isnot [System.Management.Automation.Language.VariableExpressionAst] -or $part.Splatted -or
         [string]$part.VariablePath.UserPath -inotmatch '^env:(?:AGENTOC|RAGENT)_(?:CHAT_BASE_URL|PROJECT_ROOT|SESSION_ID)$') { return $false }
@@ -226,6 +229,8 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
           $_ -isnot [System.Management.Automation.Language.ConstantExpressionAst]
         }).Count -eq 0) {
       @{ kind = 'literal_list'; values = @($_.Elements | ForEach-Object { [string]$_.Value }) }
+    } elseif (Test-SafeContextExpansion $_) {
+      @{ kind = 'literal'; value = 'safe-context-output' }
     } elseif (Test-SafeWhereBlock $_) {
       @{ kind = 'safe_where_predicate' }
     } else {
