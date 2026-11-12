@@ -44,6 +44,34 @@ test('bridge forwards only abort signal and rejects malformed/native wrong targe
     state.issue=async()=>result;await assert.rejects(requestWindowsCliOwnerCookie({baseUrl:origin}),{code:'CLI_OWNER_RESULT_INVALID'});
   }
 });
+test('pre-connection endpoint rotation retries authorization before any HTTP request',async()=>{
+  for (const code of ['OBD_ENDPOINT_UNAVAILABLE','OBC_DEADLINE_INVALID']) {
+    state.calls=0;state.activations=0;state.http=[];
+    state.issue=async()=>{state.calls++;if(state.calls<3)throw Object.assign(Error(code),{code});return {baseUrl:origin,sessionToken:'a'.repeat(64)};};
+    const result=await createAgentoCHttpClient().request('/api/fixture',{method:'POST',body:{value:'fixture'}});
+    assert.equal(result.response.status,200);assert.equal(state.calls,3);assert.equal(state.activations,3);assert.equal(state.http.length,1);
+  }
+});
+test('pre-connection retries are bounded and do not replay unconfirmed or trust failures',async()=>{
+  for (const code of ['OBD_ENDPOINT_UNAVAILABLE','OBC_DEADLINE_INVALID']) {
+    state.calls=0;state.activations=0;state.http=[];
+    state.issue=async()=>{state.calls++;throw Object.assign(Error(code),{code});};
+    await assert.rejects(createAgentoCHttpClient().request('/api/fixture',{method:'POST',body:{}}),{code});
+    assert.equal(state.calls,3);assert.equal(state.activations,3);assert.equal(state.http.length,0);
+  }
+  for (const code of ['OBC_DELIVERY_UNCONFIRMED','OBC_PEER_DISCONNECTED','OBD_ENDPOINT_POLICY_INVALID']) {
+    state.calls=0;state.activations=0;state.http=[];
+    state.issue=async()=>{state.calls++;throw Object.assign(Error(code),{code});};
+    await assert.rejects(createAgentoCHttpClient().request('/api/fixture',{method:'POST',body:{}}),{code});
+    assert.equal(state.calls,1);assert.equal(state.activations,1);assert.equal(state.http.length,0);
+  }
+});
+test('aborting authorization cancels a scheduled pre-connection retry',async()=>{
+  const controller=new AbortController();state.calls=0;state.activations=0;
+  state.issue=async()=>{state.calls++;controller.abort();throw Object.assign(Error('expired'),{code:'OBC_DEADLINE_INVALID'});};
+  await assert.rejects(requestWindowsCliOwnerCookie({baseUrl:origin,signal:controller.signal}),{name:'AbortError'});
+  assert.equal(state.calls,1);assert.equal(state.activations,1);assert.equal(state.http.length,0);
+});
 test('concurrent requests share one exchange and cache the cookie',async()=>{
   const client=createAgentoCHttpClient();await Promise.all(Array.from({length:12},()=>client.request('/api/auth/me')));await client.request('/api/auth/me');
   assert.equal(state.calls,1);assert.equal(state.http.length,13);for(const call of state.http){assert.equal(call.url,origin+'/api/auth/me');assert.equal(call.redirect,'manual');assert.equal(call.headers.Cookie,'session_token='+'1'.padStart(64,'0'));}

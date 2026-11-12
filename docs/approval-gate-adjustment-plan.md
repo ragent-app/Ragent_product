@@ -251,6 +251,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 2026-11-12 构建并安装 Windows 提交 `a270ecf7`，公开版本 `0.0.1`、内部 MSI 版本 `0.0.72`，EXE SHA-256 `2f287f0bf0469c246863fc396dd68e1b77c33eeb91b854da2db55ee642684678`；MSI 返回 0，正式服务 ready，安装的资产桥接文件与提交一致。使用正式服务、真实 Claude/Codex 和本机模拟模型，未加引号的当前会话资产登记在两种模式中均自动执行并返回资产 ID；隔离敏感目录删除在 recommended 进入审批，在 full-auto 自动拒绝。三星正式应用连接 Windows 实例，分别对真实 Claude 和 Codex 的危险请求点按拒绝，CLI 均收到拒绝、隔离文件完整，手机审批卡随后消失；临时测试会话与 provider 经 API 清理。
 - 上述手机 Claude 验收的前两次事件读取分别遇 `OBD_ENDPOINT_UNAVAILABLE` 和 `OBC_DEADLINE_INVALID`，未能完成全链路确认；降低只读轮询频率并对只读请求重试后完成。Codex 一次危险请求拒绝提交遇 `OBC_DEADLINE_INVALID`，隔离 Run 之后经 API 取消并删除会话，后续三星真实交互通过。通道错误的根因尚未查明，不把重试成功视为故障已修复；上述指定用例也不能推算生产总体审批频率。
 
+- Windows CLI 授权增加有限重试：仅在本机发现端点不存在（`OBD_ENDPOINT_UNAVAILABLE`）或原生客户端连接前发现期限无效（`OBC_DEADLINE_INVALID`）时，重新激活并重新发现，最多三次；HTTP 请求尚未发送，不重放实际审批或写操作。身份、信任和回执不确定等其他错误不重试，取消信号可中断等待。12 项使用真实客户端代码和替身授权/HTTP 的阶段测试通过，覆盖单次写入、重试上限、错误传播与取消；尚未部署到正式实例，也未证明端点轮换的根因已修复。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
