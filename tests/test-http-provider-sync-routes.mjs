@@ -142,6 +142,10 @@ const snapshot = {
 };
 const sourceKeys = createProviderSyncKeyStore({ configDir: join(home, 'source-config') });
 const sourceSyncKey = await sourceKeys.getKeyPair();
+const pullProof = { ...sourceProof, syncKeyFingerprint: sourceSyncKey.fingerprint,
+  signature: signProviderSyncPeerProof(sourceIdentity, { requestId: sourceProof.requestId,
+    targetInstanceId: targetIdentity.instanceId, issuedAt: sourceProof.issuedAt,
+    audience: sourceProof.audience, syncKeyFingerprint: sourceSyncKey.fingerprint }).signature };
 const envelope = encryptAccountSyncEnvelope({
   snapshot,
   recipientPublicKeyPem: handshake.targetPublicKey,
@@ -176,9 +180,13 @@ const credentialLedger = await readFile(join(configDir, 'native-provider-runtime
 assert.equal(credentialLedger.includes('sk-http-secret'), false);
 
 const pullResponse = response();
+const tamperedPull = response();
+await handleProviderSyncRoutes({ req: request({ sourceProof, requesterSyncPublicKey: sourceSyncKey.publicKeyPem, wants: [] }),
+  res: tamperedPull, pathname: '/api/provider-sync/pull', writeJson });
+assert.equal(tamperedPull.statusCode, 403, 'an unsigned recipient key must never receive an encrypted snapshot');
 await handleProviderSyncRoutes({
   req: request({
-    sourceProof,
+    sourceProof: pullProof,
     requesterSyncPublicKey: sourceSyncKey.publicKeyPem,
     wants: [{
       scope: 'provider',

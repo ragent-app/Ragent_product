@@ -8,6 +8,7 @@ import { CONFIG_DIR } from '../lib/config.mjs';
 import { compareSyncVersions } from '../lib/account-sync.mjs';
 import {
   authorizeProviderSyncPeer,
+  createProviderSyncPeerProof,
   getOwnerAccountBinding,
 } from '../lib/owner-account-auth.mjs';
 import { loadOrCreateInstanceIdentity } from '../lib/instance-identity.mjs';
@@ -17,6 +18,7 @@ import {
   decryptAccountSyncEnvelope,
   decryptProviderSyncEnvelope,
   encryptAccountSyncEnvelope,
+  providerSyncKeyFingerprint,
 } from '../lib/provider-runtime/sync.mjs';
 import {
   applyAccountSyncRecords,
@@ -70,12 +72,15 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
     const syncKey = await keyStore.getKeyPair();
 
     if (pathname === '/api/provider-sync/handshake') {
+      const targetProof = await createProviderSyncPeerProof({ targetInstanceId: authorization.sourceInstanceId,
+        requestId: payload.sourceProof.requestId, syncKeyFingerprint: syncKey.fingerprint });
       writeJson(res, 200, {
         protocolVersion: 1,
         targetInstanceId: identity.instanceId,
         targetPublicKey: syncKey.publicKeyPem,
         sourceInstanceId: authorization.sourceInstanceId,
         expiresAt: authorization.expiresAt,
+        targetProof,
       });
       return true;
     }
@@ -84,6 +89,10 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
       const requesterSyncPublicKey = trimString(payload?.requesterSyncPublicKey);
       if (!requesterSyncPublicKey || authorization.sourceInstanceId !== trimString(payload?.sourceProof?.instance?.instanceId)) {
         writeJson(res, 400, { error: 'Account sync pull requester is invalid.', code: 'account_sync_request_invalid' });
+        return true;
+      }
+      if (providerSyncKeyFingerprint(requesterSyncPublicKey) !== payload?.sourceProof?.syncKeyFingerprint) {
+        writeJson(res, 403, { error: 'Requester encryption key is not signed.', code: 'provider_sync_key_mismatch' });
         return true;
       }
       const [{ createNativeProviderRegistry, createSecretStore, createProviderSyncLedger, createCredentialMutationLedger }] = await Promise.all([
@@ -119,6 +128,8 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
         recipientInstanceId: authorization.sourceInstanceId,
         requestId: trimString(payload?.sourceProof?.requestId),
       });
+      const targetProof = await createProviderSyncPeerProof({ targetInstanceId: authorization.sourceInstanceId,
+        requestId: payload.sourceProof.requestId, syncKeyFingerprint: providerSyncKeyFingerprint(requesterSyncPublicKey) });
       writeJson(res, 200, {
         ok: true,
         protocolVersion: snapshot.protocolVersion,
@@ -126,12 +137,14 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
         sourcePublicKey: identity.publicKey,
         recordCount: snapshot.records.length,
         envelope,
+        targetProof,
       });
       return true;
     }
 
     const envelope = payload?.envelope;
-    if (!envelope || envelope.senderInstanceId !== authorization.sourceInstanceId) {
+    if (!envelope || envelope.senderInstanceId !== authorization.sourceInstanceId
+      || envelope.requestId !== payload?.sourceProof?.requestId) {
       writeJson(res, 403, { error: 'Provider sync envelope sender mismatch.', code: 'provider_sync_peer_mismatch' });
       return true;
     }

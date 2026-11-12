@@ -7,11 +7,14 @@ import { join } from 'node:path';
 const home = await mkdtemp(join(tmpdir(), 'agentoc-provider-peer-sync-'));
 process.env.HOME = home;
 process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
+process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
 process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 delete process.env.AGENTOC_INSTANCE_ROOT;
 
 const {
   loadOrCreateInstanceIdentity,
+  publicInstanceIdentity,
+  signProviderSyncPeerProof,
 } = await import('../lib/instance-identity.mjs');
 const {
   createProviderSyncKeyStore,
@@ -65,12 +68,23 @@ const result = await syncProviderSnapshotToPeer({
     const request = JSON.parse(options.body);
     if (calls.length === 1) {
       assert.equal(calls[0].url, 'https://computer.example.test/agentoc/api/provider-sync/handshake');
+      const issuedAt = new Date().toISOString();
+      const fields = { requestId: request.sourceProof.requestId, targetInstanceId: sourceIdentity.instanceId,
+        issuedAt, audience: 'agentoc-provider-sync', syncKeyFingerprint: targetKey.fingerprint };
       return new Response(JSON.stringify({
         targetInstanceId: targetIdentity.instanceId,
         targetPublicKey: targetKey.publicKeyPem,
+        targetProof: { ...fields, instance: publicInstanceIdentity(targetIdentity),
+          signature: signProviderSyncPeerProof(targetIdentity, fields).signature },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-    assert.equal(calls[1].url, 'https://computer.example.test/agentoc/api/provider-sync/apply');
+    if (calls.length === 2) {
+      assert.equal(calls[1].url, 'https://accounts.example.test/v1/owner-auth/provider-sync/authorize');
+      return new Response(JSON.stringify({ authorized: true, accountId: 'acct_peer_test',
+        sourceInstanceId: targetIdentity.instanceId, targetInstanceId: sourceIdentity.instanceId,
+        sourcePublicKey: targetIdentity.publicKey }), { status: 200 });
+    }
+    assert.equal(calls[2].url, 'https://computer.example.test/agentoc/api/provider-sync/apply');
     assert.equal(Object.hasOwn(request, 'sourceSyncPublicKey'), false);
     const decrypted = decryptProviderSyncEnvelope({
       envelope: request.envelope,
@@ -88,5 +102,5 @@ const result = await syncProviderSnapshotToPeer({
 });
 
 assert.deepEqual(result.accepted, ['provider-peer']);
-assert.equal(calls.length, 2);
+assert.equal(calls.length, 3);
 console.log('test-provider-peer-sync: ok');

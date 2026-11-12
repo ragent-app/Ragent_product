@@ -15,7 +15,7 @@ import {
 } from '../lib/provider-runtime/index.mjs';
 
 const DEFAULT_INITIAL_DELAY_MS = 5_000;
-const DEFAULT_INTERVAL_MS = 15 * 60 * 1_000;
+const DEFAULT_INTERVAL_MS = 60 * 1_000;
 const DEFAULT_RETRY_BASE_DELAY_MS = 30 * 1_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 30 * 60 * 1_000;
 

@@ -19,8 +19,8 @@ const accountId = 'acct_catalog_test';
 let now = Date.parse('2026-08-23T00:00:00.000Z');
 const state = {
   instanceBindings: [
-    { instanceId: source.instanceId, accountId, revokedAt: '' },
-    { instanceId: replica.instanceId, accountId, revokedAt: '' },
+    ...[source, replica].map((instance) => ({ instanceId: instance.instanceId, accountId, revokedAt: '',
+      instancePublicKey: instance.publicKey, instanceKeyFingerprint: instance.keyFingerprint })),
   ],
   devices: [
     { deviceId: source.instanceId, instanceId: source.instanceId, accountId, deviceKind: 'computer', alias: 'source', createdAt: new Date(now).toISOString() },
@@ -63,6 +63,9 @@ const first = await broker.publishAccountSyncCatalog({
     version: { updatedAt: '2026-08-23T00:00:01.000Z', counter: 1, writerId: source.instanceId },
   }],
 });
+await assert.rejects(() => broker.publishAccountSyncCatalog({ accountId,
+  sourceProof: catalogProof({ ...replica, instanceId: source.instanceId }, 'catalog_impostor'), entries: [] }),
+  (error) => error.code === 'account_sync_auth_invalid');
 assert.deepEqual(first.accepted, ['provider:provider-openai']);
 assert.deepEqual(first.ignored, []);
 

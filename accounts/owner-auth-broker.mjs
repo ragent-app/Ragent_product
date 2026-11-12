@@ -856,9 +856,10 @@ function validateProviderSyncPeer(input, { requestId, targetInstanceId, clock })
   const proofRequestId = trimString(input?.requestId);
   const issuedMs = Date.parse(issuedAt);
   const audience = trimString(input?.audience);
+  const syncKeyFingerprint = trimString(input?.syncKeyFingerprint);
   if (!instanceId || !publicKey || !keyFingerprint || !requestId || proofRequestId !== requestId
     || !targetInstanceId || proofTargetInstanceId !== targetInstanceId || !issuedMs
-    || audience !== 'agentoc-provider-sync') {
+    || audience !== 'agentoc-provider-sync' || (syncKeyFingerprint && !/^[a-f0-9]{64}$/.test(syncKeyFingerprint))) {
     throw createError('provider_sync_auth_invalid', 'Invalid provider sync peer proof.', 400);
   }
   if (Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
@@ -873,6 +874,7 @@ function validateProviderSyncPeer(input, { requestId, targetInstanceId, clock })
     targetInstanceId,
     issuedAt,
     audience,
+    syncKeyFingerprint,
   });
   if (!verifyInstanceProofSignature({ publicKey, message, signature: input?.signature })) {
     throw createError('provider_sync_auth_invalid', 'Invalid provider sync peer signature.', 401);
@@ -4227,6 +4229,11 @@ export function createOwnerAuthBroker({
       if (!sourceBinding || !targetBinding) {
         throw createError('provider_sync_peer_unbound', 'Provider sync peer is not bound to this account.', 403);
       }
+      if (!hasRendezvousIdentity(sourceBinding) || !hasRendezvousIdentity(targetBinding)
+        || trimString(sourceBinding.instancePublicKey) !== source.publicKey
+        || sourceBinding.instanceKeyFingerprint !== source.keyFingerprint) {
+        throw createError('provider_sync_auth_invalid', 'Provider sync peer identity does not match its binding.', 403);
+      }
       if (sourceBinding.accountId !== targetBinding.accountId) {
         throw createError('provider_sync_account_mismatch', 'Provider sync peers belong to different accounts.', 403);
       }
@@ -4257,6 +4264,10 @@ export function createOwnerAuthBroker({
       const binding = getInstanceBindings(draft).find((item) => item.instanceId === source.instanceId && !item.revokedAt);
       if (!binding || binding.accountId !== accountId) {
         throw createError('account_sync_peer_unbound', 'Sync publisher is not bound to this account.', 403);
+      }
+      if (!hasRendezvousIdentity(binding) || trimString(binding.instancePublicKey) !== source.publicKey
+        || binding.instanceKeyFingerprint !== source.keyFingerprint) {
+        throw createError('account_sync_auth_invalid', 'Sync publisher identity does not match its binding.', 403);
       }
       const catalog = getAccountSyncCatalog(draft);
       const accepted = [];

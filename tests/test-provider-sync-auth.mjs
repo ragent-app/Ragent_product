@@ -18,9 +18,10 @@ const other = await loadOrCreateInstanceIdentity({ filePath: join(root, 'other.j
 let now = Date.parse('2026-08-23T00:00:00.000Z');
 const state = {
   instanceBindings: [
-    { instanceId: source.instanceId, accountId: 'acct_same', revokedAt: '' },
-    { instanceId: target.instanceId, accountId: 'acct_same', revokedAt: '' },
-    { instanceId: other.instanceId, accountId: 'acct_other', revokedAt: '' },
+    ...[[source, 'acct_same'], [target, 'acct_same'], [other, 'acct_other']].map(([instance, accountId]) => ({
+      instanceId: instance.instanceId, accountId, revokedAt: '', instancePublicKey: instance.publicKey,
+      instanceKeyFingerprint: instance.keyFingerprint,
+    })),
   ],
   devices: [],
 };
@@ -32,19 +33,21 @@ const broker = createOwnerAuthBroker({
   signAssertion: async () => 'unused',
 });
 
-function proofFor(actor, targetInstanceId, requestId = 'psync_auth_1', issuedAt = new Date(now).toISOString()) {
+function proofFor(actor, targetInstanceId, requestId = 'psync_auth_1', issuedAt = new Date(now).toISOString(), syncKeyFingerprint = '') {
   return {
     requestId,
     accountId: 'acct_same',
     targetInstanceId,
     issuedAt,
     audience: 'agentoc-provider-sync',
+    ...(syncKeyFingerprint ? { syncKeyFingerprint } : {}),
     instance: publicInstanceIdentity(actor),
     signature: signProviderSyncPeerProof(actor, {
       requestId,
       targetInstanceId,
       issuedAt,
       audience: 'agentoc-provider-sync',
+      syncKeyFingerprint,
     }).signature,
   };
 }
@@ -59,6 +62,19 @@ assert.equal(authorized.accountId, 'acct_same');
 assert.equal(authorized.sourceInstanceId, source.instanceId);
 assert.equal(authorized.targetInstanceId, target.instanceId);
 assert.equal(authorized.sourcePublicKey, source.publicKey.trim());
+
+const impostor = { ...other, instanceId: source.instanceId };
+await assert.rejects(
+  () => broker.authorizeProviderSync({ requestId: 'psync_impostor', targetInstanceId: target.instanceId,
+    sourceProof: proofFor(impostor, target.instanceId, 'psync_impostor') }),
+  (error) => error.code === 'provider_sync_auth_invalid',
+);
+
+const keyBound = proofFor(source, target.instanceId, 'psync_key', new Date(now).toISOString(), 'a'.repeat(64));
+await broker.authorizeProviderSync({ requestId: 'psync_key', targetInstanceId: target.instanceId, sourceProof: keyBound });
+keyBound.syncKeyFingerprint = 'b'.repeat(64);
+await assert.rejects(() => broker.authorizeProviderSync({ requestId: 'psync_key', targetInstanceId: target.instanceId,
+  sourceProof: keyBound }), (error) => error.code === 'provider_sync_auth_invalid');
 
 await assert.rejects(
   () => broker.authorizeProviderSync({
