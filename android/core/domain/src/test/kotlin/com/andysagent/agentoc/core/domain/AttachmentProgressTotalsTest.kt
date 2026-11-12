@@ -16,4 +16,13 @@ class AttachmentProgressTotalsTest {
         totals.complete(1)
         assertEquals(45L, totals.transferred(0))
     }
+
+    @Test fun completedKnownAttachmentDoesNotMakeAnUnknownLaterAttachmentLookComplete() {
+        val totals = AttachmentProgressTotals(listOf(12, 0))
+        totals.complete(0)
+        assertNull(totals.total())
+        totals.discover(1, 33)
+        assertEquals(45L, totals.total())
+        assertEquals(17L, totals.transferred(5))
+    }
 }
