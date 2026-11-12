@@ -297,8 +297,9 @@ if [ ! -w "$NODE_CACHE_DIR" ]; then
   exit 1
 fi
 
-PACK_JSON="$(cd "$ROOT" && npm pack --json --pack-destination "$WORK_DIR")"
-PACK_FILE="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value[0].filename)' "$PACK_JSON")"
+PACK_JSON_FILE="$WORK_DIR/npm-pack-result.json"
+(cd "$ROOT" && npm pack --json --pack-destination "$WORK_DIR" > "$PACK_JSON_FILE")
+PACK_FILE="$(node -e 'const value=JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(value[0].filename)' "$PACK_JSON_FILE")"
 # Linux package staging: never let platform/scratch trees ride along even if a
 # future npm "files" glob widens. Excluded paths are not part of the shipped app.
 tar -xzf "$WORK_DIR/$PACK_FILE" -C "$APP_DIR" --strip-components=1 \
