@@ -4412,6 +4412,7 @@ async function main() {
   let providerStdoutStream;
   let providerStderrStream;
   let earlyStdoutError = null;
+  let earlyStderrError = null;
   let pendingProcessEvent = null;
   let dispatchProcessEvent = null;
   const captureProcessEvent = (type, ...args) => {
@@ -4469,7 +4470,7 @@ async function main() {
     providerStdoutStream = new PassThrough({ highWaterMark: 64 * 1024 });
     providerStderrStream = new PassThrough({ highWaterMark: 64 * 1024 });
     providerStdoutStream.on('error', error => { earlyStdoutError ||= error; });
-    providerStderrStream.on('error', () => {});
+    providerStderrStream.on('error', error => { earlyStderrError ||= error; });
     proc.stdout.on('error', error => providerStdoutStream.destroy(error));
     proc.stderr.on('error', error => providerStderrStream.destroy(error));
     proc.stdout.pipe(providerStdoutStream);
@@ -6091,6 +6092,17 @@ async function main() {
   providerStdoutInput.on('line', (line) => {
     void enqueueStdoutLine(line);
   });
+  const handleProviderStderrError = (error) => {
+    const reason = `Provider stderr stream failed: ${normalizeErrorMessage(error)}`;
+    stdoutProcessingFailureReason ||= reason;
+    void logSidecarDiagnostic(runId, reason, {
+      phase: 'provider-stderr-reader',
+      code: error?.code || null,
+    }).catch(() => {});
+    void terminateManagedProcess().catch(() => {});
+  };
+  providerStderrStream.on('error', handleProviderStderrError);
+  if (earlyStderrError) handleProviderStderrError(earlyStderrError);
   providerStderrStream.on('data', handleStderrChunk);
   if (appServerState) {
     configureCodexAccountModelCatalog({
