@@ -12,6 +12,10 @@ const { prepareNativeRunProviderHome } = await import(process.env.RAGENT_TEST_CO
 import { codexRunBindingPath, verifyCodexRunBinding } from '../lib/provider-runtime/codex-run-binding.mjs';
 import { createHash } from 'node:crypto';
 import { resolveCanonicalCodexAccountHome } from '../lib/provider-runtime/codex-account-home-registry.mjs';
+import { codexAppServerBrokerSocketPath, codexBrokerAccountDigest } from '../chat/codex-app-server-broker.mjs';
+import { createServer } from 'node:net';
+import { createInterface } from 'node:readline';
+import { once } from 'node:events';
 
 test('native preparation writes distinct account-bound records for concurrent runs', async (t) => {
   const parent = resolve(tmpdir());
@@ -48,12 +52,22 @@ test('native preparation writes distinct account-bound records for concurrent ru
   const account = { configDir, providerHomesRoot: options.providerHomesRoot, accountId: 'account-a' };
   await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: first.homeDir, initialize: true });
   const otherManifest = { tool: 'codex', options: { providerProfile: 'profile-b', model: 'gpt-5.5' } };
-  await assert.rejects(prepareNativeRunProviderHome('run_binding_third', otherManifest, options), { code: 'CODEX_ACCOUNT_HANDOFF_REQUIRED' });
-  await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: candidate, initialize: true,
-    assertMigrationSafe: async () => ({ retainLegacySource: false }) });
+  await assert.rejects(prepareNativeRunProviderHome('run_binding_third', otherManifest, options), { code: 'CODEX_HANDOFF_UNAVAILABLE' });
+  const broker = createServer((socket) => {
+    createInterface({ input: socket }).on('line', (line) => {
+      const ping = JSON.parse(line);
+      socket.write(`${JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true,
+        accountMatches: ping.expectedAccountDigest === codexBrokerAccountDigest('account-a') })}\n`);
+    });
+  });
+  broker.listen(codexAppServerBrokerSocketPath(home));
+  await once(broker, 'listening');
+  t.after(() => new Promise((done) => broker.close(done)));
   const other = await prepareNativeRunProviderHome('run_binding_third', otherManifest, options);
   assert.equal(other.ok, true);
   assert.equal(other.homeDir, first.homeDir);
   const otherBinding = JSON.parse(await readFile(codexRunBindingPath(home, 'run_binding_third'), 'utf8'));
   assert.equal(verifyCodexRunBinding(otherBinding, { runId: 'run_binding_third', providerId: 'profile-b', accountId: 'account-a' }), true);
+  const ownership = await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: candidate, includeSources: true });
+  assert.deepEqual(ownership.aliases, [candidate]);
 });

@@ -28,4 +28,11 @@ test('only a completed account handoff routes a provider to the canonical home',
     assertMigrationSafe: async () => ({ retainLegacySource: true }) });
   assert.equal(await route(), canonical);
   assert.equal(await resolveBoundCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: candidate }), candidate);
+  const otherRoot = join(root, 'other-homes');
+  const otherCandidate = join(otherRoot, 'provider-a');
+  const other = { ...base, providerHomesRoot: otherRoot, candidateHomeRoot: otherCandidate };
+  assert.equal(await resolveBoundCodexAccountHome(other), otherCandidate);
+  await resolveCanonicalCodexAccountHome({ ...other, initialize: true });
+  assert.equal(await resolveBoundCodexAccountHome(other), otherCandidate);
+  assert.equal(await route(), canonical);
 });
