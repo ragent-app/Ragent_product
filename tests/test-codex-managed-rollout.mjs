@@ -13,7 +13,7 @@ try {
   await mkdir(sessions, { recursive: true });
   await mkdir(archived);
   const file = join(sessions, name);
-  await writeFile(file, JSON.stringify({type:'session_meta',payload:{id}})+'\n');
+  await writeFile(file, JSON.stringify({type:'session_meta',payload:{id,base_instructions:'x'.repeat(200_000)}})+'\n');
   assert.equal((await findManagedCodexRollout(root, id)).toLowerCase(), file.toLowerCase());
   const decoy = join(root, 'decoy.jsonl');
   await writeFile(decoy, JSON.stringify({type:'session_meta',payload:{id}})+'\n');

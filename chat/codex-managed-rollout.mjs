@@ -4,7 +4,9 @@ import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { join, relative, isAbsolute } from 'node:path';
 
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_HEADER_BYTES = 128 * 1024;
+// Session metadata can contain long developer instructions. Bound the read,
+// but allow normal multi-hundred-kilobyte headers from existing sessions.
+const MAX_HEADER_BYTES = 4 * 1024 * 1024;
 
 async function entries(directory) {
   try {
@@ -18,12 +20,21 @@ async function entries(directory) {
 async function matchesHeader(path, threadId) {
   const file = await open(path, 'r');
   try {
-    const buffer = Buffer.alloc(MAX_HEADER_BYTES);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    const newline = buffer.indexOf(10, 0);
-    if (newline < 0 || newline >= bytesRead) return false;
+    const chunks = [];
+    let size = 0;
+    let newline = -1;
+    while (size < MAX_HEADER_BYTES && newline < 0) {
+      const buffer = Buffer.alloc(Math.min(64 * 1024, MAX_HEADER_BYTES - size));
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, size);
+      if (!bytesRead) break;
+      const part = buffer.subarray(0, bytesRead);
+      newline = part.indexOf(10);
+      chunks.push(newline < 0 ? part : part.subarray(0, newline));
+      size += bytesRead;
+    }
+    if (newline < 0) return false;
     try {
-      const item = JSON.parse(buffer.toString('utf8', 0, newline));
+      const item = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       return item?.type === 'session_meta' && String(item?.payload?.id || '').toLowerCase() === threadId;
     } catch { return false; }
   } finally { await file.close(); }
