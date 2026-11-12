@@ -30,6 +30,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import com.andysagent.agentoc.core.designsystem.recordToLayer
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.foundation.layout.Column
@@ -1380,6 +1384,16 @@ class MainActivity : ComponentActivity() {
                         dismiss = { pendingSessionNavigation = null; sessionNavigationError = null },
                     )
                 }
+                val signInBackdrop = rememberGraphicsLayer()
+                var signInBackdropReady by remember { mutableStateOf(false) }
+                LaunchedEffect(pendingGoogleSignIn != null) {
+                    signInBackdropReady = false
+                    if (pendingGoogleSignIn != null) {
+                        withFrameNanos { }
+                        withFrameNanos { }
+                        signInBackdropReady = true
+                    }
+                }
                 com.andysagent.agentoc.feature.workbench.DemoEnvironmentSurface(
                     restricted = accountsState.isRestrictedDemoAccount,
                     testAccount = accountsState.isDemoAccount,
@@ -1399,6 +1413,9 @@ class MainActivity : ComponentActivity() {
                     },
                 ) {
                 WorkbenchScreen(
+                    modifier = Modifier.drawWithContent {
+                        if (pendingGoogleSignIn != null) recordToLayer(signInBackdrop) else drawContent()
+                    },
                     state = com.andysagent.agentoc.feature.workbench.restrictDemoWorkbenchState(state, accountsState.isRestrictedDemoAccount),
                     accountsViewModel = accounts,
                     webParityViewModel = webParity,
@@ -1912,6 +1929,7 @@ class MainActivity : ComponentActivity() {
                 pendingGoogleSignIn?.let { request ->
                     GoogleSignInConfirmationDialog(
                         request = request,
+                        backdropLayer = signInBackdrop.takeIf { signInBackdropReady },
                         isDemoSignIn = pendingDemoAgreement,
                         onDemoSignIn = {
                             pendingGoogleSignIn = null
@@ -2106,6 +2124,7 @@ internal fun GoogleSignInConfirmationDialog(
     modifier: Modifier = Modifier,
     onDemoSignIn: (() -> Unit)? = null,
     isDemoSignIn: Boolean = false,
+    backdropLayer: GraphicsLayer? = null,
 ) {
     val uriHandler = LocalUriHandler.current
     val detail = stringResource(
@@ -2123,6 +2142,7 @@ internal fun GoogleSignInConfirmationDialog(
         onConfirm = onConfirm,
         onDismiss = onDismiss,
         modifier = modifier,
+        backdropLayer = backdropLayer,
     ) {
         Column {
             Text(
