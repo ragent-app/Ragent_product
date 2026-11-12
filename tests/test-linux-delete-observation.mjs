@@ -34,7 +34,9 @@ const bound = bindLinuxDeleteObservation(input);
 assert.equal(bound.decision, 'ASK');
 assert.notEqual(bound.operationManifestHash, decision.operationManifestHash);
 assert.deepEqual(bound.operation.target.resourceSnapshot.linuxTargetAttestation, attestation);
-assert.notEqual(buildSemanticCapabilitySelection([bound]).selectionManifestHash, buildSemanticCapabilitySelection([decision]).selectionManifestHash);
+const selected = buildSemanticCapabilitySelection([bound]);
+assert.notEqual(selected.selectionManifestHash, buildSemanticCapabilitySelection([decision]).selectionManifestHash);
+assert.deepEqual(selected.operations[0].adapterInput.linuxTargetAttestation, attestation);
 assert.throws(() => createSemanticCapability({ selectedDecisions: [bound], adapter: 'linux-file-delete/v1', sessionId: 's1', runId: 'r1', turnId: 't1', kid: 'test', credentialId: 'owner', now }),
   { code: 'SEMANTIC_CAPABILITY_ADAPTER_DENIED' });
 attestation.binding.inode = '101';
@@ -47,6 +49,10 @@ const modified = (change) => {
   value.operationManifestHash = computeSemanticManifestHash(value.operation);
   return value;
 };
+const malformedBound = structuredClone(bound);
+malformedBound.operation.target.resourceSnapshot.linuxTargetAttestation.binding.inode = '101';
+malformedBound.operationManifestHash = computeSemanticManifestHash(malformedBound.operation);
+assert.throws(() => buildSemanticCapabilitySelection([malformedBound]), { code: 'SEMANTIC_CAPABILITY_REVALIDATION_FAILED' });
 for (const bad of [
   { ...fresh(), trustedPublicKey: otherKeys.publicKey },
   { ...fresh(), now: now + 300000 },

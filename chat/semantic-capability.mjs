@@ -9,6 +9,8 @@
 
 import { randomBytes, sign as edSign, verify as edVerify } from 'node:crypto';
 import { validateWindowsSelectedInstallerFacts } from './windows-winget-installer-facts.mjs';
+import { createLinuxTargetBinding, hashLinuxTargetBinding } from './linux-target-binding.mjs';
+import { canonicalLinuxTargetContext } from './linux-target-attestation.mjs';
 
 import {
   SEMANTIC_CAPABILITY_VERSION,
@@ -107,6 +109,39 @@ function isSafeAptPackageName(value) {
   // Version pins, local artifacts, paths, options, globs, and repositories
   // need their own descriptors/adapters rather than an argv escape hatch.
   return /^[a-z0-9][a-z0-9.+:~-]*$/i.test(trimString(value));
+}
+
+// Keep the signed native observation inside the owner selection and eventual
+// executor input. This checks structure and binding only; a trusted root
+// public key must independently verify the signature before any execution.
+function linuxDeleteObservation(operation) {
+  const observation = operation?.target?.resourceSnapshot?.linuxTargetAttestation;
+  if (observation === undefined) return null;
+  try {
+    const keys = ['version', 'purpose', 'keyId', 'context', 'binding', 'bindingHash', 'issuedAt', 'expiresAt', 'signature'];
+    if (!observation || typeof observation !== 'object' || Array.isArray(observation) ||
+        Object.keys(observation).length !== keys.length || keys.some((key) => !Object.hasOwn(observation, key)) ||
+        observation.version !== 1 || observation.purpose !== 'linux-target-inspect/v1' ||
+        typeof observation.keyId !== 'string' || !/^[a-f0-9]{64}$/.test(observation.keyId) ||
+        typeof observation.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(observation.signature) ||
+        operation?.primaryAction !== 'fs.delete' || operation?.executionClass !== 'host' ||
+        operation?.target?.platform !== 'linux' || operation?.target?.kind !== 'filesystem_file') throw new Error('invalid observation');
+    const context = observation.context;
+    canonicalLinuxTargetContext(context);
+    if (context.sessionId !== operation.requestBinding?.sessionId || context.runId !== operation.requestBinding?.runId ||
+        context.turnId !== operation.requestBinding?.turnId || context.requestId !== operation.requestBinding?.requestKey) throw new Error('context mismatch');
+    const { path, ...snapshot } = observation.binding || {};
+    const binding = createLinuxTargetBinding(path, snapshot);
+    if (path !== operation.target.root || hashLinuxTargetBinding(path, snapshot) !== observation.bindingHash ||
+        canonicalSemanticJson(binding) !== canonicalSemanticJson(observation.binding)) throw new Error('identity mismatch');
+    const issued = Date.parse(observation.issuedAt), expires = Date.parse(observation.expiresAt);
+    if (!Number.isFinite(issued) || !Number.isFinite(expires) ||
+        new Date(issued).toISOString() !== observation.issuedAt || new Date(expires).toISOString() !== observation.expiresAt ||
+        expires <= issued || expires - issued > 5 * 60 * 1000) throw new Error('invalid observation lifetime');
+    return clone(observation);
+  } catch {
+    fail(SEMANTIC_CAPABILITY_ERROR.REVALIDATION_FAILED, 'Linux target observation is malformed or mismatched');
+  }
 }
 
 function canonicalBoundOperation(policyDecision) {
@@ -242,6 +277,8 @@ function canonicalBoundOperation(policyDecision) {
         serviceAction: operation.target.action,
         definitionHash: operation.target.resourceSnapshot.definitionHash,
       } : {}),
+      ...(operation.target?.resourceSnapshot?.linuxTargetAttestation !== undefined
+        ? { linuxTargetAttestation: linuxDeleteObservation(operation) } : {}),
     },
   };
 }

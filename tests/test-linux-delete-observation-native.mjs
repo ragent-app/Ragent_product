@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { inspectAndAttestLinuxTarget } from '../scripts/linux-target-inspection.mjs';
 import { loadOrCreateLinuxTargetKey } from '../chat/linux-target-key-store.mjs';
 import { bindLinuxDeleteObservation } from '../chat/linux-delete-observation.mjs';
+import { buildSemanticCapabilitySelection } from '../chat/semantic-capability.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.argv[2]) throw new Error('requires Linux root and native helper');
 const sourceStat = await lstat(process.argv[2]);
@@ -42,6 +43,9 @@ process.stdout.write(JSON.stringify(result.projection));`;
   const bound = bindLinuxDeleteObservation({ decision: projection.decisions[0], attestation, trustedPublicKey: keys.publicKey });
   assert.equal(bound.decision, 'ASK');
   assert.equal(bound.operation.target.resourceSnapshot.linuxTargetAttestation.binding.path, target);
+  const selection = buildSemanticCapabilitySelection([bound]);
+  assert.equal(selection.operations[0].adapterInput.linuxTargetAttestation.binding.path, target);
+  assert.match(selection.selectionManifestHash, /^[a-f0-9]{64}$/);
   assert.equal(await readFile(target, 'utf8'), 'fixture');
   console.log('linux delete observation: native and unprivileged resolver identities agree');
 } finally {
