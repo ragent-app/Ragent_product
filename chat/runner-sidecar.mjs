@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve, win32 } from 'path';
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
 import { buildCodexRunShellEnvironment } from './codex-shared-environment.mjs';
+import { macCancellationCleanupStatus, readMacCleanupNotification } from './macos-codex-cancellation.mjs';
 import { evaluateRunBoundCodexWindowsHook } from './codex-run-bound-windows-hook.mjs';
 import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -1243,6 +1244,7 @@ async function persistRunTerminalState(runId, result, nextState, options = {}) {
         ? { failureReason: options.failureReason }
         : {}),
       ...(options.authRecovery ? { authRecovery: options.authRecovery } : {}),
+      ...(options.cancellationCleanupStatus ? { cancellationCleanupStatus: options.cancellationCleanupStatus } : {}),
     }));
   } catch (error) {
     await logSidecarDiagnostic(runId, 'Failed to persist detached runner status', {
@@ -4877,6 +4879,13 @@ async function main() {
         void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
       }
     }
+    if (process.platform === 'darwin' && codexAppServerBrokered && appServerState && parsed) {
+      const cleanupStatus = readMacCleanupNotification(parsed, { threadId: appServerState.threadId, runId });
+      if (cleanupStatus) {
+        appServerState.macCancellationCleanupStatus = cleanupStatus;
+        return;
+      }
+    }
     if (appServerState && parsed && await maybeConsumeCodexAppServerGoalResponse(runId, appServerState, parsed)) {
       return;
     }
@@ -6166,6 +6175,21 @@ async function main() {
           return;
         }
       }
+      const cancellationCleanupStatus = macCancellationCleanupStatus({
+        platform: process.platform,
+        brokered: codexAppServerBrokered,
+        cancelled: current.cancelRequested === true,
+        interruptSent: appServerState?.interruptSent === true,
+        observed: appServerState?.macCancellationCleanupStatus,
+      });
+      if (cancellationCleanupStatus === 'unconfirmed') {
+        await appendRunSpoolRecord(runId, {
+          ts: nowIso(), stream: 'stdout', json: {
+            type: 'status', role: 'system', code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED',
+            content: 'Cancellation was requested, but macOS could not confirm task process cleanup. A task process may still be running.',
+          },
+        });
+      }
       const result = {
         completedAt,
         // Persist the effective Run outcome. The old code exposed a provider's
@@ -6174,6 +6198,7 @@ async function main() {
         exitCode: effectiveExitCode,
         signal: terminalSignal || null,
         cancelled: current.cancelRequested === true,
+        ...(cancellationCleanupStatus ? { cancellationCleanupStatus } : {}),
         ...(providerFailureReason && rawExitCode !== effectiveExitCode
           ? { providerExitCode: rawExitCode }
           : {}),
@@ -6214,6 +6239,7 @@ async function main() {
             ? 'completed'
             : 'failed',
         {
+          ...(cancellationCleanupStatus ? { cancellationCleanupStatus } : {}),
           ...(providerFailureReason
             ? { failureReason: providerFailureReason }
             : effectiveExitCode === 0

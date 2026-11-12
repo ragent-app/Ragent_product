@@ -24,6 +24,7 @@ import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-run
 import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
 import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.mjs';
 import { createCodexWindowsHookRouter } from './codex-windows-hook-router.mjs';
+import { MAC_CLEANUP_NOTIFICATION } from './macos-codex-cancellation.mjs';
 
 const BROKER_PING = 'agentoc-codex-broker-ping';
 const BROKER_PONG = 'agentoc-codex-broker-pong';
@@ -426,6 +427,12 @@ function runBroker() {
   const handleUpstreamMessage = (message) => {
     if (!message || typeof message !== 'object') return;
     const serverRequest = typeof message.method === 'string' && isRequest(message);
+    if (message.method === MAC_CLEANUP_NOTIFICATION) {
+      if (serverRequest) {
+        try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32601, message: 'Reserved broker method' } })}\n`); } catch {}
+      }
+      return;
+    }
     if (!serverRequest && message.id === BROKER_INTERNAL_INITIALIZE_ID) {
       upstreamReady = !message.error;
       return;
@@ -628,7 +635,11 @@ function runBroker() {
     }
     if (process.platform === 'darwin' && message.method === 'turn/interrupt' && owner === client) {
       const runTag = clientRunTags.get(client);
-      if (runTag && !cleanupMacCodexRun(upstream?.pid, runTag)) {
+      const cleanupAttempted = Boolean(runTag && cleanupMacCodexRun(upstream?.pid, runTag));
+      sendClient(client, { method: MAC_CLEANUP_NOTIFICATION, params: {
+        threadId, runId: runTag || null, status: cleanupAttempted ? 'attempted' : 'unconfirmed',
+      } });
+      if (!cleanupAttempted) {
         // Still send the provider interrupt. A failed cleanup must not prevent
         // cooperative cancellation; it also must not expose process details.
         console.error('[codex-broker] macOS run process cleanup was incomplete');

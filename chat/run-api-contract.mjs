@@ -45,6 +45,8 @@ export function projectApiRun(run) {
     createdAt: stamp(run.createdAt), updatedAt: stamp(run.updatedAt), startedAt: stamp(run.startedAt),
     completedAt: stamp(run.completedAt), cancelRequested: run.cancelRequested === true,
     cancelRequestedAt: stamp(run.cancelRequestedAt),
+    ...(run.cancelRequested === true && ['attempted', 'unconfirmed'].includes(run.cancellationCleanupStatus)
+      ? { cancellationCleanupStatus: run.cancellationCleanupStatus } : {}),
     launchAdmittedAt: stamp(run.messageLaunchAdmittedAt), dispatched: Boolean(run.runnerStartedAt || run.runnerLifecycleAcceptedAt) };
   return { ...value, revision: runApiHash(value) };
 }
