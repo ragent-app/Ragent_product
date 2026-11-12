@@ -1034,30 +1034,40 @@ async function discoverOfficialCodexCatalog(provider) {
   const providerId = String(provider?.id || '').trim();
   if (!providerId) throw new Error('Official Codex provider id is missing');
   const { prepareNativeRunProviderHome } = await import('../lib/provider-runtime/run-provider-prepare.mjs');
-  const prepared = await prepareNativeRunProviderHome(`catalog-${providerId}`, {
-    tool: 'codex',
-    runtimeFamily: 'codex-app-server-json',
-    options: {
+  let prepared;
+  try {
+    prepared = await prepareNativeRunProviderHome(`catalog-${providerId}`, {
+      tool: 'codex',
       runtimeFamily: 'codex-app-server-json',
-      providerProfile: providerId,
-      model: providerModelFromConfig(provider),
-    },
-  }, {
-    configDir: CONFIG_DIR,
-    // Use the exact same provider-scoped root as ordinary Runs. Creating a
-    // second catalog-only home would create a second OAuth refresh writer.
-    providerHomesRoot: dirname(CODEX_MANAGED_HOME_DIR),
-    externalOAuthOwnership: false,
-    holdNativeOAuthLock: false,
-  });
+      options: {
+        runtimeFamily: 'codex-app-server-json',
+        providerProfile: providerId,
+        model: providerModelFromConfig(provider),
+      },
+    }, {
+      configDir: CONFIG_DIR,
+      // Use the exact same provider-scoped root as ordinary Runs. Creating a
+      // second catalog-only home would create a second OAuth refresh writer.
+      providerHomesRoot: dirname(CODEX_MANAGED_HOME_DIR),
+      externalOAuthOwnership: false,
+      holdNativeOAuthLock: false,
+    });
+  } catch (cause) {
+    throw Object.assign(new Error('Official Codex provider preparation failed', { cause }), { discoveryStage: 'PREPARE' });
+  }
   if (!prepared?.ok || !prepared.codexHomeDir) {
-    throw new Error(prepared?.error || prepared?.reason || 'Official Codex provider home is unavailable');
+    throw Object.assign(new Error('Official Codex provider home is unavailable'), { discoveryStage: 'PREPARE', code: prepared?.reason });
   }
   const { listCodexAppServerModels } = await import('./codex-app-server-client.mjs');
-  const models = await listCodexAppServerModels({
-    codexHomeDir: prepared.codexHomeDir,
-    timeoutMs: PROVIDER_MODEL_LIST_FETCH_TIMEOUT_MS,
-  });
+  let models;
+  try {
+    models = await listCodexAppServerModels({
+      codexHomeDir: prepared.codexHomeDir,
+      timeoutMs: PROVIDER_MODEL_LIST_FETCH_TIMEOUT_MS,
+    });
+  } catch (cause) {
+    throw Object.assign(new Error('Official Codex model request failed', { cause }), { discoveryStage: 'REQUEST' });
+  }
   if (!Array.isArray(models) || models.length === 0) {
     throw new Error('Official Codex model/list returned no picker-visible models');
   }

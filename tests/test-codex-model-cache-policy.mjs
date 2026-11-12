@@ -21,3 +21,10 @@ test('discovery failure diagnostics use safe categories', () => {
   assert.equal(classifyOfficialCodexDiscoveryFailure(new Error('Official Codex model/list returned no picker-visible models')),'MODEL_LIST_EMPTY');
   assert.equal(classifyOfficialCodexDiscoveryFailure({code:'SECRET',message:'secret'}),'MODEL_LIST_FAILED');
 });
+
+test('discovery diagnostics identify the stage without leaking provider errors', () => {
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE',cause:new Error('secret')}),'MODEL_LIST_PREPARE_FAILED');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE',code:'credential-missing'}),'MODEL_LIST_PREPARE_CREDENTIAL_MISSING');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'REQUEST',cause:{code:'EPERM',message:'secret'}}),'MODEL_LIST_EPERM');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'REQUEST',cause:{code:'secret',message:'secret'}}),'MODEL_LIST_REQUEST_FAILED');
+});

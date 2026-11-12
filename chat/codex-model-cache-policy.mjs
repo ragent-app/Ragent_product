@@ -17,9 +17,17 @@ export function classifyOfficialCodexDiscoveryFailure(error) {
     'HARNESS_RUNTIME_UNAVAILABLE', 'NATIVE_OAUTH_LOCK_TIMEOUT',
     'CODEX_BROKER_PIPE_SECURITY_FAILED', 'CODEX_BROKER_PIPE_SECURITY_INVALID',
   ]);
-  if (allowedCodes.has(error?.code)) return error.code;
-  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+  const safePrepareReasons = new Set(['credential-missing', 'resolution-failed', 'oauth-persist-unavailable', 'oauth-persist-failed', 'oauth-persist-readback-failed', 'codex-broker-account-changed']);
+  if (error?.discoveryStage === 'PREPARE' && safePrepareReasons.has(error?.code)) {
+    return `MODEL_LIST_PREPARE_${error.code.toUpperCase().replaceAll('-', '_')}`;
+  }
+  const classified = error?.cause || error;
+  if (allowedCodes.has(classified?.code)) return classified.code;
+  if (['ENOENT', 'EACCES', 'EPERM', 'ECONNREFUSED', 'ECONNRESET'].includes(classified?.code)) return `MODEL_LIST_${classified.code}`;
+  const message = typeof classified?.message === 'string' ? classified.message.toLowerCase() : '';
   if (message.includes('timed out') || message.includes('timeout')) return 'MODEL_LIST_TIMEOUT';
   if (message.includes('no picker-visible models')) return 'MODEL_LIST_EMPTY';
+  if (error?.discoveryStage === 'PREPARE') return 'MODEL_LIST_PREPARE_FAILED';
+  if (error?.discoveryStage === 'REQUEST') return 'MODEL_LIST_REQUEST_FAILED';
   return 'MODEL_LIST_FAILED';
 }
