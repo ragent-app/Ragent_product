@@ -57,3 +57,7 @@ auth-sessions.json
 *.pem
 .DS_Store
 Thumbs.db
+
+# Service-private generated account credentials
+ragent-account/account.json
+ragent-account/.initial-*

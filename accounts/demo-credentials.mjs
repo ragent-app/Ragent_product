@@ -37,14 +37,16 @@ export async function loadDemoAccountAuth(path, options = {}) {
     // silently enable an account. Expose the unavailable state without logging
     // the policy, path, or credentials; restart after an operator fixes it.
     console.error('[accounts] Test account policy unavailable; test sign-in is disabled.');
-    return Object.freeze({
-      accountId: '',
-      instanceAccess: 'unavailable',
-      unlimitedConnections: false,
-      async verify() { throw unavailable(); },
-      assertAccount() { throw unavailable(); },
-    });
+    return unavailableRagentAccountAuth();
   }
+}
+
+export function unavailableRagentAccountAuth() {
+  return Object.freeze({
+    accountId: '', instanceAccess: 'unavailable', unlimitedConnections: false,
+    async verify() { throw unavailable(); },
+    assertAccount() { throw unavailable(); },
+  });
 }
 
 export function createDemoAccountAuth(policy, { clock = Date.now } = {}) {

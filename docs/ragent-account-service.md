@@ -1,0 +1,9 @@
+# Ragent account on the Accounts service
+
+On the first normal service startup without an explicitly configured account policy, Accounts creates a Ragent username/password account. Its identity and credentials survive service restarts; creating the account does not grant access to any existing computer. Access to a computer requires its own authorization.
+
+The service stores the initial username and a randomly generated password together with the password verifier in `ragent-account/account.json` beneath the Accounts data-file directory (`AGENTOC_ACCOUNTS_DATA_DIR` by default). This file contains a usable password: restrict access to the service administrator, include it in protected backups, and never attach it to logs, support bundles, or source control. On Unix the service enforces a private directory and file; on Windows it restricts the directory to the service identity, SYSTEM, and administrators. An operator may retrieve the initial credentials from the private file on the Accounts host.
+
+Back up and restore the policy and Accounts database together. If a previously provisioned policy is missing, damaged, inconsistent with its stored account, or cannot be protected, Ragent login is unavailable until the operator restores it. The service will not silently create a replacement identity; Google login continues independently. An explicitly configured `AGENTOC_DEMO_ACCOUNT_POLICY_FILE` continues to take precedence for existing deployments and is not overwritten. Existing legacy restricted and allowlist fields are interpreted as normal account behavior; actual instance authorization remains mandatory.
+
+This initialization supplies an account identity only. Durable access grants for an existing computer already owned by another account are a separate capability and must not replace that computer's owner binding.

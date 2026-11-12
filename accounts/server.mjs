@@ -15,7 +15,8 @@ import { ACCOUNT_DELETION_BODY_LIMIT, handleAccountDeletionRoutes } from './acco
 import { createContentReportStore, handleContentReportRoutes } from './content-reports.mjs';
 import { createOwnerAuthBroker } from './owner-auth-broker.mjs';
 import { createAccountEntitlementResolver } from './turn-lease-policy.mjs';
-import { loadDemoAccountAuth } from './demo-credentials.mjs';
+import { loadDemoAccountAuth, unavailableRagentAccountAuth } from './demo-credentials.mjs';
+import { ensureDefaultRagentAccount } from './default-ragent-account.mjs';
 import { handleOwnerAuthRoutes } from './owner-auth-routes.mjs';
 import { createRefreshLeaseBroker } from './refresh-lease-broker.mjs';
 import { handleRefreshLeaseRoutes } from './refresh-lease-routes.mjs';
@@ -188,6 +189,7 @@ export async function createAccountsServer({
   temporaryPairingKeyFile = '',
   temporaryPairingKeyRing,
   demoAccountPolicyFile = '',
+  defaultRagentAccountUnavailable = false,
   contentReportFile = '',
   contentReportStore,
   asrService: injectedAsrService,
@@ -247,7 +249,8 @@ export async function createAccountsServer({
   // that need custom native validation must inject it explicitly.
   const nativeVerifier = verifyNativeGoogleCredential
     || optionsNativeVerifier(fetchImpl, clock);
-  const demoAccountAuth = await loadDemoAccountAuth(demoAccountPolicyFile, { clock });
+  const demoAccountAuth = defaultRagentAccountUnavailable
+    ? unavailableRagentAccountAuth() : await loadDemoAccountAuth(demoAccountPolicyFile, { clock });
   const resolveEntitlement = createAccountEntitlementResolver(demoAccountAuth);
   const broker = createOwnerAuthBroker({
     demoAccountAuth, resolveEntitlement,
@@ -446,6 +449,21 @@ export async function startAccountsServer(options = {}) {
         (process.env.AGENTOC_ACCOUNTS_SCOPED_RENDEZVOUS_CREATION === '1'),
     }) : undefined),
   };
+  // A configured legacy policy takes precedence. Otherwise create exactly one
+  // private, durable first-party account in the service data directory.
+  // Initialization failures never block Google sessions or regenerate identity.
+  if (!serverOptions.demoAccountPolicyFile) {
+    serverOptions.store ||= createFileStore(serverOptions.dataFile);
+    try {
+      const initialized = await ensureDefaultRagentAccount({ store: serverOptions.store,
+        dataDirectory: dirname(serverOptions.dataFile), clock: serverOptions.clock });
+      serverOptions.demoAccountPolicyFile = initialized.policyPath;
+      serverOptions.defaultRagentAccountUnavailable = initialized.status !== 'configured';
+    } catch {
+      serverOptions.defaultRagentAccountUnavailable = true;
+      auditLogger.warn({ event: 'ragent_account.initialization_unavailable' }, 'Ragent account initialization unavailable');
+    }
+  }
   const app = await createAccountsServer(serverOptions);
   const fastify = Fastify({
     logger: options.logger || createAccountsLoggerOptions(),
