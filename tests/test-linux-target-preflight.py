@@ -8,8 +8,8 @@ import subprocess
 import sys
 import tempfile
 
-if os.geteuid() != 0 or len(sys.argv) not in (2, 3):
-    raise SystemExit('requires root, the preflight executable path and optional binding module')
+if os.geteuid() != 0 or len(sys.argv) not in (2, 3, 4):
+    raise SystemExit('requires root, preflight executable and optional binding and attestation modules')
 binary = os.path.abspath(sys.argv[1])
 root = pathlib.Path(tempfile.mkdtemp(prefix='ragent-target-preflight-', dir='/var/lib'))
 os.chmod(root, 0o700)
@@ -40,17 +40,31 @@ try:
     assert evidence['inode'] == str(stat.st_ino) and evidence['device'] == str(stat.st_dev)
     assert evidence['parentInode'] == str(root.stat().st_ino)
     assert evidence['size'] == str(len(b'unchanged')) and target.read_bytes() == b'unchanged'
-    if len(sys.argv) == 3:
+    if len(sys.argv) >= 3:
         script = '''import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
 const { createLinuxTargetBinding, hashLinuxTargetBinding } = await import(pathToFileURL(process.argv[1]));
 const facts = JSON.parse(readFileSync(0, 'utf8'));
 const bound = createLinuxTargetBinding(process.argv[2], facts);
-process.stdout.write(JSON.stringify({ inode: bound.inode, hash: hashLinuxTargetBinding(process.argv[2], facts) }));'''
-        checked = subprocess.run(['node', '--input-type=module', '-e', script, os.path.abspath(sys.argv[2]), str(target)],
+const output = { inode: bound.inode, hash: hashLinuxTargetBinding(process.argv[2], facts) };
+if (process.argv[3]) {
+  const { signLinuxTargetAttestation, verifyLinuxTargetAttestation } = await import(pathToFileURL(process.argv[3]));
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const context = { sessionId: 'fixture-session', runId: 'fixture-run', turnId: 'fixture-turn', requestId: 'fixture-request' };
+  const now = Date.now(), signed = signLinuxTargetAttestation({ privateKey, context, path: process.argv[2], snapshot: facts, now });
+  output.attested = verifyLinuxTargetAttestation(signed, { publicKey, expectedContext: context, expectedPath: process.argv[2], now }).ok;
+}
+process.stdout.write(JSON.stringify(output));'''
+        args = ['node', '--input-type=module', '-e', script, os.path.abspath(sys.argv[2]), str(target)]
+        if len(sys.argv) == 4:
+            args.append(os.path.abspath(sys.argv[3]))
+        checked = subprocess.run(args,
                                  input=json.dumps(evidence), capture_output=True, text=True, timeout=10, check=True)
         bound = json.loads(checked.stdout)
         assert bound['inode'] == evidence['inode'] and len(bound['hash']) == 64
+        if len(sys.argv) == 4:
+            assert bound['attested'] is True
     run('relative/path', False, 'INVALID_PATH')
     run(str(root) + '/../etc/passwd', False, 'INVALID_PATH')
     run(root, False, 'UNTRUSTED_TARGET')
