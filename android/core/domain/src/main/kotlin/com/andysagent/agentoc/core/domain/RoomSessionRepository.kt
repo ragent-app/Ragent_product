@@ -2721,6 +2721,7 @@ class RoomSessionRepository(
             if (!activePendingOperationIds.add(snapshot.requestId)) continue
             try {
                 val operation = dao.getPendingOperation(snapshot.requestId) ?: continue
+                if (operation.state !in setOf("pending", "sending")) continue
                 if (operation.path.isBlank()) continue
                 dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
                 try {
