@@ -60,7 +60,7 @@ try {
   let helpOutput = '', helpError = '';
   help.stdout.on('data', data => { helpOutput += data; }); help.stderr.on('data', data => { helpError += data; });
   const helpCode = await new Promise((resolve, reject) => { help.once('error', reject); help.once('close', resolve); });
-  assert.equal(helpCode, 0, helpError); assert.match(helpOutput, /agentoc trigger <command>/);
+  assert.equal(helpCode, 0, helpError); assert.match(helpOutput, /ragent trigger <command>/);
   assert.equal(reads, 2, 'help must not perform an API request'); assert.equal(renewals, 1);
   console.log('windows-cli-read-e2e: installed CLI, capability renewal and sanitized environment passed');
 } finally {

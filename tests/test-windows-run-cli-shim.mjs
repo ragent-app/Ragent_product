@@ -21,7 +21,7 @@ if (process.platform !== 'win32') {
     const result = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
       'agentoc trigger --help'], { env, encoding: 'utf8', timeout: 30_000 });
     assert.equal(result.status, 0, result.stderr || String(result.error));
-    assert.match(result.stdout, /agentoc trigger <command>/);
+    assert.match(result.stdout, /ragent trigger <command>/);
     assert.match(result.stdout, /--session/);
     const alias = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
       'ragent trigger --help'], { env, encoding: 'utf8', timeout: 30_000 });
