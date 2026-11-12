@@ -226,6 +226,8 @@ try {
   const catalogs = await getToolModelCatalogs('codex');
   assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official').source, 'discovered');
   assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'static');
+  assert.match(catalogs.find((entry) => entry.providerProfileId === 'codex-official-2').error?.code || '', /^MODEL_LIST_[A-Z_]+$/);
+  assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official').error, undefined);
   assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official').capabilities.effort.source, 'upstream');
   assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official-2').capabilities.effort.source, 'builtin');
   assert.equal(result.models.find((m) => m.id === 'deepseek-v4-flash@deepseek-v4-flash-codex').label, 'deepseek-v4-flash · DeepSeek');
@@ -258,6 +260,9 @@ try {
   const recovered = await getModelsForTool('codex');
   assert.equal(recovered.models.some((m) => m.id === 'gpt-official-extra@codex-official-2'), true,
     'official discovery recovers after its failure cooldown');
+  const recoveredCatalogs = await getToolModelCatalogs('codex');
+  assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').error, undefined);
+  assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'discovered');
 
   console.log('test-models-codex-merged: ok');
 } finally {

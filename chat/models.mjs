@@ -775,9 +775,12 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
       });
     }
     for (const [groupKey, entries] of providerGroups) {
+      const discoveryError = (tool === 'codex' || tool === 'codex-cli')
+        ? cacheGet(officialCodexModelListCache, groupKey)?.errorCode : null;
       catalogs.set(groupKey, normalizeModelCatalog({
         providerProfileId: groupKey,
         entries,
+        ...(discoveryError ? { error: { code: discoveryError, message: 'Official Codex model discovery failed' } } : {}),
         // The backing getModelsForTool caches (AgY TTL, codexModelsCache,
         // providerModelListCache) already carry freshness semantics; this
         // projection is 'discovered' when it came from provider enumeration
@@ -1090,9 +1093,11 @@ function refreshOfficialCodexCatalog(provider, cacheKey, staleEntry = null) {
       return models;
     })
     .catch((error) => {
-      console.warn(`[models] Official Codex discovery failed (${classifyOfficialCodexDiscoveryFailure(error)})`);
+      const errorCode = classifyOfficialCodexDiscoveryFailure(error);
+      console.warn(`[models] Official Codex discovery failed (${errorCode})`);
       const failedAt = Date.now();
       cacheSet(officialCodexModelListCache, cacheKey, {
+        errorCode,
         ...(Array.isArray(staleModels) ? { models: staleModels } : {}),
         ...(Array.isArray(staleModels) ? { at: staleEntry?.at || 0 } : {}),
         failedAt,
