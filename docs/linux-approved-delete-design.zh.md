@@ -427,6 +427,18 @@ UID 的保留、任务 cgroup 和所有进程的退出形成同一可验证生�
 通过其他 IPC 逃逸及持久化文件残留，才能考虑复用该 UID。systemd 对动态
 用户释放及可写目录的限制见 [systemd.exec 文档](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)。
 
+随后同机使用 systemd D-Bus 的临时单元和 `ExecStartEx` 的 `no-setuid` 模式，
+让同一个 `DynamicUser` 单元保留 UID，并由该单元内的 root 测试启动器建立
+ID 映射、降权后执行任务。真实测试确认任务在该单元 cgroup 内、`NoNewPrivs`
+为 1 且 capability 集合为空；另一 UID 不能经 `/proc` 读取其映射。正常
+停止以及向主进程发送 SIGKILL 后，所创建的主进程和子进程均停止，systemd
+运行目录消失；复用相同动态 UID 后旧运行目录内容不可见。夹具为
+`tests/test-linux-systemd-single-dynamic-idmap.sh` 和其 D-Bus 启动脚本。
+这只覆盖单台机器的受控测试：该 root 启动器和 D-Bus 调用尚未成为产品组件，
+尚未验证进程通过 IPC 离开 cgroup、用户数据持久化、凭据和结果传递、异常
+升级、实际重启或真实提供商。systemd 的 `!` 执行前缀语义见
+[systemd.service 文档](https://www.freedesktop.org/software/systemd/man/252/systemd.service.html)。
+
 同一物理机对 systemd 管理目录作了补充试验：动态用户可在自己的
 `RuntimeDirectory` 中读写，而控制用的 0600 凭据源文件不能被该 UID 直接
 读取；单元通过 `LoadCredential` 获得该测试凭据。正常停止或向单元主进程
