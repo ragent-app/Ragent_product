@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, chown, copyFile, link, lstat, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { inspectAndAttestLinuxTarget } from '../scripts/linux-target-inspection.mjs';
+import { inspectAndAttestLinuxTarget, removeVerifiedLinuxTarget } from '../scripts/linux-target-inspection.mjs';
 import { loadLinuxTargetPublicKey, loadOrCreateLinuxTargetKey } from '../chat/linux-target-key-store.mjs';
 import { verifyLinuxTargetAttestation } from '../chat/linux-target-attestation.mjs';
 
@@ -48,7 +48,20 @@ try {
   await assert.rejects(inspectAndAttestLinuxTarget(input));
   await chmod(root, 0o700);
   assert.equal(await readFile(target, 'utf8'), 'fixture');
-  console.log('linux target inspection: pinned helper and signed snapshot checks passed');
+  const invalid = { ...checked.binding, inode: String(BigInt(checked.binding.inode) + 1n) };
+  assert.deepEqual(await removeVerifiedLinuxTarget({ helperPath: helper, expectedSha256: digest, binding: invalid }),
+    { state: 'rejected', code: 'SNAPSHOT_MISMATCH' });
+  assert.deepEqual(await removeVerifiedLinuxTarget({ helperPath: helper, expectedSha256: '0'.repeat(64), binding: checked.binding }),
+    { state: 'rejected', code: 'HELPER_UNAVAILABLE' });
+  await writeFile(target, 'changed');
+  assert.deepEqual(await removeVerifiedLinuxTarget({ helperPath: helper, expectedSha256: digest, binding: checked.binding }),
+    { state: 'rejected', code: 'SNAPSHOT_MISMATCH' });
+  const fresh = await inspectAndAttestLinuxTarget(input);
+  const current = verifyLinuxTargetAttestation(fresh, { publicKey: trusted.publicKey, expectedContext: context, expectedPath: target });
+  assert.equal(current.ok, true);
+  assert.deepEqual(await removeVerifiedLinuxTarget({ helperPath: helper, expectedSha256: digest, binding: current.binding }), { state: 'completed' });
+  await assert.rejects(readFile(target), { code: 'ENOENT' });
+  console.log('linux target inspection: pinned helper, snapshot and removal checks passed');
 } finally {
   await chmod(root, 0o700);
   await rm(root, { recursive: true });

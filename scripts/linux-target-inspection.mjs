@@ -9,7 +9,7 @@ import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { posix as path } from 'node:path';
-import { validateLinuxTargetPath } from '../chat/linux-target-binding.mjs';
+import { createLinuxTargetBinding, validateLinuxTargetPath } from '../chat/linux-target-binding.mjs';
 import { canonicalLinuxTargetContext, signLinuxTargetAttestation } from '../chat/linux-target-attestation.mjs';
 import { assertLinuxRootControlledDirectory } from '../chat/linux-target-key-store.mjs';
 
@@ -29,47 +29,40 @@ function sameHelper(a, b) {
     a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
 }
 
-function runInspection(fd, targetPath) {
-  return new Promise((resolve, reject) => {
+function runNative(fd, args) {
+  return new Promise((resolve) => {
     // The already-verified descriptor is inherited as fd 3. Executing through
     // procfs prevents a later pathname replacement from selecting another file.
-    const child = spawn('/proc/self/fd/3', [targetPath], {
+    const child = spawn('/proc/self/fd/3', args, {
       cwd: '/', env: {}, stdio: ['ignore', 'pipe', 'pipe', fd],
     });
     let stdout = '', stderr = '', settled = false;
-    const timer = setTimeout(() => { child.kill('SIGKILL'); finish(new Error('inspection timed out')); }, TIMEOUT_MS);
-    function finish(error, value) {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ uncertain: true }); }, TIMEOUT_MS);
+    function finish(value) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (error) reject(error); else resolve(value);
+      resolve(value);
     }
     function collect(chunk, which) {
       const next = (which === 'stdout' ? stdout : stderr) + chunk.toString('utf8');
       if (Buffer.byteLength(next, 'utf8') > MAX_OUTPUT_BYTES) {
         child.kill('SIGKILL');
-        finish(new Error('inspection output exceeded limit'));
+        finish({ uncertain: true });
       } else if (which === 'stdout') stdout = next;
       else stderr = next;
     }
     child.stdout.on('data', (chunk) => collect(chunk, 'stdout'));
     child.stderr.on('data', (chunk) => collect(chunk, 'stderr'));
-    child.once('error', (error) => finish(error));
-    child.once('close', (code, signal) => {
-      if (code !== 0 || signal) return finish(new Error('native inspection rejected target'));
-      try { finish(null, JSON.parse(stdout)); } catch { finish(new Error('invalid native inspection response')); }
-    });
+    child.once('error', () => finish({ uncertain: true }));
+    child.once('close', (code, signal) => finish({ code, signal, stdout, stderr }));
   });
 }
 
-export async function inspectAndAttestLinuxTarget({ helperPath, expectedSha256, privateKey, targetPath, context } = {}) {
+async function withVerifiedHelper(helperPath, expectedSha256, action) {
   if (process.platform !== 'linux' || typeof process.geteuid !== 'function' || process.geteuid() !== 0) fail('Linux root is required');
   validateLinuxTargetPath(helperPath);
-  validateLinuxTargetPath(targetPath);
-  const normalizedContext = canonicalLinuxTargetContext(context);
-  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || '') || !privateKey || privateKey.type !== 'private' || privateKey.asymmetricKeyType !== 'ed25519') {
-    fail('trusted helper digest and private key are required');
-  }
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || '')) fail('trusted helper digest is required');
   await assertLinuxRootControlledDirectory(path.dirname(helperPath));
   const file = await open(helperPath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -87,7 +80,70 @@ export async function inspectAndAttestLinuxTarget({ helperPath, expectedSha256, 
         createHash('sha256').update(binary).digest('hex') !== expectedSha256) {
       fail('helper identity or architecture does not match');
     }
-    const snapshot = await runInspection(file.fd, targetPath);
-    return signLinuxTargetAttestation({ privateKey, context: normalizedContext, path: targetPath, snapshot });
+    return await action(file.fd);
   } finally { await file.close(); }
+}
+
+export async function inspectAndAttestLinuxTarget({ helperPath, expectedSha256, privateKey, targetPath, context } = {}) {
+  validateLinuxTargetPath(targetPath);
+  const normalizedContext = canonicalLinuxTargetContext(context);
+  if (!privateKey || privateKey.type !== 'private' || privateKey.asymmetricKeyType !== 'ed25519') fail('private key is required');
+  return withVerifiedHelper(helperPath, expectedSha256, async (fd) => {
+    const result = await runNative(fd, [targetPath]);
+    if (result.uncertain || result.code !== 0 || result.signal) fail('native inspection rejected target');
+    let snapshot;
+    try { snapshot = JSON.parse(result.stdout); } catch { fail('invalid native inspection response'); }
+    return signLinuxTargetAttestation({ privateKey, context: normalizedContext, path: targetPath, snapshot });
+  });
+}
+
+const SNAPSHOT_FIELDS = Object.freeze([
+  'mountId', 'parentDevice', 'parentInode', 'device', 'inode', 'size',
+  'ctimeSeconds', 'ctimeNanoseconds', 'mtimeSeconds', 'mtimeNanoseconds',
+]);
+const DEFINITE_REJECTIONS = new Set([
+  'ROOT_REQUIRED', 'INVALID_ARGUMENTS', 'INVALID_PATH', 'INTERNAL_ERROR', 'ROOT_UNAVAILABLE',
+  'UNTRUSTED_DIRECTORY', 'UNTRUSTED_TARGET', 'TARGET_CHANGED_OR_UNTRUSTED', 'SNAPSHOT_MISMATCH',
+]);
+
+export function classifyLinuxDeleteNativeResult(result = {}) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return { state: 'unknown', code: 'LINUX_DELETE_RESULT_UNKNOWN' };
+  if (!result.uncertain && !result.signal && result.code === 0) {
+    try {
+      const value = JSON.parse(result.stdout);
+      if (value && Object.keys(value).length === 1 && value.removed === true) return { state: 'completed' };
+    } catch { /* The operation may have happened; report unknown. */ }
+  }
+  const code = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+  if (!result.uncertain && !result.signal && result.code === 1 && DEFINITE_REJECTIONS.has(code)) {
+    return { state: 'rejected', code };
+  }
+  return { state: 'unknown', code: 'LINUX_DELETE_RESULT_UNKNOWN' };
+}
+
+/**
+ * Executes only a validated single-file snapshot. This is NOT authorization:
+ * a trusted caller must verify policy, owner capability, run liveness, and
+ * durably consume a one-shot nonce before invoking it. Not exposed by Ragent.
+ */
+export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, binding } = {}) {
+  let normalized;
+  try {
+    if (!binding || typeof binding !== 'object' || Array.isArray(binding) || !Object.hasOwn(binding, 'path')) {
+      return { state: 'rejected', code: 'INVALID_BINDING' };
+    }
+    const { path: targetPath, ...snapshot } = binding || {};
+    normalized = createLinuxTargetBinding(targetPath, snapshot);
+  } catch { return { state: 'rejected', code: 'INVALID_BINDING' }; }
+  let invoked = false;
+  try {
+    return await withVerifiedHelper(helperPath, expectedSha256, async (fd) => {
+      invoked = true;
+      const result = await runNative(fd, ['--remove', normalized.path, ...SNAPSHOT_FIELDS.map((field) => normalized[field])]);
+      return classifyLinuxDeleteNativeResult(result);
+    });
+  } catch {
+    return invoked ? { state: 'unknown', code: 'LINUX_DELETE_RESULT_UNKNOWN' }
+      : { state: 'rejected', code: 'HELPER_UNAVAILABLE' };
+  }
 }
