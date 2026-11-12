@@ -269,6 +269,20 @@ try {
   assert.ok(dropArgs.includes('/usr/bin/setpriv'));
   assert.ok(dropArgs.includes('--reuid'));
   assert.ok(!dropArgs.some(arg => arg.startsWith('SupplementaryGroups=')));
+  assert.ok(dropArgs.includes('AGENTOC_RUNNER_DISTINCT_IDENTITY=0'));
+  dropCalls.length = 0;
+  await launchLifecycleRunner('run_distinctfixture', { ...dropOptions, controlUser:'control' });
+  assert.ok(dropCalls.find(item => item.command === '/usr/bin/systemd-run').args
+    .includes('AGENTOC_RUNNER_DISTINCT_IDENTITY=1'));
+  let migratedInputs = false;
+  await launchLifecycleRunner('run_legacyfixture', { ...dropOptions, controlUser:'control',
+    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'1', AGENTOC_RUNNER_SAME_USER:'0' },
+    resolveRunnerOwnershipImpl:async user => ({ uid:user === 'control' ? 1235 : 1234, gid:1234 }),
+    grantExistingRunnerFilesImpl:async (path, identities) => {
+      migratedInputs = path.endsWith('/run_legacyfixture') && identities.controlUid === 1235 && identities.runnerUid === 1234;
+    },
+  });
+  assert.equal(migratedInputs, true);
   let checkedProcess = false;
   const reusedDrop = await launchLifecycleRunner('run_dropfixture', { ...dropOptions,
     readUnitStateImpl: async () => ({loadState:'loaded', activeState:'active', pid:4321, user:'root'}),

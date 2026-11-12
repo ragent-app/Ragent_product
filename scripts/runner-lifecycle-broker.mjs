@@ -45,6 +45,7 @@ import { normalizeRunnerInheritedGroups, RUNNER_DENIED_GROUPS } from '../lib/run
 import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGroupIds,
   resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
+import { grantExistingRunnerFiles } from '../lib/linux-runner-file-access.mjs';
 
 const execFileAsync = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -524,6 +525,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   resolveAllowedGroupsImpl = resolveAllowedRunnerGroupIds,
   verifyDroppedRunnerProcessImpl = verifyDroppedRunnerProcess,
   isTrustedSetprivImpl = isTrustedSetpriv,
+  grantExistingRunnerFilesImpl = grantExistingRunnerFiles,
   resolveInheritedGroupsImpl = resolveRunnerInheritedGroups,
   readManifestImpl = readRunManifest,
   grantWorkspaceAccessImpl = grantRunnerWorkspaceAccess,
@@ -601,6 +603,17 @@ async function launchLifecycleRunnerUnlocked(runId, {
   // control user and pass the fixed deny-list; same UID never authorizes sudo,
   // docker, privileged-executor, or hardware privilege channels.
   const resolvedControlUser = controlUser || await resolveControlUser();
+  let distinctIdentity = resolvedServiceUser !== resolvedControlUser;
+  if (distinctIdentity && String(environment.AGENTOC_RUNNER_SAME_USER ?? '1').trim() === '0') {
+    const controlOwnership = await resolveRunnerOwnershipImpl(resolvedControlUser, resolvedServiceGroup);
+    if (!Number.isSafeInteger(controlOwnership?.uid) || controlOwnership.uid <= 0) {
+      throw Object.assign(new Error('Cannot verify control user identity'), { code:'RUNNER_IDENTITY_INVALID' });
+    }
+    distinctIdentity = controlOwnership.uid !== runnerOwnership.uid;
+    if (distinctIdentity) await grantExistingRunnerFilesImpl(join(RUN_SPOOL_DIR, normalized), {
+      controlUid: controlOwnership.uid, runnerUid: runnerOwnership.uid,
+    });
+  }
   const inheritedGroups = await resolveInheritedGroupsImpl(resolvedControlUser, {
     environment,
   });
@@ -776,6 +789,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     ...(await resolveRunnerProxyEnvironment(environment)),
     HOME: resolvedServiceHome,
     ...(useGroupDrop ? { USER: resolvedServiceUser, LOGNAME: resolvedServiceUser } : {}),
+    AGENTOC_RUNNER_DISTINCT_IDENTITY: distinctIdentity ? '1' : '0',
     AGENTOC_CODEX_HOME_DIR: runCodexHomeDir,
     AGENTOC_AGY_HOME_DIR: isAgy ? runAgyHomeDir : '',
     AGENTOC_RUN_SPOOL_DIR: environment.AGENTOC_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs'),

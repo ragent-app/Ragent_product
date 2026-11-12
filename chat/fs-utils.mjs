@@ -83,7 +83,7 @@ function atomicTempPath(path) {
   return `${path}.tmp-${process.pid}-${Date.now()}-${atomicWriteSeq++}`;
 }
 
-export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable = false, signal, beforeReplace, preserveOwner = false } = {}) {
+export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable = false, signal, beforeReplace, preserveOwner = false, prepareHandle } = {}) {
   await ensureDir(dirname(path));
   const tempPath = atomicTempPath(path);
   const data = JSON.stringify(value, null, spaces);
@@ -95,7 +95,7 @@ export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable =
     owner = await lstat(path);
     if (!owner.isFile()) throw new Error('Cannot preserve ownership of a non-regular file');
   }
-  if (durable || owner) {
+  if (durable || owner || prepareHandle) {
     let handle;
     let ownsTemp = false;
     try {
@@ -103,6 +103,7 @@ export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable =
       ownsTemp = true;
       await handle.writeFile(data, 'utf8');
       if (owner) await handle.chown(owner.uid, owner.gid);
+      if (prepareHandle) await prepareHandle(handle);
       if (durable) await handle.sync();
       await handle.close();
       handle = null;
@@ -126,17 +127,18 @@ export async function writeJsonAtomic(path, value, { mode, spaces = 2, durable =
   }
 }
 
-export async function writeTextAtomic(path, value, { mode, durable = false, signal } = {}) {
+export async function writeTextAtomic(path, value, { mode, durable = false, signal, prepareHandle } = {}) {
   await ensureDir(dirname(path));
   const tempPath = atomicTempPath(path);
-  if (durable) {
+  if (durable || prepareHandle) {
     let handle;
     let ownsTemp = false;
     try {
       handle = await open(tempPath, 'wx', mode ?? 0o600);
       ownsTemp = true;
       await handle.writeFile(value, 'utf8');
-      await handle.sync();
+      if (prepareHandle) await prepareHandle(handle);
+      if (durable) await handle.sync();
       await handle.close();
       handle = null;
       await replaceAtomically(tempPath, path, signal);

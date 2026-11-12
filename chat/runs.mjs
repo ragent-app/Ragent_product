@@ -11,6 +11,7 @@ import { BoundedLruMap } from './cache-utils.mjs';
 import { registerLruOrMap } from './memory-registry.mjs';
 import { cacheBudget } from '../lib/cache-budget.mjs';
 import { CHAT_RUNS_DIR } from '../lib/config.mjs';
+import { grantRunnerFileAccess, resolveRunFilePeerUid } from '../lib/linux-runner-file-access.mjs';
 import {
   createKeyedTaskQueue,
   ensureDir,
@@ -927,6 +928,11 @@ export function runDir(runId) {
   return join(CHAT_RUNS_DIR, runId);
 }
 
+async function runFileWriteOptions(runId, options, { writable = false } = {}) {
+  const uid = await resolveRunFilePeerUid(runDir(runId));
+  return uid === null ? options : { ...options, prepareHandle: handle => grantRunnerFileAccess(handle, uid, { writable }) };
+}
+
 export function runRequestIndexPath() {
   return REQUEST_INDEX_PATH;
 }
@@ -1568,14 +1574,14 @@ async function writeSessionControlSecrets(runId, {
     await writeTextAtomic(
       runSessionControlCapabilityPath(runId),
       `${capabilityToken}\n`,
-      { mode: 0o600, durable: true },
+      await runFileWriteOptions(runId, { mode: 0o600, durable: true }),
     );
   }
   if (renewalToken) {
     await writeTextAtomic(
       runSessionControlRenewalCapabilityPath(runId),
       `${renewalToken}\n`,
-      { mode: 0o600, durable: true },
+      await runFileWriteOptions(runId, { mode: 0o600, durable: true }),
     );
   }
 }
@@ -1709,14 +1715,14 @@ export async function createRun({ status, manifest }, { authorizePublication } =
         await writeTextAtomic(
           runAuthRecoveryCapabilityPath(run.id),
           `${recoveryCapability.token}\n`,
-          { mode: 0o600, durable: true },
+          await runFileWriteOptions(run.id, { mode: 0o600, durable: true }),
         );
       }
       if (browserCapability) {
         await writeTextAtomic(
           runBrowserCapabilityPath(run.id),
           `${browserCapability.token}\n`,
-          { mode: 0o600, durable: true },
+          await runFileWriteOptions(run.id, { mode: 0o600, durable: true }),
         );
       }
       // Publish the request key before the status file. If the process stops
@@ -1730,9 +1736,11 @@ export async function createRun({ status, manifest }, { authorizePublication } =
       await appendRunIndexRecord(run);
       // status.json is the acceptance commit point. A manifest-only directory is
       // an unpublished orphan, not a Run. All execution inputs precede that point.
-      await writeJsonAtomic(runManifestPath(run.id), persistedManifest, { ...COMPACT_JSON_OPTIONS, durable: true });
+      await writeJsonAtomic(runManifestPath(run.id), persistedManifest,
+        await runFileWriteOptions(run.id, { ...COMPACT_JSON_OPTIONS, durable: true }, { writable:true }));
       await authorizePublication?.();
-      await writeJsonAtomic(runStatusPath(run.id), run, { ...COMPACT_JSON_OPTIONS, durable: true });
+      await writeJsonAtomic(runStatusPath(run.id), run,
+        await runFileWriteOptions(run.id, { ...COMPACT_JSON_OPTIONS, durable: true }, { writable:true }));
       runStatusCache.set(run.id, run);
       runManifestCache.set(run.id, persistedManifest);
       await recordCacheMeta(run.id, runStatusPath(run.id), runStatusCacheMeta);
@@ -1806,12 +1814,12 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // Admission predicates run inside the exact Run mutation queue, after
     // all suspendable reads and immediately before durable publication.
     if (beforeWrite) beforeWrite(next);
-    await writeJsonAtomic(runStatusPath(runId), next, {
+    await writeJsonAtomic(runStatusPath(runId), next, await runFileWriteOptions(runId, {
       ...COMPACT_JSON_OPTIONS,
       durable: Boolean(next.runPublication),
       beforeReplace: beforeCommit,
       preserveOwner,
-    });
+    }, { writable:true }));
     runStatusCache.set(runId, next);
     await recordCacheMeta(runId, runStatusPath(runId), runStatusCacheMeta);
     // Heartbeats and observer ticks update status.json frequently.  The index
@@ -1840,7 +1848,8 @@ export async function updateRunManifest(runId, updater) {
     const prepared = normalizeSessionControlManifest({ ...retained, id: runId }, current);
     const next = prepared.manifest;
     await writeSessionControlSecrets(runId, prepared);
-    await writeJsonAtomic(runManifestPath(runId), next, { ...COMPACT_JSON_OPTIONS, durable: Boolean(next.runPublication) });
+    await writeJsonAtomic(runManifestPath(runId), next,
+      await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: Boolean(next.runPublication) }, { writable:true }));
     runManifestCache.set(runId, next);
     return clone(next);
   }));
@@ -1968,7 +1977,7 @@ export async function renewRunSessionControlCapability({
     }, manifest);
     await writeSessionControlSecrets(normalizedRunId, prepared);
     await writeJsonAtomic(runManifestPath(normalizedRunId), prepared.manifest,
-      { ...COMPACT_JSON_OPTIONS, durable: Boolean(prepared.manifest.runPublication) });
+      await runFileWriteOptions(normalizedRunId, { ...COMPACT_JSON_OPTIONS, durable: Boolean(prepared.manifest.runPublication) }, { writable:true }));
     runManifestCache.set(normalizedRunId, prepared.manifest);
     return { capability, renewal, manifest: clone(prepared.manifest) };
   }));
