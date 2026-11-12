@@ -12,9 +12,12 @@ cleanup() {
 trap cleanup EXIT
 contents="$test_dir/Ragent App.app/Contents"
 mkdir -p "$contents/MacOS" "$contents/Resources/runtime" "$contents/Resources/app" "$test_dir/bin" "$test_dir/home"
-cp "$root/packaging/macos/AgentoC" "$contents/MacOS/"
+cp "$root/packaging/macos/Info.plist" "$contents/Info.plist"
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$contents/Info.plist")" = cloud.agenton.ragent ]
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = Ragent ]
+cp "$root/packaging/macos/AgentoC" "$contents/MacOS/Ragent"
 cp "$root/packaging/macos/"{agentoc-env.sh,agentoc-stop} "$contents/Resources/"
-chmod 0755 "$contents/MacOS/AgentoC" "$contents/Resources/agentoc-stop"
+chmod 0755 "$contents/MacOS/Ragent" "$contents/Resources/agentoc-stop"
 xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=13.0 "$root/native/macos-instance-check.c" -o "$contents/Resources/runtime/agentoc-macos-instance-check"
 ln -s "$(command -v node)" "$contents/Resources/runtime/node"
 printf '#!/bin/sh\nexit 0\n' > "$contents/Resources/runtime/codex"
@@ -47,7 +50,7 @@ chmod 0755 "$test_dir/bin/osascript"
 export HOME="$test_dir/home" AGENTOC_CONFIG_DIR="$test_dir/config" PATH="$test_dir/bin:$PATH" QA_ALERT_ARGS="$test_dir/alert"
 port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
 export CHAT_PORT="$port"
-"$contents/MacOS/AgentoC"
+"$contents/MacOS/Ragent"
 server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
 kill -0 "$server_pid"
 curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
@@ -79,12 +82,12 @@ fi
 grep -Fq 'no service was stopped' "$test_dir/stop-error"
 kill -0 "$server_pid"
 cp "$test_dir/instance.env.before-stop" "$AGENTOC_CONFIG_DIR/instance.env"
-"$contents/MacOS/AgentoC"
+"$contents/MacOS/Ragent"
 [ "$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")" = "$server_pid" ]
 # Replacing the bundle while a service retains the same command path must not
 # silently open the old service, even if only the source revision changed.
 printf '%040d\n' 2 > "$contents/Resources/app/.agentoc-source-commit"
-if "$contents/MacOS/AgentoC" >/dev/null 2>&1; then
+if "$contents/MacOS/Ragent" >/dev/null 2>&1; then
   echo 'launcher accepted a service from another source revision' >&2
   exit 1
 fi
@@ -92,7 +95,7 @@ grep -Fq '当前应用版本不一致' "$QA_ALERT_ARGS"
 kill -0 "$server_pid"
 printf '%040d\n' 1 > "$contents/Resources/app/.agentoc-source-commit"
 printf '%s\n' 0.0.2 > "$contents/Resources/app/.agentoc-package-version"
-if "$contents/MacOS/AgentoC" >/dev/null 2>&1; then
+if "$contents/MacOS/Ragent" >/dev/null 2>&1; then
   echo 'launcher accepted a service from another package version' >&2
   exit 1
 fi
@@ -103,7 +106,7 @@ server_pid=''
 
 # LaunchAgent-style starts need not have a PID file. The stop command must
 # wait for the actual listening service to exit before reporting success.
-"$contents/MacOS/AgentoC"
+"$contents/MacOS/Ragent"
 server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
 rm "$AGENTOC_CONFIG_DIR/agentoc.pid"
 "$contents/Resources/agentoc-stop"
@@ -121,7 +124,7 @@ for _ in $(seq 1 50); do
   if curl -fsS -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then break; fi
   sleep 0.1
 done
-if "$contents/MacOS/AgentoC"; then
+if "$contents/MacOS/Ragent"; then
   echo 'launcher accepted an unrelated service on its port' >&2
   exit 1
 fi
@@ -132,7 +135,7 @@ kill -0 "$other_pid"
 export AGENTOC_CONFIG_DIR="$test_dir/incomplete-config"
 mkdir -p "$AGENTOC_CONFIG_DIR"
 : > "$AGENTOC_CONFIG_DIR/instance.env"
-if "$contents/MacOS/AgentoC" >/dev/null 2>&1; then
+if "$contents/MacOS/Ragent" >/dev/null 2>&1; then
   echo 'launcher accepted incomplete existing configuration' >&2
   exit 1
 fi

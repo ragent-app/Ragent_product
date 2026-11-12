@@ -428,7 +428,7 @@ printf 'claude_sha256=%s\n' "$CLAUDE_BINARY_SHA" >> "$CONTENTS/Resources/runtime
 
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
-install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/AgentoC"
+install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/Ragent"
 install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/agentoc-service"
 install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/agentoc-stop"
 install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/Resources/agentoc-cli"
@@ -528,7 +528,7 @@ BUNDLED_NODE_VERSION="$("$CONTENTS/Resources/runtime/node" --version)"
   echo "Bundled Node reports $BUNDLED_NODE_VERSION, expected $NODE_VERSION" >&2
   exit 1
 }
-for script in "$CONTENTS/MacOS/AgentoC" "$CONTENTS/Resources/agentoc-service" "$CONTENTS/Resources/agentoc-stop" "$CONTENTS/Resources/agentoc-cli" "$CONTENTS/Resources/ragent" "$CONTENTS/Resources/agentoc-login" "$CONTENTS/Resources/agentoc-env.sh"; do
+for script in "$CONTENTS/MacOS/Ragent" "$CONTENTS/Resources/agentoc-service" "$CONTENTS/Resources/agentoc-stop" "$CONTENTS/Resources/agentoc-cli" "$CONTENTS/Resources/ragent" "$CONTENTS/Resources/agentoc-login" "$CONTENTS/Resources/agentoc-env.sh"; do
   bash -n "$script" || { echo "Launcher syntax error: $script" >&2; exit 1; }
 done
 for required in \

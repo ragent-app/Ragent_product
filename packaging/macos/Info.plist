@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>Ragent</string>
     <key>CFBundleIdentifier</key>
-    <string>cloud.agenton.agentoc</string>
+    <string>cloud.agenton.ragent</string>
     <key>CFBundleVersion</key>
     <string>{{VERSION}}</string>
     <key>CFBundleShortVersionString</key>
@@ -15,7 +15,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>AgentoC</string>
+    <string>Ragent</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>LSMinimumSystemVersion</key>
