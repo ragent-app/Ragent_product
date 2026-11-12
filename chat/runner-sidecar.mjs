@@ -4242,7 +4242,8 @@ async function main() {
         upstreamArgs: brokerCommand.args,
         upstreamWindowsVerbatimArguments: brokerCommand.windowsVerbatimArguments === true,
         cwd: resolvedFolder.cwd,
-        env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, AGENTOC_CODEX_BROKER_BASE_PATH: codexBrokerBasePath },
+        env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, AGENTOC_CODEX_BROKER_BASE_PATH: codexBrokerBasePath,
+          AGENTOC_CODEX_BROKER_SERVICE_MODE: process.platform === 'win32' && process.env.AGENTOC_RUNNER_LAUNCH_MODE === 'runner-supervisor' ? '1' : '0' },
         scriptPath: CODEX_APP_SERVER_BROKER_SCRIPT,
         assertLaunchBoundary: () => assertRunLaunchBoundary(runId),
       });

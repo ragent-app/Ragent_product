@@ -27,6 +27,7 @@ import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.m
 import { createCodexWindowsHookRouter } from './codex-windows-hook-router.mjs';
 import { MAC_CLEANUP_NOTIFICATION, MAC_CLEANUP_SPOOL_TYPE } from './macos-codex-cancellation.mjs';
 import { createCodexBrokerTurnActivity } from './codex-broker-turn-activity.mjs';
+import { secureWindowsCodexBrokerPipe } from './codex-windows-broker-pipe-security.mjs';
 
 const BROKER_PING = 'agentoc-codex-broker-ping';
 const BROKER_PONG = 'agentoc-codex-broker-pong';
@@ -752,6 +753,16 @@ function runBroker() {
     server = createServer(attachClient);
     server.listen(socketPath, async () => {
       await chmod(socketPath, 0o660).catch(() => {});
+      try {
+        await secureWindowsCodexBrokerPipe(socketPath, process.pid, {
+          serviceMode: process.env.AGENTOC_CODEX_BROKER_SERVICE_MODE === '1',
+        });
+      } catch (error) {
+        console.error(`[codex-broker] pipe security failed: ${error?.code || 'unknown'}`);
+        server?.close();
+        process.exitCode = 1;
+        return;
+      }
       void startUpstream().catch((error) => {
         console.error(`[codex-broker] upstream launch failed: ${error?.message || error}`);
         server?.close();

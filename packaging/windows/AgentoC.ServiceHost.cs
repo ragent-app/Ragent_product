@@ -18,6 +18,50 @@ using Microsoft.Win32;
 
 namespace AgentoC.ServiceHost
 {
+    // A shared Codex broker is reached by both installed service identities.
+    // Apply the pipe ACL only after the kernel identifies the expected server.
+    internal static class CodexBrokerPipeSecurity
+    {
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        static extern bool GetNamedPipeServerProcessId(SafeFileHandle handle, out uint pid);
+        [DllImport("advapi32.dll", SetLastError=true)]
+        static extern uint SetSecurityInfo(SafeFileHandle handle, uint objectType, uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+        [DllImport("advapi32.dll", SetLastError=true)]
+        static extern bool GetSecurityDescriptorDacl(IntPtr descriptor, out bool present, out IntPtr dacl, out bool defaulted);
+
+        internal static int Run(string[] args)
+        {
+            if (args.Length != 3 || args[0] != "--codex-broker-pipe-security" ||
+                !Regex.IsMatch(args[1] ?? "", @"\Aagentoc-codex-[a-f0-9]{32}\z")) return 2;
+            uint expected;
+            if (!UInt32.TryParse(args[2], out expected) || expected == 0) return 2;
+            try {
+                string control = new NTAccount("NT SERVICE", "AgentoC-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;
+                string runner = new NTAccount("NT SERVICE", "AgentoC-RunnerSupervisor").Translate(typeof(SecurityIdentifier)).Value;
+                string caller = WindowsIdentity.GetCurrent().User.Value;
+                if (!String.Equals(caller, control, StringComparison.OrdinalIgnoreCase) &&
+                    !String.Equals(caller, runner, StringComparison.OrdinalIgnoreCase)) return 2;
+                using (var pipe = CreateFileW(@"\\.\pipe\" + args[1], 0x00040000, 0, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
+                    if (pipe.IsInvalid) return 1;
+                    uint actual;
+                    if (!GetNamedPipeServerProcessId(pipe, out actual) || actual != expected) return 1;
+                    var descriptor = new RawSecurityDescriptor("D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;"+control+")(A;;GA;;;"+runner+")");
+                    var bytes = new byte[descriptor.BinaryLength]; descriptor.GetBinaryForm(bytes, 0);
+                    IntPtr memory = Marshal.AllocHGlobal(bytes.Length);
+                    try {
+                        Marshal.Copy(bytes, 0, memory, bytes.Length);
+                        bool present, defaulted; IntPtr dacl;
+                        if (!GetSecurityDescriptorDacl(memory, out present, out dacl, out defaulted) || !present) return 1;
+                        if (SetSecurityInfo(pipe, 6, 0x80000004, IntPtr.Zero, IntPtr.Zero, dacl, IntPtr.Zero) != 0) return 1;
+                    } finally { Marshal.FreeHGlobal(memory); }
+                }
+                return 0;
+            } catch { return 1; }
+        }
+    }
+
     // Node's net.Socket does not set a named-pipe client impersonation level.
     // The Broker verifies both the kernel-reported client PID and its
     // impersonated token, so ControlPlane uses this small mode of its already
@@ -1091,6 +1135,9 @@ namespace AgentoC.ServiceHost
 
         public static void Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--codex-broker-pipe-security") {
+                Environment.ExitCode = CodexBrokerPipeSecurity.Run(args); return;
+            }
             if(args.Length>0&&args[0]=="--build-info") {
                 Environment.ExitCode=PrintBuildInfo(args);return;
             }
