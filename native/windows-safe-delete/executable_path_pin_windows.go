@@ -54,9 +54,46 @@ func OpenPinnedDependencyPath(name string, expected [sha256.Size]byte) (*PinnedE
 }
 
 func openPinnedImagePath(name string, expected [sha256.Size]byte, allowDLL bool) (*PinnedExecutablePath, error) {
+	return openPinnedPath(name, expected, allowDLL, false)
+}
+
+// PinnedReadPath keeps one previously authorized regular file and its
+// directory names stable while the caller performs a read. It does not decide
+// whether a path is sensitive; the caller must independently apply policy and
+// supply a digest from a trusted approval decision.
+type PinnedReadPath struct{ path *PinnedExecutablePath }
+
+func (p *PinnedReadPath) Path() string {
+	if p == nil || p.path == nil {
+		return ""
+	}
+	return p.path.Path()
+}
+
+func (p *PinnedReadPath) Close() error {
+	if p == nil || p.path == nil {
+		return nil
+	}
+	err := p.path.Close()
+	p.path = nil
+	return err
+}
+
+// OpenPinnedReadPath accepts ordinary local paths inside or outside the
+// workspace. Reparse points, hard links, content changes and ancestor renames
+// are rejected or held blocked by handles until Close.
+func OpenPinnedReadPath(name string, expected [sha256.Size]byte) (*PinnedReadPath, error) {
+	value, err := openPinnedPath(name, expected, false, true)
+	if err != nil {
+		return nil, err
+	}
+	return &PinnedReadPath{path: value}, nil
+}
+
+func openPinnedPath(name string, expected [sha256.Size]byte, allowDLL, regularRead bool) (*PinnedExecutablePath, error) {
 	clean := filepath.Clean(name)
 	ext := strings.ToLower(filepath.Ext(clean))
-	if !filepath.IsAbs(clean) || len(filepath.VolumeName(clean)) != 2 || (ext != ".exe" && (!allowDLL || ext != ".dll")) || strings.Contains(clean[2:], ":") {
+	if !filepath.IsAbs(clean) || len(filepath.VolumeName(clean)) != 2 || (!regularRead && ext != ".exe" && (!allowDLL || ext != ".dll")) || strings.Contains(clean[2:], ":") {
 		return nil, ErrExecutableIdentity
 	}
 	var chain []string
@@ -95,7 +132,13 @@ func openPinnedImagePath(name string, expected [sha256.Size]byte, allowDLL bool)
 			return nil, ErrExecutableIdentity
 		}
 	}
-	image, err := openPinnedImageFile(clean, expected, true, allowDLL)
+	var image *PinnedExecutable
+	var err error
+	if regularRead {
+		image, err = openPinnedRegularFile(clean, expected, false)
+	} else {
+		image, err = openPinnedImageFile(clean, expected, true, allowDLL)
+	}
 	if err != nil {
 		return nil, err
 	}
