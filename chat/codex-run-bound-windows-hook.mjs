@@ -12,5 +12,6 @@ export async function evaluateRunBoundCodexWindowsHook(event, binding) {
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
       permissionDecisionReason: 'The Windows operation could not be bound to its active run.' } };
   }
+  if (binding.enabled === false) return {};
   return evaluateCodexWindowsHook(event, binding.env);
 }

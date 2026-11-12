@@ -13,6 +13,8 @@ const [first, second] = await Promise.all([
 ]);
 assert.match(first.hookSpecificOutput.permissionDecisionReason, /agentoc_request_actions/);
 assert.match(second.hookSpecificOutput.permissionDecisionReason, /unavailable/);
+assert.deepEqual(await evaluateRunBoundCodexWindowsHook(event, { ...binding, enabled: false }), {});
+assert.equal((await evaluateRunBoundCodexWindowsHook(event, { ...binding, enabled: false, active: false })).hookSpecificOutput.permissionDecision, 'deny');
 for (const invalid of [{ ...binding, threadId: 'thread-b' }, { ...binding, turnId: 'turn-b' }, { ...binding, active: false }]) {
   const result = await evaluateRunBoundCodexWindowsHook(event, invalid);
   assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');

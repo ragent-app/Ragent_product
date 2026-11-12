@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve, win32 } from 'path';
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
 import { buildCodexRunShellEnvironment } from './codex-shared-environment.mjs';
+import { evaluateRunBoundCodexWindowsHook } from './codex-run-bound-windows-hook.mjs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createToolInvocation, prependAttachmentPaths, resolveCommandSpawnSpec } from './process-runner.mjs';
 import { readPiTerminalOutcome } from './adapters/pi.mjs';
@@ -4864,6 +4865,16 @@ async function main() {
       }
     }
     if (appServerState && parsed && await maybeConsumeCodexAppServerGoalResponse(runId, appServerState, parsed)) {
+      return;
+    }
+    if (codexAppServerBrokered && parsed?.method === 'agentoc/windowsHook' && parsed.id != null) {
+      const result = await evaluateRunBoundCodexWindowsHook(parsed.params?.event, {
+        active: appServerState?.startedTurn === true && !appServerState.terminalSeen && !appServerState.hadError,
+        threadId: appServerState?.threadId, turnId: appServerState?.turnId,
+        enabled: windowsElevationHook, env: spawnEnv,
+      }).catch(() => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
+        permissionDecisionReason: 'The Ragent Windows operation check failed.' } }));
+      writeCodexAppServerMessage(proc, { id: parsed.id, result });
       return;
     }
     if (appServerState?.codexManagedHookSetup && parsed && appServerState.codexManagedHookSetup.consume(parsed)) {
