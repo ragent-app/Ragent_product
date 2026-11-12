@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { appendFile, chmod, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 test('persisted Run cancellation notifies the root lifecycle broker',
@@ -18,8 +18,8 @@ test('persisted Run cancellation notifies the root lifecycle broker',
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
       const { createRunnerLifecycleServer } = await import('../scripts/runner-lifecycle-broker.mjs');
-      const { createRun, getRunAcceptanceEvidence, requestRunCancel, recoverLinuxRunScopeRevocations, runIndexPath, updateRun } = await import('../chat/runs.mjs');
-      const { hasLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
+      const { createRun, getRunAcceptanceEvidence, requestRunCancel, recoverLinuxRunScopeRevocations, runIndexPath, runStatusPath, updateRun } = await import('../chat/runs.mjs');
+      const { hasLinuxRunCancelIntent, listLinuxRunRevocationOutbox } = await import('../chat/linux-run-cancel-intent.mjs');
       const broker = await createRunnerLifecycleServer({ socketPath: process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET,
         serviceUser: 'root', serviceGroup: 'root', controlUser: 'root', controlGroup: 'root', chownImpl: async () => {},
         runScopeRegistration: { directory: contextDirectory, pinDirectory: `${root}/unused` } });
@@ -61,6 +61,32 @@ test('persisted Run cancellation notifies the root lifecycle broker',
         assert.equal((await recoverLinuxRunScopeRevocations()).revoked, 1);
         const delayedName = `${createHash('sha256').update(delayedId).digest('hex')}-2.revoked`;
         assert.equal((await lstat(`${contextDirectory}/${delayedName}`)).mode & 0o777, 0o600);
+        const protectedId = 'run_protectedfixture1';
+        await createRun({ status: { id: protectedId, sessionId: 's1', requestId: 't7', state: 'running', runnerLaunchAttempt: 3 },
+          manifest: { sessionId: 's1', requestId: 't7' } });
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
+        await requestRunCancel(protectedId);
+        const forged = JSON.parse(await readFile(runStatusPath(protectedId), 'utf8'));
+        forged.state = 'running'; forged.cancelRequested = false; forged.linuxScopeRevocationPending = false;
+        await writeFile(runStatusPath(protectedId), JSON.stringify(forged));
+        await appendFile(runIndexPath(), `${JSON.stringify({ kind: 'entry', op: 'put', id: protectedId,
+          sessionId: 's1', requestId: 't7', state: 'running', cancelRequested: false })}\n`);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        const recoveryUrl = new URL('../chat/linux-run-revocation-outbox.mjs', import.meta.url).href;
+        const recovery = spawn(process.execPath, ['--input-type=module', '-e',
+          `import {createLinuxRunRevocationOutboxRecovery} from ${JSON.stringify(recoveryUrl)}; await createLinuxRunRevocationOutboxRecovery()();`],
+        { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+        let recoveryError = ''; recovery.stderr.on('data', (chunk) => { recoveryError += chunk; });
+        const recoveryCode = await new Promise((resolve, reject) => { recovery.once('error', reject); recovery.once('close', resolve); });
+        assert.equal(recoveryCode, 0, recoveryError);
+        const protectedName = `${createHash('sha256').update(protectedId).digest('hex')}-3.revoked`;
+        assert.equal((await lstat(`${contextDirectory}/${protectedName}`)).mode & 0o777, 0o600);
+        assert.equal(await hasLinuxRunCancelIntent(protectedId, 3), true);
+        assert.equal((await listLinuxRunRevocationOutbox()).records.some((item) => item.runId === protectedId), false);
+        const malformed = `${root}/config/linux-run-cancel-intents/${'0'.repeat(64)}-0.revoke.json`;
+        await writeFile(malformed, '{}', { mode: 0o600 });
+        assert.equal((await listLinuxRunRevocationOutbox()).invalid, 1);
+        await rm(malformed);
         const terminalId = 'run_terminalfixture1';
         await createRun({ status: { id: terminalId, sessionId: 's1', requestId: 't6', state: 'running' },
           manifest: { sessionId: 's1', requestId: 't6' } });

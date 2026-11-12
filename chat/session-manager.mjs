@@ -610,6 +610,8 @@ let linuxRunScopeRecoveryTimer = null;
 let linuxRunScopeRecoveryPromise = null;
 let linuxRunScopeRenewalTimer = null;
 let linuxRunScopeRenewalPromise = null;
+let linuxRunScopeOutboxTimer = null;
+let linuxRunScopeOutboxPromise = null;
 
 // Memory registry (DS-06): active detached-run watchers.
 registerCache('observedRuns', {
@@ -9630,6 +9632,20 @@ export async function startDetachedRunObservers() {
     renew(true);
     linuxRunScopeRenewalTimer = setInterval(() => renew(false), 30_000);
     linuxRunScopeRenewalTimer.unref?.();
+  }
+  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeOutboxTimer) {
+    const outboxRecovery = import('./linux-run-revocation-outbox.mjs')
+      .then(({ createLinuxRunRevocationOutboxRecovery }) => createLinuxRunRevocationOutboxRecovery());
+    const recoverOutbox = () => {
+      if (linuxRunScopeOutboxPromise) return;
+      linuxRunScopeOutboxPromise = outboxRecovery.then((recover) => recover())
+        .then(({ invalid }) => { if (invalid) console.error(`[runs] ${invalid} invalid privileged scope revocation records`); })
+        .catch((error) => console.error(`[runs] privileged scope outbox recovery failed: ${error.message}`))
+        .finally(() => { linuxRunScopeOutboxPromise = null; });
+    };
+    recoverOutbox();
+    linuxRunScopeOutboxTimer = setInterval(recoverOutbox, 15_000);
+    linuxRunScopeOutboxTimer.unref?.();
   }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {
