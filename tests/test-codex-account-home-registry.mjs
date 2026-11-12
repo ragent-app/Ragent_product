@@ -38,6 +38,7 @@ test('verified accounts converge on one guarded home across provider profiles', 
   const registry = join(configDir, 'native-provider-runtime', 'codex-canonical-accounts');
   const marker = join(registry, `${codexAccountHomeKey('account-a')}.json`);
   assert.doesNotMatch(await readFile(marker, 'utf8'), /account-a/);
+  await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, providerHomesRoot: join(root, 'other-homes'), candidateHomeRoot: join(root, 'other-homes', 'first') }), { code: 'CODEX_ACCOUNT_HOME_INVALID' });
   await writeFile(marker, JSON.stringify({ version: 1, home: '../outside' }));
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first }), { code: 'CODEX_ACCOUNT_HOME_INVALID' });
   await mkdir(providerHomesRoot, { recursive: true });
