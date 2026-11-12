@@ -17,7 +17,7 @@ import { createInterface } from 'node:readline';
 import { getExecution, listExecutions } from '../chat/orchestration-store.mjs';
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_NAME = 'agentoc';
+const SERVER_NAME = 'ragent';
 const SERVER_VERSION = '1.0.0';
 
 const SESSION_METADATA_FIELDS = [
@@ -116,7 +116,7 @@ async function getOrchestration(args = {}) {
 
 const TOOLS = [
   {
-    name: 'agentoc_list_sessions',
+    name: 'ragent_list_sessions',
     description: 'List Ragent chat sessions (metadata only: id, name, group, description, tool, timestamps). Sorted by most recently updated.',
     inputSchema: {
       type: 'object',
@@ -126,7 +126,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'agentoc_get_session',
+    name: 'ragent_get_session',
     description: 'Get a single Ragent session metadata by session id or exact name. Conversation bodies are never exposed.',
     inputSchema: {
       type: 'object',
@@ -137,7 +137,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'agentoc_list_orchestrations',
+    name: 'ragent_list_orchestrations',
     description: 'List durable Ragent orchestration executions and their provider-neutral state (read-only).',
     inputSchema: {
       type: 'object',
@@ -149,12 +149,12 @@ const TOOLS = [
     },
   },
   {
-    name: 'agentoc_get_orchestration',
+    name: 'ragent_get_orchestration',
     description: 'Read one durable orchestration execution, including steps, commands, interrupts and audit events (read-only).',
     inputSchema: {
       type: 'object',
       properties: {
-        executionId: { type: 'string', description: 'Execution id returned by agentoc_list_orchestrations' },
+        executionId: { type: 'string', description: 'Execution id returned by ragent_list_orchestrations' },
       },
       required: ['executionId'],
     },
@@ -190,21 +190,23 @@ async function handleRequest(request) {
     return jsonRpcResult(id, { tools: TOOLS });
   }
   if (method === 'tools/call') {
-    const name = trimString(request.params?.name);
+    // Keep old calls working for clients that cached the previous tool list.
+    const requestedName = trimString(request.params?.name);
+    const name = requestedName.replace(/^agentoc_/, 'ragent_');
     const args = request.params?.arguments && typeof request.params.arguments === 'object'
       ? request.params.arguments
       : {};
     try {
-      if (name === 'agentoc_list_sessions') {
+      if (name === 'ragent_list_sessions') {
         return jsonRpcResult(id, toolResult(JSON.stringify(await listSessions(args), null, 2)));
       }
-      if (name === 'agentoc_get_session') {
+      if (name === 'ragent_get_session') {
         return jsonRpcResult(id, toolResult(JSON.stringify(await getSession(args), null, 2)));
       }
-      if (name === 'agentoc_list_orchestrations') {
+      if (name === 'ragent_list_orchestrations') {
         return jsonRpcResult(id, toolResult(JSON.stringify(await listOrchestrations(args), null, 2)));
       }
-      if (name === 'agentoc_get_orchestration') {
+      if (name === 'ragent_get_orchestration') {
         return jsonRpcResult(id, toolResult(JSON.stringify(await getOrchestration(args), null, 2)));
       }
       return jsonRpcResult(id, toolResult(`Unknown tool: ${name}`, true));

@@ -77,7 +77,7 @@ async function run() {
       clientInfo: { name: 'phase1-test', version: '0' },
     } });
     const initialize = await mcp.waitFor(1);
-    assert.equal(initialize.result?.serverInfo?.name, 'agentoc', 'server should identify as agentoc');
+    assert.equal(initialize.result?.serverInfo?.name, 'ragent', 'server should identify as ragent');
     assert.equal(initialize.result?.protocolVersion, '2024-11-05', 'protocol version should be echoed');
 
     // Notifications must never produce a response.
@@ -86,17 +86,22 @@ async function run() {
     const list = await mcp.waitFor(2);
     const toolNames = list.result?.tools?.map((tool) => tool.name) || [];
     assert.deepEqual(toolNames, [
-      'agentoc_list_sessions',
-      'agentoc_get_session',
-      'agentoc_list_orchestrations',
-      'agentoc_get_orchestration',
+      'ragent_list_sessions',
+      'ragent_get_session',
+      'ragent_list_orchestrations',
+      'ragent_get_orchestration',
     ], 'expected tool set');
 
     mcp.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {
-      name: 'agentoc_list_sessions',
+      name: 'ragent_list_sessions',
       arguments: { limit: 5 },
     } });
+    mcp.send({ jsonrpc: '2.0', id: 30, method: 'tools/call', params: {
+      name: 'agentoc_list_sessions', arguments: { limit: 5 },
+    } });
+    const legacyListed = await mcp.waitFor(30);
     const listed = await mcp.waitFor(3);
+    assert.deepEqual(legacyListed.result, listed.result, 'cached legacy tool calls remain compatible');
     const listedText = listed.result?.content?.[0]?.text || '';
     assert.ok(listedText.includes('sess-1'), 'list should include newest session');
     assert.ok(listedText.includes('sess-2'), 'list should include both sessions');
@@ -104,7 +109,7 @@ async function run() {
     assert.ok(!listedText.includes('message') && !listedText.includes('content'), 'list must never expose bodies');
 
     mcp.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: {
-      name: 'agentoc_get_session',
+      name: 'ragent_get_session',
       arguments: { sessionId: 'sess-1' },
     } });
     const got = await mcp.waitFor(4);
@@ -113,14 +118,14 @@ async function run() {
     assert.ok(!gotText.includes('message'), 'get must never expose conversation bodies');
 
     mcp.send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: {
-      name: 'agentoc_get_session',
+      name: 'ragent_get_session',
       arguments: { sessionId: 'missing' },
     } });
     const missing = await mcp.waitFor(5);
     assert.equal(missing.result?.isError, true, 'unknown session should surface as a tool error');
 
     mcp.send({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: {
-      name: 'agentoc_list_sessions',
+      name: 'ragent_list_sessions',
       arguments: { limit: 1 },
     } });
     const limited = await mcp.waitFor(6);
@@ -128,7 +133,7 @@ async function run() {
     assert.ok(limitedText.includes('sess-1') && !limitedText.includes('sess-2'), 'limit should cap results');
 
     mcp.send({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: {
-      name: 'agentoc_list_orchestrations',
+      name: 'ragent_list_orchestrations',
       arguments: { rootSessionId: 'sess-1' },
     } });
     const orchestrations = await mcp.waitFor(8);
@@ -137,7 +142,7 @@ async function run() {
     assert.equal(orchestrations.result?.isError, false, 'orchestration list should be read-only and succeed without rows');
 
     mcp.send({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: {
-      name: 'agentoc_get_orchestration',
+      name: 'ragent_get_orchestration',
       arguments: { executionId: 'missing-execution' },
     } });
     const missingOrchestration = await mcp.waitFor(9);
