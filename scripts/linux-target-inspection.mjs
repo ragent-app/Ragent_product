@@ -29,12 +29,12 @@ function sameHelper(a, b) {
     a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
 }
 
-function runNative(fd, args) {
+function runNative(fd, args, lockFd) {
   return new Promise((resolve) => {
     // The already-verified descriptor is inherited as fd 3. Executing through
     // procfs prevents a later pathname replacement from selecting another file.
     const child = spawn('/proc/self/fd/3', args, {
-      cwd: '/', env: {}, stdio: ['ignore', 'pipe', 'pipe', fd],
+      cwd: '/', env: {}, stdio: ['ignore', 'pipe', 'pipe', fd, ...(Number.isInteger(lockFd) ? [lockFd] : [])],
     });
     let stdout = '', stderr = '', settled = false;
     const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ uncertain: true }); }, TIMEOUT_MS);
@@ -126,7 +126,7 @@ export function classifyLinuxDeleteNativeResult(result = {}) {
  * a trusted caller must verify policy, owner capability, run liveness, and
  * durably consume a one-shot nonce before invoking it. Not exposed by Ragent.
  */
-export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, binding, beforeExecute } = {}) {
+export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, binding, beforeExecute, lockFd } = {}) {
   let normalized;
   try {
     if (!binding || typeof binding !== 'object' || Array.isArray(binding) || !Object.hasOwn(binding, 'path')) {
@@ -144,7 +144,7 @@ export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, bi
         if (!allowed) return { state: 'rejected', code: 'EXECUTION_PRECONDITION_FAILED' };
       }
       invoked = true;
-      const result = await runNative(fd, ['--remove', normalized.path, ...SNAPSHOT_FIELDS.map((field) => normalized[field])]);
+      const result = await runNative(fd, ['--remove', normalized.path, ...SNAPSHOT_FIELDS.map((field) => normalized[field])], lockFd);
       return classifyLinuxDeleteNativeResult(result);
     });
   } catch {

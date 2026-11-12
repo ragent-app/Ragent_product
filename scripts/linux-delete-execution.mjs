@@ -15,7 +15,7 @@ const unknown = () => ({ state: 'unknown', code: 'LINUX_DELETE_RESULT_UNKNOWN' }
 
 export function createLinuxDeleteExecutor({
   servicePublicKey, rootPublicKey, rootPrivateKey, helperPath, expectedHelperSha256,
-  ledgerDirectory, resolveTrustedRun, isRunActive,
+  ledgerDirectory, resolveTrustedRun, isRunActive, lockFd,
 } = {}) {
   return async function executeLinuxDelete(capability) {
     let nativeInvocationStarted = false;
@@ -49,7 +49,7 @@ export function createLinuxDeleteExecutor({
       }
       nativeInvocationStarted = true;
       const result = await removeVerifiedLinuxTarget({
-        helperPath, expectedSha256: expectedHelperSha256, binding: current.binding,
+        helperPath, expectedSha256: expectedHelperSha256, binding: current.binding, lockFd,
         beforeExecute: async () => {
           const latestRun = await readRun();
           if (canonicalSemanticJson(latestRun) !== canonicalSemanticJson(currentRun) ||

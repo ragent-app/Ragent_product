@@ -11,6 +11,7 @@ import { verifyLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
 import { resolveApprovedActionRunDirectories } from '../chat/approved-action-run-directories.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
 import { captureLinuxRunUnitIdentity, isLinuxRunUnitLive } from './linux-run-unit-liveness.mjs';
+import { withLinuxRunOperationLock } from './linux-run-operation-lock.mjs';
 
 const RUN_ID = /^run_[A-Za-z0-9_-]{8,128}$/;
 const MAX_RECORD_BYTES = 256 * 1024;
@@ -98,6 +99,9 @@ export async function revokeLinuxRunContext({ directory, runId, launchAttempt } 
     const dir = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     try { await dir.sync(); } finally { await dir.close(); }
   }
+  // Marker first prevents later operations. Acquiring the same lock then
+  // waits for any operation that had already begun before acknowledging.
+  await withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {});
 }
 
 // Extend a still-live, non-revoked record without changing its signed scope or
