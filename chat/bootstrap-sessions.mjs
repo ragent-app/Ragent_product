@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 
 import { CHAT_PORT, INSTANCE_ROOT, MANAGED_WORK_ROOT_DIR } from '../lib/config.mjs';
 import {
-  CALENDAR_SUBSCRIBE_HELPER_PATH,
   buildCalendarSubscribeHelperPath,
   getFeedInfo,
 } from '../lib/connector-calendar-feed.mjs';
@@ -25,7 +24,6 @@ import {
   createSession,
   getSession,
   listSessions,
-  deleteSession,
   setSessionPinned,
   updateSessionEntryMode,
   updateSessionGrouping,
@@ -422,8 +420,8 @@ async function getOwnerBootstrapSessionDefinitions() {
   return definitions;
 }
 
-const LEGACY_WELCOME_SHOWCASE_HINT = [
-  '另外，左侧现在已经给你放了 3 个真实跑通过的示例会话：表格清洗回传、行业热点摘要发邮箱、以及发邮件进实例自动开新会话。',
+const WELCOME_SHOWCASE_HINT = [
+  '左侧有预置示例会话：表格清洗回传、行业热点摘要发邮箱，以及邮件进入实例后的会话。',
   '你可以按兴趣点开看看，主要是参考：用户通常怎么开头、我会怎么交付，以及结果会长什么样。',
   '觉得哪个最像你的情况，就直接照着那个方式把你的版本发给我。',
 ].join('\n\n');
@@ -501,30 +499,15 @@ async function appendMissingBootstrapMessages(sessionId, messages = [], existing
   return pendingEvents.length;
 }
 
-async function shouldRebuildBootstrapSession(session, definition) {
-  if (definition?.externalTriggerId === OWNER_BOOTSTRAP_CALENDAR_SUBSCRIBE_EXTERNAL_TRIGGER_ID) {
-    const contents = await loadMessageContents(session.id, {
-      stopWhen: (current) => current.some((content) => content.includes(CALENDAR_SUBSCRIBE_HELPER_PATH)),
-    });
-    return !contents.some((content) => typeof content === 'string' && content.includes(CALENDAR_SUBSCRIBE_HELPER_PATH));
-  }
-  if (definition?.externalTriggerId === OWNER_BOOTSTRAP_GUEST_MIGRATION_GUIDE_EXTERNAL_TRIGGER_ID) {
-    const contents = await loadMessageContents(session.id, {
-      stopWhen: (current) => current.some((content) => /整机里找 xxx 项目|本机哪个盘、哪个目录附近/u.test(content)),
-    });
-    return !contents.some((content) => typeof content === 'string' && /整机里找 xxx 项目|本机哪个盘、哪个目录附近/u.test(content));
-  }
-  return false;
-}
-
 async function backfillWelcomeGuideMessages(session, mailboxAddress) {
+  const hasShowcaseHint = (content) => /预置示例会话|3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content);
   const existingContents = await loadMessageContents(session.id, {
-    stopWhen: (current) => current.some((content) => /3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content))
+    stopWhen: (current) => current.some(hasShowcaseHint)
       && current.some((content) => /允许发件人|安全机制会先把邮件拦掉/u.test(content)),
   });
   const followups = [];
-  if (!existingContents.some((content) => /3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content))) {
-    followups.push({ role: 'assistant', content: LEGACY_WELCOME_SHOWCASE_HINT });
+  if (!existingContents.some(hasShowcaseHint)) {
+    followups.push({ role: 'assistant', content: WELCOME_SHOWCASE_HINT });
   }
   if (!existingContents.some((content) => /允许发件人|安全机制会先把邮件拦掉/u.test(content))) {
     followups.push({ role: 'assistant', content: buildInboundEmailSetupHint(mailboxAddress) });
@@ -611,11 +594,7 @@ export async function backfillOwnerBootstrapSessions() {
 
   for (const definition of ownerBootstrapSessions) {
     let session = sessionsByTrigger.get(definition.externalTriggerId) || null;
-    if (session && await shouldRebuildBootstrapSession(session, definition)) {
-      await deleteSession(session.id);
-      sessionsByTrigger.delete(definition.externalTriggerId);
-      session = null;
-    }
+    // A missing old seed phrase does not prove a conversation is untouched.
     if (!session) {
       session = await createOwnerBootstrapSession(definition);
       if (!session) continue;
