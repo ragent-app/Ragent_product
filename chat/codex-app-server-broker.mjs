@@ -187,8 +187,8 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
   });
 }
 
-export async function isCodexAppServerBrokerReady(socketPath, timeoutMs = 1_500) {
-  return probeBroker(socketPath, timeoutMs);
+export async function isCodexAppServerBrokerReady(socketPath, timeoutMs = 1_500, options = {}) {
+  return probeBroker(socketPath, timeoutMs, options);
 }
 
 /**
