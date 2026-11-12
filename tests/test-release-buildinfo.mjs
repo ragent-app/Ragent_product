@@ -11,7 +11,8 @@ const { releaseBuildInfo } = require('../desktop/update-check.cjs');
 const dir = await mkdtemp(join(tmpdir(), 'ragent-buildinfo-'));
 const version = '1.2.3', commit = 'a'.repeat(40), data = Buffer.from('candidate artifact\n');
 try {
-  for (const name of ['ragent_1.2.3_amd64.deb', 'ragent_1.2.3-darwin-arm64.dmg']) {
+  for (const name of ['ragent_1.2.3_amd64.deb', 'ragent_1.2.3-darwin-arm64.dmg',
+    'Ragent-1.2.3-ubuntu24.04-x86_64.deb', 'Ragent-1.2.3-macos13plus-arm64.dmg']) {
     const artifact = join(dir, name);
     await writeFile(artifact, data);
     const result = await createReleaseBuildinfo(artifact, version, commit);

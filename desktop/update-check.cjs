@@ -39,9 +39,9 @@ function assetVersion(asset) {
 function releaseAsset(asset, platform = process.platform, arch = process.arch) {
   if (!asset || typeof asset.name !== "string") return false;
   const patterns = {
-    "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-windows-x64-setup\.exe|(?:Ragent|AgentoC)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
-    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-linux-x64|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
-    "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-macos-arm64|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
+    "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:windows-x64|windows11-x86_64)-setup\.exe|(?:Ragent|AgentoC)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
+    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:linux-x64|ubuntu24\.04-x86_64)|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
+    "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:macos-arm64|macos13plus-arm64)|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
   };
   const pattern = patterns[`${platform}-${arch}`];
   if (!pattern || !pattern.test(asset.name)) return false;

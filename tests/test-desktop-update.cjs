@@ -11,6 +11,8 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert.equal(version("1.2.3.9007199254740992"), null);
   assert(windowsAsset(asset));
   assert(windowsAssetUrl(url));
+  const namedWindowsUrl = url.replace('windows-x64-setup.exe', 'windows11-x86_64-setup.exe');
+  assert(windowsAsset({ name: 'Ragent-1.2.3-windows11-x86_64-setup.exe', browser_download_url: namedWindowsUrl }));
   assert(!windowsAsset({ ...asset, name: "Ragent-1.2.3-windows-x64.msi" }));
   assert(!windowsAssetUrl(url + "?redirect=evil"));
   assert(!windowsAssetUrl(url.replace("ragent-app/Ragent_product", "ragent-app/other")));
@@ -19,9 +21,11 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert(!windowsAsset({ ...asset, name: "agentoc-arm64.msi" }));
   for (const [platform, arch, name] of [
     ["linux", "x64", "Ragent-1.2.3-linux-x64.deb"],
+    ["linux", "x64", "Ragent-1.2.3-ubuntu24.04-x86_64.deb"],
     ["linux", "x64", "ragent_1.2.3_amd64.deb"],
     ["linux", "x64", "agentoc_1.2.3_amd64.deb"],
     ["darwin", "arm64", "Ragent-1.2.3-macos-arm64.dmg"],
+    ["darwin", "arm64", "Ragent-1.2.3-macos13plus-arm64.dmg"],
     ["darwin", "arm64", "ragent_1.2.3-darwin-arm64.dmg"],
     ["darwin", "arm64", "agentoc_1.2.3-darwin-arm64.dmg"],
   ]) {
