@@ -19,6 +19,7 @@ import {
   CODEX_APP_SERVER_BROKER_SCRIPT,
   codexAppServerBrokerLockPath,
   codexAppServerBrokerSocketPath,
+  codexBrokerAccountDigest,
   ensureCodexAppServerBroker,
 } from './codex-app-server-broker.mjs';
 import {
@@ -4219,6 +4220,8 @@ async function main() {
         '--socket',
         brokerSocketPath,
       ];
+      const expectedAccountDigest = codexBrokerAccountDigest(codexRolloutAccountId(runtimeAuth));
+      if (expectedAccountDigest) spawnArgs.push('--account-digest', expectedAccountDigest);
       spawnShell = false;
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;
