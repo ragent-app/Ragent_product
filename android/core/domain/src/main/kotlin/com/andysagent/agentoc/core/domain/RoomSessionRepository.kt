@@ -798,13 +798,17 @@ class RoomSessionRepository(
         require(attachments.size <= 16 && attachments.all { !it.assetId.isNullOrBlank() && it.url == null && it.text == null }) { "Only verified file asset references may be submitted" }
         val body = encodeMessage(text, requestId, selection, agentId, attachments.toList())
         val response = execute(ApiRequest("POST", "/api/sessions/${encode(sessionId)}/messages", body, requestId, requestId))
-        return messageSubmissionReceipt(sessionId, requestId, codec.decode(serializer<JsonObject>(), response.body))
+        val receipt = messageSubmissionReceipt(sessionId, requestId, codec.decode(serializer<JsonObject>(), response.body))
+        markFirstTurnAccepted(sessionId)
+        return receipt
     }
 
     override suspend fun findMessageSubmissionReceipt(sessionId: String, requestId: String): MessageSubmissionReceipt? {
         require(sessionId.isNotBlank() && requestId.isNotBlank() && requestId.length <= 200) { "Invalid receipt identity" }
         val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/message-receipts/${encode(requestId)}"))
-        return lookupMessageSubmissionReceipt(sessionId, requestId, codec.decode(serializer<JsonObject>(), response.body))
+        val receipt = lookupMessageSubmissionReceipt(sessionId, requestId, codec.decode(serializer<JsonObject>(), response.body))
+        if (receipt != null) markFirstTurnAccepted(sessionId)
+        return receipt
     }
 
     override suspend fun createSessionInProject(projectId: String?, name: String, tool: String): Session {
@@ -1072,12 +1076,14 @@ class RoomSessionRepository(
         val response = requestSessionList()
         val payload = codec.decode(serializer<SessionListResponseDto>(), response.body)
         val now = System.currentTimeMillis()
+        val persistedSnapshots = dao.observeSessions().first()
+            .filter { it.status == ACCEPTED_FIRST_TURN_STATUS }.associateBy { it.id }
         val canonical = payload.sessions.map { item ->
             val existing = item.string("id")?.let { dao.getSession(it) }
             val activity = item["activity"]?.jsonObject
             val run = activity?.get("run")?.jsonObject
             val workflowState = item.string("workflowState")
-            val rawStatus = item.string("status") ?: workflowState ?: run?.string("state") ?: "idle"
+            val rawStatus = chooseSessionSummaryStatus(item.string("status"), workflowState, run?.string("state"))
             val sessionId = item.string("id").orEmpty()
             val status = preservePendingApprovalStatus(sessionId, rawStatus, sessionRunId(item))
             val waitingAction = item.string("waitingAction")
@@ -1093,7 +1099,7 @@ class RoomSessionRepository(
             SessionEntity(
                 id = item.string("id").orEmpty(),
                 title = item.string("title") ?: item.string("name") ?: "Unnamed session",
-                projectId = item.string("projectId"),
+                projectId = if (item.containsKey("projectId")) item.string("projectId") else existing?.projectId,
                 templateId = item.string("templateId"),
                 status = status,
                 latestSeq = item["latestSeq"]?.toString()?.trim('"')?.toLongOrNull() ?: 0L,
@@ -1109,7 +1115,7 @@ class RoomSessionRepository(
             )
         }.filter { it.id.isNotBlank() }
         val canonicalById = canonical.associateBy { it.id }
-        val acceptedIds = acceptedFirstTurnSessionIds.value
+        val acceptedIds = acceptedFirstTurnSessionIds.value + persistedSnapshots.keys
         val completedFirstTurns = mutableSetOf<String>()
         val reconciled = canonical.map { session ->
             if (session.id !in acceptedIds) return@map session
@@ -1118,10 +1124,24 @@ class RoomSessionRepository(
                 completedFirstTurns += session.id
                 return@map session
             }
-            session.copy(status = "working").also { acceptedFirstTurnSnapshots[session.id] = it }
+            val retainedStatus = if (sessionStatusFromRaw(session.status) == SessionStatus.WaitingApproval) session.status else ACCEPTED_FIRST_TURN_STATUS
+            session.copy(status = retainedStatus).also { acceptedFirstTurnSnapshots[session.id] = it }
         }.toMutableList()
         for (sessionId in acceptedIds - canonicalById.keys) {
-            acceptedFirstTurnSnapshots[sessionId]?.let(reconciled::add)
+            val retained = acceptedFirstTurnSnapshots[sessionId] ?: persistedSnapshots[sessionId] ?: continue
+            // A stale list can omit a just-accepted session. A definitive 404
+            // is different: another device may have deleted it intentionally.
+            val deleted = try {
+                execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}"))
+                false
+            } catch (error: SessionRepositoryException) {
+                error.statusCode == 404
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+            if (!deleted) reconciled.add(retained) else completedFirstTurns += sessionId
         }
         dao.replaceSessions(reconciled)
         if (completedFirstTurns.isNotEmpty()) {
@@ -1228,7 +1248,8 @@ class RoomSessionRepository(
         if (item.string("id").isNullOrBlank()) return null
         val initial = sessionEntityFromClientJson(item, dao.getSession(sessionId), authoritative = true)
         val runId = sessionRunId(item)
-        val terminalSession = hasTerminalSessionDetail(item) || isAuthoritativelyIdleSession(item)
+        val terminalSession = hasTerminalSessionDetail(item) ||
+            (initial.status != ACCEPTED_FIRST_TURN_STATUS && isAuthoritativelyIdleSession(item))
         val activity = item["activity"] as? JsonObject
         val activityRun = activity?.get("run") as? JsonObject
         val activityRunState = (activityRun?.get("state") ?: activityRun?.get("status"))
@@ -1265,7 +1286,7 @@ class RoomSessionRepository(
     }
 
     private suspend fun preservePendingApprovalStatus(sessionId: String, status: String, runId: String?): String {
-        if (sessionId.isBlank() || status.lowercase() !in setOf("running", "working", "streaming", "starting")) return status
+        if (sessionId.isBlank() || sessionStatusFromRaw(status) != SessionStatus.Working) return status
         return if (dao.getPendingApprovals(sessionId).any { approval ->
                 runId == null || approval.runId.isNullOrBlank() || approval.runId == runId
             }) "waiting_approval" else status
@@ -1795,7 +1816,6 @@ class RoomSessionRepository(
         executePending(sessionId, requestId, "send_message", path, body) {
             execute(ApiRequest("POST", path, body, requestId, requestId))
         }
-        markFirstTurnAccepted(sessionId)
         refreshSessionDetail(sessionId)
     }
 
@@ -1821,7 +1841,6 @@ class RoomSessionRepository(
             executePending(sessionId, requestId, "send_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
             }
-            markFirstTurnAccepted(sessionId)
             refreshSessionDetail(sessionId)
             return
         }
@@ -1855,8 +1874,8 @@ class RoomSessionRepository(
             )
             dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
             execute(ApiRequest("POST", path, body, requestId, requestId))
-            dao.deleteOperation(requestId)
             markFirstTurnAccepted(sessionId)
+            dao.deleteOperation(requestId)
         } catch (error: Throwable) {
             val recoverable = dao.getPendingOperation(requestId) ?: operation
             dao.upsertOperation(recoverable.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
@@ -1865,12 +1884,12 @@ class RoomSessionRepository(
         runCatching { refreshSessionDetail(sessionId) }
     }
 
-    private suspend fun markFirstTurnAccepted(sessionId: String) {
-        val candidate = firstTurnCandidates.remove(sessionId) ?: return
-        val current = dao.getSession(sessionId) ?: candidate
-        val retained = if (current.latestSeq == 0L && current.status.equals("idle", ignoreCase = true)) {
-            current.copy(status = "working")
-        } else current
+    private suspend fun markFirstTurnAccepted(sessionId: String) = sessionListRefreshMutex.withLock {
+        val candidate = firstTurnCandidates.remove(sessionId)
+        val current = dao.getSession(sessionId) ?: candidate ?: return@withLock
+        if (current.latestSeq > 0L) return@withLock
+        val retained = if (sessionStatusFromRaw(current.status) == SessionStatus.WaitingApproval) current
+            else current.copy(status = ACCEPTED_FIRST_TURN_STATUS)
         acceptedFirstTurnSnapshots[sessionId] = retained
         acceptedFirstTurnSessionIds.update { it + sessionId }
         dao.upsertSessions(listOf(retained))
@@ -2745,6 +2764,9 @@ class RoomSessionRepository(
                 if (operation.kind.startsWith("queue_")) {
                     runCatching { persistQueueMutationSession(response.body, sessionIdFromPath(operation.path)) }
                 }
+                if (operation.kind == "send_message" || operation.kind == "send_message_with_attachments") {
+                    markFirstTurnAccepted(sessionIdFromPath(operation.path))
+                }
                 dao.deleteOperation(operation.requestId)
                 completed += 1
             } catch (error: Throwable) {
@@ -2836,6 +2858,7 @@ class RoomSessionRepository(
         dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
         try {
             val response = action()
+            if (kind == "send_message") markFirstTurnAccepted(scope)
             dao.deleteOperation(requestId)
             return response
         } catch (error: Throwable) {
@@ -2864,7 +2887,11 @@ class RoomSessionRepository(
         val activity = item["activity"]?.jsonObject
         val run = activity?.get("run")?.jsonObject
         val workflowState = item.string("workflowState")
-        val rawStatus = item.string("status") ?: workflowState ?: run?.string("state") ?: existing?.status ?: "idle"
+        val summaryStatus = chooseSessionSummaryStatus(item.string("status"), workflowState, run?.string("state"), existing?.status ?: "idle")
+        val latestSeq = item["latestSeq"]?.toString()?.trim('"')?.toLongOrNull() ?: existing?.latestSeq ?: 0L
+        val rawStatus = if (existing?.status == ACCEPTED_FIRST_TURN_STATUS && latestSeq == 0L &&
+            sessionStatusFromRaw(summaryStatus) !in setOf(SessionStatus.WaitingApproval, SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled))
+            ACCEPTED_FIRST_TURN_STATUS else summaryStatus
         val waitingAction = item.string("waitingAction")
             ?: item.string("attentionKind")
             ?: run?.string("kind")?.takeIf { it.equals("approval", ignoreCase = true) }
@@ -2878,9 +2905,9 @@ class RoomSessionRepository(
         return SessionEntity(
             id = id,
             title = item.string("title") ?: item.string("name") ?: existing?.title ?: "Unnamed session",
-            projectId = item.string("projectId") ?: existing?.projectId,
+            projectId = if (item.containsKey("projectId")) item.string("projectId") else existing?.projectId,
             status = rawStatus,
-            latestSeq = item["latestSeq"]?.toString()?.trim('"')?.toLongOrNull() ?: existing?.latestSeq ?: 0L,
+            latestSeq = latestSeq,
             updatedAt = serverUpdatedAt,
             lastAssistantMessageAt = parseTimestamp(item.string("lastAssistantMessageAt")) ?: existing?.lastAssistantMessageAt,
             lastReviewedAt = parseTimestamp(item.string("lastReviewedAt")) ?: existing?.lastReviewedAt,
@@ -2967,14 +2994,7 @@ class RoomSessionRepository(
         id = item.id,
         title = item.title,
         projectId = item.projectId,
-        status = when (item.status.lowercase()) {
-            "running", "working", "streaming" -> SessionStatus.Working
-            "waiting_user", "waiting", "waiting_approval", "awaiting_approval" -> SessionStatus.WaitingApproval
-            "done", "completed", "complete" -> SessionStatus.Completed
-            "failed", "error" -> SessionStatus.Failed
-            "cancelled", "canceled" -> SessionStatus.Cancelled
-            else -> SessionStatus.Idle
-        },
+        status = sessionStatusFromRaw(item.status),
         latestSeq = item.latestSeq,
         updatedAt = item.updatedAt,
         templateId = item.templateId,
@@ -3196,7 +3216,7 @@ private class RoomEventSink(
                     (event.runId.isNullOrBlank() || approval.runId.isNullOrBlank() || approval.runId == event.runId)
             }
             if (waiting) dao.getSession(scope)?.let {
-                if (it.status == "working") dao.upsertSessions(listOf(it.copy(status = "waiting_approval", updatedAt = System.currentTimeMillis())))
+                if (sessionStatusFromRaw(it.status) == SessionStatus.Working) dao.upsertSessions(listOf(it.copy(status = "waiting_approval", updatedAt = System.currentTimeMillis())))
             }
         }
     }
