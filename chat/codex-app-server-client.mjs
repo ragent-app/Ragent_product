@@ -23,6 +23,8 @@ import {
   codexAppServerBrokerSocketPath,
   ensureCodexAppServerBroker,
 } from './codex-app-server-broker.mjs';
+import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
+import { WORKBENCH_EXECUTION_POLICY } from '../lib/workbench-execution-policy.mjs';
 
 const CODEX_APP_SERVER_REQUEST_IDS = Object.freeze({
   fork: 10,
@@ -282,12 +284,14 @@ export async function listCodexAppServerModels({
     command = invocation.command;
     env = invocation.env;
   }
-  const args = Array.isArray(upstreamArgs) ? upstreamArgs : ['app-server', '--stdio'];
+  const socketPath = codexAppServerBrokerSocketPath(home);
+  const args = Array.isArray(upstreamArgs) ? upstreamArgs : [
+    'app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY ? buildSharedCodexWindowsHook({ socketPath }).args : []),
+  ];
   const spawnSpec = buildPlatformSpawnSpec(command, args, {
     cwd: trimString(cwd) || process.cwd(),
     env: env || { ...process.env, CODEX_HOME: home },
   });
-  const socketPath = codexAppServerBrokerSocketPath(home);
   await ensureBrokerImpl({
     socketPath,
     lockPath: codexAppServerBrokerLockPath(home),
@@ -413,9 +417,11 @@ export async function listCodexAppServerCapabilities({
     command = invocation.command;
     env = invocation.env;
   }
-  const args = Array.isArray(upstreamArgs) ? upstreamArgs : ['app-server', '--stdio'];
-  const spawnSpec = buildPlatformSpawnSpec(command, args, { cwd: workingDirectory, env: env || { ...process.env, CODEX_HOME: home } });
   const socketPath = codexAppServerBrokerSocketPath(home);
+  const args = Array.isArray(upstreamArgs) ? upstreamArgs : [
+    'app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY ? buildSharedCodexWindowsHook({ socketPath }).args : []),
+  ];
+  const spawnSpec = buildPlatformSpawnSpec(command, args, { cwd: workingDirectory, env: env || { ...process.env, CODEX_HOME: home } });
   await ensureBrokerImpl({
     socketPath,
     lockPath: codexAppServerBrokerLockPath(home),

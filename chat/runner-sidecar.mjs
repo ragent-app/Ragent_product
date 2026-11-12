@@ -9,6 +9,7 @@ import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
 import { buildCodexRunShellEnvironment } from './codex-shared-environment.mjs';
 import { evaluateRunBoundCodexWindowsHook } from './codex-run-bound-windows-hook.mjs';
+import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createToolInvocation, prependAttachmentPaths, resolveCommandSpawnSpec } from './process-runner.mjs';
 import { readPiTerminalOutcome } from './adapters/pi.mjs';
@@ -3799,8 +3800,7 @@ async function main() {
     ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
     : null;
   const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
-  const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime && !readOnlyRequested && !WORKBENCH_EXECUTION_POLICY
-    && !windowsElevationHook);
+  const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime && !readOnlyRequested && !WORKBENCH_EXECUTION_POLICY);
   const threadScopedCodexMcp = sharedCodexThreadSupported;
   const windowsBrokerChannel = manifest.options?.windowsBrokerChannel;
   const windowsBrokerMcpRequested = !readOnlyRequested && Boolean(
@@ -4056,7 +4056,7 @@ async function main() {
   }
   // The private hook also supplies elevation guidance when no managed MCP
   // channel exists. It does not add approval rules in other permission modes.
-  if (!managedMcpOverlay && appServerState && windowsElevationHook) {
+  if (!managedMcpOverlay && appServerState && windowsElevationHook && !sharedCodexThreadSupported) {
     try {
       managedMcpOverlay = await prepareManagedMcpOverlay({ runtimeFamily, runId, spawnEnv, servers: [], codexWindowsApprovalGate: Boolean(spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT),
         codexWindowsInstallHook: join(PROJECT_ROOT, 'scripts', 'agentoc-codex-windows-install-hook.mjs') });
@@ -4120,8 +4120,10 @@ async function main() {
       && !sandboxRequired) {
     const brokerSocketPath = codexAppServerBrokerSocketPath(runnerCodexHomeDir);
     try {
-      const brokerCommand = appServerState?.agentocApprovalGate
-        ? await resolveCommandSpawnSpec(initialCommand, initialArgs, { cwd: resolvedFolder.cwd, env: spawnEnv })
+      const sharedHook = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY
+        ? buildSharedCodexWindowsHook({ socketPath: brokerSocketPath }) : null;
+      const brokerCommand = appServerState?.agentocApprovalGate || sharedHook
+        ? await resolveCommandSpawnSpec(initialCommand, [...initialArgs, ...(sharedHook?.args || [])], { cwd: resolvedFolder.cwd, env: spawnEnv })
         : resolvedCommand;
       await ensureCodexAppServerBroker({
         socketPath: brokerSocketPath,
@@ -4144,8 +4146,9 @@ async function main() {
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;
       if (!WORKBENCH_EXECUTION_POLICY) appServerState.threadShellEnvironment = buildCodexRunShellEnvironment(spawnEnv);
+      if (sharedHook) appServerState.codexWindowsInstallHook = { ...sharedHook, configPath: join(runnerCodexHomeDir, 'config.toml') };
     } catch (error) {
-      if (threadScopedCodexMcp && managedMcpOverlay) throw error;
+      if (sharedCodexThreadSupported && (managedMcpOverlay || windowsElevationHook)) throw error;
       await logSidecarDiagnostic(runId, 'Machine-local Codex app-server broker unavailable; using the safe exclusive fallback', {
         error: normalizeErrorMessage(error),
         code: error?.code || 'CODEX_APP_SERVER_BROKER_UNAVAILABLE',
