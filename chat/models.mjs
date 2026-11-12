@@ -9,6 +9,7 @@ import { CODEX_SERVICE_TIER_OPTIONS } from '../lib/codex-service-tier.mjs';
 import { AGY_EFFORT_LEVELS, listAgyModels } from '../lib/agy-manager.mjs';
 import { lookupModelContextWindowTokens } from './model-context-windows.mjs';
 import { classifyOfficialCodexDiscoveryFailure, mayCacheMergedCodexCatalog } from './codex-model-cache-policy.mjs';
+import { readPersistentCodexCatalog, writePersistentCodexCatalog } from './codex-model-persistent-cache.mjs';
 import { normalizeModelCatalog, sourceFromModelOrigins } from '../lib/provider-runtime/model-catalog.mjs';
 import { getHarnessProviderProtocols } from '../lib/provider-runtime/harness-bridge.mjs';
 import { getHarnessDefinition, listHarnesses } from '../lib/harness-registry.mjs';
@@ -1084,8 +1085,10 @@ function refreshOfficialCodexCatalog(provider, cacheKey, staleEntry = null) {
   }
   const staleModels = Array.isArray(staleEntry?.models) ? staleEntry.models : null;
   const promise = discoverOfficialCodexCatalog(provider)
-    .then((models) => {
-      cacheSet(officialCodexModelListCache, cacheKey, { at: Date.now(), models });
+    .then(async (models) => {
+      const entry = { at: Date.now(), models };
+      cacheSet(officialCodexModelListCache, cacheKey, entry);
+      await writePersistentCodexCatalog(CONFIG_DIR, cacheKey, entry);
       return models;
     })
     .catch((error) => {
@@ -1113,7 +1116,13 @@ async function readOfficialCodexCatalog(provider, { allowNetwork = true } = {}) 
   const cacheKey = String(provider?.catalogAccountKey || '').trim();
   if (!cacheKey) return [];
   const now = Date.now();
-  const cached = cacheGet(officialCodexModelListCache, cacheKey);
+  let cached = cacheGet(officialCodexModelListCache, cacheKey);
+  if (!cached) {
+    const persisted = await readPersistentCodexCatalog(CONFIG_DIR, cacheKey, now);
+    // A concurrent live refresh may already have installed a newer entry.
+    cached = cacheGet(officialCodexModelListCache, cacheKey) || persisted;
+    if (cached) cacheSet(officialCodexModelListCache, cacheKey, cached);
+  }
   const staleModels = Array.isArray(cached?.models) ? cached.models : null;
   if (cached?.at && now - cached.at < PROVIDER_MODEL_LIST_TTL_MS && staleModels) {
     return staleModels;
