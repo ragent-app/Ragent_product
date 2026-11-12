@@ -187,7 +187,8 @@ assert.match(
 );
 assert.match(buildScript, /PACKAGE_ACCOUNTS_URL="\$\{AGENTOC_PACKAGE_ACCOUNTS_URL:-https:\/\/ragent\.agentoncloud\.com\/accounts\}"/);
 assert.match(buildScript, /PACKAGE_TURN_BROKER_URL="\$\{AGENTOC_PACKAGE_TURN_BROKER_URL:-https:\/\/ragent\.agentoncloud\.com\/turn\}"/);
-assert.match(buildScript, /OUTPUT_NAME="ragent_\$\{VERSION\}_\$\{ARCH\}\.deb"/);
+assert.match(buildScript, /PACKAGE_NAME="\$\{AGENTOC_DEB_PACKAGE_NAME:-ragent\}"/);
+assert.match(buildScript, /OUTPUT_NAME="\$\{PACKAGE_NAME\}_\$\{VERSION\}_\$\{ARCH\}\.deb"/);
 assert.match(buildScript, /GOOS=linux GOARCH="\$P2P_GOARCH" CGO_ENABLED=0 go build/);
 assert.match(buildScript, /P2P_GOARCH=arm64/);
 assert.match(buildScript, /P2P_GOARCH=amd64/);

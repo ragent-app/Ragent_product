@@ -180,7 +180,8 @@ retire_legacy_maintenance_data() {
     fi
   done
 
-  package_version="$(dpkg-query -W -f='${Version}' agentoc 2>/dev/null || printf '%s' unknown)"
+  case "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" in ragent|agentoc) package_name="${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" ;; *) package_name=ragent ;; esac
+  package_version="$(dpkg-query -W -f='${Version}' "$package_name" 2>/dev/null || printf '%s' unknown)"
   {
     printf 'AgentoC retired maintenance state\n'
     printf 'Source package version: %s\n' "$package_version"

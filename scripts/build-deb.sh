@@ -56,6 +56,8 @@ if [ "${AGENTOC_PARITY_GATE:-0}" = "1" ]; then
 fi
 
 ARCH="${AGENTOC_PACKAGE_ARCH:-$(dpkg --print-architecture)}"
+PACKAGE_NAME="${AGENTOC_DEB_PACKAGE_NAME:-ragent}"
+case "$PACKAGE_NAME" in ragent|agentoc) ;; *) echo 'Invalid Debian package name.' >&2; exit 1 ;; esac
 OUTPUT_DIR="${AGENTOC_DEB_OUTPUT_DIR:-/srv/agentoc-promoted-data/workspace/releases}"
 SIGNALING_URL="${AGENTOC_PACKAGE_SIGNALING_URL:-}"
 PACKAGE_PUBLIC_BASE_URL="${AGENTOC_PACKAGE_PUBLIC_BASE_URL:-https://app.agentoncloud.com}"
@@ -272,7 +274,7 @@ fi
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb.XXXXXX")"
 STAGE="$WORK_DIR/stage"
 APP_DIR="$STAGE/opt/agentoc/app"
-OUTPUT_NAME="ragent_${VERSION}_${ARCH}.deb"
+OUTPUT_NAME="${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
 OUTPUT="$WORK_DIR/$OUTPUT_NAME"
 FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 
@@ -582,7 +584,7 @@ ACCOUNT_AUTH_ENV="$STAGE/etc/agentoc/account-auth.env"
 chmod 0640 "$ACCOUNT_AUTH_ENV"
 
 cat > "$STAGE/DEBIAN/control" <<EOF
-Package: agentoc
+Package: $PACKAGE_NAME
 Version: $VERSION
 Section: net
 Priority: optional
@@ -595,6 +597,9 @@ Description: Ragent local AI workbench with TURN-first mobile pairing
  without requiring a public domain or routing application state through a
  second control plane.
 EOF
+if [ "$PACKAGE_NAME" = ragent ]; then
+  printf 'Replaces: agentoc\n' >> "$STAGE/DEBIAN/control"
+fi
 
 cat > "$STAGE/DEBIAN/conffiles" <<EOF
 /etc/agentoc/agentoc.env
@@ -608,6 +613,19 @@ fi
 
 chmod -R a+rX "$APP_DIR" "$STAGE/opt/agentoc/vendor"
 find "$STAGE" -type d -exec chmod 0755 {} +
+# Embed the staged payload inventory in the preinst, so a rename is accepted
+# only when every file owned by the legacy package will be taken over.
+node "$ROOT/scripts/render-deb-payload-manifest.mjs" "$STAGE" > "$WORK_DIR/package-paths"
+cat >> "$STAGE/DEBIAN/preinst" <<'EOF'
+
+: <<'RAGENT_PAYLOAD_MANIFEST'
+# RAGENT_PAYLOAD_MANIFEST_BEGIN
+EOF
+cat "$WORK_DIR/package-paths" >> "$STAGE/DEBIAN/preinst"
+cat >> "$STAGE/DEBIAN/preinst" <<'EOF'
+# RAGENT_PAYLOAD_MANIFEST_END
+RAGENT_PAYLOAD_MANIFEST
+EOF
 dpkg-deb --root-owner-group --build "$STAGE" "$OUTPUT" >/dev/null
 
 DEB_CONTENTS="$WORK_DIR/deb-contents.txt"

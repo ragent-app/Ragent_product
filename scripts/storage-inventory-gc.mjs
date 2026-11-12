@@ -462,17 +462,18 @@ function parseRunState(corpus) {
 
 // --------------------------------------------------------------- releases
 
-async function resolveInstalledVersion(cfg) {
+export async function resolveInstalledVersion(cfg, { query = execFileAsync } = {}) {
   if (cfg.installedVersion) return cfg.installedVersion;
-  try {
-    const { stdout } = await execFileAsync('dpkg-query', ['-W', '-f=${Version}', 'agentoc'], {
-      timeout: 5_000,
-      encoding: 'utf8',
-    });
-    const version = String(stdout || '').trim();
-    if (version) return version;
-  } catch {
-    // not a dpkg-managed install; fall through to repo package.json
+  for (const name of ['ragent', 'agentoc']) {
+    try {
+      const { stdout } = await query('dpkg-query', ['-W', '-f=${db:Status-Status}\t${Version}', name], {
+        timeout: 5_000, encoding: 'utf8',
+      });
+      const [status, version] = String(stdout || '').trim().split(/\s+/);
+      if (status === 'installed' && version) return version;
+    } catch {
+      // The other package name may still be installed during migration.
+    }
   }
   try {
     const pkg = JSON.parse(await readFile(
