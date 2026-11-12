@@ -217,7 +217,7 @@ const server = createServer((req, res) => {
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
     if (!tool && phoneQueueCase) phoneToolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item => item.type === 'tool_result'));
     if (!tool && cliReadCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item =>
-      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && JSON.stringify(item.content).includes(cliReadCase === 'help' ? 'ragent trigger <command>' : cliReadCase === 'asset' ? 'fixture-asset' : 'fixture-trigger')));
+      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && (cliReadCase === 'help' ? /(?:agentoc|ragent) trigger <command>/.test(JSON.stringify(item.content)) : JSON.stringify(item.content).includes(cliReadCase === 'asset' ? 'fixture-asset' : 'fixture-trigger'))));
     if (!tool && taskToolCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content)
       && message.content.some(item => item.type === 'tool_result' && item.tool_use_id === `toolu_fixture_${taskFollowup ? 2 : 1}` && item.is_error !== true
         && (!['TaskCreate', 'TaskGet'].includes(taskToolCase) || JSON.stringify(item.content).includes('Fixture task'))));
