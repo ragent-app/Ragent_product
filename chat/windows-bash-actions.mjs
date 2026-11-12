@@ -202,6 +202,17 @@ function isReadOnlyStdinFilter(command) {
 }
 
 export async function analyzeWindowsBash(command, context = {}, { analyzeFiles = analyzeWindowsFileChanges } = {}) {
+  // A literal, unconditional wrapper is equivalent to its one contained
+  // command. Analyze that command normally so its file targets and options
+  // receive exactly the same checks as an unwrapped operation. Do not infer
+  // conditions, accept extra branches, or skip any additional shell command.
+  const unconditional = typeof command === 'string' && command.length <= 128 * 1024 && !/[\r\n\0]/.test(command)
+    ? /^\s*if\s+true\s*;\s*then\s+([\s\S]+?)\s*;\s*fi\s*$/.exec(command) : null;
+  if (unconditional) {
+    const inner = splitLiteralCompound(unconditional[1]);
+    if (!inner || inner.operators.length) return { complete: false, actions: [], reason: 'conditional command needs review' };
+    return analyzeWindowsBash(unconditional[1], context, { analyzeFiles });
+  }
   const compound = splitLiteralCompound(command);
   if (!compound) return { complete: false, actions: [], reason: 'Bash command requires expansion or parsing' };
   if (compound.operators.length) {

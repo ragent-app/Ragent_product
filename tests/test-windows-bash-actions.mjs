@@ -46,6 +46,17 @@ if (process.platform === 'win32') {
     assert.equal((await inspect(command)).decision, 'review', command);
   }
   assert.equal((await inspect('ls -la')).decision, 'allow');
+  for (const command of ["if true; then rm -f '中文 文件.md'; fi", "if true; then cat '中文 文件.md'; fi"]) {
+    assert.equal((await inspect(command)).decision, 'allow', `ordinary unconditional command: ${command}`);
+  }
+  for (const command of ["if true; then rm -rf secret; fi", "if true; then rm -f secret/.ssh/fixture-key; fi",
+    "if true; then cat secret/.ssh/fixture-key; fi",
+    "if true; then cat '中文 文件.md'; rm -rf secret; fi", "if false; then cat '中文 文件.md'; fi",
+    "if true; then cat '中文 文件.md'; else rm -rf secret; fi", "if true; then bash -c 'rm -rf secret'; fi"]) {
+    assert.equal((await inspect(command)).decision, 'review', `dangerous or unsupported conditional: ${command}`);
+  }
+  assert.equal((await inspect('if true; then rm -f ordinary-link; fi')).decision,
+    (await inspect('rm -f ordinary-link')).decision, 'the wrapper must preserve existing hardlink deletion policy');
   if (process.env.AGENTOC_TEST_BASH_BINARY) {
     await mkdir(path.join(workspace, 'transient'));
     await writeFile(path.join(workspace, 'transient', 'readme.txt'), 'fixture');
