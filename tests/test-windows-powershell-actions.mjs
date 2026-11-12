@@ -191,6 +191,8 @@ assert.equal((await inspect("Get-ChildItem . | Where-Object Name -like '*.txt' |
 assert.equal((await inspect("Get-ChildItem . | where Length -gt 0 | Select-Object Name")).decision, 'allow');
 assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -like '*.txt' } | Select-Object Name")).decision, 'allow');
 assert.equal((await inspect("Get-ChildItem . | where { $PSItem.Length -gt 0 }")).decision, 'allow');
+assert.equal((await inspect("Get-ChildItem . | Where-Object { ($_.Name -like '*.txt') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }")).decision, 'allow');
+assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -eq 'readme.txt' -or $_.PSIsContainer -eq $true }")).decision, 'allow');
 assert.equal((await inspect("Get-ChildItem '..\\protected' | Where-Object Name -like '*.txt'")).decision, 'review');
 assert.equal((await inspect("Get-ChildItem '..\\protected' | Where-Object { $_.Name -like '*.txt' }")).decision, 'review');
 assert.equal((await inspect("Get-ChildItem . | Where-Object { Remove-Item readme.txt }")).decision, 'review');
@@ -198,6 +200,9 @@ assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -like '*.t
 assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name.ToString() -eq 'x' }")).decision, 'review');
 assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -eq $env:TEMP }")).decision, 'review');
 assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -eq $(Remove-Item readme.txt) }")).decision, 'review');
+assert.equal((await inspect("Get-ChildItem . | Where-Object { ($_.Name -eq 'x') -or (Remove-Item readme.txt) }")).decision, 'review');
+assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -eq 'x' -and $_.Name -eq $env:TEMP }")).decision, 'review');
+assert.equal((await inspect("Get-ChildItem . | Where-Object { $_.Name -eq 'x' -or $_.Name.ToString() -eq 'x' }")).decision, 'review');
 assert.equal((await inspect("Get-ChildItem . | Where-Object Name -like $env:TEMP")).decision, 'review');
 assert.equal((await inspect("Get-Item -LiteralPath '..\\protected\\secret.txt' | fl Name,Length | Out-String")).decision, 'review');
 assert.equal((await inspect("Get-Item -LiteralPath 'readme.txt' | Format-List @{Name='x';Expression={Remove-Item readme.txt}} | Out-String")).decision, 'review');

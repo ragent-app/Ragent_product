@@ -76,6 +76,39 @@ function Test-ConfirmFalseArgument($node) {
     $node.Parent -is [System.Management.Automation.Language.CommandParameterAst] -and
     $node.Parent.ParameterName -ieq 'Confirm' -and $node.Parent.Argument -eq $node
 }
+function Test-SafeWhereMember($node) {
+  return $node -is [System.Management.Automation.Language.MemberExpressionAst] -and
+    $node -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] -and -not $node.Static -and
+    $node.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $node.Expression.VariablePath.UserPath -iin @('_','PSItem') -and
+    $node.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+    [string]$node.Member.Value -match '^\w+$'
+}
+function Test-SafeWhereExpression($expr, $depth) {
+  if ($null -eq $expr -or $depth -gt 12) { return $false }
+  if (Test-SafeWhereMember $expr) { return $true }
+  if ($expr -is [System.Management.Automation.Language.ParenExpressionAst]) {
+    $pipeline = $expr.Pipeline
+    if ($pipeline -isnot [System.Management.Automation.Language.PipelineAst] -or @($pipeline.PipelineElements).Count -ne 1) { return $false }
+    $element = $pipeline.PipelineElements[0]
+    if ($element -isnot [System.Management.Automation.Language.CommandExpressionAst] -or @($element.Redirections).Count -ne 0) { return $false }
+    return Test-SafeWhereExpression $element.Expression ($depth + 1)
+  }
+  if ($expr -is [System.Management.Automation.Language.UnaryExpressionAst]) {
+    if ([string]$expr.TokenKind -inotmatch '^(not|exclaim)$') { return $false }
+    return Test-SafeWhereExpression $expr.Child ($depth + 1)
+  }
+  if ($expr -isnot [System.Management.Automation.Language.BinaryExpressionAst]) { return $false }
+  if ([string]$expr.Operator -iin @('and','or')) {
+    return (Test-SafeWhereExpression $expr.Left ($depth + 1)) -and (Test-SafeWhereExpression $expr.Right ($depth + 1))
+  }
+  if ([string]$expr.Operator -inotmatch '^(i|c)?(eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin)$') { return $false }
+  $right = $expr.Right
+  return (Test-SafeWhereMember $expr.Left) -and (
+    $right -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+    $right -is [System.Management.Automation.Language.ConstantExpressionAst] -or
+    ($right -is [System.Management.Automation.Language.VariableExpressionAst] -and $right.VariablePath.UserPath -iin @('true','false','null')))
+}
 function Test-SafeWhereBlock($block) {
   if ($block -isnot [System.Management.Automation.Language.ScriptBlockExpressionAst] -or
       $block.Parent -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
@@ -92,17 +125,7 @@ function Test-SafeWhereBlock($block) {
   if ($pipeline -isnot [System.Management.Automation.Language.PipelineAst] -or @($pipeline.PipelineElements).Count -ne 1) { return $false }
   $element = $pipeline.PipelineElements[0]
   if ($element -isnot [System.Management.Automation.Language.CommandExpressionAst] -or @($element.Redirections).Count -ne 0) { return $false }
-  $expr = $element.Expression
-  if ($expr -isnot [System.Management.Automation.Language.BinaryExpressionAst] -or
-      [string]$expr.Operator -inotmatch '^(i|c)?(eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin)$') { return $false }
-  $left = $expr.Left; $right = $expr.Right
-  return $left -is [System.Management.Automation.Language.MemberExpressionAst] -and
-    $left -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] -and -not $left.Static -and
-    $left.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
-    $left.Expression.VariablePath.UserPath -iin @('_','PSItem') -and
-    $left.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
-    [string]$left.Member.Value -match '^\w+$' -and
-    ($right -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $right -is [System.Management.Automation.Language.ConstantExpressionAst])
+  return Test-SafeWhereExpression $element.Expression 0
 }
 function Test-InSafeWhereBlock($node) {
   for ($item = $node; $null -ne $item; $item = $item.Parent) {

@@ -81,7 +81,7 @@ const safeFileCommand = fileCommand === 'rename'
   : fileCommand === 'read-null' ? `Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
   : fileCommand === 'conditional-write' ? `if (Test-Path -LiteralPath '${fileFixture.replace(/'/g, "''")}') { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : fileCommand === 'output-filters' ? `Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' | Format-List Name,Length | Out-String`
-  : fileCommand === 'where-filter' ? `Get-ChildItem -LiteralPath '${home.replace(/'/g, "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like 'ordinary-*.txt' }" : "Name -like 'ordinary-*.txt'"} | Select-Object Name | Out-String`
+  : fileCommand === 'where-filter' ? `Get-ChildItem -LiteralPath '${home.replace(/'/g, "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like 'ordinary-*.txt') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like 'ordinary-*.txt' }" : "Name -like 'ordinary-*.txt'"} | Select-Object Name | Out-String`
   : fileCommand === 'uninstall' ? 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact'
   : fileCommand === 'git-status' ? 'git status --short'
   : fileCommand === 'git-diff' ? 'git diff'
