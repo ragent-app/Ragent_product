@@ -128,7 +128,7 @@ const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerC
 const bashGitRoot = outsideGitRoot.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 let readCommand = readCase === 'conditional'
   ? process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
-    ? `$p='${outsideReadRoot.replaceAll("'", "''")}'; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
+    ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(outsideReadRoot) + path.sep).replaceAll("'", "''")}' + '${path.basename(outsideReadRoot).replaceAll("'", "''")}')` : `'${outsideReadRoot.replaceAll("'", "''")}'`}; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
     : `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
   : readCase === 'conditional-write' ? `if (Test-Path -LiteralPath '${artifact.replaceAll("'", "''")}') { Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : readCase === 'stderr-null' ? `Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}' 2>$null`

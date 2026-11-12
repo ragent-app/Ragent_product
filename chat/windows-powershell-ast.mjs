@@ -139,14 +139,33 @@ function Test-InSafeWhereBlock($node) {
 $boundPaths = @{}
 $boundAssignmentOffsets = @{}
 $reservedVariables = @('args','consolefilename','enabledexperimentalfeatures','error','errorview','event','executioncontext','false','foreach','formatenumerationlimit','home','host','input','iscoreclr','islinux','ismacos','iswindows','lastexitcode','matches','maximumaliascount','maximumdrivecount','maximumerrorcount','maximumfunctioncount','maximumhistorycount','maximumvariablecount','myinvocation','nestedpromptlevel','null','ofs','outputencoding','pid','profile','pwd','sender','shellid','stacktrace','switch','this','true','logcommandhealthevent','logcommandlifecycleevent','logenginehealthevent','logenginelifecycleevent','logproviderhealthevent','logproviderlifecycleevent')
+function Get-LiteralPathText($node, [int]$depth) {
+  if ($null -eq $node -or $depth -gt 8) { return $null }
+  if ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return [string]$node.Value }
+  if ($node -is [System.Management.Automation.Language.BinaryExpressionAst] -and $node.Operator.ToString() -eq 'Plus') {
+    $leftText = Get-LiteralPathText $node.Left ($depth + 1)
+    $rightText = Get-LiteralPathText $node.Right ($depth + 1)
+    if ($null -eq $leftText -or $null -eq $rightText) { return $null }
+    return [string]::Concat($leftText, $rightText)
+  }
+  if ($node -is [System.Management.Automation.Language.ParenExpressionAst] -and
+      $node.Pipeline -is [System.Management.Automation.Language.PipelineAst] -and
+      @($node.Pipeline.PipelineElements).Count -eq 1) {
+    $element = $node.Pipeline.PipelineElements[0]
+    if ($element -is [System.Management.Automation.Language.CommandExpressionAst] -and @($element.Redirections).Count -eq 0) {
+      return Get-LiteralPathText $element.Expression ($depth + 1)
+    }
+  }
+  return $null
+}
 foreach ($statement in @($ast.EndBlock.Statements)) {
   if ($statement -isnot [System.Management.Automation.Language.AssignmentStatementAst]) { break }
   $left = $statement.Left; $right = $statement.Right
   if ($statement.Operator.ToString() -ne 'Equals' -or $left -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
       $left.Splatted -or $right -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
-      $right.Expression -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
       @($right.Redirections).Count -ne 0) { break }
-  $name = [string]$left.VariablePath.UserPath; $value = [string]$right.Expression.Value
+  $name = [string]$left.VariablePath.UserPath; $value = Get-LiteralPathText $right.Expression 0
+  if ($null -eq $value -or $value.Length -gt 32767) { break }
   if ($name -notmatch '^[a-z_][a-z0-9_]*$' -or $name -iin $reservedVariables -or $name -imatch '^ps' -or
       $name -imatch 'preference$' -or $value -notmatch '^[a-zA-Z]:[\\/]' -or
       $value.Substring(2).Contains(':') -or $value.Contains([char]0) -or $boundPaths.ContainsKey($name) -or $boundPaths.Count -ge 8) { break }
@@ -164,6 +183,14 @@ function Test-BoundPathVariable($node) {
   }
   return $node.Parent -is [System.Management.Automation.Language.CommandParameterAst] -and
     $node.Parent.Argument -eq $node -and $node.Parent.Parent -is [System.Management.Automation.Language.CommandAst]
+}
+function Test-InBoundAssignment($node) {
+  for ($parent = $node.Parent; $null -ne $parent; $parent = $parent.Parent) {
+    if ($parent -is [System.Management.Automation.Language.AssignmentStatementAst]) {
+      return $boundAssignmentOffsets.ContainsKey([int]$parent.Extent.StartOffset)
+    }
+  }
+  return $false
 }
 $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object {
   $command = $_
@@ -194,7 +221,7 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
   $hasPipelineInput = $command.Parent -is [System.Management.Automation.Language.PipelineAst] -and $command.Parent.PipelineElements[0] -ne $command
   @{ name = $command.GetCommandName(); elements = $elements; invocation = [string]$command.InvocationOperator; redirections = @($command.Redirections).Count; redirectFacts = $redirectFacts; pipelineInput = $hasPipelineInput }
 })
-$expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandExpressionAst] -and -not (Test-InSafeWhereBlock $n) }, $true) | ForEach-Object {
+$expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandExpressionAst] -and -not (Test-InSafeWhereBlock $n) -and -not (Test-InBoundAssignment $n) }, $true) | ForEach-Object {
   @{ expressionType = $_.Expression.GetType().Name; staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
 })
 $dynamicNodes = @($ast.FindAll({ param($n)

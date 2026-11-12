@@ -97,7 +97,7 @@ if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
 const safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
   : fileCommand === 'read-null' ? process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
-    ? `$p='${fileFixture.replace(/'/g, "''")}'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`
+    ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(fileFixture) + path.sep).replace(/'/g, "''")}' + '${path.basename(fileFixture).replace(/'/g, "''")}')` : `'${fileFixture.replace(/'/g, "''")}'`}; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`
     : `Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
   : fileCommand === 'select-string' ? `Select-String ${process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? path.join(outsideWriteRoot, '*.txt') : fileFixture).replace(/'/g, "''")}' -Pattern 'fixture content'`
   : fileCommand === 'conditional-write' ? `if (Test-Path -LiteralPath '${fileFixture.replace(/'/g, "''")}') { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`

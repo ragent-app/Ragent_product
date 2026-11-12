@@ -126,6 +126,8 @@ assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
 assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
+assert.equal((await inspect("Get-ChildItem -Path 'glob-read\\*.md' | Select-Object Name")).decision, 'review',
+  'unbound wildcard listing may follow a newly matched directory link, including a network link');
 {
   const quote = value => `'${String(value).replaceAll("'", "''")}'`;
   const ordinary = path.join(root, 'ordinary.txt');
@@ -136,6 +138,10 @@ assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'"))
     const state = { riskMode, cwd: workspace, riskContext: context, riskContextValid: true };
     const approval = { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command } } };
     assert.equal((await decideWindowsApproval(approval, state)).decision, 'auto-allow', `${riskMode}: static variable resolves to ordinary outside file`);
+    approval.params.input.command = `$p=(${quote(root + path.sep)} + 'ordinary.txt'); if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`;
+    assert.equal((await decideWindowsApproval(approval, state)).decision, 'auto-allow', `${riskMode}: literal string concatenation resolves to ordinary outside file`);
+    approval.params.input.command = `$p=(${quote(path.dirname(sensitive) + path.sep)} + 'fixture-key'); Get-Content -LiteralPath $p`;
+    assert.equal((await decideWindowsApproval(approval, state)).decision, 'prompt', `${riskMode}: concatenation cannot hide a sensitive file`);
     approval.params.input.command = protectedCommand;
     assert.equal((await decideWindowsApproval(approval, state)).decision, 'prompt', `${riskMode}: static variable resolves to sensitive file`);
     for (const unsafe of [
@@ -147,6 +153,9 @@ assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'"))
       `$p=${quote(ordinary)}; Get-Content -LiteralPath "$p"`,
       `$p=${quote(ordinary)}; Get-Content -LiteralPath $p > $p`,
       `$p=Join-Path ${quote(root)} ordinary.txt; Get-Content -LiteralPath $p`,
+      `$p=${quote(root + path.sep)} + $env:SECRET; Get-Content -LiteralPath $p`,
+      `$p=(${quote(root + path.sep)} + (Get-Date)); Get-Content -LiteralPath $p`,
+      `$p=${quote(ordinary)} -replace 'ordinary','secret'; Get-Content -LiteralPath $p`,
       `$ErrorView=${quote(ordinary)}; Get-Content -LiteralPath $ErrorView`,
       `$LogCommandHealthEvent=${quote(ordinary)}; Get-Content -LiteralPath $LogCommandHealthEvent`,
     ]) {
