@@ -74,12 +74,12 @@ async function startServer({ home, configDir, port }) {
       AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
+      AGENTOC_INSTANCE_ROOT: home,
       AGENTOC_CONFIG_DIR: configDir,
       AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
       SECURE_COOKIES: '0',
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'inherit', 'inherit'],
   });
 
   await waitFor(async () => {
@@ -95,9 +95,9 @@ async function startServer({ home, configDir, port }) {
 }
 
 async function stopServer(server) {
-  if (!server?.child || server.child.exitCode !== null) return;
+  if (!server?.child || server.child.exitCode !== null || server.child.signalCode !== null) return;
   server.child.kill('SIGTERM');
-  await waitFor(() => server.child.exitCode !== null, 'server shutdown');
+  await waitFor(() => server.child.exitCode !== null || server.child.signalCode !== null, 'server shutdown');
 }
 
 async function main() {
@@ -107,20 +107,13 @@ async function main() {
 
   try {
     const page = await request(port, '/showcase/parent-english-courseware');
-    assert.equal(page.status, 200, 'public product page should render without auth');
-    assert.match(page.headers['content-type'], /text\/html/);
-    assert.match(page.text, /一份课件，直接变成家里能用的英语复习站点/);
-    assert.match(page.text, /建议新增 01/);
-    assert.match(page.text, /parent-english-courseware\.css(?:\?v=[^"]+)?/);
-    assert.match(page.text, /parent-english-courseware\.js(?:\?v=[^"]+)?/);
+    assert.ok([302, 404].includes(page.status), 'retired showcase is not publicly served');
 
     const css = await request(port, '/parent-english-courseware.css');
-    assert.equal(css.status, 200, 'page stylesheet should be served');
-    assert.match(css.headers['content-type'], /text\/css/);
+    assert.ok([302, 404].includes(css.status), 'retired stylesheet is not served');
 
     const js = await request(port, '/parent-english-courseware.js');
-    assert.equal(js.status, 200, 'page script should be served');
-    assert.match(js.headers['content-type'], /javascript/);
+    assert.ok([302, 404].includes(js.status), 'retired script is not served');
 
     console.log('test-parent-english-courseware-page: ok');
   } finally {

@@ -183,7 +183,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const chatTemplatePath = join(__dirname, '..', 'templates', 'chat.html');
 const loginTemplatePath = join(__dirname, '..', 'templates', 'login.html');
 const mobileInstallTemplatePath = join(__dirname, '..', 'templates', 'mobile-install.html');
-const parentEnglishCoursewareTemplatePath = join(__dirname, '..', 'templates', 'parent-english-courseware.html');
 const staticDir = join(__dirname, '..', 'static');
 const packageJsonPath = join(__dirname, '..', 'package.json');
 const packageBuildVersionPath = join(__dirname, '..', '.agentoc-package-version');
@@ -1708,7 +1707,6 @@ export async function handleRequest(req, res) {
     nonce,
     loginTemplatePath,
     mobileInstallTemplatePath,
-    parentEnglishCoursewareTemplatePath,
     getPageBuildInfo,
     buildHeaders,
     renderPageTemplate,
