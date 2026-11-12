@@ -237,6 +237,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - PowerShell `Test-Path` 现识别字面量 `-PathType Any|Container|Leaf`，并继续逐项判断条件分支中的实际操作。历史记录中一条 `Leaf` 检查由语法不支持变为自动通过，属于只读回放而非实际执行；两种模式使用相同判断。Windows PowerShell 动作回归通过，真实 Claude 和 Codex CLI 使用本地模拟模型在两种模式下执行带 `-PathType Leaf` 的隔离条件写入均通过，未消耗官方额度。该源码尚未部署到正式实例，单条样本不能证明总体审批频率。
 
+- PowerShell 的 `-not (...)` 和 `!(...)` 现在可作为逻辑取反外层表达式分析，括号内命令及所有条件分支仍逐项检查；其他一元操作符不走此规则。两条历史文件创建请求只读回放由拦截变为自动通过，未执行历史命令。Windows PowerShell 动作回归通过，真实 Claude 和 Codex CLI 在两种模式中使用本地模拟模型执行隔离条件写入通过，未使用官方额度；尚未部署正式实例，也无法由这两条样本估算总体审批频率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)

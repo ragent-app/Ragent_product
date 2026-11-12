@@ -547,9 +547,9 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     return '';
   };
   for (const expression of expressions) {
-    if (expression.expressionType === 'ParenExpressionAst') {
-      // The native AST walk also reports the commands and expressions inside
-      // the parentheses, so each inner operation is checked independently.
+    if (expression.expressionType === 'ParenExpressionAst' || (expression.expressionType === 'UnaryExpressionAst' && expression.safeLogicalNegation === true)) {
+      // The native AST walk also reports commands and expressions inside the
+      // parentheses, including those under a logical negation. Check each.
       const reason = await appendRedirects(expression, 'parenthesized');
       if (reason) return { complete: false, actions, reason };
       continue;

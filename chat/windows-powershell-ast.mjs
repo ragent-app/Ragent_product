@@ -222,7 +222,7 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
   @{ name = $command.GetCommandName(); elements = $elements; invocation = [string]$command.InvocationOperator; redirections = @($command.Redirections).Count; redirectFacts = $redirectFacts; pipelineInput = $hasPipelineInput }
 })
 $expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandExpressionAst] -and -not (Test-InSafeWhereBlock $n) -and -not (Test-InBoundAssignment $n) }, $true) | ForEach-Object {
-  @{ expressionType = $_.Expression.GetType().Name; staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
+  @{ expressionType = $_.Expression.GetType().Name; safeLogicalNegation = ($_.Expression -is [System.Management.Automation.Language.UnaryExpressionAst] -and $_.Expression.TokenKind -in @('Not','Exclaim') -and $_.Expression.Child -is [System.Management.Automation.Language.ParenExpressionAst]); staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
 })
 $dynamicNodes = @($ast.FindAll({ param($n)
   -not (Test-InSafeWhereBlock $n) -and (
