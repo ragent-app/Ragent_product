@@ -478,8 +478,8 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
   const expressions = Array.isArray(ast.expressions) ? ast.expressions : [];
   // Analyze every command and expression in every conditional branch. Their
   // normal target and operation checks still apply regardless of which branch
-  // runs. Variables, assignments, script blocks, loops, and other dynamic
-  // constructs remain unsupported here.
+  // runs. The parser resolves eligible leading literal path assignments;
+  // other variables, assignments, script blocks and loops remain unsupported.
   if (ast.errors.length || ast.dynamicNodes.some(node => node !== 'IfStatementAst') || (!ast.commands.length && !expressions.length)) {
     return { complete: false, actions: [], reason: ast.errors.length ? 'PowerShell syntax error' : 'dynamic or unsupported PowerShell syntax' };
   }

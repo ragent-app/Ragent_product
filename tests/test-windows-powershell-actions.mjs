@@ -126,6 +126,35 @@ assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
 assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
+{
+  const quote = value => `'${String(value).replaceAll("'", "''")}'`;
+  const ordinary = path.join(root, 'ordinary.txt');
+  const sensitive = path.join(workspace, 'sensitive-folder', '.ssh', 'fixture-key');
+  const command = `$p=${quote(ordinary)}; if (Test-Path -LiteralPath $p) { Get-Item -LiteralPath $p | Select-Object Name }`;
+  const protectedCommand = `$p=${quote(sensitive)}; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`;
+  for (const riskMode of ['recommended', 'full-auto']) {
+    const state = { riskMode, cwd: workspace, riskContext: context, riskContextValid: true };
+    const approval = { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command } } };
+    assert.equal((await decideWindowsApproval(approval, state)).decision, 'auto-allow', `${riskMode}: static variable resolves to ordinary outside file`);
+    approval.params.input.command = protectedCommand;
+    assert.equal((await decideWindowsApproval(approval, state)).decision, 'prompt', `${riskMode}: static variable resolves to sensitive file`);
+    for (const unsafe of [
+      `$p=${quote(ordinary)}; $p=${quote(sensitive)}; Get-Content -LiteralPath $p`,
+      `$p=${quote(ordinary)}; if (Test-Path -LiteralPath $p) { $p=${quote(sensitive)} }; Get-Content -LiteralPath $p`,
+      `$p=${quote(ordinary)}; Set-Variable p ${quote(sensitive)}; Get-Content -LiteralPath $p`,
+      `$p=${quote(ordinary)}; Get-Content -LiteralPath ($p + '.other')`,
+      `$p=${quote(ordinary)}; & $p`,
+      `$p=${quote(ordinary)}; Get-Content -LiteralPath "$p"`,
+      `$p=${quote(ordinary)}; Get-Content -LiteralPath $p > $p`,
+      `$p=Join-Path ${quote(root)} ordinary.txt; Get-Content -LiteralPath $p`,
+      `$ErrorView=${quote(ordinary)}; Get-Content -LiteralPath $ErrorView`,
+      `$LogCommandHealthEvent=${quote(ordinary)}; Get-Content -LiteralPath $LogCommandHealthEvent`,
+    ]) {
+      approval.params.input.command = unsafe;
+      assert.equal((await decideWindowsApproval(approval, state)).decision, 'prompt', `${riskMode}: dynamic variable operation is not automatically allowed`);
+    }
+  }
+}
 for (const command of ["Select-String -Path readme.txt -Pattern fixture", "Select-String fixture readme.txt", "Select-String -LiteralPath '..\\ordinary.txt' -Pattern fixture -SimpleMatch"]) {
   assert.equal((await inspect(command)).decision, 'allow', `${command}: ordinary files can be searched`);
 }

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { gzipSync } from 'node:zlib';
 import { resolveWindowsSystemPaths } from './windows-system-paths.mjs';
 
 // Fixed parser program: the provider's command travels only on stdin as JSON.
@@ -133,6 +134,37 @@ function Test-InSafeWhereBlock($node) {
   }
   return $false
 }
+# Resolve leading literal path assignments only. No variable is executed or
+# expanded here; later file policy still checks every substituted target.
+$boundPaths = @{}
+$boundAssignmentOffsets = @{}
+$reservedVariables = @('args','consolefilename','enabledexperimentalfeatures','error','errorview','event','executioncontext','false','foreach','formatenumerationlimit','home','host','input','iscoreclr','islinux','ismacos','iswindows','lastexitcode','matches','maximumaliascount','maximumdrivecount','maximumerrorcount','maximumfunctioncount','maximumhistorycount','maximumvariablecount','myinvocation','nestedpromptlevel','null','ofs','outputencoding','pid','profile','pwd','sender','shellid','stacktrace','switch','this','true','logcommandhealthevent','logcommandlifecycleevent','logenginehealthevent','logenginelifecycleevent','logproviderhealthevent','logproviderlifecycleevent')
+foreach ($statement in @($ast.EndBlock.Statements)) {
+  if ($statement -isnot [System.Management.Automation.Language.AssignmentStatementAst]) { break }
+  $left = $statement.Left; $right = $statement.Right
+  if ($statement.Operator.ToString() -ne 'Equals' -or $left -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
+      $left.Splatted -or $right -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
+      $right.Expression -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
+      @($right.Redirections).Count -ne 0) { break }
+  $name = [string]$left.VariablePath.UserPath; $value = [string]$right.Expression.Value
+  if ($name -notmatch '^[a-z_][a-z0-9_]*$' -or $name -iin $reservedVariables -or $name -imatch '^ps' -or
+      $name -imatch 'preference$' -or $value -notmatch '^[a-zA-Z]:[\\/]' -or
+      $value.Substring(2).Contains(':') -or $value.Contains([char]0) -or $boundPaths.ContainsKey($name) -or $boundPaths.Count -ge 8) { break }
+  $boundPaths[$name] = $value
+  $boundAssignmentOffsets[[int]$statement.Extent.StartOffset] = $true
+}
+function Test-BoundPathVariable($node) {
+  if ($node -isnot [System.Management.Automation.Language.VariableExpressionAst] -or $node.Splatted -or
+      -not $boundPaths.ContainsKey([string]$node.VariablePath.UserPath)) { return $false }
+  if ($node.Parent -is [System.Management.Automation.Language.AssignmentStatementAst]) {
+    return $node.Parent.Left -eq $node -and $boundAssignmentOffsets.ContainsKey([int]$node.Parent.Extent.StartOffset)
+  }
+  if ($node.Parent -is [System.Management.Automation.Language.CommandAst]) {
+    return $node.Parent.CommandElements[0] -ne $node
+  }
+  return $node.Parent -is [System.Management.Automation.Language.CommandParameterAst] -and
+    $node.Parent.Argument -eq $node -and $node.Parent.Parent -is [System.Management.Automation.Language.CommandAst]
+}
 $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object {
   $command = $_
   $elements = @($command.CommandElements | ForEach-Object {
@@ -140,7 +172,10 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
       $value = $null; $argumentType = $null
       if ($null -ne $_.Argument) { $value = $_.Argument.Value; $argumentType = $_.Argument.GetType().Name }
       if (Test-ConfirmFalseArgument $_.Argument) { $value = 'false'; $argumentType = 'StaticConfirmFalse' }
+      if (Test-BoundPathVariable $_.Argument) { $value = $boundPaths[[string]$_.Argument.VariablePath.UserPath]; $argumentType = 'StringConstantExpressionAst' }
       @{ kind = 'parameter'; name = $_.ParameterName; value = $value; argumentType = $argumentType }
+    } elseif (Test-BoundPathVariable $_) {
+      @{ kind = 'literal'; value = $boundPaths[[string]$_.VariablePath.UserPath] }
     } elseif ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $_ -is [System.Management.Automation.Language.ConstantExpressionAst]) {
       @{ kind = 'literal'; value = [string]$_.Value }
     } elseif ($_ -is [System.Management.Automation.Language.ArrayLiteralAst] -and
@@ -164,10 +199,10 @@ $expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.L
 })
 $dynamicNodes = @($ast.FindAll({ param($n)
   -not (Test-InSafeWhereBlock $n) -and (
-  (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n) -and -not (Test-NullRedirection $n)) -or
+  (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n) -and -not (Test-NullRedirection $n) -and -not (Test-BoundPathVariable $n)) -or
   ($n -is [System.Management.Automation.Language.SubExpressionAst]) -or
   ($n -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) -or
-  ($n -is [System.Management.Automation.Language.AssignmentStatementAst]) -or
+  (($n -is [System.Management.Automation.Language.AssignmentStatementAst]) -and -not $boundAssignmentOffsets.ContainsKey([int]$n.Extent.StartOffset)) -or
   (($n -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) -and $null -eq (Get-SafeStaticFileCall $n)) -or
   (($n -is [System.Management.Automation.Language.TypeExpressionAst]) -and $null -eq (Get-SafeStaticFileCall $n.Parent) -and
     -not ((Get-SafeStaticEncoding $n.Parent) -and $null -ne (Get-SafeStaticFileCall $n.Parent.Parent))) -or
@@ -181,6 +216,12 @@ $errorMessages = @($errors | ForEach-Object { $_.Message })
 `;
 
 export const WINDOWS_POWERSHELL_AST_VERSION = 'powershell-native-ast/v1';
+
+// Keep the fixed parser below Windows' process command-line limit as its AST
+// checks grow. Only this trusted source is compressed; user commands remain
+// JSON data on stdin and are passed to ParseInput, never to ScriptBlock.
+const PARSER_COMPRESSED = gzipSync(Buffer.from(PARSER_SCRIPT, 'utf8')).toString('base64');
+const PARSER_BOOTSTRAP = `$m=New-Object IO.MemoryStream(,[Convert]::FromBase64String('${PARSER_COMPRESSED}'));$g=New-Object IO.Compression.GzipStream($m,[IO.Compression.CompressionMode]::Decompress);$r=New-Object IO.StreamReader($g,[Text.Encoding]::UTF8);& ([scriptblock]::Create($r.ReadToEnd()))`;
 
 // Use the Windows filesystem provider's own wildcard rules. The pattern is
 // data on stdin, never interpolated into the fixed PowerShell program.
@@ -230,7 +271,7 @@ export function parseWindowsPowerShellAst(command, { executable, timeoutMs = 500
   }
   const shell = executable || resolveWindowsSystemPaths()?.powershell;
   if (!shell || !path.win32.isAbsolute(shell)) return Promise.reject(new Error('Windows system PowerShell is unavailable'));
-  const encoded = Buffer.from(PARSER_SCRIPT, 'utf16le').toString('base64');
+  const encoded = Buffer.from(PARSER_BOOTSTRAP, 'utf16le').toString('base64');
   return new Promise((resolve, reject) => {
     let finished = false; let stdout = ''; let stderr = '';
     const stdoutDecoder = new StringDecoder('utf8');

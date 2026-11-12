@@ -84,7 +84,7 @@ if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== '
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
 if (outsideWrite && fileCommand !== 'dotnet') throw new Error('outside-write fixture requires the fixed dotnet command');
-const outsideWriteRoot = outsideWrite || fileCommand === 'select-string' ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
+const outsideWriteRoot = outsideWrite || fileCommand === 'select-string' || (fileCommand === 'read-null' && process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1') ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
 const fileFixture = path.join(outsideWriteRoot || home, 'ordinary-fixture.txt');
 if (fileCommand) await writeFile(fileFixture, 'fixture content');
 if (fileCommand === 'git-c') { await mkdir(alternateCwd); execFileSync('git', ['init', '-q'], { cwd: alternateCwd, windowsHide: true }); await writeFile(path.join(alternateCwd, 'ordinary-fixture.txt'), 'fixture content'); }
@@ -96,7 +96,9 @@ if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
 }
 const safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
-  : fileCommand === 'read-null' ? `Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
+  : fileCommand === 'read-null' ? process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
+    ? `$p='${fileFixture.replace(/'/g, "''")}'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`
+    : `Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
   : fileCommand === 'select-string' ? `Select-String ${process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? path.join(outsideWriteRoot, '*.txt') : fileFixture).replace(/'/g, "''")}' -Pattern 'fixture content'`
   : fileCommand === 'conditional-write' ? `if (Test-Path -LiteralPath '${fileFixture.replace(/'/g, "''")}') { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : fileCommand === 'output-filters' ? `Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' | Format-List Name,Length | Out-String`
