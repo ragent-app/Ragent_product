@@ -57,8 +57,10 @@ process.stdin.on('data', (chunk) => {
     if (message.method === 'initialize') {
       process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
     } else if (message.method === 'model/list') {
-      const response = providerId === 'codex-official' || (process.env.FIXTURE_MODEL_RECOVERY_FILE && existsSync(process.env.FIXTURE_MODEL_RECOVERY_FILE))
-        ? { id: message.id, result: { data: catalog, nextCursor: null } }
+      const recovery = process.env.FIXTURE_MODEL_RECOVERY_FILE && existsSync(process.env.FIXTURE_MODEL_RECOVERY_FILE)
+        ? readFileSync(process.env.FIXTURE_MODEL_RECOVERY_FILE, 'utf8').trim() : '';
+      const response = providerId === 'codex-official' || recovery
+        ? { id: message.id, result: { data: recovery === 'trimmed' ? catalog.filter((model) => model.id !== 'gpt-5.4-mini') : catalog, nextCursor: null } }
         : { id: message.id, error: { code: -32001, message: 'fixture account unavailable' } };
       process.stdout.write(JSON.stringify(response) + '\\n');
       setTimeout(() => process.exit(0), 50);
@@ -262,9 +264,23 @@ try {
   assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').error, undefined);
   assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'discovered');
 
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  writeFileSync(process.env.FIXTURE_MODEL_RECOVERY_FILE, 'trimmed');
+  Date.now = () => baseNow + 182_000;
+  const refreshed = await getModelsForTool('codex', { providerProfile: 'codex-official-2' });
+  assert.equal(refreshed.models.some((m) => m.id === 'gpt-5.4-mini@codex-official-2'), false,
+    'a successful refresh removes models no longer advertised by the account');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  rmSync(process.env.FIXTURE_MODEL_RECOVERY_FILE);
+  Date.now = () => baseNow + 303_000;
+  const stale = await getModelsForTool('codex', { providerProfile: 'codex-official-2' });
+  assert.equal(stale.models.some((m) => m.id === 'gpt-official-extra@codex-official-2'), true,
+    'a transient discovery failure retains the last successful catalog');
+  assert.equal(stale.models.some((m) => m.id === 'gpt-5.4-mini@codex-official-2'), false);
+  assert.equal((await getToolModelCatalogs('codex', 'codex-official-2'))[0].status, 'stale');
+
   // Reusing a provider profile for another account must never reuse the old
   // account's successful catalog, even during its freshness window.
-  rmSync(process.env.FIXTURE_MODEL_RECOVERY_FILE);
   writeFileSync(join(secretsDir, 'secret-codex-official-2.json'), JSON.stringify({ authType: 'oauth',
     tokens: { access_token: 'replacement', refresh_token: 'replacement', account_id: 'replacement-account' } }));
   const switched = await getModelsForTool('codex', { providerProfile: 'codex-official-2' });
