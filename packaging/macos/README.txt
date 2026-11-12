@@ -4,17 +4,17 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 
 快速开始 / Quick start
 ----------------------
-1. 把 AgentoC.app 拖入 Applications（或直接双击运行）。
+1. 把 Ragent.app 拖入 Applications（或直接双击运行）。
 2. 首次运行会自动生成 owner 登录凭据并弹出文本文件显示用户名/密码
    （保存在 ~/.config/agentoc/owner-credentials.txt，登录后请改密并删除该文件）。
 3. 自动打开 Ragent 桌面管理器；也可在浏览器中打开 http://127.0.0.1:7690/。
 
 日常使用
 --------
-- 双击 AgentoC.app：启动服务并打开桌面管理器（服务已运行时仅打开管理器）。
-- 命令行：AgentoC.app/Contents/Resources/agentoc-cli <command>
+- 双击 Ragent.app：启动服务并打开桌面管理器（服务已运行时仅打开管理器）。
+- 命令行：Ragent.app/Contents/Resources/agentoc-cli <command>
   （例如 agentoc-cli doctor、agentoc-cli set-password）
-- 停止服务：AgentoC.app/Contents/Resources/agentoc-stop
+- 停止服务：Ragent.app/Contents/Resources/agentoc-stop
 - 日志：~/.config/agentoc/chat-server.log
 - 实例配置（升级保留）：~/.config/agentoc/instance.env
 - 升级前先停止服务；如启用了登录自启动，先按下方步骤停用。替换 App 后
@@ -29,16 +29,16 @@ Ragent — 本地 AI 自动化工作台 (macOS)
   启动后检查配置和工作区。旧版本可能无法读取新版本迁移后的数据；
   遇到不兼容时停止使用并从备份恢复，不要反复覆盖唯一的数据副本。
 - 卸载时，先退出桌面管理器，停用已启用的登录自启动并停止服务，再将
-  AgentoC.app 移到废纸篓。配置、凭据、日志和工作区不会自动删除；如需
+  Ragent.app 移到废纸篓。配置、凭据、日志和工作区不会自动删除；如需
   删除，请确认不再需要后自行处理。停用命令提示已有不匹配的登录项时，
   不要强行删除该登录项，应先检查它属于哪个应用或用户。
 
 可选：登录时自动启动（手机随时可连的前提）
 ------------------------------------------
 先停止正在运行的 Ragent 服务，然后在终端中运行：
-"/Applications/AgentoC.app/Contents/Resources/agentoc-login" enable
-查询状态："/Applications/AgentoC.app/Contents/Resources/agentoc-login" status
-停用并停止登录服务："/Applications/AgentoC.app/Contents/Resources/agentoc-login" disable
+"/Applications/Ragent.app/Contents/Resources/agentoc-login" enable
+查询状态："/Applications/Ragent.app/Contents/Resources/agentoc-login" status
+停用并停止登录服务："/Applications/Ragent.app/Contents/Resources/agentoc-login" disable
 停用不会删除配置、凭据、工作区或日志。启用后服务在登录时启动并在异常
 退出后重启；正常退出服务前请先停用自启动。若已有同名的手工配置，本工具
 不会覆盖或卸载它，请先自行检查和移除旧配置。移动应用前请先停用，移动后
@@ -54,7 +54,7 @@ launch-agent.stderr.log，要求仅当前用户可读写。
 默认中央服务地址在 instance.env 中，可由部署方配置。
 
 在本机：
-  1. 在浏览器中登录（首次双击 AgentoC.app 自动生成凭据），
+  1. 在浏览器中登录（首次双击 Ragent.app 自动生成凭据），
      进入 设置 → 设备/账号 绑定 Google 账号
      （手机与 Mac 绑定同一 Google 账号；未绑定的 Mac 通过一次性
      account-claim 二维码由已绑定的手机授权）。

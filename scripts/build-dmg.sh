@@ -265,7 +265,7 @@ printf 'Building AgentoC %s (darwin/%s) with Codex %s and Claude Code %s\n' \
   "$VERSION" "$ARCH" "$CODEX_VERSION" "$CLAUDE_VERSION"
 
 STAGE="$WORK_DIR/stage"
-CONTENTS="$STAGE/AgentoC.app/Contents"
+CONTENTS="$STAGE/Ragent.app/Contents"
 APP_DIR="$CONTENTS/Resources/app"
 OUTPUT_NAME="ragent_${VERSION}-darwin-${ARCH}.dmg"
 FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
@@ -309,7 +309,7 @@ mkdir -p "$DESKTOP_BUILD"
 install -m 0644 "$ROOT/desktop/package.json" "$ROOT/desktop/package-lock.json" "$DESKTOP_BUILD/"
 (cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" npm ci --no-audit --no-fund)
 (cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" node node_modules/electron/install.js)
-MANAGER="$CONTENTS/Resources/Manager.app"
+MANAGER="$CONTENTS/Resources/Ragent.app"
 cp -R "$DESKTOP_BUILD/node_modules/electron/dist/Electron.app" "$MANAGER"
 MANAGER_APP="$MANAGER/Contents/Resources/app"
 mkdir -p "$MANAGER_APP/assets"
@@ -456,7 +456,7 @@ fi
 
 # Set the final bundle permissions before signing. Do not change the signed
 # app's resources or executable bits after the signature has been verified.
-chmod -R u+rwX,go+rX "$STAGE/AgentoC.app"
+chmod -R u+rwX,go+rX "$STAGE/Ragent.app"
 
 # ── 8. Sign inside out; ad-hoc candidates are for controlled testing only ──
 command -v codesign >/dev/null 2>&1 || { echo 'codesign is required.' >&2; exit 1; }
@@ -482,7 +482,7 @@ if [ -n "$SIGN_IDENTITY" ]; then
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
   codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
-    --sign "$SIGN_IDENTITY" "$STAGE/AgentoC.app"
+    --sign "$SIGN_IDENTITY" "$STAGE/Ragent.app"
   codesign --display --entitlements :- "$CONTENTS/Resources/runtime/node" > "$WORK_DIR/node-entitlements.plist" 2>/dev/null
   [ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-jit' "$WORK_DIR/node-entitlements.plist")" = true ] || {
     echo 'Signed Node runtime is missing its JIT entitlement.' >&2; exit 1;
@@ -502,7 +502,7 @@ else
   codesign --force --sign - "$APP_DIR/bin/agentoc-p2p-host"
   codesign --force --sign - "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
   codesign --force --sign - "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
-  codesign --force --sign - "$STAGE/AgentoC.app"
+  codesign --force --sign - "$STAGE/Ragent.app"
 fi
 codesign --verify --strict "$CONTENTS/Resources/runtime/node"
 codesign --verify --strict "$APP_DIR/bin/agentoc-p2p-host"
@@ -545,7 +545,7 @@ do
   [ -e "$required" ] || { echo "Built bundle is missing $required" >&2; exit 1; }
 done
 node "$ROOT/scripts/verify-runtime-payload.mjs" "$CONTENTS"
-codesign --verify --deep --strict "$STAGE/AgentoC.app"
+codesign --verify --deep --strict "$STAGE/Ragent.app"
 
 # ── 10. DMG ──────────────────────────────────────────────────────────────────
 # Refuse a mixed-source bundle before optional notarization submits it.
@@ -567,9 +567,9 @@ fi
 MOUNT_DIR="$WORK_DIR/verify-mount"
 mkdir -p "$MOUNT_DIR"
 hdiutil attach "$DMG_PATH" -readonly -nobrowse -mountpoint "$MOUNT_DIR" >/dev/null
-if [ ! -d "$MOUNT_DIR/AgentoC.app/Contents/MacOS" ]; then
+if [ ! -d "$MOUNT_DIR/Ragent.app/Contents/MacOS" ]; then
   hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
-  echo "DMG verification failed: AgentoC.app missing from mounted volume" >&2
+  echo "DMG verification failed: Ragent.app missing from mounted volume" >&2
   exit 1
 fi
 hdiutil detach "$MOUNT_DIR" >/dev/null

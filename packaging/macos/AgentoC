@@ -7,8 +7,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../Resources/agentoc-env.sh"
 
 open_manager() {
-  if [ -d "$AGENTOC_RESOURCES_DIR/Manager.app" ]; then
-    open "$AGENTOC_RESOURCES_DIR/Manager.app" --args "--agentoc-service-port=$PORT"
+  if [ -d "$AGENTOC_RESOURCES_DIR/Ragent.app" ]; then
+    open "$AGENTOC_RESOURCES_DIR/Ragent.app" --args "--agentoc-service-port=$PORT"
   else
     open "$BASE_URL"
   fi
