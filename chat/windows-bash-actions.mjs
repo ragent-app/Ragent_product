@@ -332,6 +332,15 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
   if ((['pwd', 'true', 'false', ':'].includes(program) && words.length === 1) || program === 'echo') {
     return outputEntry.length ? analyzeFiles(outputEntry, context) : { complete: true, actions: [{ kind: 'read', program, target: null }] };
   }
+  if (['which', 'command', 'type'].includes(program)) {
+    const args = words.slice(1);
+    if (program === 'command' && !['-v', '-V'].includes(args.shift())) return { complete: false, actions: [], reason: 'command execution needs review' };
+    if (program === 'which' && ['-a', '--all'].includes(args[0])) args.shift();
+    if (program === 'type' && /^-[aptP]+$/.test(args[0] || '')) args.shift();
+    if (args[0] === '--') args.shift();
+    if (!args.length || args.some(arg => !arg || arg.startsWith('-'))) return { complete: false, actions: [], reason: 'command lookup arguments need review' };
+    return withOutput({ complete: true, actions: [{ kind: 'read', program, target: null }] });
+  }
   if (['head', 'tail', 'wc', 'grep', 'sed'].includes(program)) {
     const operands = readUtilityOperands(program, words.slice(1));
     if (!operands) return { complete: false, actions: [], reason: 'read utility has unsupported or ambiguous arguments' };

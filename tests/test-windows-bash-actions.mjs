@@ -25,6 +25,12 @@ if (process.platform === 'win32') {
   await link(path.join(workspace, 'secret', '.ssh', 'fixture-key'), path.join(workspace, 'linked-dest', '中文 文件.md'));
   const context = { cwd: workspace, trustedWorkspaceRoot: workspace };
   const inspect = async (command, conservative = false) => decideWindowsPowerShellActions(await analyzeWindowsBash(command, context), { conservative });
+  for (const command of ['which node', 'which -a git', 'command -v node', 'type -P git', "which node; echo 'done'"]) {
+    assert.equal((await inspect(command)).decision, 'allow', command);
+  }
+  for (const command of ['which --read-alias node', 'command node script.js', 'type -x node', 'which $TARGET']) {
+    assert.equal((await inspect(command)).decision, 'review', command);
+  }
   assert.equal((await inspect("cat '中文 文件.md'")).decision, 'allow');
   for (const command of ["cat -n '中文 文件.md'", "cat --number '中文 文件.md'", 'ls -lah ordinary', 'ls -1 ordinary', 'ls -r secret', 'ls --reverse secret']) {
     assert.equal((await inspect(command)).decision, 'allow', command);
@@ -140,6 +146,8 @@ if (process.platform === 'win32') {
   }
   for (const riskMode of ['recommended', 'full-auto']) {
     const state = { riskMode, cwd: workspace, riskContext: context };
+    assert.equal((await decideWindowsApproval(request('which node; echo done'), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request('command node script.js'), state)).decision, 'prompt');
     assert.equal((await decideWindowsApproval(request('git status --short'), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request("git log -1 --format='%h %s'"), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request(`cat -n '${file}'`), state)).decision, 'auto-allow');

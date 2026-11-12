@@ -37,11 +37,11 @@ const BUILTIN_ALIASES = new Map([
   ['mv', 'move-item'], ['move', 'move-item'], ['mi', 'move-item'],
   ['ren', 'rename-item'], ['rni', 'rename-item'],
   ['rm', 'remove-item'], ['del', 'remove-item'], ['ri', 'remove-item'],
-  ['echo', 'write-output'], ['write', 'write-output'], ['sort', 'sort-object'], ['ft', 'format-table'], ['fl', 'format-list'],
+  ['echo', 'write-output'], ['write', 'write-output'], ['sleep', 'start-sleep'], ['sort', 'sort-object'], ['ft', 'format-table'], ['fl', 'format-list'],
   ['where', 'where-object'], ['?', 'where-object'],
 ]);
 const FILTERS = new Set(['select-object', 'sort-object', 'format-table', 'format-list', 'measure-object', 'out-null', 'out-string', 'write-output', 'get-date', 'get-location', 'get-service', 'get-process', 'get-command']);
-const SAFE_FILTER_PARAMS = new Set(['first', 'last', 'skip', 'unique', 'property', 'descending', 'width', 'line', 'name', 'displayname', 'noenumerate', 'id', 'module', 'commandtype', 'all', 'listimported', 'includeusername', 'autosize']);
+const SAFE_FILTER_PARAMS = new Set(['first', 'last', 'skip', 'unique', 'property', 'descending', 'width', 'line', 'name', 'displayname', 'noenumerate', 'id', 'module', 'commandtype', 'all', 'listimported', 'includeusername', 'autosize', 'erroraction']);
 const SAFE_FILTER_SWITCHES = new Set(['unique', 'descending', 'noenumerate', 'all', 'listimported', 'includeusername', 'autosize']);
 const WORKSPACE_SCRIPT_TASKS = new Set(['build', 'check', 'format:check', 'format-check', 'lint', 'test', 'test:ci', 'test:unit', 'typecheck', 'type-check']);
 const WORKSPACE_SCRIPT_RUNNERS = new Set(['npm', 'npm.cmd', 'npm.exe', 'pnpm', 'pnpm.cmd', 'pnpm.exe', 'yarn', 'yarn.cmd', 'yarn.exe', 'bun', 'bun.exe']);
@@ -661,14 +661,21 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       }
       actions.push({ kind: 'read', program, target: null }); continue;
     }
+    if (program === 'start-sleep') {
+      const args = parseArguments(entry.elements, new Set(['seconds', 'milliseconds']));
+      if (entry.pipelineInput !== false || !args || args.named.size + args.positional.length !== 1 ||
+          !/^(?:\d+)(?:\.\d+)?$/.test(String(args.positional[0] ?? [...args.named.values()][0] ?? ''))) {
+        return { complete: false, actions, reason: 'unsupported sleep duration' };
+      }
+      actions.push({ kind: 'read', program, target: null }); continue;
+    }
     if (FILTERS.has(program)) {
       const filterArgs = parseArguments(entry.elements, SAFE_FILTER_PARAMS, SAFE_FILTER_SWITCHES);
       if (!filterArgs) return { complete: false, actions, reason: 'unsupported filter arguments' };
-      // Get-Command can import a module and run its initialization even with
-      // -ListImported when a name is supplied. An unnamed, non-pipeline
-      // inventory may safely filter already imported commands by literal type.
+      // Named lookups can execute module initialization, including with
+      // -ListImported, so only unnamed inventories are automatically safe.
       if (program === 'get-command' && (entry.pipelineInput !== false || filterArgs.positional.length ||
-          [...filterArgs.named.keys()].some(key => !['listimported', 'commandtype'].includes(key)) ||
+          [...filterArgs.named.keys()].some(key => !['listimported', 'commandtype', 'erroraction'].includes(key)) ||
           (filterArgs.named.has('commandtype') &&
             !GET_COMMAND_TYPES.has(String(filterArgs.named.get('commandtype')).toLowerCase())))) {
         return { complete: false, actions, reason: 'command lookup may execute module initialization' };

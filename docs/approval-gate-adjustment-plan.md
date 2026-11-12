@@ -223,6 +223,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 两台指定 POSIX 实例随后通过真实 Ragent 服务、其已安装 Claude CLI 和本机模拟模型执行隔离验收：recommended 与 full-auto 均自动读取工作区外普通文件；隔离 `.ssh` 的递归删除在 recommended 产生审批并经 API 拒绝，在 full-auto 由 Ragent 自动拒绝，CLI 均收到拒绝结果且文件未受影响。两端临时 provider 和会话已通过 API 删除；没有消耗真实模型额度。该阶段覆盖 Claude 的两个指定场景，尚未覆盖 Codex、手机连接真实实例或实际生产审批率。最初 Linux 夹具创建在 SSH 的 `/tmp`，服务使用私有 `/tmp` 因此无法看到，测试会话未创建；改用实例可见的隔离目录后完成验收。
 - 两台实例的 Codex 也使用各自现有 Ragent 服务、安装的 Codex 与本机模拟 Responses 服务完成相同隔离场景：recommended/full-auto 自动通过工作区外普通读取；递归删除隔离 `.ssh` 在 recommended 产生审批并通过 API 拒绝，在 full-auto 自动拒绝，两种模式的真实 Codex 均收到拒绝，文件保持完整。未调用官方 Codex 模型，临时 provider 和会话通过 API 删除。这四个场景不等同于全部命令覆盖率或生产审批率；手机连接真实实例的审批操作和 Windows 正式实例验收仍待完成。
 - Windows 已安装实例后来恢复为 ready，owner activation 处于 listening；未从本次验收操作中重启或修改服务，恢复的具体原因尚未查明。安装件源码标识为 `cece257997e28f315a94cd4a231ca40cd0e305a3`。同样通过真实服务、已安装 Claude 和 Codex 以及本机模拟模型各验证 recommended/full-auto：工作区外普通读取四次均成功，隔离 `.ssh` 删除在 recommended 经审批 API 拒绝、在 full-auto 自动拒绝，CLI 收到拒绝且文件完整。临时 provider 和会话均经 API 删除；一次临时 provider 清理遇到 `OBD_ENDPOINT_UNAVAILABLE`，重试成功，不能把这次恢复视作信任故障根因已修复。上述是指定命令场景，尚未覆盖三星连接真实实例，也不能推算总体审批率。
+- 检查 Windows 正式实例近期记录时发现 14 次 Claude 自动拒绝标记为语法不支持；从原始事件重建请求并使用当时 Run 风险上下文只读回放。现在自动识别字面量 `Start-Sleep`/`sleep` 及 Bash 的 `which`、`command -v`、`type` 静态命令查询；实际命令仍会按链中所有操作分别判断。该批 14 条中一条普通等待由拒绝变为直接放行，其余 13 条未由本次所测路径放行，两种模式的自动放行结果一致；不执行历史命令，这批拒绝样本也不能用于推算总体通过率。PowerShell 带名称的 `Get-Command` 可能触发模块初始化执行，暂未将其直接视为只读查询。
 
 ## 外部依据
 
