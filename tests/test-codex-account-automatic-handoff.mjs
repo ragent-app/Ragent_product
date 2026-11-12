@@ -24,7 +24,9 @@ test('automatic handoff fences an unused home and routes to the verified running
   assert.equal(await coordinateCodexAccountRoute({ ...base, candidateHomeRoot: canonical }), canonical);
   await mkdir(join(canonical, 'codex'), { recursive: true });
   await writeFile(join(canonical, 'codex', 'auth.json'), JSON.stringify({ tokens: { account_id: 'account-a', refresh_token: 'secret' } }));
-  await assert.rejects(coordinateCodexAccountRoute({ ...base, candidateHomeRoot: legacy, waitMs: 0 }), { code: 'CODEX_HANDOFF_UNAVAILABLE' });
+  await assert.rejects(coordinateCodexAccountRoute({ ...base, candidateHomeRoot: legacy, waitMs: 0,
+    attest: async () => { throw Object.assign(new Error('identity not verified'), { code: 'CODEX_HANDOFF_UNAVAILABLE' }); } }),
+  { code: 'CODEX_HANDOFF_UNAVAILABLE' });
   await assertCodexHomeNotFenced(legacy);
   const server = createServer((socket) => {
     createInterface({ input: socket }).on('line', (line) => {
@@ -44,4 +46,26 @@ test('automatic handoff fences an unused home and routes to the verified running
   const fence = await readFile(join(legacy, '.agentoc-codex-home-fence.json'), 'utf8');
   assert.ok(!fence.includes('account-a'));
   assert.equal(await coordinateCodexAccountRoute({ ...base, candidateHomeRoot: legacy }), canonical);
+});
+
+test('an offline canonical owner can be resumed after a guarded handoff', { timeout: 15000 }, async (t) => {
+  const parent = resolve(tmpdir());
+  const root = await mkdtemp(join(parent, 'ragent-offline-handoff-'));
+  t.after(async () => {
+    const part = relative(parent, root);
+    if (!part || part === '..' || part.startsWith(`..${sep}`) || isAbsolute(part)) throw new Error('Unsafe fixture cleanup');
+    await rm(root, { recursive: true, force: true });
+  });
+  const base = { configDir: join(root, 'config'), providerHomesRoot: join(root, 'homes'), accountId: 'account-a' };
+  const canonical = join(base.providerHomesRoot, 'a');
+  const legacy = join(base.providerHomesRoot, 'b');
+  const tokens = { account_id: 'account-a', refresh_token: 'fixture-refresh' };
+  assert.equal(await coordinateCodexAccountRoute({ ...base, candidateHomeRoot: canonical }), canonical);
+  await mkdir(join(canonical, 'codex'), { recursive: true });
+  await writeFile(join(canonical, 'codex', 'auth.json'), JSON.stringify({ tokens }));
+  await assert.rejects(coordinateCodexAccountRoute({ ...base, candidateHomeRoot: legacy, waitMs: 0,
+    selectedTokens: { ...tokens, refresh_token: 'independent-login' } }), { code: 'CODEX_HANDOFF_CREDENTIALS_DIVERGED' });
+  await assertCodexHomeNotFenced(legacy);
+  assert.equal(await coordinateCodexAccountRoute({ ...base, candidateHomeRoot: legacy, waitMs: 0, selectedTokens: tokens }), canonical);
+  await assert.rejects(assertCodexHomeNotFenced(legacy), { code: 'CODEX_HOME_RETIRED' });
 });
