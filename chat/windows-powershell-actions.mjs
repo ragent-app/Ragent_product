@@ -594,11 +594,27 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       continue;
     }
     if (program === 'select-string') {
-      const args = parseArguments(entry.elements, new Set(['pattern', 'simplematch', 'casesensitive', 'quiet', 'notmatch']),
-        new Set(['simplematch', 'casesensitive', 'quiet', 'notmatch']));
-      if (entry.pipelineInput !== true || !args || args.positional.length > 1 ||
-          (args.named.has('pattern') ? args.positional.length !== 0 : args.positional.length !== 1)) {
+      const args = parseArguments(entry.elements, new Set(['pattern', 'path', 'literalpath', 'encoding', 'simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']),
+        new Set(['simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']));
+      if (!args || (args.named.has('path') && args.named.has('literalpath'))) {
         return { complete: false, actions, reason: 'unsupported Select-String arguments' };
+      }
+      const namedPath = args.named.get('literalpath') || args.named.get('path');
+      const hasNamedPattern = args.named.has('pattern');
+      const expectedPositionals = hasNamedPattern ? 0 : 1;
+      if (args.positional.length < expectedPositionals || args.positional.length > expectedPositionals + (namedPath ? 0 : 1)) {
+        return { complete: false, actions, reason: 'unsupported Select-String arguments' };
+      }
+      const filePath = namedPath || args.positional[expectedPositionals];
+      if ((!filePath && entry.pipelineInput !== true) || (filePath && entry.pipelineInput === true) ||
+          (filePath && !args.named.has('literalpath') && /[*?\[\]]/.test(filePath))) {
+        return { complete: false, actions, reason: 'unsupported Select-String arguments' };
+      }
+      if (filePath) {
+        const files = await analyzeWindowsFileChanges([{ path: filePath, kind: 'read' }], context, { fsApi });
+        if (!files.complete) return { ...files, actions: [...actions, ...files.actions] };
+        actions.push(...files.actions.map(action => ({ ...action, program })));
+        continue;
       }
       actions.push({ kind: 'read', program, target: null }); continue;
     }

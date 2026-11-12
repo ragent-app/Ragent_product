@@ -121,6 +121,12 @@ assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
 assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
+for (const command of ["Select-String -Path readme.txt -Pattern fixture", "Select-String fixture readme.txt", "Select-String -LiteralPath '..\\ordinary.txt' -Pattern fixture -SimpleMatch"]) {
+  assert.equal((await inspect(command)).decision, 'allow', `${command}: ordinary files can be searched`);
+}
+for (const command of ["Select-String -Path '..\\protected\\secret' -Pattern fixture", "Select-String -Path '*.txt' -Pattern fixture", "Select-String -LiteralPath ordinary-link -Pattern fixture"]) {
+  assert.equal((await inspect(command)).decision, 'review', `${command}: file scope still needs checking`);
+}
 for (const command of ["winget list --id Microsoft.VisualStudioCode --exact --disable-interactivity | Select-String 'Visual Studio'", "winget.exe list --source winget | Select-String -Pattern 'example' -SimpleMatch", "'text' | Select-String 'text'", "(winget list --id Example.App | Select-String 'Example')"]) {
   assert.equal((await inspect(command)).decision, 'allow', command);
 }
@@ -131,6 +137,11 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const codex = { kind: 'command', params: { command: [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', command] } };
   assert.equal((await decideWindowsApproval(claude, state)).decision, 'auto-allow', `${riskMode}: Claude list query`);
   assert.equal((await decideWindowsApproval(codex, state)).decision, 'auto-allow', `${riskMode}: Codex list query`);
+  const search = `Select-String -Path '${path.join(root, 'ordinary.txt').replaceAll("'", "''")}' -Pattern fixture`;
+  claude.params.input.command = search;
+  codex.params.command[3] = search;
+  assert.equal((await decideWindowsApproval(claude, state)).decision, 'auto-allow', `${riskMode}: Claude searches an outside file`);
+  assert.equal((await decideWindowsApproval(codex, state)).decision, 'auto-allow', `${riskMode}: Codex searches an outside file`);
 }
 for (const command of ['winget install --id Example.App', 'winget uninstall --id Example.App', '(winget uninstall --id Example.App)', 'winget list --open-logs', "winget list --id Example.App | Select-String -Path 'secret.txt' -Pattern 'x'"]) {
   assert.equal((await inspect(command)).decision, 'review', command);

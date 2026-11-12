@@ -62,7 +62,7 @@ const deleteCase = process.env.AGENTOC_QA_CLAUDE_DELETE === '1';
 const nativePowerShell = process.env.AGENTOC_QA_CLAUDE_NATIVE_POWERSHELL === '1';
 const deleteList = process.env.AGENTOC_QA_CLAUDE_DELETE_LIST === '1';
 const deleteSteps = process.env.AGENTOC_QA_CLAUDE_DELETE_STEPS === '1';
-if (nativePowerShell && !deleteCase && !['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy'].includes(process.env.AGENTOC_QA_CLAUDE_READ) && !cliReadCase) throw new Error('native PowerShell fixture requires deletion, read or CLI-read mode');
+if (nativePowerShell && !deleteCase && !['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(process.env.AGENTOC_QA_CLAUDE_READ) && !cliReadCase) throw new Error('native PowerShell fixture requires deletion, read or CLI-read mode');
 if (deleteList && (!deleteCase || !nativePowerShell)) throw new Error('deletion list requires native PowerShell fixture');
 if (deleteSteps && (!deleteList || !nativePowerShell)) throw new Error('deletion steps require native PowerShell list fixture');
 const outsideFileCase = process.env.AGENTOC_QA_CLAUDE_FILE_OUTSIDE === '1';
@@ -75,7 +75,7 @@ const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === '
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
 const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
-if (readCase && (!['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'cd-rg', 'cwd-change', 'cwd-change-rg', 'relative-write', 'unconditional-file-delete', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-log-format', 'git-diff-file', 'git-c-outside', 'conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy'].includes(readCase) || (['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy'].includes(readCase) && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
+if (readCase && (!['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'cd-rg', 'cwd-change', 'cwd-change-rg', 'relative-write', 'unconditional-file-delete', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-log-format', 'git-diff-file', 'git-c-outside', 'conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(readCase) || (['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(readCase) && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 const cwdChangeCase = ['cwd-change', 'cwd-change-rg'].includes(readCase);
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
 if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
@@ -90,7 +90,7 @@ const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-
 const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-file-')) : '';
 const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-git-')) : '';
 if (outsideGitRoot) { execFileSync('git', ['init', '-q'], { cwd: outsideGitRoot, windowsHide: true }); await writeFile(path.join(outsideGitRoot, 'fixture.md'), 'outside git fixture\n'); }
-const outsideReadRoot = readCase === 'relative-file-tool' || cliReadCase === 'asset' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
+const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || cliReadCase === 'asset' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
 if (outsideReadRoot) await writeFile(path.join(outsideReadRoot, 'fixture.md'), 'local read fixture\n');
 const deleteTarget = path.join(outsideCase ? outsideRoot : protectedCase ? protectedRoot : root, unicodeFixture ? '构建 输出' : 'delete-fixture');
 const keepFile = path.join(root, 'keep-fixture.txt');
@@ -105,7 +105,7 @@ const bashTarget = deleteTarget.replace(/^([A-Za-z]):\\/, (_, drive) => `/${driv
 const deleteCommand = nativePowerShell
   ? `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`
   : `rm -rf '${bashTarget.replace(/'/g, "'\\''")}'`;
-const artifact = path.join(cliReadCase === 'asset' ? outsideReadRoot : outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
+const artifact = path.join(cliReadCase === 'asset' || readCase === 'select-string' ? outsideReadRoot : outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
 if (cliReadCase === 'asset') await writeFile(artifact, 'isolated asset fixture\n');
 const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
 if (readCase) await writeFile(artifact, readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
@@ -130,6 +130,7 @@ let readCommand = readCase === 'conditional'
   ? `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
   : readCase === 'conditional-write' ? `if (Test-Path -LiteralPath '${artifact.replaceAll("'", "''")}') { Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : readCase === 'stderr-null' ? `Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}' 2>$null`
+  : readCase === 'select-string' ? `Select-String -LiteralPath '${artifact.replaceAll("'", "''")}' -Pattern 'local read fixture'`
   : readCase === 'output-filters' ? `Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${artifact.replaceAll("'", "''")}' | Format-List Name,Length | Out-String`
   : readCase === 'where-filter' ? `Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like '*.md') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like '*.md' }" : "Name -like '*.md'"} | Select-Object Name | Out-String`
   : readCase === 'system-copy' ? `Copy-Item -LiteralPath '${path.join(process.env.SystemRoot, 'win.ini').replaceAll("'", "''")}' -Destination '${artifact.replaceAll("'", "''")}' -Force; Get-Item -LiteralPath '${artifact.replaceAll("'", "''")}' | Select-Object Name | Out-String`
@@ -412,6 +413,7 @@ try {
     if (readCase === 'output-filters') assert.equal(approvals, 1, 'real Claude must exercise the PowerShell output filter approval callback');
     if (readCase === 'where-filter') assert.equal(approvals, 1, 'real Claude must exercise the PowerShell filter approval callback');
     if (readCase === 'system-copy') assert.equal(approvals, 1, 'real Claude must exercise the system copy approval callback');
+    if (readCase === 'select-string') assert.equal(approvals, 1, 'real Claude must exercise the Select-String approval callback');
     if (readCase === 'rg-text' && askAll) assert.equal(approvals, 1, 'ask rule must route the search through Ragent');
     if (readCase === 'git-diff-file' && askAll) assert.equal(approvals, 1, 'ask rule must route the file diff through Ragent');
     if (readCase === 'git-log-format' && askAll) assert.equal(approvals, 1, 'ask rule must route the formatted log through Ragent');
