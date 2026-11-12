@@ -104,7 +104,10 @@ internal fun splitTurnEntries(
         it is TimelineItem.Message && it.role == TimelineRole.Agent && it.messagePhase == "final_answer"
     }
     val finalIndex = if (explicitIndex >= 0) explicitIndex else if (allowTerminalFallback) {
-        val last = entries.indexOfLast { it !is TimelineItem.Notice }
+        // Durable reasoning blocks can be emitted after a finalized assistant
+        // snapshot even though they belong to its process. They must not hide
+        // the actual reply when the turn is complete.
+        val last = entries.indexOfLast { it !is TimelineItem.Notice && !(it is TimelineItem.Operation && it.isReasoning) }
         val reply = entries.getOrNull(last) as? TimelineItem.Message
         if (reply?.let {
                 it.role == TimelineRole.Agent && it.completed &&
@@ -113,6 +116,12 @@ internal fun splitTurnEntries(
         ) last else -1
     } else -1
     if (finalIndex < 0) return emptyList<TimelineItem>() to entries
+    if (explicitIndex < 0) {
+        val trailing = entries.drop(finalIndex + 1)
+        val lateReasoning = trailing.filter { it is TimelineItem.Operation && it.isReasoning }
+        return (entries.take(finalIndex) + lateReasoning) to
+            (listOf(entries[finalIndex]) + trailing.filterNot { it is TimelineItem.Operation && it.isReasoning })
+    }
     return entries.take(finalIndex) to entries.drop(finalIndex)
 }
 
