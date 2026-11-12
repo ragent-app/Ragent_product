@@ -6066,7 +6066,7 @@ async function main() {
     lastOutputAt = lastProviderLineAt;
     providerBytesSeen = true;
   });
-  providerStdoutInput.on('error', (error) => {
+  const handleProviderStdoutError = (error) => {
     const reason = `Provider stdout reader failed: ${normalizeErrorMessage(error)}`;
     stdoutProcessingFailureReason ||= reason;
     providerProtocolErrorPreview = clipDiagnosticMessage(
@@ -6078,7 +6078,11 @@ async function main() {
       code: error?.code || null,
     }).catch(() => {});
     void terminateManagedProcess().catch(() => {});
-  });
+  };
+  providerStdoutInput.on('error', handleProviderStdoutError);
+  // readline does not forward errors emitted by its input stream. The
+  // buffering stream therefore needs its own handler after setup, too.
+  providerStdoutStream.on('error', handleProviderStdoutError);
   providerStdoutInput.on('line', (line) => {
     void enqueueStdoutLine(line);
   });
