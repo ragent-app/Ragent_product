@@ -7,9 +7,10 @@ import { createInterface } from 'node:readline';
 const root = process.env.AGENTOC_TEST_ROOT;
 const runnerUid = Number(process.env.AGENTOC_TEST_RUNNER_UID);
 const realSidecar = process.env.AGENTOC_TEST_REAL_SIDECAR === '1';
-const runId = realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
+const cancellation = process.env.AGENTOC_TEST_CANCEL_HANDOFF === '1';
+const runId = cancellation ? 'run_peercancelfixture1' : realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
 const sessionId = 's1', requestId = 't1';
-const { createRun, getRunAcceptanceEvidence, getRunManifest, getRunResult, clearRunResult } = await import('../../chat/runs.mjs');
+const { createRun, getRunAcceptanceEvidence, getRunManifest, getRunResult, clearRunResult, requestRunCancel } = await import('../../chat/runs.mjs');
 const { computeExecutionScopeDigest } = await import('../../chat/execution-scope.mjs');
 const { issueLinuxRunScopeGrant } = await import('../../chat/linux-run-scope-issuance.mjs');
 const { getActivePrivilegedSigningKey } = await import('../../chat/privileged-signing-keys.mjs');
@@ -44,6 +45,7 @@ process.stdout.write(`QA:${JSON.stringify({ run: await getRunAcceptanceEvidence(
 for await (const line of createInterface({ input: process.stdin })) {
   try {
     if (line === 'read') process.stdout.write(`QA:${JSON.stringify({ result: await getRunResult(runId) })}\n`);
+    else if (line === 'cancel') { await requestRunCancel(runId); process.stdout.write('QA:{"cancelRequested":true}\n'); }
     else if (line === 'clear') { await clearRunResult(runId); process.stdout.write('QA:{"cleared":true}\n'); }
     else if (line === 'exit') break;
   } catch (error) { process.stdout.write(`QA:${JSON.stringify({ error: error.code || error.message })}\n`); }

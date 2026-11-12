@@ -2237,16 +2237,37 @@ export async function getRunResult(runId) {
               const { hasLinuxPeerResultClearIntent } = await import('./linux-run-peer-result-clear.mjs');
               if (await hasLinuxPeerResultClearIntent(runId, attempt)) return null;
               const { readLinuxRunResultSnapshot, saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+              const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
+              const explicitlyCancelled = await hasLinuxRunExplicitCancellation(runId);
+              const cancelledAfterStop = async () => {
+                // Revocation alone does not prove that the runner has exited.
+                const { confirmProtectedLinuxRunStopped } = await import('./linux-run-peer-result-client.mjs');
+                await confirmProtectedLinuxRunStopped({ ...linuxPeerResultClientOptions(), runId, launchAttempt: attempt });
+                return { cancelled: true, exitCode: null, error: null, completedAt: new Date().toISOString() };
+              };
               let result = await readLinuxRunResultSnapshot(runId, attempt);
+              if (result && result.cancelled !== true && explicitlyCancelled && !isTerminalRunState(current.state)) {
+                // A crash may leave a protected snapshot without its status
+                // commit. A later explicit cancellation wins only after the
+                // root broker has also proved that the original unit stopped.
+                result = await saveLinuxRunResultSnapshot(runId, attempt, await cancelledAfterStop(), { replace: true });
+              }
               if (!result) {
                 const { readProtectedLinuxRunResult } = await import('./linux-run-peer-result-client.mjs');
                 const record = await readProtectedLinuxRunResult({ ...linuxPeerResultClientOptions(), runId, launchAttempt: attempt });
-                if (!record) return null;
-                if (record.sessionId !== binding.sessionId || record.turnId !== binding.turnId) throw linuxScopeResultUnavailable();
-                result = record.result;
+                if (record && (record.sessionId !== binding.sessionId || record.turnId !== binding.turnId)) throw linuxScopeResultUnavailable();
+                if (explicitlyCancelled && (!record || record.result.cancelled !== true)) {
+                  // Cancellation may revoke the root channel before a runner
+                  // can stage its final result. Only the control service can
+                  // synthesize this result, after root confirms the registered
+                  // unit and all of its cgroup descendants have stopped.
+                  result = await cancelledAfterStop();
+                } else {
+                  if (!record) return null;
+                  result = record.result;
+                }
               }
-              const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
-              if ((current.cancelRequested === true || await hasLinuxRunExplicitCancellation(runId)) && result.cancelled !== true)
+              if ((current.cancelRequested === true || explicitlyCancelled) && result.cancelled !== true)
                 throw linuxScopeResultUnavailable();
               if (hasUnresolvedResultApproval(current, result)) return null;
               if (typeof result.completedAt !== 'string' || !Number.isFinite(Date.parse(result.completedAt)))
@@ -3123,6 +3144,17 @@ async function retryLinuxRunScopeRevocation(run) {
   try {
     const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
     if ((await revokeLinuxRunScope(run, { enabled: true })).state !== 'revoked') return false;
+    const { hasLinuxRunControlBinding, readLinuxRunControlBindingRecord, matchesLinuxRunControlBinding } =
+      await import('./linux-run-control-binding.mjs');
+    if (await hasLinuxRunControlBinding(run.id, attempt) &&
+        (await readLinuxRunControlBindingRecord(run.id, attempt)).resultChannel === 'peer-v1') {
+      // A cancellation can reach root before the runner can send its finish
+      // notification. Preserve the same durable completion receipt used by
+      // normal result adoption before clearing the retry flag.
+      if (!await matchesLinuxRunControlBinding({ run, manifest: await getRunManifestUnlocked(run.id), launchAttempt: attempt })) return false;
+      const { persistLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+      await persistLinuxRunCompletionReceipt(run.id, attempt);
+    }
     await updateRun(run.id, (current) => {
       const currentAttempt = Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0;
       if ((!current.cancelRequested && !isTerminalRunState(current.state)) || !current.linuxScopeRevocationPending || currentAttempt !== attempt) return current;

@@ -10,8 +10,9 @@ import { createLinuxRunPeerResultServer } from '../scripts/linux-run-peer-result
 import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
 
-for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar' : 'runner fixture'} hands a result to real root broker and non-root control`,
+for (const scenario of ['runner', 'sidecar', 'cancel']) test(`systemd ${scenario} uses real root broker and non-root control`,
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.AGENTOC_TEST_SYSTEMD_PEER !== '1', timeout: 45000 }, async () => {
+    const realSidecar = scenario === 'sidecar', cancellation = scenario === 'cancel';
     const account = name => {
       const fields = execFileSync('/usr/bin/getent', ['passwd', name], { encoding: 'utf8' }).trim().split(':');
       return { uid: Number(fields[2]), gid: Number(fields[3]) };
@@ -19,7 +20,7 @@ for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar'
     const controlAccount = account('nobody'), runner = account('agentoc-runner');
     assert.ok(controlAccount.uid > 0 && runner.uid > 0 && controlAccount.uid !== runner.uid);
     const root = await mkdtemp('/srv/agentoc-peer-handoff-');
-    const runId = realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
+    const runId = cancellation ? 'run_peercancelfixture1' : realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
     const unit = `agentoc-runner-${runId}.service`;
     let lifecycle, inbox, control, started = false, succeeded = false;
     try {
@@ -49,6 +50,7 @@ for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar'
         process.execPath, fixture], { env: { ...process.env, HOME: `${root}/home`, AGENTOC_CONFIG_DIR: `${root}/config`,
           AGENTOC_MEMORY_DIR: `${root}/memory`, AGENTOC_RUN_SPOOL_DIR: `${root}/spool`, AGENTOC_TEST_ROOT: root,
           AGENTOC_TEST_RUNNER_UID: String(runner.uid), AGENTOC_TEST_REAL_SIDECAR: realSidecar ? '1' : '0', AGENTOC_LINUX_RUN_SCOPE_GRANTS: '1',
+          AGENTOC_TEST_CANCEL_HANDOFF: cancellation ? '1' : '0',
           AGENTOC_RUNNER_LIFECYCLE_SOCKET: lifecycleSocket, AGENTOC_LINUX_PEER_RESULT_SOCKET: endpoint,
           AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: helper }, stdio: ['pipe', 'pipe', 'pipe'] });
       control.stderr.on('data', data => { errorOutput += data.toString(); });
@@ -69,7 +71,11 @@ for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar'
       await enrollLinuxServiceKeyPin({ directory: `${root}/pin`, publicKey, expectedKeyId: keyId });
       inbox = await createLinuxRunPeerResultServer({ socketPath: endpoint, directory: `${root}/contexts`,
         pinDirectory: `${root}/pin`, resultDirectory: `${root}/results`, controlUid: controlAccount.uid, peerHelper: helper });
-      const task = fileURLToPath(new URL(realSidecar ? '../chat/runner-sidecar.mjs' : './fixtures/linux-peer-handoff-task.mjs', import.meta.url));
+      let task = fileURLToPath(new URL(realSidecar ? '../chat/runner-sidecar.mjs' : './fixtures/linux-peer-handoff-task.mjs', import.meta.url));
+      if (cancellation) {
+        task = `${root}/wait.mjs`;
+        await writeFile(task, 'setInterval(() => {}, 1000);\n', { mode: 0o644 });
+      }
       const env = { HOME: `${root}/runner-home`, AGENTOC_CONFIG_DIR: `${root}/runner-home`,
         AGENTOC_MEMORY_DIR: `${root}/runner-home/memory`, AGENTOC_RUN_SPOOL_DIR: `${root}/spool`,
         AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1',
@@ -83,6 +89,15 @@ for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar'
       execFileSync('/usr/bin/systemd-run', [...args, process.execPath, task, ...(realSidecar ? [runId] : [])], { timeout: 10000 });
       await registerLinuxRunContext({ directory: `${root}/contexts`, pinDirectory: `${root}/pin`,
         run: ready.run, manifest: ready.manifest, grant: ready.grant, launchAttempt: 0, runnerUid: runner.uid });
+      if (cancellation) {
+        control.stdin.write('cancel\n');
+        assert.deepEqual(await next(), { cancelRequested: true });
+        // Revocation alone is insufficient: a live runner must not be
+        // represented as fully cancelled, even when no result was staged.
+        control.stdin.write('read\n');
+        assert.deepEqual(await next(), { error: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        execFileSync('/usr/bin/systemctl', ['stop', unit], { timeout: 10000 });
+      }
       let outcome;
       for (let i = 0; i < 250; i++) {
         control.stdin.write('read\n');
@@ -91,14 +106,18 @@ for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar'
         assert.equal(outcome.error, 'LINUX_RUN_RESULT_UNAVAILABLE');
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      if (realSidecar) {
+      if (cancellation) {
+        assert.equal(outcome?.result?.cancelled, true, errorOutput);
+        assert.equal(outcome?.result?.exitCode, null);
+        assert.ok(Number.isFinite(Date.parse(outcome?.result?.completedAt)));
+      } else if (realSidecar) {
         assert.equal(outcome?.result?.exitCode, 0, errorOutput);
         assert.equal(outcome?.result?.providerTerminalSeen, true);
         assert.equal(await readFile(`${root}/workspace/marker`, 'utf8'), 'executed');
       } else {
         assert.deepEqual(outcome?.result, { completedAt: '2026-11-12T00:00:00.000Z', exitCode: 0, signal: null }, errorOutput);
       }
-      assert.equal(JSON.parse(await readFile(`${root}/spool/${runId}/status.json`, 'utf8')).state, 'completed');
+      assert.equal(JSON.parse(await readFile(`${root}/spool/${runId}/status.json`, 'utf8')).state, cancellation ? 'cancelled' : 'completed');
       control.stdin.write('clear\n');
       assert.deepEqual(await next(), { cleared: true });
       control.stdin.write('read\n');

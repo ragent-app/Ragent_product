@@ -9,7 +9,7 @@ import { TextDecoder } from 'node:util';
 import { assertLinuxRootControlledDirectory } from '../chat/linux-target-key-store.mjs';
 import { stageLinuxRunPeerResult, readRevokedLinuxRunPeerResult, discardRevokedLinuxRunPeerResult } from './linux-run-peer-result-store.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
-import { withLinuxRunPeerContext } from './linux-run-context-store.mjs';
+import { confirmRevokedLinuxRunStopped, withLinuxRunPeerContext } from './linux-run-context-store.mjs';
 
 const MAX_REQUEST = 4 * 1024 * 1024;
 const MAX_CLIENTS = 32;
@@ -55,7 +55,7 @@ function decodeRequest(buffer) {
       !Number.isSafeInteger(request.launchAttempt) || request.launchAttempt < 0 || request.launchAttempt > 10000) fail();
   const keys = Object.keys(request).sort().join(',');
   if ((request.type === 'stage' && keys === 'launchAttempt,result,runId,type') ||
-      (['ready', 'read', 'discard'].includes(request.type) && keys === 'launchAttempt,runId,type')) return request;
+      (['ready', 'read', 'discard', 'stopped'].includes(request.type) && keys === 'launchAttempt,runId,type')) return request;
   fail();
 }
 
@@ -115,9 +115,14 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
             runId: request.runId, launchAttempt: request.launchAttempt, peer, result: request.result });
         } else {
           if (peer.uid !== controlUid) fail();
-          const operation = request.type === 'discard' ? discardRevokedLinuxRunPeerResult : readRevokedLinuxRunPeerResult;
-          value = await operation({ directory, resultDirectory,
-            runId: request.runId, launchAttempt: request.launchAttempt });
+          if (request.type === 'stopped') {
+            value = await confirmRevokedLinuxRunStopped({ directory,
+              runId: request.runId, launchAttempt: request.launchAttempt });
+          } else {
+            const operation = request.type === 'discard' ? discardRevokedLinuxRunPeerResult : readRevokedLinuxRunPeerResult;
+            value = await operation({ directory, resultDirectory,
+              runId: request.runId, launchAttempt: request.launchAttempt });
+          }
         }
         if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: true, value })}\n`);
       })().catch(() => { if (!socket.destroyed) socket.end('{"ok":false}\n'); });

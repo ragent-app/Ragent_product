@@ -3,19 +3,22 @@
 // provenance. Neither this store nor its revocation marker is wired to the
 // production launch/cancellation paths yet.
 import { constants } from 'node:fs';
-import { lstat, open, rename, unlink } from 'node:fs/promises';
+import { lstat, open, readFile, rename, statfs, unlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash, randomBytes } from 'node:crypto';
 import { posix as path } from 'node:path';
 import { assertLinuxRootControlledDirectory } from '../chat/linux-target-key-store.mjs';
 import { verifyLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
 import { resolveApprovedActionRunDirectories } from '../chat/approved-action-run-directories.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
-import { captureLinuxRunUnitIdentity, isLinuxRunUnitLive } from './linux-run-unit-liveness.mjs';
+import { captureLinuxRunUnitIdentity, isLinuxRunUnitLive, linuxRunUnitName } from './linux-run-unit-liveness.mjs';
 import { isLinuxRunPeerLive } from './linux-run-peer-identity.mjs';
 import { withLinuxRunOperationLock } from './linux-run-operation-lock.mjs';
 
 const RUN_ID = /^run_[A-Za-z0-9_-]{8,128}$/;
 const MAX_RECORD_BYTES = 256 * 1024;
+const execFileAsync = promisify(execFile);
 function unavailable() { throw Object.assign(new Error('Trusted Run context is unavailable'), { code: 'LINUX_RUN_CONTEXT_UNAVAILABLE' }); }
 function validateId(runId, launchAttempt) {
   if (typeof runId !== 'string' || !RUN_ID.test(runId) || !Number.isSafeInteger(launchAttempt) ||
@@ -109,6 +112,63 @@ export async function revokeLinuxRunContext({ directory, runId, launchAttempt } 
   // Marker first prevents later operations. Acquiring the same lock then
   // waits for any operation that had already begun before acknowledging.
   await withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {});
+}
+
+// Root-only evidence for cancellation recovery. A revocation prevents new
+// privileged operations but does not itself stop the provider. Before the
+// control service can publish a cancellation without a runner result, verify
+// that the exact registered systemd invocation has stopped and its cgroup is
+// empty. An unknown state, different invocation or non-cgroup-v2 host fails
+// closed. This endpoint neither stops a unit nor grants execution authority.
+export async function confirmRevokedLinuxRunStopped({ directory, runId, launchAttempt } = {}) {
+  await validateDirectory(directory);
+  const paths = recordPaths(directory, runId, launchAttempt);
+  const unitName = linuxRunUnitName(runId, launchAttempt);
+  return withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {
+    const marker = await readRecord(paths.revoked);
+    const record = await readRecord(paths.record);
+    const identity = record?.unit;
+    if (Object.keys(marker).join(',') !== 'version' || marker.version !== 1 || record?.version !== 1 ||
+        record.run?.id !== runId || identity?.runId !== runId || identity?.launchAttempt !== launchAttempt ||
+        typeof identity.invocationId !== 'string' || !/^[a-f0-9]{32}$/.test(identity.invocationId) ||
+        /^0+$/.test(identity.invocationId)) unavailable();
+    const fields = ['Id', 'LoadState', 'ActiveState', 'MainPID', 'ControlPID', 'InvocationID', 'ControlGroup'];
+    const args = ['show', ...fields.map(field => `--property=${field}`), '--', unitName];
+    const options = { timeout: 5000, maxBuffer: 16384, env: { PATH: '/usr/bin:/bin', LANG: 'C' } };
+    const inspect = async () => {
+      const { stdout } = await execFileAsync('/usr/bin/systemctl', args, options);
+      const values = Object.create(null);
+      for (const line of stdout.split('\n')) {
+        if (!line) continue;
+        const index = line.indexOf('=');
+        const key = line.slice(0, index);
+        if (index < 1 || !fields.includes(key) || Object.hasOwn(values, key)) unavailable();
+        values[key] = line.slice(index + 1);
+      }
+      if (!fields.every(key => Object.hasOwn(values, key)) || values.Id !== unitName ||
+          !['loaded', 'not-found'].includes(values.LoadState) || !['inactive', 'failed'].includes(values.ActiveState) ||
+          values.MainPID !== '0' || values.ControlPID !== '0') unavailable();
+      if (values.LoadState === 'loaded' && values.InvocationID !== identity.invocationId) unavailable();
+      if (values.LoadState === 'not-found' && values.ActiveState !== 'inactive') unavailable();
+      const expectedGroup = `/agentoc.slice/agentoc-runners.slice/${unitName}`;
+      if (values.ControlGroup && values.ControlGroup !== expectedGroup) unavailable();
+      return stdout;
+    };
+    const first = await inspect();
+    // cgroup.events reports descendants too; unlike cgroup.procs it cannot
+    // miss a child cgroup. The filesystem itself must be kernel cgroup v2.
+    if ((await statfs('/sys/fs/cgroup', { bigint: true })).type !== 0x63677270n) unavailable();
+    const eventsPath = `/sys/fs/cgroup/agentoc.slice/agentoc-runners.slice/${unitName}/cgroup.events`;
+    let events;
+    try { events = await readFile(eventsPath, 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (events !== undefined) {
+      const populated = events.split('\n').filter(line => line.startsWith('populated '));
+      if (populated.length !== 1 || populated[0] !== 'populated 0') unavailable();
+    }
+    if (await inspect() !== first) unavailable();
+    return { stopped: true };
+  });
 }
 
 // Extend a still-live, non-revoked record without changing its signed scope or

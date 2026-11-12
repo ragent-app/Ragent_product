@@ -127,3 +127,11 @@ export async function discardProtectedLinuxRunResult({ runId, launchAttempt, ...
   if (!value || Object.keys(value).join(',') !== 'discarded' || value.discarded !== true) throw unavailable();
   return value;
 }
+
+// Only the configured control UID can ask the root broker for this evidence.
+// Revocation alone does not imply that the runner and its descendants stopped.
+export async function confirmProtectedLinuxRunStopped({ runId, launchAttempt, ...options } = {}) {
+  const value = await requestProtectedResult({ type: 'stopped', runId, launchAttempt }, options);
+  if (!value || Object.keys(value).join(',') !== 'stopped' || value.stopped !== true) throw unavailable();
+  return true;
+}
