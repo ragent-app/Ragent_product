@@ -11,6 +11,7 @@ import { verifyLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
 import { resolveApprovedActionRunDirectories } from '../chat/approved-action-run-directories.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
 import { captureLinuxRunUnitIdentity, isLinuxRunUnitLive } from './linux-run-unit-liveness.mjs';
+import { isLinuxRunPeerLive } from './linux-run-peer-identity.mjs';
 import { withLinuxRunOperationLock } from './linux-run-operation-lock.mjs';
 
 const RUN_ID = /^run_[A-Za-z0-9_-]{8,128}$/;
@@ -164,4 +165,22 @@ export async function readLinuxRunContext({ directory, pinDirectory, runId, laun
     return { runId, sessionId: record.run.sessionId, turnId: record.run.requestId, launchAttempt,
       invocationId: record.unit.invocationId, ...directories };
   } catch { return null; }
+}
+
+// Internal primitive for a future root-mediated Run channel. The caller must
+// obtain `peer` from SO_PEERCRED on the accepted socket and validate every
+// request payload; a request-supplied identity is never acceptable. Holding
+// the operation lock makes revocation wait for a callback already admitted.
+export async function withLinuxRunPeerContext({ directory, pinDirectory, runId, launchAttempt, peer } = {}, action) {
+  if (typeof action !== 'function') unavailable();
+  await validateDirectory(directory);
+  const paths = recordPaths(directory, runId, launchAttempt);
+  return withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {
+    const context = await readLinuxRunContext({ directory, pinDirectory, runId, launchAttempt });
+    if (!context) unavailable();
+    const record = await readRecord(paths.record);
+    if (!await isLinuxRunPeerLive(record.unit, peer)) unavailable();
+    await assertNotRevoked(paths.revoked);
+    return action(context);
+  });
 }

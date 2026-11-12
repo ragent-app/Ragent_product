@@ -439,6 +439,21 @@ ID 映射、降权后执行任务。真实测试确认任务在该单元 cgroup 
 升级、实际重启或真实提供商。systemd 的 `!` 执行前缀语义见
 [systemd.service 文档](https://www.freedesktop.org/software/systemd/man/252/systemd.service.html)。
 
+为后续逐任务结果通道新增了对端身份校验组件：它要求调用方从真实 socket
+取得 `SO_PEERCRED`，并以 root 可信的 Run 绑定核对 UID、GID、进程启动时间、
+无新增权限、空 capability、精确任务 cgroup 和 systemd 调用代次；失效或
+僵尸进程被拒绝。Ubuntu 真机通过 Unix socket 验证了任务子进程可识别、
+同 UID 但属于另一个单元的进程被拒绝，以及原对端退出后即使 socket 文件
+描述符仍被同单元的其他进程持有也被拒绝。
+`scripts/linux-run-peer-identity.mjs` 尚未接入结果通道，也不单独构成授权：
+对端仍活着时可以传递已连接文件描述符，校验与实际写入之间也存在竞态；
+还必须结合独立 UID、请求授权、受保护的结果保存及撤销屏障完成设计。
+根上下文存储增加了供未来通道调用的组合入口：在 Run 操作锁内重新验证
+签名上下文及对端，再执行内部回调，使撤销确认等待已接纳的操作结束。
+真机使用真实 socket、签名 Run 上下文和 systemd 单元验证不同任务拒绝、
+原对端僵尸状态拒绝、并发撤销等待及撤销后的拒绝；该入口尚未对外提供
+写回服务，也不能解决活跃对端转交文件描述符的问题。
+
 同一物理机对 systemd 管理目录作了补充试验：动态用户可在自己的
 `RuntimeDirectory` 中读写，而控制用的 0600 凭据源文件不能被该 UID 直接
 读取；单元通过 `LoadCredential` 获得该测试凭据。正常停止或向单元主进程

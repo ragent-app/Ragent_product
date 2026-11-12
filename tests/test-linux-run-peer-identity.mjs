@@ -1,0 +1,140 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync, spawn } from 'node:child_process';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
+import { isLinuxRunPeerLive, matchesLinuxRunPeerCgroup } from '../scripts/linux-run-peer-identity.mjs';
+import { captureLinuxRunUnitIdentity } from '../scripts/linux-run-unit-liveness.mjs';
+import { createRunPublication, bindRunPublication } from '../chat/run-publication-contract.mjs';
+import { computeExecutionScopeDigest } from '../chat/execution-scope.mjs';
+import { signLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
+import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
+import { registerLinuxRunContext, revokeLinuxRunContext, withLinuxRunPeerContext } from '../scripts/linux-run-context-store.mjs';
+
+const expected = { runId: 'run_peerfixture1', launchAttempt: 2 };
+const path = '/agentoc.slice/agentoc-runners.slice/agentoc-runner-run_peerfixture1-a2.service';
+test('peer cgroup must match one exact launch unit', () => {
+  assert.equal(matchesLinuxRunPeerCgroup(`0::${path}\n`, expected), true);
+  assert.equal(matchesLinuxRunPeerCgroup(`0::${path}/child\n`, expected), false);
+  assert.equal(matchesLinuxRunPeerCgroup(`0::${path}\n0::${path}\n`, expected), false);
+  assert.equal(matchesLinuxRunPeerCgroup(`0::${path}\n`, { ...expected, launchAttempt: 3 }), false);
+});
+
+test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
+  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.AGENTOC_TEST_SYSTEMD_PEER !== '1', timeout: 30000 }, async () => {
+    const root = await mkdtemp('/srv/agentoc-peer-test-');
+    const unit = 'agentoc-runner-run_peerfixture1-a2.service';
+    const otherUnit = 'agentoc-runner-run_peerfixture2-a2.service';
+    const zombieUnit = 'agentoc-runner-run_peerfixture3-a2.service';
+    const sockets = [], started = [];
+    let server;
+    const stop = name => {
+      try { execFileSync('/usr/bin/systemctl', ['stop', name], { stdio: 'ignore', timeout: 10000 }); return true; }
+      catch { return false; }
+    };
+    try {
+      await chmod(root, 0o711);
+      for (const name of [unit, otherUnit, zombieUnit]) {
+        assert.equal(execFileSync('/usr/bin/systemctl', ['show', '--property=LoadState', '--value', name], { encoding: 'utf8' }).trim(), 'not-found');
+      }
+      const account = execFileSync('/usr/bin/getent', ['passwd', 'agentoc-runner'], { encoding: 'utf8' }).trim().split(':');
+      const uid = Number(account[2]);
+      assert.ok(Number.isSafeInteger(uid) && uid > 0);
+      const helper = `${root}/peercred`;
+      execFileSync('/usr/bin/gcc', ['-Wall', '-Wextra', '-Werror', '-O2', fileURLToPath(new URL('../native/privileged-peercred.c', import.meta.url)), '-o', helper]);
+      const pending = [], waiting = [];
+      server = createServer(socket => { sockets.push(socket); const ready = waiting.shift(); if (ready) ready(socket); else pending.push(socket); });
+      const socketPath = `${root}/control.sock`;
+      await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+      await chmod(socketPath, 0o666);
+      const nextSocket = () => pending.length ? Promise.resolve(pending.shift()) : new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { const index = waiting.indexOf(ready); if (index >= 0) waiting.splice(index, 1); reject(new Error('peer connection timeout')); }, 5000);
+        const ready = socket => { clearTimeout(timer); resolve(socket); };
+        waiting.push(ready);
+      });
+      const launch = (name, zombie = false) => {
+        const code = zombie
+          ? 'import array,os,socket,sys,time\na,b=socket.socketpair()\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); b.sendmsg([b"x"],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array("i",[s.fileno()]))]); os._exit(0)\nelse:\n a.recvmsg(1,socket.CMSG_SPACE(4)); time.sleep(120)'
+          : 'import os,socket,sys\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.recv(1); os._exit(0)\nelse:\n os.wait()';
+        execFileSync('/usr/bin/systemd-run', ['--quiet', '--collect', '--service-type=exec', `--unit=${name}`,
+          '--slice=agentoc-runners.slice', '--property=User=agentoc-runner', '--property=NoNewPrivileges=yes',
+          '/usr/bin/python3', '-c', code, socketPath], { timeout: 10000 });
+        started.push(name);
+      };
+      const credentials = async socket => {
+        const child = spawn(helper, [], { stdio: ['ignore', 'pipe', 'pipe', socket._handle.fd] });
+        let stdout = '', stderr = '';
+        child.stdout.on('data', data => { stdout += data; });
+        child.stderr.on('data', data => { stderr += data; });
+        const status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+        assert.equal(status, 0, stderr);
+        return JSON.parse(stdout);
+      };
+      launch(unit);
+      const a = await nextSocket();
+      const peerA = await credentials(a);
+      const binding = await captureLinuxRunUnitIdentity({ ...expected, runnerUid: uid });
+      assert.ok(binding);
+      assert.notEqual(peerA.pid, binding.mainPid, 'a child process in the unit can be identified');
+      assert.equal(await isLinuxRunPeerLive(binding, peerA), true);
+      const directory = `${root}/contexts`, pinDirectory = `${root}/pin`;
+      await mkdir(directory, { mode: 0o700 }); await mkdir(pinDirectory, { mode: 0o700 });
+      const keys = generateKeyPairSync('ed25519');
+      const keyId = createHash('sha256').update(keys.publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
+      await enrollLinuxServiceKeyPin({ directory: pinDirectory, publicKey: keys.publicKey, expectedKeyId: keyId });
+      const run = { id: expected.runId, sessionId: 's1', requestId: 't1', runPublication: createRunPublication() };
+      const scope = { sessionId: 's1', cwd: { realPath: '/srv/work' }, scopeRoot: { realPath: '/srv/work' },
+        riskContext: { platform: 'linux', cwd: '/srv/work', trustedWorkspaceRoot: '/srv/work' } };
+      const manifest = bindRunPublication(run, { executionScope: scope, executionScopeDigest: computeExecutionScopeDigest(scope),
+        options: { approvedActionChannel: { turnId: 't1', token: 'test-only' } } });
+      const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey, ttlMs: 60000 });
+      await registerLinuxRunContext({ directory, pinDirectory, run, manifest, grant, launchAttempt: 2, runnerUid: uid });
+      const peerContext = { directory, pinDirectory, ...expected, peer: peerA };
+      assert.equal(await withLinuxRunPeerContext(peerContext, async ctx => ctx.sessionId), 's1');
+      launch(otherUnit);
+      const b = await nextSocket();
+      const peerB = await credentials(b);
+      assert.equal(peerB.uid, peerA.uid);
+      assert.equal(await isLinuxRunPeerLive(binding, peerB), false);
+      await assert.rejects(withLinuxRunPeerContext({ ...peerContext, peer: peerB }, async () => 'unexpected'), { code: 'LINUX_RUN_CONTEXT_UNAVAILABLE' });
+      assert.equal(await isLinuxRunPeerLive({ ...binding, invocationId: 'b'.repeat(32) }, peerA), false);
+      assert.equal(await isLinuxRunPeerLive(binding, { ...peerA, gid: 0 }), false);
+      launch(zombieUnit, true);
+      const zombieSocket = await nextSocket();
+      const zombiePeer = await credentials(zombieSocket);
+      for (let i = 0; i < 100; i++) {
+        if (/^State:\s*Z/m.test(await readFile(`/proc/${zombiePeer.pid}/status`, 'utf8'))) break;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.match(await readFile(`/proc/${zombiePeer.pid}/status`, 'utf8'), /^State:\s*Z/m);
+      const zombieBinding = await captureLinuxRunUnitIdentity({ runId: 'run_peerfixture3', launchAttempt: 2, runnerUid: uid });
+      assert.ok(zombieBinding, 'the unit and the process retaining the fd are still alive');
+      assert.equal(await isLinuxRunPeerLive(zombieBinding, zombiePeer), false);
+      let releaseAction, signalStarted;
+      const admitted = new Promise(resolve => { signalStarted = resolve; });
+      const gate = new Promise(resolve => { releaseAction = resolve; });
+      const operation = withLinuxRunPeerContext(peerContext, async () => { signalStarted(); await gate; return 'finished'; });
+      await admitted;
+      let revoked = false;
+      const revoke = revokeLinuxRunContext({ directory, ...expected }).then(() => { revoked = true; });
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        assert.equal(revoked, false, 'revocation waits for an admitted operation');
+      } finally { releaseAction(); }
+      assert.equal(await operation, 'finished');
+      await revoke;
+      await assert.rejects(withLinuxRunPeerContext(peerContext, async () => 'unexpected'), { code: 'LINUX_RUN_CONTEXT_UNAVAILABLE' });
+      assert.equal(stop(unit), true);
+      started.splice(started.indexOf(unit), 1);
+      assert.equal(await isLinuxRunPeerLive(binding, peerA), false);
+    } finally {
+      let stopped = true;
+      for (const name of started.reverse()) if (!stop(name)) stopped = false;
+      for (const socket of sockets) socket.destroy();
+      if (server) await new Promise(resolve => server.close(resolve));
+      if (stopped) await rm(root, { recursive: true, force: true });
+      else console.error(`Retaining ${root}: a fixture unit did not stop`);
+    }
+  });
