@@ -11,10 +11,10 @@
     audit: ['操作记录', '查看密钥轮换、数据库维护和服务操作的审计记录。'],
   };
   const serviceLabels = {
-    'agentoc-accounts': ['Accounts API', '账号、设备配对、ASR 用量与推送队列'],
+    'ragent-accounts': ['Accounts API', '账号、设备配对、ASR 用量与推送队列'],
     'turn-credential-broker': ['TURN 凭据 broker', '为跨设备会话签发 TURN 中继凭据'],
-    'agentoc-signaling': ['P2P 信令服务', '为 Ragent 设备连接转发信令'],
-    'agentoc-tunnel-server': ['反向隧道服务', '提供受控的远程连接入口'],
+    'ragent-signaling': ['P2P 信令服务', '为 Ragent 设备连接转发信令'],
+    'ragent-tunnel-server': ['反向隧道服务', '提供受控的远程连接入口'],
   };
   const actionLabels = {
     'secret.rotate': '轮换服务凭据',
@@ -204,10 +204,10 @@
     const fcmTotal = sumRows(fcmRows, 'events');
     const asrTotal = sumRows(asrRows, 'requests');
     const detail = {
-      'agentoc-accounts': '账号和设备配对 API、用量汇总、服务端语音识别与推送队列。',
+      'ragent-accounts': '账号和设备配对 API、用量汇总、服务端语音识别与推送队列。',
       'turn-credential-broker': '根据 Accounts 签发的短期能力凭据为设备提供 TURN 配置。',
-      'agentoc-signaling': '转发手机和电脑之间建立 P2P 连接所需的信令。',
-      'agentoc-tunnel-server': '提供 Ragent 远程连接通道，保持现有设备接入。',
+      'ragent-signaling': '转发手机和电脑之间建立 P2P 连接所需的信令。',
+      'ragent-tunnel-server': '提供 Ragent 远程连接通道，保持现有设备接入。',
     };
     const managedServices = Object.entries(serviceLabels).map(([id, [label]]) => {
       const service = services[id] || {};
@@ -292,10 +292,10 @@
     const sampleServices = latest?.services || {};
     const serviceMetrics = overview.services || {};
     const resourceCards = [
-      resourceCard('Accounts API', serviceMetrics['agentoc-accounts'], sampleServices['agentoc-accounts'], serviceMetrics['agentoc-accounts']),
+      resourceCard('Accounts API', serviceMetrics['ragent-accounts'], (sampleServices['ragent-accounts'] || sampleServices['agentoc-accounts']), serviceMetrics['ragent-accounts']),
       resourceCard('TURN 凭据 broker', serviceMetrics['turn-credential-broker'], sampleServices['turn-credential-broker'], serviceMetrics['turn-credential-broker']),
-      resourceCard('P2P 信令服务', serviceMetrics['agentoc-signaling'], sampleServices['agentoc-signaling'], serviceMetrics['agentoc-signaling']),
-      resourceCard('反向隧道服务', serviceMetrics['agentoc-tunnel-server'], sampleServices['agentoc-tunnel-server'], serviceMetrics['agentoc-tunnel-server']),
+      resourceCard('P2P 信令服务', serviceMetrics['ragent-signaling'], (sampleServices['ragent-signaling'] || sampleServices['agentoc-signaling']), serviceMetrics['ragent-signaling']),
+      resourceCard('反向隧道服务', serviceMetrics['ragent-tunnel-server'], (sampleServices['ragent-tunnel-server'] || sampleServices['agentoc-tunnel-server']), serviceMetrics['ragent-tunnel-server']),
       resourceCard('Caddy HTTPS 入口', platform.caddy, sampleServices.caddy, platform.caddy),
       resourceCard('PostgreSQL', platform.postgres, sampleServices.postgres, platform.postgres),
       ...(platform.legacyConnectivityGateway?.active || platform.legacyConnectivityGateway?.fragmentPath

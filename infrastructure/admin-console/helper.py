@@ -42,7 +42,7 @@ METRICS_FILE = pathlib.Path("/var/lib/agentoc-admin/metrics.json")
 TRAFFIC_FILE = pathlib.Path("/var/lib/agentoc-admin/traffic.json")
 TURN_ANALYTICS_FILE = pathlib.Path("/etc/agentoc/turn-analytics.json")
 AUDIT_FILE = pathlib.Path("/var/log/agentoc-admin/audit.jsonl")
-ACCOUNTS_SERVICE = "agentoc-accounts.service"
+ACCOUNTS_SERVICE = "ragent-accounts.service"
 DATABASE_CONTAINER = "agentoc-pg"
 DATABASE_NAME = "agentoc_accounts_runtime"
 DATABASE_APP_ROLE = "agentoc_accounts_app"
@@ -60,11 +60,13 @@ METRICS_RETENTION_SECONDS = 24 * 60 * 60
 METRICS_MAX_SAMPLES = 1500
 
 SERVICES = {
-    "agentoc-accounts": "agentoc-accounts.service",
+    "ragent-accounts": "ragent-accounts.service",
     "turn-credential-broker": "turn-credential-broker.service",
-    "agentoc-signaling": "agentoc-signaling.service",
-    "agentoc-tunnel-server": "agentoc-tunnel-server.service",
+    "ragent-signaling": "ragent-signaling.service",
+    "ragent-tunnel-server": "ragent-tunnel-server.service",
 }
+
+LEGACY_SERVICE_NAMES = {f"ragent-{name}": f"agentoc-{name}" for name in ("accounts", "signaling", "tunnel-server")}
 
 BACKUP_PATTERN = re.compile(r"^accounts-\d{8}T\d{6}Z-[a-f0-9]{8}\.dump$")
 SECRET_FIELDS = {
@@ -460,7 +462,8 @@ def _record_metrics(services, platform, now_epoch=None):
     elapsed = now_epoch - float(previous["epoch"]) if previous else 0
     if previous and elapsed > 0:
         for name, current in service_metrics.items():
-            old = previous.get("services", {}).get(name, {})
+            old_services = previous.get("services", {})
+            old = old_services.get(name) or old_services.get(LEGACY_SERVICE_NAMES.get(name), {})
             old_cpu = old.get("cpuUsageNs")
             new_cpu = current.get("cpuUsageNs")
             if isinstance(old_cpu, int) and isinstance(new_cpu, int) and new_cpu >= old_cpu:
@@ -716,10 +719,10 @@ def _overview():
         for key, unit in SERVICES.items()
     }
     for service_id, host, port, route in (
-        ("agentoc-accounts", account_host, account_port, "/readyz"),
+        ("ragent-accounts", account_host, account_port, "/readyz"),
         ("turn-credential-broker", turn_host, turn_port, "/healthz"),
-        ("agentoc-signaling", "127.0.0.1", SIGNALING_PORT_DEFAULT, "/health"),
-        ("agentoc-tunnel-server", "127.0.0.1", TUNNEL_PORT_DEFAULT, "/health"),
+        ("ragent-signaling", "127.0.0.1", SIGNALING_PORT_DEFAULT, "/health"),
+        ("ragent-tunnel-server", "127.0.0.1", TUNNEL_PORT_DEFAULT, "/health"),
     ):
         healthy, latency_ms = _readiness_metric(host, port, route)
         services[service_id]["health"] = healthy
@@ -842,12 +845,12 @@ def _run_diagnostics(actor):
         "broker 健康接口正常。",
     )
     endpoint_check(
-        "signaling", "P2P 信令服务", SERVICES["agentoc-signaling"], "127.0.0.1", SIGNALING_PORT_DEFAULT, "/health",
+        "signaling", "P2P 信令服务", SERVICES["ragent-signaling"], "127.0.0.1", SIGNALING_PORT_DEFAULT, "/health",
         lambda payload: isinstance(payload, dict) and payload.get("ok") is True,
         "信令服务健康接口正常。",
     )
     endpoint_check(
-        "tunnel", "远程隧道服务", SERVICES["agentoc-tunnel-server"], "127.0.0.1", TUNNEL_PORT_DEFAULT, "/health",
+        "tunnel", "远程隧道服务", SERVICES["ragent-tunnel-server"], "127.0.0.1", TUNNEL_PORT_DEFAULT, "/health",
         lambda payload: isinstance(payload, dict) and payload.get("ok") is True,
         "隧道进程健康接口正常；未建立真实手机/电脑连接。",
     )
@@ -1394,6 +1397,8 @@ def _rotate_database_password(actor):
 
 def _restart_service(actor, data):
     name = data.get("service")
+    # Accept requests from an already-open page during a rolling upgrade.
+    name = next((current for current, legacy in LEGACY_SERVICE_NAMES.items() if name == legacy), name)
     if name not in SERVICES:
         raise AdminError("SERVICE_NOT_ALLOWED")
     status = _service_restart(SERVICES[name])

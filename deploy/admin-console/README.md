@@ -49,7 +49,7 @@ Create the system group and user `agentoc-admin`, then create the directories:
 /var/log/agentoc-admin            root:root 0700
 ```
 
-Install the two systemd units into `/etc/systemd/system/`. `/etc/agentoc/admin-console.env` contains only the owner email, Cloudflare Access auth domain, and application audience ID; it is not a provider-secret file. Set it to mode `0644`, enable both services, and verify that `agentoc-admin-console` listens only on `127.0.0.1:7722`.
+Install the two systemd units into `/etc/systemd/system/`. `/etc/agentoc/admin-console.env` contains only the owner email, Cloudflare Access auth domain, and application audience ID; it is not a provider-secret file. Set it to mode `0644`, enable both services, and verify that `ragent-admin-console` listens only on `127.0.0.1:7722`.
 
 The Accounts PostgreSQL container must be named `agentoc-pg`, database `agentoc_accounts_runtime`, and expose the local superuser role `agentoc_accounts` only over the container's internal Unix socket. Those names are fixed in the helper and are never received from the browser.
 

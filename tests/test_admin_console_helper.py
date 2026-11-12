@@ -18,6 +18,15 @@ SPEC.loader.exec_module(HELPER)
 
 
 class AdminHelperValidationTests(unittest.TestCase):
+    def test_service_restart_uses_canonical_unit_and_accepts_cached_old_name(self):
+        with patch.object(HELPER, "_service_restart", return_value={"active": True, "since": "now"}) as restart, patch.object(HELPER, "_audit"):
+            for supplied in ("ragent-accounts", "agentoc-accounts"):
+                result = HELPER._restart_service("owner", {"service": supplied})
+                self.assertEqual(result["service"], "ragent-accounts")
+                restart.assert_called_with("ragent-accounts.service")
+            with self.assertRaises(HELPER.AdminError):
+                HELPER._restart_service("owner", {"service": "foreign.service"})
+
     def test_turn_analytics_validates_credentials_and_aggregates_bytes(self):
         config = {'accountId': 'a' * 32, 'token': 'x' * 40}
         self.assertEqual(HELPER.json.loads(HELPER._validate_secret('turn-analytics', HELPER.json.dumps(config))), config)
@@ -240,7 +249,7 @@ class AdminHelperValidationTests(unittest.TestCase):
                 pathlib.Path(path).write_text(content, encoding="utf-8")
 
             first_services = {"agentoc-accounts": {"memoryBytes": 1024, "cpuUsageNs": 1_000_000_000, "tasks": 3, "restartCount": 0}}
-            second_services = {"agentoc-accounts": {"memoryBytes": 2048, "cpuUsageNs": 3_000_000_000, "tasks": 4, "restartCount": 0}}
+            second_services = {"ragent-accounts": {"memoryBytes": 2048, "cpuUsageNs": 3_000_000_000, "tasks": 4, "restartCount": 0}}
             with (
                 patch.object(HELPER, "METRICS_FILE", metrics_file),
                 patch.object(HELPER, "atomic_write", side_effect=write_metrics),
@@ -250,7 +259,7 @@ class AdminHelperValidationTests(unittest.TestCase):
                 second = HELPER._record_metrics(second_services, {}, now_epoch=1_060)
             self.assertEqual(len(first["history"]), 1)
             self.assertEqual(len(second["history"]), 2)
-            self.assertAlmostEqual(second["history"][-1]["services"]["agentoc-accounts"]["cpuPercent"], 3.33, places=2)
+            self.assertAlmostEqual(second["history"][-1]["services"]["ragent-accounts"]["cpuPercent"], 3.33, places=2)
 
     def test_backup_ids_are_confined_to_expected_names(self):
         self.assertTrue(HELPER.validate_backup_id("accounts-20261111T120000Z-a1b2c3d4.dump"))

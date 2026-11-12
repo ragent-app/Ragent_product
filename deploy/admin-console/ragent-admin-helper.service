@@ -32,3 +32,5 @@ ReadWritePaths=/etc/agentoc /var/lib/agentoc/accounts /var/lib/agentoc-admin /va
 
 [Install]
 WantedBy=multi-user.target
+# Transitional alias for an existing installation.
+Alias=agentoc-admin-helper.service

@@ -1,8 +1,8 @@
 [Unit]
 Description=Ragent owner-only admin console
-After=network-online.target agentoc-admin-helper.service
+After=network-online.target ragent-admin-helper.service
 Wants=network-online.target
-Requires=agentoc-admin-helper.service
+Requires=ragent-admin-helper.service
 
 [Service]
 Type=simple
@@ -39,3 +39,5 @@ ReadWritePaths=/run/agentoc-admin
 
 [Install]
 WantedBy=multi-user.target
+# Transitional alias for an existing installation.
+Alias=agentoc-admin-console.service
