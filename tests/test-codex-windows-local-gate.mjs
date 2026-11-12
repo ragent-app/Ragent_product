@@ -28,8 +28,14 @@ process.env.AGENTOC_WORK_ROOT_DIR = path.join(home, 'instance', 'workspace');
 process.env.AGENTOC_MEMORY_DIR = path.join(home, 'instance', 'memory');
 process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(home, 'instance', 'provider-homes');
 process.env.AGENTOC_RUN_SPOOL_DIR = path.join(home, 'instance', 'data', 'chat-runs');
-const { createRun, getRun } = await import('../chat/runs.mjs');
-const { trackCodexAppServerApprovalRequest, handleCodexAppServerInitializeResponse } = await import('../chat/runner-sidecar.mjs');
+const { appendRunSpoolRecord, createRun, getRun } = await import('../chat/runs.mjs');
+const { flushCodexAppServerApprovalResponses, trackCodexAppServerApprovalRequest, handleCodexAppServerInitializeResponse } = await import('../chat/runner-sidecar.mjs');
+const phoneQueueCase = process.env.AGENTOC_QA_SAMSUNG_CODEX_QUEUE === '1';
+const phoneSessionId = 'samsung-fixture';
+const { handleSessionMainRoutes } = phoneQueueCase ? await import('../chat/router-session-main-routes.mjs') : {};
+const { getHistory } = phoneQueueCase ? await import('../chat/session-manager.mjs') : {};
+const { withSessionsMetaMutation, mutateSessionMeta } = phoneQueueCase ? await import('../chat/session-meta-store.mjs') : {};
+let phoneApproval = null; let phoneState = null; let phoneQueued = false;
 const riskMode = ['full-auto', 'conservative-auto'].includes(process.env.AGENTOC_QA_MODE) ? process.env.AGENTOC_QA_MODE : 'recommended';
 const boundContext = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
   ? await (await import('./fixtures/windows-admitted-context.mjs')).admittedWindowsContext(home, 'fixture-session') : null;
@@ -54,6 +60,7 @@ if (managedRipgrep) {
   await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(path.join(rgFixture, '.ignore'), '!.env\n'); await writeFile(rgConfig, '--hidden\n');
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
+if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
 if (fileCommand && (!['rename', 'clear', 'dotnet', 'git-status', 'git-diff', 'git-show', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
@@ -95,9 +102,37 @@ const productionStartup = (managedInstall || managedDelete || managedElevation |
 const failSecondPreflight = managedInstall && process.env.AGENTOC_QA_PREFLIGHT_FAIL_SECOND === '1';
 let preflights = 0; let submissions = 0;
 let providerRequests = 0;
-const run = await createRun({ status: { sessionId: 'fixture-session', requestId: 'fixture-request', state: 'accepted', tool: 'codex' },
-  manifest: { sessionId: 'fixture-session', requestId: 'fixture-request', folder: home, tool: 'codex', runtimeFamily: 'codex-app-server-json', prompt: 'fixture', options: {} } });
+const fixtureSessionId = phoneQueueCase ? phoneSessionId : 'fixture-session';
+if (phoneQueueCase) await withSessionsMetaMutation(async (rows, save) => { rows.push({ id: phoneSessionId, name: 'Samsung real Codex fixture', folder: home, tool: 'codex', sessionPlane: 'user', sessionClass: 'ROOT_LEADERSHIP', userAddressable: true }); await save(rows, { immediate: true, durable: true }); });
+const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 'fixture-request', state: phoneQueueCase ? 'running' : 'accepted', tool: 'codex' },
+  manifest: { sessionId: fixtureSessionId, requestId: 'fixture-request', folder: home, tool: 'codex', runtimeFamily: 'codex-app-server-json', prompt: 'fixture', options: phoneQueueCase ? { riskMode: 'recommended' } : {} } });
+if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
 const server = createServer((req, res) => {
+  if (phoneQueueCase && req.url.startsWith('/api/')) {
+    void (async () => {
+      const url = new URL(req.url, 'http://127.0.0.1'); let status = 0; let body;
+      const isEvents = req.method === 'GET' && url.pathname === `/api/sessions/${phoneSessionId}/events`;
+      const isApproval = phoneApproval && req.method === 'POST' && url.pathname === `/api/runs/${encodeURIComponent(run.id)}/approvals/${encodeURIComponent(phoneApproval.approvalId)}`;
+      if (!isEvents && !isApproval) { res.writeHead(404).end(); return; }
+      const handled = await handleSessionMainRoutes({ req, res, pathname: url.pathname, parsedUrl: { pathname: url.pathname, query: Object.fromEntries(url.searchParams) },
+        ...(isEvents ? { sessionGetRoute: { kind: 'event-delta', sessionId: phoneSessionId } } : {}),
+        authSession: { role: 'owner', principalKind: 'trusted_device' }, requireSessionAccess: async (_response, _auth, id) => id === phoneSessionId,
+        writeJson: (_response, code, value) => { status = code; body = value; }, writeJsonCached: (_request, _response, value) => { status = 200; body = value; } });
+      if (!handled || status !== (isEvents ? 200 : 202)) throw new Error(`unexpected phone route status ${status}`);
+      if (isApproval) {
+        const current = await getRun(run.id); const response = current.appServerApprovalResponseQueue.find(entry => entry.approvalId === phoneApproval.approvalId);
+        if (response?.decision !== 'deny') throw new Error('phone did not deny the fixture');
+        let writes = 0; const tracked = { stdin: { writable: true, write(value) { writes++; return child.stdin.write(value); } } };
+        await flushCodexAppServerApprovalResponses(tracked, phoneState, current);
+        await flushCodexAppServerApprovalResponses(tracked, phoneState, current);
+        const delivered = (await getRun(run.id)).appServerApprovalResponseQueue.find(entry => entry.id === response.id);
+        if (writes !== 1 || delivered?.state !== 'sent' || delivered?.response?.result?.decision !== 'decline') throw new Error('Codex response was not delivered exactly once');
+        phoneQueued = true;
+      }
+      res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+    })().catch(error => { console.error(error); if (!res.headersSent) res.writeHead(500).end(); }); return;
+  }
+  if (phoneQueueCase && req.method === 'GET' && req.url === '/fixture/status') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ queued: phoneQueued })); return; }
   let body = ''; req.setEncoding('utf8');
   req.on('data', chunk => { body += chunk; if (body.length > 4_000_000) req.destroy(); });
   req.on('end', () => {
@@ -120,8 +155,8 @@ const server = createServer((req, res) => {
     if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] shell tool: ${JSON.stringify({ name: shellToolName, properties: Object.keys(shellToolProperties), required: shellToolSchema.required || [] })}\n`);
     if (!shellToolName || !shellCommandField) { process.stderr.write('Codex shell tool schema missing a supported command field\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
     providerRequests++;
-    if (managedElevation && providerRequests > 1) {
-      if (!JSON.stringify(data).includes('agentoc_request_actions')) { process.stderr.write('managed elevation instruction did not reach model\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
+    if ((managedElevation || phoneQueueCase) && providerRequests > 1) {
+      if (managedElevation && !JSON.stringify(data).includes('agentoc_request_actions')) { process.stderr.write('managed elevation instruction did not reach model\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
       const item = { id: 'msg_fixture', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Managed elevation required', annotations: [] }] };
       const response = { id: 'resp_done', object: 'response', created_at: 1, status: 'completed', model: 'gpt-5.4', output: [item], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
       res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -155,7 +190,7 @@ const server = createServer((req, res) => {
     res.end();
   });
 });
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await new Promise(resolve => server.listen(phoneQueueCase ? 18667 : 0, '127.0.0.1', resolve));
 const port = server.address().port;
 const hookExperiment = process.env.AGENTOC_QA_HOOK_REWRITE === '1';
 const hookShouldRun = hookExperiment && process.env.AGENTOC_QA_HOOK_TRUST !== '0';
@@ -224,7 +259,7 @@ child.stderr.on('data', chunk => {
   codexStderr = (codexStderr + String(chunk)).slice(-6000);
   if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] Codex stderr: ${String(chunk).slice(-2000)}\n`);
 });
-const timeout = setTimeout(() => { process.stderr.write(`fixture timed out${codexStderr ? `: ${codexStderr}` : ''}\n`); child.kill(); server.close(); process.exitCode = 1; }, 30000);
+const timeout = setTimeout(() => { process.stderr.write(`fixture timed out${codexStderr ? `: ${codexStderr}` : ''}\n`); child.kill(); server.close(); process.exitCode = 1; }, phoneQueueCase ? 240000 : 30000);
 let stage = 0; let hookCompleted = false; let hookFailed = false; let hookBlocked = false;
 let fixtureHookKey = '';
 let managedHookSetup = null;
@@ -357,7 +392,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     const argv = decodeCodexShlexArgv(msg.params?.command);
     const recognized = !!readWindowsPowerShellInvocation({ params: { command: argv } });
     const state = { riskMode, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home },
-      threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set(), startedTurn: true };
+      threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), sentApprovalResponseIds: new Set(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set(), startedTurn: true };
     const policy = await decideWindowsApproval({ kind: 'command', providerMethod: msg.method, params: msg.params }, state);
     const sent = [];
     const fakeProc = { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } };
@@ -377,6 +412,12 @@ createInterface({ input: child.stdout }).on('line', async line => {
       stage = 4; child.stdin.write(JSON.stringify(sent[0]) + '\n');
     } else {
       if (outsideWrite && await readFile(fileFixture, 'utf8') !== 'fixture content') { fixtureError('outside review fixture was modified'); return; }
+      if (phoneQueueCase) {
+        phoneApproval = pending[0]; phoneState = state; await appendRunSpoolRecord(run.id, { stream: 'stdout', json: msg });
+        const history = await getHistory(phoneSessionId);
+        if (!history.some(item => item.type === 'approval_request' && item.approvalId === phoneApproval.approvalId)) { fixtureError('Codex approval did not project to phone history'); return; }
+        stage = 6; process.stdout.write('SAMSUNG_CODEX_PROVIDER_READY\n'); return;
+      }
       process.stdout.write(riskMode === 'full-auto'
         ? 'codex-windows-local-gate: full-auto denied the dangerous command without creating an owner prompt\n'
         : `codex-windows-local-gate: ${expected} passed\n`);
@@ -422,6 +463,9 @@ createInterface({ input: child.stdout }).on('line', async line => {
     stage = 3;
     process.stderr.write('command completed without a gate request\n'); process.exitCode = 1;
     child.kill(); server.close();
+  } else if (stage === 6 && phoneQueueCase && msg.method === 'turn/completed') {
+    if (!phoneQueued || providerRequests < 2) { fixtureError('phone denial did not return to Codex model'); return; }
+    stage = 5; process.stdout.write('codex-windows-local-gate: Samsung denial reached real Codex CLI\n'); setTimeout(() => { child.kill(); server.close(); }, 1000);
   } else if (stage === 2 && managedElevation && msg.method === 'turn/completed') {
     if (!hookBlocked || providerRequests < 2) { fixtureError('managed elevation denial did not reach the model'); return; }
     stage = 5; process.stdout.write('codex-windows-local-gate: managed elevation guidance reached model without executing command\n'); child.kill(); server.close();
