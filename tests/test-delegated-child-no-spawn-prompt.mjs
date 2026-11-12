@@ -72,7 +72,7 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(
   childPrompt,
-  /agentoc session-spawn/,
+  /(?:agentoc|ragent) session-spawn/,
   'Delegated child must NOT include session-spawn CLI commands',
 );
 
