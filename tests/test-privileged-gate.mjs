@@ -136,11 +136,13 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
   eq('op.wrapperCommand empty (no sentinel)', d.op.wrapperCommand, '');
 }
 
-// --- malformed sentinel (no `--`) => AUTO_ALLOW so the wrapper runs and fails loudly ---
+// A malformed sentinel may contain additional shell effects; never auto-allow it.
 {
   const d = decidePrivilegedGate(bidiApproval('agentoc-privileged --category install'), { privilegedMode: true });
-  eq('malformed sentinel => AUTO_ALLOW', d.decision, PRIVILEGED_GATE_DECISION.AUTO_ALLOW);
+  eq('malformed sentinel requires review', d.decision, PRIVILEGED_GATE_DECISION.PROMPT);
   check('malformed reason surfaced', /malformed sentinel/.test(d.reason));
+  const compound = decidePrivilegedGate(bidiApproval('agentoc-privileged --category install; rm -rf /tmp/fixture'), { privilegedMode: true });
+  eq('malformed sentinel with trailing shell command requires review', compound.decision, PRIVILEGED_GATE_DECISION.PROMPT);
 }
 
 // --- Codex runtime path parity: valid sentinel via app-server shape => ACCUMULATE ---
@@ -167,6 +169,13 @@ const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
 }
 
 // ==================== decideRiskGate (plan phase 2) ====================
+
+for (const riskMode of ['safe', 'recommended', 'full-auto', 'conservative-auto']) {
+  const malformed = decideRiskGate(bidiApproval('agentoc-privileged --category install; rm -rf /tmp/fixture'), { riskMode });
+  eq(`${riskMode}: malformed sentinel requires review`, malformed.decision, PRIVILEGED_GATE_DECISION.PROMPT);
+  const composite = decideRiskGate(bidiApproval('agentoc-privileged --description test; rm -rf /tmp/fixture -- echo safe'), { riskMode });
+  eq(`${riskMode}: sentinel wrapper never auto-allows a benign inner command`, composite.decision, PRIVILEGED_GATE_DECISION.ACCUMULATE);
+}
 
 // --- risk mode off => PASS; unattended profiles reuse the shared risk bands ---
 {

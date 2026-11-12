@@ -246,12 +246,11 @@ export function decidePrivilegedGate(approval, options = {}) {
   const sentinel = parsePrivilegedSentinel(command);
 
   if (sentinel?.isSentinel && !sentinel.valid) {
-    // Declared but malformed (no `--` / empty real command). Auto-allow so the
-    // wrapper runs and fails loudly with "command not found" — the agent sees a
-    // real error and can re-issue it correctly. `agentoc-privileged` is not a
-    // real binary, so nothing privileged can happen either way.
+    // A malformed declaration can still contain shell operators or other
+    // commands. The launcher also exists on PATH, so do not assume the whole
+    // request is harmless or that it will fail before any other effect.
     return {
-      decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
+      decision: PRIVILEGED_GATE_DECISION.PROMPT,
       reason: `malformed sentinel (${sentinel.malformedReason || 'unparseable'})`,
       command,
       sentinel,
@@ -350,6 +349,10 @@ export function decideRiskGate(approval, options = {}) {
 
   const { toolName, toolInput, command } = readGateToolContext(approval);
   const sentinel = parsePrivilegedSentinel(command);
+  if (sentinel?.isSentinel && !sentinel.valid) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      reason: `malformed sentinel (${sentinel.malformedReason || 'unparseable'})`, command, sentinel };
+  }
   const realCommand = sentinel?.valid ? sentinel.realCommand : command;
   const declaredCategory = sentinel?.valid ? trimString(sentinel.declaredCategory) : '';
 
@@ -428,11 +431,14 @@ export function decideRiskGate(approval, options = {}) {
     };
   }
 
-  if (risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
+  if (!sentinel?.valid && risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
     return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; safe mode requires owner approval`, command, risk };
   }
 
-  const shouldAccumulate = risk.tier === RISK_TIER.DANGER
+  // A declared managed action must never auto-allow its provider shell just
+  // because the extracted inner command looks benign. Shell text before or
+  // around the separator may have unrelated effects.
+  const shouldAccumulate = Boolean(sentinel?.valid) || risk.tier === RISK_TIER.DANGER
     || risk.signals?.needsPrivilegedExecution === true;
 
   if (!shouldAccumulate) {
