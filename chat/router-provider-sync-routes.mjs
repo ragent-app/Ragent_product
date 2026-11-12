@@ -109,10 +109,20 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
         `${entry?.scope || 'provider'}:${entry?.key || ''}`,
         entry,
       ]));
+      const have = new Map((Array.isArray(payload?.have) ? payload.have : []).map((entry) => [
+        `${entry?.scope || 'provider'}:${entry?.key || ''}`,
+        entry,
+      ]));
       const wantedRecords = records.filter((record) => {
-        const want = wants.get(`${record.scope || 'provider'}:${record.key}`);
+        const identity = `${record.scope || 'provider'}:${record.key}`;
+        const want = wants.get(identity);
         if (!want) return false;
-        return compareSyncVersions(record.version, want.version) >= 0;
+        // A catalog entry can refer to an offline instance's newer version.
+        // A reachable peer's older copy is still useful if the requester has
+        // nothing as new. Never use that fallback to bypass a newer deletion.
+        if (want.deletedAt && compareSyncVersions(record.version, want.version) < 0) return false;
+        const current = have.get(identity);
+        return !current || compareSyncVersions(record.version, current.version) > 0;
       });
       const snapshot = buildAccountSyncSnapshot({
         accountId: binding.accountId,

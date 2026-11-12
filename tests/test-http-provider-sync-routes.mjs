@@ -213,5 +213,26 @@ const pulledSnapshot = decryptAccountSyncEnvelope({
 });
 assert.deepEqual(pulledSnapshot.records.map((record) => record.key), ['provider-http', 'account-http']);
 
+async function pullKeys(want, have = []) {
+  const res = response();
+  await handleProviderSyncRoutes({
+    req: request({ sourceProof: pullProof, requesterSyncPublicKey: sourceSyncKey.publicKeyPem, wants: [want], have }),
+    res, pathname: '/api/provider-sync/pull', writeJson,
+  });
+  assert.equal(res.statusCode, 200);
+  return decryptAccountSyncEnvelope({
+    envelope: JSON.parse(res.body).envelope,
+    recipientPrivateKeyPem: sourceSyncKey.privateKeyPem,
+    expectedRecipientInstanceId: sourceIdentity.instanceId,
+    expectedSenderInstanceId: targetIdentity.instanceId,
+    senderSigningPublicKeyPem: targetIdentity.publicKey,
+  }).records.map((record) => record.key);
+}
+const newer = { updatedAt: '2099-01-01T00:00:00.000Z', counter: 1, writerId: 'offline-peer' };
+const staleCatalog = { scope: 'provider', key: 'provider-http', version: newer };
+assert.deepEqual(await pullKeys(staleCatalog), ['provider-http'], 'a reachable older copy fills a missing record');
+assert.deepEqual(await pullKeys(staleCatalog, [{ ...staleCatalog, version: snapshot.records[0].version }]), [], 'do not resend a copy the requester already has');
+assert.deepEqual(await pullKeys({ ...staleCatalog, deletedAt: newer.updatedAt }), [], 'a newer deletion prevents resurrection');
+
 globalThis.fetch = originalFetch;
 console.log('test-http-provider-sync-routes: ok');
