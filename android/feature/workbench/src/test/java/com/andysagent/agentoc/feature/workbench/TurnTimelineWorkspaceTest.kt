@@ -81,6 +81,19 @@ class TurnTimelineWorkspaceTest {
         assertEquals(listOf(thought) to listOf(commentary), splitTurnEntries(listOf(thought, commentary), allowTerminalFallback = true))
     }
 
+    @Test fun `completed reply remains visible when durable reasoning arrives later`() {
+        val prompt = TimelineItem.Message("prompt", 20, TimelineRole.User, "question", true, requestId = "req", runId = "run")
+        val reply = TimelineItem.Message("reply", 22, TimelineRole.Agent, "final body", true, requestId = "req", runId = "run")
+        val reasoning = TimelineItem.Operation("reasoning", 23, TimelineOperationKind.Tool, "Thinking", "detail",
+            TimelineOperationStatus.Completed, runId = "run", isReasoning = true)
+        val laterReasoning = reasoning.copy(id = "late-reasoning", seq = 36)
+        val turn = TurnGroupProjector().project(listOf(prompt, reply, reasoning, laterReasoning)).single()
+        val (process, visible) = splitTurnEntries(turn.entries, allowTerminalFallback = true)
+        assertEquals(listOf(reasoning, laterReasoning), process)
+        assertEquals(listOf(reply), visible)
+        assertEquals(emptyList<TimelineItem>() to turn.entries, splitTurnEntries(turn.entries, allowTerminalFallback = false))
+    }
+
     private val projector = TurnGroupProjector()
 
     @Test fun `late reply is paired by request identity rather than the newest user prompt`() {
