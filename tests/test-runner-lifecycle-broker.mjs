@@ -250,12 +250,23 @@ try {
   );
   assert.deepEqual(ownershipCalls.map(({ args }) => args[0]), ['passwd', 'group']);
 
-  await verifyRunnerSystemGroups('svc', 'svc', { execFileImpl: async () => ({ stdout: 'svc developers\n' }) });
-  for (const groups of ['svc sudo', 'svc docker', 'svc agentoc-privileged', '']) {
+  const groupsFixture = (ids) => async (command, args) => {
+    if (command === '/usr/bin/id') return { stdout: ids };
+    const known = { root: 0, sudo: 27, docker: 998, 'agentoc-privileged': 997 };
+    if (Object.hasOwn(known, args[1])) return { stdout: `${args[1]}:x:${known[args[1]]}:\n` };
+    throw Object.assign(new Error('not found'), { code: 2 });
+  };
+  await verifyRunnerSystemGroups('svc', 'svc', { runnerGid: 1234, execFileImpl: groupsFixture('1234 1235') });
+  for (const groups of ['1234 27', '1234 998', '1234 997', '']) {
     await assert.rejects(() => verifyRunnerSystemGroups('svc', 'svc', {
-      execFileImpl: async () => ({ stdout: groups }),
+      runnerGid: 1234, execFileImpl: groupsFixture(groups),
     }), error => error.code === 'RUNNER_IDENTITY_INVALID');
   }
+  // A differently named account group with the same numeric ID still grants
+  // the same privilege and must be refused.
+  await assert.rejects(() => verifyRunnerSystemGroups('svc', 'alias', {
+    runnerGid: 27, execFileImpl: groupsFixture('1234'),
+  }), error => error.code === 'RUNNER_IDENTITY_INVALID');
   await assert.rejects(() => verifyRunnerSystemGroups('svc', 'svc', {
     execFileImpl: async () => { throw new Error('NSS unavailable'); },
   }), error => error.code === 'RUNNER_IDENTITY_INVALID');

@@ -34,6 +34,7 @@ have the configured service user's ordinary file access. Check
 The systemd runner currently refuses accounts that belong to restricted
 system groups such as `sudo` or `docker`: systemd automatically inherits
 those memberships even when they are omitted from supplementary group settings.
+The check compares numeric group IDs as well as names to catch aliases.
 Configure an unprivileged runner account under the administrator's control;
 set `AGENTOC_RUNNER_SAME_USER=0`, `AGENTOC_RUNNER_USER` and
 `AGENTOC_RUNNER_GROUP` in `/etc/agentoc/agentoc.env`, then restart the lifecycle
