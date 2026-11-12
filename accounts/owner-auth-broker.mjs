@@ -2702,7 +2702,7 @@ export function createOwnerAuthBroker({
           binding = getInstanceBindings(draft).find((item) => item.instanceId === instance.instanceId);
         }
         if (binding.accountId !== accountId) {
-          throw createError('owner_auth_binding_mismatch', 'Google account does not match the target instance.', 403);
+          throw createError('owner_auth_binding_mismatch', 'Account does not match the target instance.', 403);
         }
         const now = nowIso(clock);
         if (grant) {

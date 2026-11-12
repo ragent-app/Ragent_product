@@ -639,8 +639,8 @@ class AccountsViewModel(
             ("account join" in detail || "account claim" in detail) && ("expired" in detail || "replay" in detail) ->
                 "The target computer account authorization expired. Start the connection again."
             "account" in detail && ("mismatch" in detail || "different" in detail) ->
-                "The Google account cannot join this target computer. Check the account and try again."
-            "credential" in detail || "token" in detail -> "Google verification failed. Try again."
+                "This account cannot join the target computer. Check the account and try again."
+            "credential" in detail || "token" in detail -> "Account verification failed. Try again."
             else -> "Could not join the target computer. Try again."
         }
     }
