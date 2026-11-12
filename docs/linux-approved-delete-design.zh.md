@@ -329,6 +329,11 @@ UID 和错误启动时间的拒绝。旧登记记录缺少这些字段，会拒�
 登记、续期和撤销，root 启动包装器也能在该限制下切换至 runner 用户。
 升级时旧的未受限任务无法继续使用该实验性上下文，必须
 以新限制重新启动；这不隔离共享 UID，也不排除其他 IPC 或已持有权限。
+根服务现在还要求主进程的 inheritable、permitted、effective 和 ambient
+capability 集合均为空，因为 `NoNewPrivileges` 不会移除进程已有的能力。
+真机单元在启用 `NoNewPrivileges` 的同时持有 `CAP_NET_BIND_SERVICE`，已被
+拒绝登记；无这些能力的单元仍通过登记与续期。该检查针对 systemd 主进程，
+不证明同 UID 的其他进程或已脱离任务边界的进程安全。
 
 长任务续期的生命周期 socket 已提供可选的 `renew-scope` 请求。接收端只使用
 root 配置的记录和公钥目录，并重新验证签名、运行代次、systemd 单元及未撤销

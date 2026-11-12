@@ -48,6 +48,13 @@ export function parseLinuxRunProcessIdentity(status, stat, expectedUid) {
     if (fields.length !== 4 || fields.some((field) => !/^\d+$/.test(field) || Number(field) !== expectedUid)) return null;
     const noNewPrivileges = status.split('\n').filter((line) => line.startsWith('NoNewPrivs:'));
     if (noNewPrivileges.length !== 1 || noNewPrivileges[0].slice('NoNewPrivs:'.length).trim() !== '1') return null;
+    // NoNewPrivs prevents exec from granting additional privilege, but does
+    // not remove capabilities the process already holds. Refuse each existing
+    // capability set as well, including inheritable and ambient capabilities.
+    for (const name of ['CapInh', 'CapPrm', 'CapEff', 'CapAmb']) {
+      const entries = status.split('\n').filter((line) => line.startsWith(`${name}:`));
+      if (entries.length !== 1 || !/^0{1,64}$/.test(entries[0].slice(name.length + 1).trim())) return null;
+    }
     // comm is parenthesized and can itself contain spaces and parentheses.
     const close = stat.lastIndexOf(')');
     const rest = close < 0 ? [] : stat.slice(close + 1).trim().split(/\s+/);

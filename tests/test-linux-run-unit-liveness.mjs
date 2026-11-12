@@ -15,13 +15,19 @@ test('a unit must match the recorded launch generation and systemd invocation', 
   assert.equal(matchesLinuxRunUnitState(`${state}MainPID=123\n`, expected), false);
   assert.equal(matchesLinuxRunUnitState(state, { ...expected, runId: '../../etc' }), false);
 });
-test('process identity requires the UID, no-new-privileges and kernel start time', () => {
+test('process identity requires the UID, no-new-privileges, empty capabilities and kernel start time', () => {
   const stat = `123 (a name ) with spaces) S ${Array(18).fill('0').join(' ')} 123456 0`;
-  const status = 'Uid:\t1001\t1001\t1001\t1001\nNoNewPrivs:\t1\n';
+  const status = 'Uid:\t1001\t1001\t1001\t1001\nNoNewPrivs:\t1\n' +
+    ['CapInh', 'CapPrm', 'CapEff', 'CapAmb'].map(name => `${name}:\t0000000000000000\n`).join('');
   assert.deepEqual(parseLinuxRunProcessIdentity(status, stat, 1001), { uid: 1001, startTime: '123456' });
   assert.equal(parseLinuxRunProcessIdentity(status.replace('NoNewPrivs:\t1', 'NoNewPrivs:\t0'), stat, 1001), null);
   assert.equal(parseLinuxRunProcessIdentity(status.replace('NoNewPrivs:\t1\n', ''), stat, 1001), null);
   assert.equal(parseLinuxRunProcessIdentity(`${status}NoNewPrivs:\t1\n`, stat, 1001), null);
+  for (const name of ['CapInh', 'CapPrm', 'CapEff', 'CapAmb']) {
+    assert.equal(parseLinuxRunProcessIdentity(status.replace(`${name}:\t0000000000000000`, `${name}:\t0000000000000001`), stat, 1001), null);
+    assert.equal(parseLinuxRunProcessIdentity(status.replace(`${name}:\t0000000000000000\n`, ''), stat, 1001), null);
+    assert.equal(parseLinuxRunProcessIdentity(`${status}${name}:\t0000000000000000\n`, stat, 1001), null);
+  }
   assert.equal(parseLinuxRunProcessIdentity('Uid:\t1001\t0\t1001\t1001\n', stat, 1001), null);
   assert.equal(parseLinuxRunProcessIdentity(status, stat, 0), null);
   assert.equal(parseLinuxRunProcessIdentity(status, 'bad', 1001), null);
