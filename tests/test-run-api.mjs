@@ -26,12 +26,16 @@ const api = await import('../chat/run-api-store.mjs');
 const contract = await import('../chat/run-api-contract.mjs');
 const { CHAT_RUNS_DIR, CHAT_HISTORY_DIR, CHAT_SESSIONS_FILE } = await import('../lib/config.mjs');
 const { messageEvent } = await import('../chat/normalizer.mjs');
+const { ensureProjectForSessionFolder } = await import('../chat/projects.mjs');
+// A real project prevents the background legacy-session migration from
+// retargeting this fixture while the scoped read tests are running.
+const fixtureProject = await ensureProjectForSessionFolder(root);
 let sequence = 0;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; };
 async function seed() {
   const sessionId = `run_api_${++sequence}`;
   await meta.withSessionsMetaMutation(async (rows, save) => {
-    rows.push({ id: sessionId, name: 'Run API', folder: root, projectId: 'p1', tool: 'run-fixture',
+    rows.push({ id: sessionId, name: 'Run API', folder: root, projectId: fixtureProject.id, tool: 'run-fixture',
       model: 'fixture-model', sessionPlane: 'user', sessionClass: 'ROOT_LEADERSHIP', userAddressable: true });
     await save(rows, { immediate: true, durable: true });
   });
@@ -179,7 +183,7 @@ test('scope moves and A to B to A reject reads and never retarget the resource',
   const v = await seed(); const run = await makeRun(v);
   await meta.mutateSessionMeta(v.sessionId, row => { row.projectId = 'p2'; return true; });
   assert.equal((await route(v, `/${run.id}`)).body.code, 'REVISION_CONFLICT');
-  await meta.mutateSessionMeta(v.sessionId, row => { row.projectId = 'p1'; return true; });
+  await meta.mutateSessionMeta(v.sessionId, row => { row.projectId = fixtureProject.id; return true; });
   assert.equal((await route(v, `/${run.id}`)).body.code, 'REVISION_CONFLICT');
 });
 test('scope reauthorization surrounds long IO without monopolizing the metadata actor', async () => {
