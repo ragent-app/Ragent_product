@@ -17,6 +17,7 @@ const RETRY_INTERVAL_MS = 1800;
 const AUTH_HOSTS = new Set([
   "accounts.google.com",
   "auth.openai.com",
+  "ragent.agentoncloud.com",
   "agentoc.andyscodexagent.cyou",
 ]);
 

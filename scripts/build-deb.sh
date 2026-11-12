@@ -59,10 +59,10 @@ ARCH="${AGENTOC_PACKAGE_ARCH:-$(dpkg --print-architecture)}"
 OUTPUT_DIR="${AGENTOC_DEB_OUTPUT_DIR:-/srv/agentoc-promoted-data/workspace/releases}"
 SIGNALING_URL="${AGENTOC_PACKAGE_SIGNALING_URL:-}"
 PACKAGE_PUBLIC_BASE_URL="${AGENTOC_PACKAGE_PUBLIC_BASE_URL:-https://app.agentoncloud.com}"
-PACKAGE_ACCOUNTS_URL="${AGENTOC_PACKAGE_ACCOUNTS_URL:-https://agentoc.andyscodexagent.cyou/accounts}"
-PACKAGE_ACCOUNTS_JWKS_URL="${AGENTOC_PACKAGE_ACCOUNTS_JWKS_URL:-https://agentoc.andyscodexagent.cyou/accounts/.well-known/jwks.json}"
+PACKAGE_ACCOUNTS_URL="${AGENTOC_PACKAGE_ACCOUNTS_URL:-https://ragent.agentoncloud.com/accounts}"
+PACKAGE_ACCOUNTS_JWKS_URL="${AGENTOC_PACKAGE_ACCOUNTS_JWKS_URL:-https://ragent.agentoncloud.com/accounts/.well-known/jwks.json}"
 PACKAGE_ACCOUNTS_ISSUER="${AGENTOC_PACKAGE_ACCOUNTS_ISSUER:-https://agentoc.andyscodexagent.cyou}"
-PACKAGE_TURN_BROKER_URL="${AGENTOC_PACKAGE_TURN_BROKER_URL:-https://agentoc.andyscodexagent.cyou/turn}"
+PACKAGE_TURN_BROKER_URL="${AGENTOC_PACKAGE_TURN_BROKER_URL:-https://ragent.agentoncloud.com/turn}"
 PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS="${AGENTOC_PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS:-}"
 
 # Auto-version: resolve a version strictly higher than the highest version this

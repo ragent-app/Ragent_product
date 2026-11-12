@@ -13,7 +13,7 @@
     <string name="windows_broker_already_completed">This Windows Broker request was already completed.</string>
     <string name="windows_broker_denial_conflict">The Broker reported success after a denial. Check the original request.</string>
     <!-- Public Accounts directory origin and path for the current deployment. -->
-    <string name="accounts_directory_base_url" translatable="false">https://agentoc.andyscodexagent.cyou/accounts</string>
+    <string name="accounts_directory_base_url" translatable="false">https://ragent.agentoncloud.com/accounts</string>
     <!-- Credential Manager requires the Web/server OAuth client ID. Its value
          must exactly match the Accounts native audience allowlist. -->
     <string name="google_server_client_id" translatable="false">541054013971-tm7ip89ett0mar1cfph6j9kakl27nadb.apps.googleusercontent.com</string>

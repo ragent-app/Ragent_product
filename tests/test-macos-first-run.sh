@@ -18,9 +18,16 @@ AGENTOC_NODE_BIN="$test_dir/node"
 umask 022
 agentoc_first_run_bootstrap
 [ "$(umask)" = 0022 ]
+grep -Fxq 'AGENTOC_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts' "$AGENTOC_CONFIG_DIR/instance.env"
+grep -Fxq 'AGENTOC_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json' "$AGENTOC_CONFIG_DIR/instance.env"
+grep -Fxq 'AGENTOC_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn' "$AGENTOC_CONFIG_DIR/instance.env"
+grep -Fxq 'AGENTOC_P2P_SIGNALING_URL=https://ragent.agentoncloud.com/signal' "$AGENTOC_CONFIG_DIR/instance.env"
+grep -Fxq 'AGENTOC_ACCOUNTS_ISSUER=https://agentoc.andyscodexagent.cyou' "$AGENTOC_CONFIG_DIR/instance.env"
+cp "$AGENTOC_CONFIG_DIR/instance.env" "$test_dir/env-before"
 cp "$AGENTOC_CONFIG_DIR/auth.json" "$test_dir/auth-before"
 cp "$AGENTOC_CONFIG_DIR/owner-credentials.txt" "$test_dir/credentials-before"
 agentoc_first_run_bootstrap
+cmp "$test_dir/env-before" "$AGENTOC_CONFIG_DIR/instance.env"
 cmp "$test_dir/auth-before" "$AGENTOC_CONFIG_DIR/auth.json"
 cmp "$test_dir/credentials-before" "$AGENTOC_CONFIG_DIR/owner-credentials.txt"
 validate_credentials() {

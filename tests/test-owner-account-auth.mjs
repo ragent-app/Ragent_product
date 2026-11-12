@@ -11,7 +11,7 @@ const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-account-auth-'));
 process.env.HOME = home;
 process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
 process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts-new.example.test';
 process.env.AGENTOC_ACCOUNTS_ISSUER = 'https://accounts.example.test';
 process.env.AGENTOC_PUBLIC_BASE_URL = 'https://instance.example.test';
 process.env.SECURE_COOKIES = '0';
@@ -159,7 +159,7 @@ try {
       enabled: true,
       configured: true,
       mode: 'accounts',
-      accountsUrl: 'https://accounts.example.test',
+      accountsUrl: 'https://accounts-new.example.test',
     });
   });
 
@@ -171,6 +171,18 @@ try {
     assert.equal(request.deliveryMode, 'instance_poll');
     assert.equal(request.returnUrl, undefined);
     assert.equal(request.alias, 'Default poll bind');
+  });
+
+  await check('迁移期间只接受配置的 Accounts 或签名发行者域名', async () => {
+    for (const badUrl of ['https://attacker.example.test/owner/bind', 'https://user@accounts.example.test/owner/bind']) {
+      const badFetch = async (url, options) => {
+        const result = await mockFetch(url, options);
+        const body = await result.json();
+        return response(result.status, { ...body, authUrl: badUrl });
+      };
+      await assert.rejects(() => startOwnerAccountAuth({ purpose: 'bind', fetchImpl: badFetch, clock: () => now }),
+        { code: 'owner_auth_broker_response_invalid' });
+    }
   });
 
   const bindStart = await startOwnerAccountAuth({ purpose: 'bind', alias: 'Pinggu', deliveryMode: 'browser_callback', fetchImpl: mockFetch, clock: () => now });

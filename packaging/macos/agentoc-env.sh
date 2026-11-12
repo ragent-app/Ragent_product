@@ -134,11 +134,12 @@ if (!existing(envFile)) {
     '# Edits survive app upgrades. Restart the app after changing values.',
     `AGENTOC_AUTH_SESSION_SECRET=${secret}`,
     'SECURE_COOKIES=0',
-    'AGENTOC_ACCOUNTS_URL=https://agentoc.andyscodexagent.cyou/accounts',
-    'AGENTOC_ACCOUNTS_JWKS_URL=https://agentoc.andyscodexagent.cyou/accounts/.well-known/jwks.json',
+    'AGENTOC_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts',
+    'AGENTOC_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json',
+    '# Issuer remains unchanged while existing installed clients are migrated.',
     'AGENTOC_ACCOUNTS_ISSUER=https://agentoc.andyscodexagent.cyou',
-    'AGENTOC_TURN_BROKER_URL=https://agentoc.andyscodexagent.cyou/turn',
-    'AGENTOC_P2P_SIGNALING_URL=https://agentoc.andyscodexagent.cyou/signal',
+    'AGENTOC_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn',
+    'AGENTOC_P2P_SIGNALING_URL=https://ragent.agentoncloud.com/signal',
     '',
   ].join('\n'));
   if (!created && !existing(envFile)) throw new Error(`Cannot publish ${envFile}`);
