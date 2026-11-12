@@ -18,6 +18,9 @@ Group=root
 RuntimeDirectory=agentoc
 RuntimeDirectoryMode=0755
 WorkingDirectory=/opt/agentoc/app
+# EnvironmentFile overrides this default when an administrator explicitly
+# configures the mode, without modifying the operator's dpkg conffile.
+Environment=AGENTOC_RUNNER_DROP_GROUPS=auto
 EnvironmentFile=/etc/agentoc/agentoc.env
 ExecStart=/opt/agentoc/runtime/node /opt/agentoc/app/scripts/runner-lifecycle-broker.mjs
 Restart=on-failure

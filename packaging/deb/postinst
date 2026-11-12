@@ -221,15 +221,6 @@ ensure_agent_create_default() {
   fi
 }
 
-# Apply the packaged same-user group-drop default on upgrades while retaining
-# an operator's explicit setting, including a deliberate opt-out.
-ensure_runner_group_drop_default() {
-  [ -f "$AGENTOC_ENV_FILE" ] || return 0
-  if ! grep -Eq '^[[:space:]]*AGENTOC_RUNNER_DROP_GROUPS=' "$AGENTOC_ENV_FILE"; then
-    printf '\nAGENTOC_RUNNER_DROP_GROUPS=auto\n' >> "$AGENTOC_ENV_FILE"
-  fi
-}
-
 # dpkg preserves an existing conffile when the operator selected the old
 # version.  Migrate the former packaged supervisor socket path, but preserve
 # any explicit operator path (including a custom socket under another root).
@@ -416,7 +407,6 @@ install -d -m 0750 -o root -g agentoc-privileged /var/log/agentoc-privileged
 # reaching the older final ownership convergence block.
 converge_provider_runtime_access
 ensure_agent_create_default
-ensure_runner_group_drop_default
 ensure_runner_supervisor_socket_default
 ensure_runner_state_defaults
 ensure_multi_agent_collaboration_defaults
