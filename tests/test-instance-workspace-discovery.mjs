@@ -37,6 +37,9 @@ test('discovery exposes only workspaces with an active grant bound to the same o
   draft.bindingHistory = [{ instanceId, action: 'unbind' }, { instanceId, action: 'bind' }];
   assert.deepEqual((await discover()).instances, [], 'a rebind invalidates the old grant');
   draft.bindingHistory = [];
+  draft.accounts[0].disabledAt = new Date(now).toISOString();
+  assert.deepEqual((await discover()).instances, [], 'a disabled owner cannot share a workspace');
+  delete draft.accounts[0].disabledAt;
   revokeInstanceAccessGrant(draft, { grantId: issued.grant.grantId, ownerAccountId: owner, now });
   assert.deepEqual((await discover()).instances, [], 'revocation removes it immediately');
 });
