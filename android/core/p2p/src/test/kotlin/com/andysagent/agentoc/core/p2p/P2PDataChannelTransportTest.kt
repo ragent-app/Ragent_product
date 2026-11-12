@@ -12,6 +12,18 @@ import kotlin.test.assertTrue
  */
 class P2PDataChannelTransportTest {
 
+    @Test fun `binary body frame preserves arbitrary bytes and ordered index`() {
+        val bytes = byteArrayOf(0, 1, -1, -128, 127)
+        val frame = P2PHttpBodyStream.binaryChunkFrame("binary-test", 7, bytes)
+        val input = java.nio.ByteBuffer.wrap(frame)
+        val magic = ByteArray(4).also(input::get)
+        assertEquals("AGB3", String(magic, Charsets.US_ASCII))
+        val id = ByteArray(input.get().toInt() and 0xff).also(input::get)
+        assertEquals("binary-test", String(id, Charsets.US_ASCII))
+        assertEquals(7, input.int)
+        assertTrue(ByteArray(input.remaining()).also(input::get).contentEquals(bytes))
+    }
+
     @Test
     fun `bulk recovery attempts share a cooldown across concurrent callers`() {
         val gate = BulkChannelRetryGate(cooldownMs = 5_000)

@@ -3796,12 +3796,17 @@ private fun PendingTurnItemView(
             val progress = state.attachmentUploadProgress
             val hasTransferProgress = progress != null && progress.phase in setOf(
                 com.andysagent.agentoc.core.domain.FileUploadPhase.TRANSFERRING,
+                com.andysagent.agentoc.core.domain.FileUploadPhase.RETRYING,
                 com.andysagent.agentoc.core.domain.FileUploadPhase.VERIFYING,
                 com.andysagent.agentoc.core.domain.FileUploadPhase.CONFIRMED,
             )
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = if (hasTransferProgress) {
+                    text = if (progress?.phase == com.andysagent.agentoc.core.domain.FileUploadPhase.RETRYING) {
+                        stringResource(R.string.workbench_upload_retrying)
+                    } else if (progress?.phase == com.andysagent.agentoc.core.domain.FileUploadPhase.VERIFYING) {
+                        stringResource(R.string.workbench_upload_verifying)
+                    } else if (hasTransferProgress) {
                         stringResource(
                             R.string.workbench_upload_progress,
                             ((progress!!.fraction * 100f).toInt()).coerceIn(0, 100),

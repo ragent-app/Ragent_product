@@ -161,6 +161,33 @@ class WebRTCDataChannelTransport(
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private class UploadSendTelemetry {
+        var blockedNanos = 0L
+        var peakBufferedBytes = 0L
+        var blockedPolls = 0L
+    }
+
+    /** Opt-in diagnostics contain no candidate addresses, credentials, or file data. */
+    private fun traceUploadRtcStats() {
+        if (!debuggable || !Log.isLoggable("AgentoC.Upload", Log.DEBUG)) return
+        runCatching {
+            peerConnection?.getStats { report ->
+                runCatching {
+                    val entries = report.statsMap
+                    val pairId = entries.values.firstOrNull { it.type == "transport" &&
+                        it.members["selectedCandidatePairId"] is String }?.members?.get("selectedCandidatePairId") as? String
+                    val pair = pairId?.let { entries[it] } ?: entries.values.firstOrNull { it.type == "candidate-pair" &&
+                        it.members["nominated"] == true && it.members["state"] == "succeeded" }
+                    val local = (pair?.members?.get("localCandidateId") as? String)?.let { entries[it] }
+                    val remote = (pair?.members?.get("remoteCandidateId") as? String)?.let { entries[it] }
+                    Log.d("AgentoC.Upload", "stage=rtc_stats localType=${local?.members?.get("candidateType")}" +
+                        " localProtocol=${local?.members?.get("protocol")} relayProtocol=${local?.members?.get("relayProtocol")}" +
+                        " remoteType=${remote?.members?.get("candidateType")} remoteProtocol=${remote?.members?.get("protocol")}" +
+                        " rttSeconds=${pair?.members?.get("currentRoundTripTime")} outgoingBps=${pair?.members?.get("availableOutgoingBitrate")}")
+                }
+            }
+        }
+    }
     private val debugCarrierId = debugCarrierSequence.incrementAndGet()
     private val debuggable = appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
     private fun traceConnect(stage: String) {
@@ -670,9 +697,9 @@ class WebRTCDataChannelTransport(
 
     override suspend fun requestStream(request: P2PHttpRequest, totalBytes: Long, sha256: String,
         openBody: () -> java.io.InputStream, onProgress: (sentBytes: Long, totalBytes: Long) -> Unit): Result<P2PHttpResponse> {
-        val channel = dataChannel
+        val primary = dataChannel
             ?: return Result.failure(IllegalStateException("DataChannel is null"))
-        if (channel.state() != DataChannel.State.OPEN) {
+        if (primary.state() != DataChannel.State.OPEN) {
             return Result.failure(IllegalStateException("DataChannel is not open"))
         }
         if (request.bodyBase64.isNotEmpty() || totalBytes !in 1..P2PHttpBodyStream.MAX_BODY_BYTES ||
@@ -695,15 +722,26 @@ class WebRTCDataChannelTransport(
                 Result.failure(error)
             }
         }
+        // Upload traffic is isolated from interactive requests when the peer
+        // offers the optional bulk channel. If it is unavailable, use primary.
+        val isAssetChunk = request.method == "PATCH" &&
+            request.path.substringBefore('?').matches(Regex("^/api/assets/fasset_[a-f0-9]{24}/upload$"))
+        if (isAssetChunk && bulkChannel == null) requestBulkChannel()
+        val channel = bulkChannel?.takeIf { isAssetChunk && it.state() == DataChannel.State.OPEN } ?: primary
+        val binaryChunks = "http_request_binary_chunks_v3" in features
         val id = request.id
         return try {
-            withTimeoutOrNull(LARGE_REQUEST_TIMEOUT_MS) {
+            // Larger negotiated batches may take longer on a slow relay. The
+            // timeout remains bounded and ordinary requests keep their limit.
+            val timeoutMs = if (isAssetChunk) maxOf(LARGE_REQUEST_TIMEOUT_MS,
+                minOf(900_000L, totalBytes * 600_000L / (1024 * 1024))) else LARGE_REQUEST_TIMEOUT_MS
+            withTimeoutOrNull(timeoutMs) {
                 suspendCancellableCoroutine<Result<P2PHttpResponse>> { cont ->
                     val pendingRequest = PendingRequest(
-                        onResponse = { response -> cont.resume(Result.success(response)) },
-                        onError = { error -> cont.resume(Result.failure(error)) },
+                        onResponse = { response -> bulkPending.remove(id); cont.resume(Result.success(response)) },
+                        onError = { error -> bulkPending.remove(id); cont.resume(Result.failure(error)) },
                     )
-                    val registrationError = registerPending(id, pendingRequest)
+                    val registrationError = registerPending(id, pendingRequest, channel)
                     if (registrationError != null) {
                         pendingRequest.onError(registrationError)
                         return@suspendCancellableCoroutine
@@ -712,6 +750,8 @@ class WebRTCDataChannelTransport(
                         var input: java.io.InputStream? = null
                         var sentBytes = 0L
                         var chunkCount = 0
+                        val telemetry = if (isAssetChunk && debuggable && Log.isLoggable("AgentoC.Upload", Log.DEBUG)) UploadSendTelemetry() else null
+                        val enqueueStartedAt = System.nanoTime()
                         val digest = java.security.MessageDigest.getInstance("SHA-256")
                         try {
                             sendDataChannelFrame(channel, P2PHttpBodyStream.initFrame(request.copy(acceptResponseStream = true), totalBytes, sha256))
@@ -723,8 +763,10 @@ class WebRTCDataChannelTransport(
                                 if (count == 0) continue
                                 require(sentBytes + count <= totalBytes) { "Streamed request body exceeded its declared length" }
                                 digest.update(buffer, 0, count)
-                                sendDataChannelFrame(channel, P2PHttpBodyStream.chunkFrame(id, chunkCount,
-                                    buffer.copyOf(count)))
+                                val chunk = buffer.copyOf(count)
+                                val frame = if (binaryChunks) P2PHttpBodyStream.binaryChunkFrame(id, chunkCount, chunk)
+                                    else P2PHttpBodyStream.chunkFrame(id, chunkCount, chunk)
+                                sendDataChannelFrame(channel, frame, binary = binaryChunks, telemetry = telemetry)
                                 sentBytes += count
                                 chunkCount++
                                 runCatching { onProgress(sentBytes, totalBytes) }
@@ -734,6 +776,12 @@ class WebRTCDataChannelTransport(
                             }
                             sendDataChannelFrame(channel, P2PHttpBodyStream.endFrame(id, chunkCount, totalBytes, sha256))
                             Log.i(TAG, "datachannel_stream_request_sent id=$id bodyBytes=$sentBytes chunks=$chunkCount")
+                            telemetry?.let {
+                                Log.d("AgentoC.Upload", "stage=enqueue bytes=$sentBytes binary=$binaryChunks bulk=${channel !== primary}" +
+                                    " elapsedMs=${(System.nanoTime() - enqueueStartedAt) / 1_000_000}" +
+                                    " blockedMs=${it.blockedNanos / 1_000_000} blockedPolls=${it.blockedPolls} peakBufferedBytes=${it.peakBufferedBytes}")
+                                traceUploadRtcStats()
+                            }
                         } catch (cancelled: CancellationException) {
                             withContext(NonCancellable) {
                                 sendAbortBestEffort(channel, id)
@@ -741,6 +789,10 @@ class WebRTCDataChannelTransport(
                             throw cancelled
                         } catch (error: Exception) {
                             sendAbortBestEffort(channel, id)
+                            if (channel !== primary && (error is P2PSendTimeoutException || channel.state() != DataChannel.State.OPEN)) {
+                                runCatching { channel.close() }
+                                failBulkRequests(channel)
+                            }
                             if (pending.remove(id, pendingRequest)) pendingRequest.onError(error)
                         } finally {
                             runCatching { input?.close() }
@@ -748,12 +800,13 @@ class WebRTCDataChannelTransport(
                     }
                     cont.invokeOnCancellation {
                         pending.remove(id, pendingRequest)
+                        bulkPending.remove(id)
                         pendingRequest.cancel()
                         responseStreams.discard(id)
                         sendJob.cancel()
                     }
                 }
-            } ?: Result.failure(IllegalStateException("P2P stream request timed out"))
+            } ?: Result.failure(P2PRequestTimeoutException())
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -761,20 +814,33 @@ class WebRTCDataChannelTransport(
         }
     }
 
-    private suspend fun sendDataChannelFrame(channel: DataChannel, frame: ByteArray) {
-        withP2PSendDeadline(15_000L) {
+    private suspend fun sendDataChannelFrame(channel: DataChannel, frame: ByteArray, binary: Boolean = false,
+        telemetry: UploadSendTelemetry? = null) {
+        val bulk = channel !== dataChannel
+        // Keep the bulk channel's queued data small enough for interactive
+        // traffic to share the underlying SCTP association. Slow relays need
+        // longer to drain that bounded buffer than the interactive channel.
+        // Diagnostic-only A/B switch. Release builds and ordinary debug runs
+        // retain the conservative default until real relay evidence is gathered.
+        val highWaterBytes = if (bulk && debuggable && Log.isLoggable("AgentoC.FastBulk", Log.DEBUG)) 2L * 1024 * 1024
+            else if (bulk) 64L * 1024 else 512L * 1024
+        withP2PSendDeadline(if (bulk) 60_000L else 15_000L) {
             (if (channel === dataChannel) outboundFrameMutex else bulkOutboundFrameMutex).withLock {
                 while (true) {
                     if (channel.state() != DataChannel.State.OPEN) {
                         throw IllegalStateException("DataChannel closed while sending request")
                     }
-                    if (channel.bufferedAmount() > 512L * 1024L) {
+                    val buffered = channel.bufferedAmount()
+                    telemetry?.let { it.peakBufferedBytes = maxOf(it.peakBufferedBytes, buffered) }
+                    if (buffered > highWaterBytes) {
+                        val blockedAt = if (telemetry != null) System.nanoTime() else 0L
                         delay(10)
+                        telemetry?.let { it.blockedNanos += System.nanoTime() - blockedAt; it.blockedPolls++ }
                         continue
                     }
                     val sent = channel.send(DataChannel.Buffer(
                         java.nio.ByteBuffer.wrap(frame),
-                        false,
+                        binary,
                     ))
                     if (sent) return@withLock
                     delay(10)

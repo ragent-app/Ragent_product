@@ -11,18 +11,19 @@ function fixture() {
   const manifest = bindRunPublication(run, { executionScope, executionScopeDigest: computeExecutionScopeDigest(executionScope), options: { approvedActionChannel: { turnId: run.requestId } } });
   const keys = generateKeyPairSync('ed25519');
   const now = 1700000000000;
-  const grant = signLinuxRunScopeGrant({ run, manifest, privateKey: keys.privateKey, now });
+  const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 0, privateKey: keys.privateKey, now });
   return { run, manifest, keys, now, grant };
 }
 test('signed Run scope binds publication, session, turn, and full scope digest', () => {
   const { run, manifest, keys, now, grant } = fixture();
-  const check = (g = grant, r = run, m = manifest, key = keys.publicKey, time = now) => verifyLinuxRunScopeGrant(g, { run: r, manifest: m, publicKey: key, now: time }).ok;
+  const check = (g = grant, r = run, m = manifest, key = keys.publicKey, time = now, launchAttempt = 0) => verifyLinuxRunScopeGrant(g, { run: r, manifest: m, launchAttempt, publicKey: key, now: time }).ok;
   assert.equal(check(), true);
   assert.equal(check({ ...grant, runId: 'run_other' }), false);
   assert.equal(check({ ...grant, extra: true }), false);
   assert.equal(check(grant, run, manifest, generateKeyPairSync('ed25519').publicKey), false);
   assert.equal(check(grant, run, manifest, keys.publicKey, now - 1), false);
   assert.equal(check(grant, run, manifest, keys.publicKey, now + 15 * 60 * 1000), false);
+  assert.equal(check(grant, run, manifest, keys.publicKey, now, 1), false);
   const altered = structuredClone(manifest);
   altered.executionScope.cwd.realPath = '/etc';
   altered.executionScopeDigest = computeExecutionScopeDigest(altered.executionScope);
@@ -36,7 +37,8 @@ test('signed Run scope binds publication, session, turn, and full scope digest',
 });
 test('legacy and inconsistent publications cannot be signed', () => {
   const { run, manifest, keys, now } = fixture();
-  assert.throws(() => signLinuxRunScopeGrant({ run: { ...run, runPublication: undefined }, manifest, privateKey: keys.privateKey, now }));
-  assert.throws(() => signLinuxRunScopeGrant({ run, manifest: { ...manifest, executionScopeDigest: 'sha256:' + '0'.repeat(64) }, privateKey: keys.privateKey, now }));
-  assert.throws(() => signLinuxRunScopeGrant({ run, manifest, privateKey: keys.privateKey, now, ttlMs: 900001 }));
+  assert.throws(() => signLinuxRunScopeGrant({ run: { ...run, runPublication: undefined }, manifest, launchAttempt: 0, privateKey: keys.privateKey, now }));
+  assert.throws(() => signLinuxRunScopeGrant({ run, manifest: { ...manifest, executionScopeDigest: 'sha256:' + '0'.repeat(64) }, launchAttempt: 0, privateKey: keys.privateKey, now }));
+  assert.throws(() => signLinuxRunScopeGrant({ run, manifest, launchAttempt: 0, privateKey: keys.privateKey, now, ttlMs: 900001 }));
+  assert.throws(() => signLinuxRunScopeGrant({ run, manifest, privateKey: keys.privateKey, now }));
 });

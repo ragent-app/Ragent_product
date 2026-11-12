@@ -298,11 +298,16 @@ fun UserPromptBlock(
                 val progress = prompt.attachmentUploadProgress
                 val hasTransferProgress = progress != null && progress.phase in setOf(
                     FileUploadPhase.TRANSFERRING,
+                    FileUploadPhase.RETRYING,
                     FileUploadPhase.VERIFYING,
                     FileUploadPhase.CONFIRMED,
                 )
                 Text(
-                    text = if (hasTransferProgress) {
+                    text = if (progress?.phase == FileUploadPhase.RETRYING) {
+                        stringResource(R.string.workbench_upload_retrying)
+                    } else if (progress?.phase == FileUploadPhase.VERIFYING) {
+                        stringResource(R.string.workbench_upload_verifying)
+                    } else if (hasTransferProgress) {
                         stringResource(
                             R.string.workbench_upload_progress,
                             ((progress!!.fraction * 100f).toInt()).coerceIn(0, 100),

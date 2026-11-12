@@ -5,4 +5,4 @@ data class FileUploadProgress(val phase: FileUploadPhase, val totalBytes: Long, 
     init { require(totalBytes > 0); require(writtenBytes == null || writtenBytes in 0..totalBytes) }
 }
 
-enum class FileUploadPhase { CHECKING, PREPARING, TRANSFERRING, VERIFYING, CONFIRMED }
+enum class FileUploadPhase { CHECKING, PREPARING, TRANSFERRING, RETRYING, VERIFYING, CONFIRMED }

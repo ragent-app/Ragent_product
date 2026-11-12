@@ -193,6 +193,7 @@ class RoomSessionRepository(
     private val codec: ProtocolCodec = ProtocolCodec(),
     private val contentResolver: ContentResolver? = null,
     private val targetId: String? = null,
+    private val attachmentRelay: AttachmentRelayTransport? = null,
 ) : SessionRepository {
     override val runtimeTargetId: String? get() = targetId
     private companion object {
@@ -2227,7 +2228,7 @@ class RoomSessionRepository(
             resolver.openInputStream(uri) ?: error("Attachment file could not be reopened")
         }
         onProgress(FileUploadProgress(FileUploadPhase.PREPARING, sizeBytes, 0L))
-        val uploaded = FileAssetUploadClient(fixedTargetId, transport).upload(
+        val uploaded = FileAssetUploadClient(fixedTargetId, transport, attachmentRelay).upload(
             sessionId,
             FileUploadInput(uploadRequestId, attachment.originalName, mimeType, sizeBytes, descriptor.second,
                 quotaBatchId = quotaBatchId),

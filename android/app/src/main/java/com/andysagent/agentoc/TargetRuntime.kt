@@ -5,6 +5,7 @@ import com.andysagent.agentoc.core.appapi.ResultExportClient
 import com.andysagent.agentoc.core.datastore.LinkedComputer
 import com.andysagent.agentoc.core.domain.SessionRepository
 import com.andysagent.agentoc.core.domain.FileAssetUploadClient
+import com.andysagent.agentoc.core.domain.AttachmentRelayTransport
 import com.andysagent.agentoc.core.domain.ScopedMessageClient
 import com.andysagent.agentoc.core.domain.ScopedRunClient
 import com.andysagent.agentoc.core.network.AgentoCTransport
@@ -27,11 +28,12 @@ internal class TargetRuntime(
     val sessions: SessionRepository,
     val controller: TargetConnectionController,
     private val scope: CoroutineScope,
+    private val relay: AttachmentRelayTransport? = null,
     private val disposeStorage: () -> Unit = {},
 ) : TargetConnectionResource {
     internal fun ownsJob(candidate: Job?): Boolean = isWithinJobTree(scope.coroutineContext[Job], candidate)
 
-    val assets = FileAssetUploadClient(instanceId, transport)
+    val assets = FileAssetUploadClient(instanceId, transport, relay)
     val messages = ScopedMessageClient(instanceId, transport)
     val runs = ScopedRunClient(instanceId, transport)
     val exports = ResultExportClient(instanceId, transport)

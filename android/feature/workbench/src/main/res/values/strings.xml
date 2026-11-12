@@ -218,6 +218,8 @@
     <string name="workbench_status_awaiting_approval">Waiting for approval</string>
     <string name="workbench_status_sending">Sending…</string>
     <string name="workbench_upload_preparing">Preparing attachment…</string>
+    <string name="workbench_upload_verifying">Verifying attachment…</string>
+    <string name="workbench_upload_retrying">Reconnecting upload…</string>
     <string name="workbench_upload_progress">Uploading attachment · %1$d%%</string>
     <string name="workbench_session_run_details">Run details</string>
     <string name="workbench_session_rename">Rename chat</string>

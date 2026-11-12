@@ -23,6 +23,7 @@ internal fun FileUploadPhase.toTaskPhase() = when (this) {
     FileUploadPhase.CHECKING -> TaskUploadPhase.CHECKING
     FileUploadPhase.PREPARING -> TaskUploadPhase.PREPARING
     FileUploadPhase.TRANSFERRING -> TaskUploadPhase.TRANSFERRING
+    FileUploadPhase.RETRYING -> TaskUploadPhase.TRANSFERRING
     FileUploadPhase.VERIFYING -> TaskUploadPhase.VERIFYING
     FileUploadPhase.CONFIRMED -> TaskUploadPhase.CONFIRMED
 }

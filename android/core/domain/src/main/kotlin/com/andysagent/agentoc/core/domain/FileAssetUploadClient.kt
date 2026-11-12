@@ -11,6 +11,13 @@ import com.andysagent.agentoc.core.protocol.AgentocProtocol
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import java.net.URI
 import java.net.URLEncoder
@@ -46,7 +53,8 @@ data class TargetFileAsset(
  * retries or treats a ready attachment as an accepted message/finished Run.
  * The caller holds the target lease throughout each call.
  */
-class FileAssetUploadClient(private val instanceId: String, private val transport: AgentoCTransport) {
+class FileAssetUploadClient(private val instanceId: String, private val transport: AgentoCTransport,
+    private val relay: AttachmentRelayTransport? = null) {
     init {
         require(instanceId.isNotBlank())
         require(transport !is SwitchingAgentoCTransport) { "Uploads require a fixed target transport" }
@@ -64,7 +72,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         val frozen = validate(sessionId, input)
         require(scope == null || scope.validate().sessionId == sessionId)
         checkAccess()
-        val targetMaximumBytes = requireContract(scope)
+        val targetMaximumBytes = requireContract(scope).maximumBytes
         require(frozen.sizeBytes <= targetMaximumBytes) {
             "This computer accepts attachments up to ${sizeLabel(targetMaximumBytes)}"
         }
@@ -110,13 +118,23 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         require(scope == null || scope.validate().sessionId == sessionId)
         currentCoroutineContext().ensureActive()
         checkAccess()
-        val targetMaximumBytes = requireContract(scope)
+        report(FileUploadPhase.CHECKING)
+        // These two operations are read-only. With no scope condition, issue
+        // them together so a high-latency TURN path costs one round trip less.
+        // Scoped requests must discover the scope contract before lookup.
+        val (contract, previous) = if (scope == null) coroutineScope {
+            val contractRequest = async { requireContract() }
+            val receiptRequest = async { lookup(sessionId, frozen, null) }
+            contractRequest.await() to receiptRequest.await()
+        } else {
+            val discovered = requireContract(scope)
+            checkAccess()
+            discovered to lookup(sessionId, frozen, scope)
+        }
+        val targetMaximumBytes = contract.maximumBytes
         require(frozen.sizeBytes <= targetMaximumBytes) {
             "This computer accepts attachments up to ${sizeLabel(targetMaximumBytes)}"
         }
-        checkAccess()
-        report(FileUploadPhase.CHECKING)
-        val previous = lookup(sessionId, frozen, scope)
         checkAccess()
         if (previous?.ready == true) { report(FileUploadPhase.CONFIRMED); return previous }
         report(FileUploadPhase.PREPARING)
@@ -125,6 +143,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
             put("quotaBatchId", frozen.quotaBatchId?.takeIf { it.isNotBlank() } ?: frozen.requestId)
             put("originalName", frozen.originalName); put("mimeType", frozen.mimeType)
             put("sizeBytes", frozen.sizeBytes); put("sha256", frozen.sha256)
+            put("resumableChunkBytes", UPLOAD_BATCH_BYTES)
         }.toString()
         val intent = json(execute(ApiRequest("POST", "/api/assets/upload-intents", intentBody,
             headers = scope?.headers().orEmpty(), contentType = "application/json")))
@@ -155,11 +174,17 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         val bodyHeaders = if (path.startsWith('/')) headers + scope?.headers().orEmpty() else headers
         report(FileUploadPhase.TRANSFERRING)
         val resumable = intent["resumableUpload"] as? JsonObject
+        var relayFinalized: ApiResponse? = null
         val uploaded = if (resumable != null) {
             require(path == "/api/assets/${asset.assetId}/upload" && method == "POST") {
                 "Resumable upload contract advertised an unexpected upload destination"
             }
-            uploadLocalChunks(asset.assetId, frozen, source, resumable, scope, ::report, checkAccess)
+            val fast = if (contract.encryptedRelay && relay != null &&
+                runCatching { AttachmentRelayPayload.wireSize(frozen.sizeBytes) }.isSuccess) {
+                uploadViaRelay(asset.assetId, source, scope, contract.finalizeWaitsForRelay, ::report, checkAccess)
+            } else null
+            if (fast == null) uploadLocalChunks(asset.assetId, frozen, source, resumable, scope, ::report, checkAccess)
+            else relayFinalized = fast.finalized
             ApiResponse(200, "")
         } else if (path.startsWith('/')) {
             val bytes = legacyBytes ?: error("Target does not support bounded resumable uploads")
@@ -172,12 +197,14 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
                 onBodyBytesWritten = { report(FileUploadPhase.TRANSFERRING, it) }))
         }
         checkAccess()
-        report(FileUploadPhase.VERIFYING)
+        // All bytes have reached the destination; readiness still requires the
+        // authoritative finalize receipt. Preserve progress during verification.
+        report(FileUploadPhase.VERIFYING, frozen.sizeBytes)
         val finalizeBody = buildJsonObject {
             put("sizeBytes", frozen.sizeBytes)
             put("etag", uploaded.headers.entries.firstOrNull { it.key.equals("ETag", ignoreCase = true) }?.value.orEmpty())
         }.toString()
-        val finalized = parseAsset(sessionId, frozen, json(execute(
+        val finalized = parseAsset(sessionId, frozen, json(relayFinalized ?: execute(
             ApiRequest("POST", "/api/assets/${asset.assetId}/finalize", finalizeBody,
                 headers = scope?.headers().orEmpty(), contentType = "application/json"),
         )), scope)
@@ -187,15 +214,99 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         return finalized
     }
 
+    private data class RelayUploadResult(val finalized: ApiResponse? = null)
+
+    private suspend fun uploadViaRelay(assetId: String, source: ApiRequestBodySource, scope: SessionScopeCondition?,
+        finalizeWaitsForRelay: Boolean,
+        report: (FileUploadPhase, Long?) -> Unit, checkAccess: suspend () -> Unit): RelayUploadResult? {
+        val relayTransport = relay ?: return null
+        if (scope != null) requireSessionScopeEffects(transport, mapOf(
+            "asset.upload.relay.start" to ("POST" to "/api/assets/{assetId}/relay"),
+            "asset.upload.relay.status" to ("GET" to "/api/assets/{assetId}/relay?jobId={jobId}"),
+            "asset.upload.relay.cancel" to ("DELETE" to "/api/assets/{assetId}/relay?jobId={jobId}"),
+        ))
+        checkAccess()
+        val wireSize = AttachmentRelayPayload.wireSize(source.sizeBytes)
+        val ticket = relayTransport.reserve(wireSize) ?: return null
+        check(ticket.id.matches(Regex("[a-f0-9]{32}")) && ticket.sizeBytes == wireSize &&
+            ticket.readToken.matches(Regex("[A-Za-z0-9_-]{43}")) && ticket.writeToken.matches(Regex("[A-Za-z0-9_-]{43}"))) {
+            "Invalid relay reservation"
+        }
+        val key = AttachmentRelayPayload.newKey()
+        val transferId = AttachmentRelayPayload.newTransferId()
+        var jobId: String? = null
+        var received = false
+        try {
+            val body = buildJsonObject {
+                put("relayId", ticket.id); put("readToken", ticket.readToken); put("transferId", transferId)
+                put("key", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(key))
+            }.toString()
+            val started = try { json(execute(ApiRequest("POST", "/api/assets/$assetId/relay", body,
+                headers = scope?.headers().orEmpty(), contentType = "application/json"))) }
+            catch (error: ApiException) {
+                if (error.code == "FILE_ASSET_UPLOAD_MODE_CONFLICT") return null
+                throw error
+            }
+            jobId = string(started, "jobId")
+            check(jobId.matches(Regex("[a-f0-9]{32}")) && started["version"]?.jsonPrimitive?.intOrNull == 1 &&
+                string(started, "status") == "receiving") { "Invalid relay job" }
+            checkAccess()
+            if (finalizeWaitsForRelay) {
+                val response = supervisorScope {
+                    val finish = async {
+                        val body = buildJsonObject { put("sizeBytes", source.sizeBytes); put("etag", "") }.toString()
+                        execute(ApiRequest("POST", "/api/assets/$assetId/finalize", body,
+                            headers = scope?.headers().orEmpty(), contentType = "application/json"))
+                    }
+                    relayTransport.send(ticket, source, key, transferId) { report(FileUploadPhase.TRANSFERRING, it) }
+                    report(FileUploadPhase.VERIFYING, source.sizeBytes)
+                    try { finish.await() }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { null } // Retry the idempotent finalize after the transfer.
+                }
+                received = true
+                return RelayUploadResult(response)
+            }
+            relayTransport.send(ticket, source, key, transferId) { report(FileUploadPhase.TRANSFERRING, it) }
+            report(FileUploadPhase.VERIFYING, source.sizeBytes)
+            withTimeout(45_000L) {
+                while (true) {
+                    checkAccess()
+                    val status = json(execute(ApiRequest("GET", "/api/assets/$assetId/relay?jobId=$jobId",
+                        headers = scope?.headers().orEmpty())))
+                    check(string(status, "jobId") == jobId && status["version"]?.jsonPrimitive?.intOrNull == 1)
+                    when (string(status, "status")) {
+                        "received" -> break
+                        "receiving" -> delay(500)
+                        else -> error("Computer did not receive the encrypted attachment")
+                    }
+                }
+            }
+            received = true
+            return RelayUploadResult()
+        } finally {
+            key.fill(0)
+            val startedJob = jobId
+            if (startedJob != null && !received) withContext(NonCancellable) {
+                withTimeoutOrNull(5_000L) {
+                    runCatching { execute(ApiRequest("DELETE", "/api/assets/$assetId/relay?jobId=$startedJob",
+                        headers = scope?.headers().orEmpty())) }
+                }
+            }
+        }
+    }
+
     private suspend fun uploadLocalChunks(assetId: String, input: FileUploadInput, source: ApiRequestBodySource,
         contract: JsonObject, scope: SessionScopeCondition?, report: (FileUploadPhase, Long?) -> Unit,
         checkAccess: suspend () -> Unit) {
         val contractVersion = contract["version"]?.jsonPrimitive?.intOrNull
         val chunkBytes = contract["chunkBytes"]?.jsonPrimitive?.intOrNull
-        check(contractVersion == 1 && contract["checksum"]?.jsonPrimitive?.contentOrNull == "sha256"
-            && contract["fixedChunks"] == JsonPrimitive(true) && chunkBytes == UPLOAD_CHUNK_BYTES) {
+        check(((contractVersion == 1 && chunkBytes == UPLOAD_CHUNK_BYTES) ||
+            (contractVersion == 2 && chunkBytes == UPLOAD_BATCH_BYTES)) &&
+            contract["checksum"]?.jsonPrimitive?.contentOrNull == "sha256" && contract["fixedChunks"] == JsonPrimitive(true)) {
             "Target advertised an unsupported resumable upload contract"
         }
+        val negotiatedChunkBytes = requireNotNull(chunkBytes)
         val path = "/api/assets/$assetId/upload"
         val checkpointPath = "/api/assets/$assetId/upload-checkpoint"
         val state = json(execute(ApiRequest("GET", checkpointPath, headers = scope?.headers().orEmpty())))
@@ -203,11 +314,11 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
             && state["assetId"]?.jsonPrimitive?.contentOrNull == assetId
             && state["totalBytes"]?.jsonPrimitive?.longOrNull == input.sizeBytes
             && state["sha256"]?.jsonPrimitive?.contentOrNull == input.sha256
-            && state["chunkBytes"]?.jsonPrimitive?.intOrNull == UPLOAD_CHUNK_BYTES) {
+            && state["chunkBytes"]?.jsonPrimitive?.intOrNull == negotiatedChunkBytes) {
             "Target checkpoint differs from the frozen file"
         }
         var offset = state["offset"]?.jsonPrimitive?.longOrNull ?: error("Missing upload offset")
-        check(offset in 0..input.sizeBytes && (offset == input.sizeBytes || offset % UPLOAD_CHUNK_BYTES.toLong() == 0L)) {
+        check(offset in 0..input.sizeBytes && (offset == input.sizeBytes || offset % negotiatedChunkBytes.toLong() == 0L)) {
             "Target returned an invalid upload offset"
         }
         check(state["status"]?.jsonPrimitive?.contentOrNull in setOf("uploading", "uploaded", "ready")) {
@@ -229,7 +340,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
             while (offset < input.sizeBytes) {
                 checkAccess()
                 currentCoroutineContext().ensureActive()
-                val length = minOf(UPLOAD_CHUNK_BYTES.toLong(), input.sizeBytes - offset).toInt()
+                val length = minOf(negotiatedChunkBytes.toLong(), input.sizeBytes - offset).toInt()
                 val bytes = ByteArray(length)
                 var filled = 0
                 while (filled < length) {
@@ -248,7 +359,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
                 )
                 val expectedOffset = offset + length
                 val confirmedOffset = uploadChunkWithRetry(assetId, input, path, checkpointPath, offset, expectedOffset,
-                    headers, bytes, scope, checkAccess)
+                    headers, bytes, scope, negotiatedChunkBytes, report, checkAccess)
                 // Another execution may already have durably written later
                 // chunks. Hash every skipped source byte before finalizing so
                 // the original whole-file integrity check remains effective.
@@ -274,40 +385,45 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
      */
     private suspend fun uploadChunkWithRetry(assetId: String, input: FileUploadInput, path: String,
         checkpointPath: String, offset: Long, expectedOffset: Long, headers: Map<String, String>, bytes: ByteArray,
-        scope: SessionScopeCondition?, checkAccess: suspend () -> Unit): Long {
+        scope: SessionScopeCondition?, negotiatedChunkBytes: Int, report: (FileUploadPhase, Long?) -> Unit,
+        checkAccess: suspend () -> Unit): Long {
         var attempt = 0
         var lastFailure: Exception? = null
         while (attempt < MAX_CHUNK_ATTEMPTS) {
             checkAccess()
             currentCoroutineContext().ensureActive()
+            val startedAt = System.nanoTime()
             try {
                 val response = json(execute(ApiRequest("PATCH", path, headers = headers, bodyBytes = bytes,
                     contentType = "application/octet-stream")))
-                validateCheckpoint(response, assetId, input)
+                validateCheckpoint(response, assetId, input, negotiatedChunkBytes)
                 val confirmedOffset = response["offset"]?.jsonPrimitive?.longOrNull
                     ?: error("Target did not confirm the upload offset")
                 check(confirmedOffset in expectedOffset..input.sizeBytes &&
-                    (confirmedOffset == input.sizeBytes || confirmedOffset % UPLOAD_CHUNK_BYTES == 0L)) {
+                    (confirmedOffset == input.sizeBytes || confirmedOffset % negotiatedChunkBytes == 0L)) {
                     "Target returned an invalid upload offset"
                 }
+                traceUploadChunk(bytes.size, attempt, "confirmed", startedAt)
                 return confirmedOffset
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
                 if (!isRetryableChunkFailure(failure)) throw failure
+                traceUploadChunk(bytes.size, attempt, "retryable", startedAt)
                 lastFailure = failure
                 attempt++
+                report(FileUploadPhase.RETRYING, offset)
 
                 // A timeout can mean the server committed the chunk but its
                 // response was lost. Never infer progress from client bytes.
                 try {
                     val state = json(execute(ApiRequest("GET", checkpointPath, headers = scope?.headers().orEmpty())))
-                    validateCheckpoint(state, assetId, input)
+                    validateCheckpoint(state, assetId, input, negotiatedChunkBytes)
                     val serverOffset = state["offset"]?.jsonPrimitive?.longOrNull
                         ?: error("Missing upload offset")
                     when (serverOffset) {
                         in expectedOffset..input.sizeBytes -> {
-                            check(serverOffset == input.sizeBytes || serverOffset % UPLOAD_CHUNK_BYTES == 0L) {
+                            check(serverOffset == input.sizeBytes || serverOffset % negotiatedChunkBytes == 0L) {
                                 "Target returned an invalid upload offset"
                             }
                             return serverOffset
@@ -330,12 +446,12 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         throw lastFailure ?: IOException("Attachment chunk upload failed")
     }
 
-    private fun validateCheckpoint(state: JsonObject, assetId: String, input: FileUploadInput) {
+    private fun validateCheckpoint(state: JsonObject, assetId: String, input: FileUploadInput, chunkBytes: Int) {
         check(state["uploadCheckpointVersion"]?.jsonPrimitive?.intOrNull == 1
             && state["assetId"]?.jsonPrimitive?.contentOrNull == assetId
             && state["totalBytes"]?.jsonPrimitive?.longOrNull == input.sizeBytes
             && state["sha256"]?.jsonPrimitive?.contentOrNull == input.sha256
-            && state["chunkBytes"]?.jsonPrimitive?.intOrNull == UPLOAD_CHUNK_BYTES
+            && state["chunkBytes"]?.jsonPrimitive?.intOrNull == chunkBytes
             && state["status"]?.jsonPrimitive?.contentOrNull in setOf("uploading", "uploaded", "ready")) {
             "Target checkpoint differs from the frozen file"
         }
@@ -347,7 +463,20 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         else -> false
     }
 
-    private suspend fun requireContract(scope: SessionScopeCondition? = null): Long {
+    /** Opt-in, content-free diagnostic; logging must never affect delivery. */
+    private fun traceUploadChunk(bytes: Int, attempt: Int, result: String, startedAt: Long) {
+        runCatching {
+            val tag = "AgentoC.Upload"
+            if (android.util.Log.isLoggable(tag, android.util.Log.DEBUG)) {
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+                android.util.Log.d(tag, "stage=chunk bytes=$bytes attempt=${attempt + 1} result=$result elapsedMs=$elapsedMs")
+            }
+        }
+    }
+
+    private data class UploadContract(val maximumBytes: Long, val encryptedRelay: Boolean,
+        val finalizeWaitsForRelay: Boolean)
+    private suspend fun requireContract(scope: SessionScopeCondition? = null): UploadContract {
         if (scope != null) {
             scope.validate()
             requireUploadScope()
@@ -361,7 +490,11 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
             && (contract["requestIdMaximumLength"]?.jsonPrimitive?.intOrNull ?: 0) >= 200) {
             "Target does not support the stable upload contract"
         }
-        return minOf(targetMaximumBytes, MAXIMUM_BYTES)
+        val relay = contract["encryptedRelay"] as? JsonObject
+        val supportsRelay = relay?.get("version")?.jsonPrimitive?.intOrNull == 1 &&
+            relay["recordBytes"]?.jsonPrimitive?.intOrNull == 256 * 1024
+        return UploadContract(minOf(targetMaximumBytes, MAXIMUM_BYTES), supportsRelay,
+            supportsRelay && relay?.get("finalizeWaitsForRelay") == JsonPrimitive(true))
     }
 
     private suspend fun requireUploadScope() = requireSessionScopeEffects(transport, mapOf(
@@ -435,6 +568,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         const val MAXIMUM_BYTES = 1024L * 1024 * 1024
         const val MAX_IN_MEMORY_UPLOAD_BYTES = 25L * 1024 * 1024
         const val UPLOAD_CHUNK_BYTES = 256 * 1024
+        const val UPLOAD_BATCH_BYTES = 1024 * 1024
         private const val MAX_CHUNK_ATTEMPTS = 10
         private const val INITIAL_RETRY_DELAY_MS = 500L
         private const val MAX_RETRY_DELAY_MS = 30_000L

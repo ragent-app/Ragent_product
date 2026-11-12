@@ -83,6 +83,16 @@ internal object P2PHttpBodyStream {
             id = id, index = index, dataBase64 = Base64.getEncoder().encodeToString(bytes),
         )).toByteArray(Charsets.UTF_8)
 
+    /** Binary v3 frame: magic, id length, UTF-8 id, big-endian index, raw bytes. */
+    fun binaryChunkFrame(id: String, index: Int, bytes: ByteArray): ByteArray {
+        require(id.matches(Regex("^[A-Za-z0-9_-]{1,128}$")) && index >= 0)
+        require(bytes.isNotEmpty() && bytes.size <= CHUNK_BYTES)
+        val encodedId = id.toByteArray(Charsets.US_ASCII)
+        return java.nio.ByteBuffer.allocate(5 + encodedId.size + 4 + bytes.size)
+            .put(byteArrayOf(65, 71, 66, 51)).put(encodedId.size.toByte())
+            .put(encodedId).putInt(index).put(bytes).array()
+    }
+
     fun endFrame(id: String, chunkCount: Int, totalBytes: Long, sha256: String): ByteArray = json
         .encodeToString(P2PHttpBodyStreamEnd.serializer(), P2PHttpBodyStreamEnd(
             id = id, chunkCount = chunkCount, totalBytes = totalBytes, sha256 = sha256,

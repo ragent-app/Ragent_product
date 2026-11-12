@@ -5,6 +5,7 @@ import com.andysagent.agentoc.core.protocol.ProtocolCodec
 import com.andysagent.agentoc.core.protocol.SessionEventDto
 import com.andysagent.agentoc.core.protocol.WebSocketPushDto
 import com.andysagent.agentoc.core.p2p.P2PHttpRequest
+import com.andysagent.agentoc.core.p2p.P2PHttpResponse
 import com.andysagent.agentoc.core.p2p.P2PProtocol
 import com.andysagent.agentoc.core.p2p.P2PRequestTimeoutException
 import com.andysagent.agentoc.core.p2p.P2PSession
@@ -262,25 +263,24 @@ class OkHttpAgentoCTransport(
         attemptedCredential?.let { headers["Authorization"] = "Bearer $it" }
         request.requestId?.let { headers["X-AgentoC-Request-Id"] = it }
         request.idempotencyKey?.let { headers["Idempotency-Key"] = it }
-        val result = session.request(P2PHttpRequest(
+        val result = executeCarrierRequest(session, request, P2PHttpRequest(
             // Business IDs (for example android:UUID) stay in headers/body.
             // Each carrier attempt needs an independent, frame-safe correlation ID.
             id = java.util.UUID.randomUUID().toString(),
             method = request.method.uppercase(),
             path = path,
             headers = headers,
-            bodyBase64 = request.bodyBytes?.let(P2PProtocol::encodeBody)
-                ?: request.body?.let(P2PProtocol::encodeBody)
-                ?: "",
+            bodyBase64 = carrierBody(request, path),
         )).getOrElse { failure ->
             if (failure is kotlinx.coroutines.CancellationException) throw failure
             recordCarrierFailure("p2p", failure, session.isOpen)
-            reportUnavailableCarrier(session)
+            if (failure !is P2PRequestTimeoutException || !session.isOpen) reportUnavailableCarrier(session)
             throw ApiException(0, "P2P_NETWORK_ERROR", "P2P request failed", retryable = true)
         }
         val remoteError = result.error
         if (remoteError != null) {
-            throw ApiException(0, "P2P_REMOTE_ERROR", remoteError, retryable = false)
+            throw ApiException(0, "P2P_REMOTE_ERROR", remoteError,
+                retryable = isRetryableUploadLocalFailure(request, remoteError))
         }
         val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers)
         if (!response.isSuccessful) {
@@ -303,16 +303,14 @@ class OkHttpAgentoCTransport(
         attemptedCredential?.let { headers["Authorization"] = "Bearer $it" }
         request.requestId?.let { headers["X-AgentoC-Request-Id"] = it }
         request.idempotencyKey?.let { headers["Idempotency-Key"] = it }
-        val result = session.request(P2PHttpRequest(
+        val result = executeCarrierRequest(session, request, P2PHttpRequest(
             // Business IDs (for example android:UUID) stay in headers/body.
             // Each carrier attempt needs an independent, frame-safe correlation ID.
             id = java.util.UUID.randomUUID().toString(),
             method = request.method.uppercase(),
             path = path,
             headers = headers,
-            bodyBase64 = request.bodyBytes?.let(P2PProtocol::encodeBody)
-                ?: request.body?.let(P2PProtocol::encodeBody)
-                ?: "",
+            bodyBase64 = carrierBody(request, path),
         )).getOrElse { failure ->
             if (failure is kotlinx.coroutines.CancellationException) throw failure
             recordCarrierFailure("turn", failure, session.isOpen)
@@ -323,7 +321,8 @@ class OkHttpAgentoCTransport(
         }
         val remoteError = result.error
         if (remoteError != null) {
-            throw ApiException(0, "TURN_REMOTE_ERROR", remoteError, retryable = false)
+            throw ApiException(0, "TURN_REMOTE_ERROR", remoteError,
+                retryable = isRetryableUploadLocalFailure(request, remoteError))
         }
         val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers)
         if (!response.isSuccessful) {
@@ -331,6 +330,39 @@ class OkHttpAgentoCTransport(
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
         }
         return response
+    }
+
+    /** Route only resumable attachment PATCH bodies through the bounded body
+     * stream. Older peers fall back inside requestStream; injectable sessions
+     * without that API fall back before any request is sent. */
+    private suspend fun executeCarrierRequest(session: P2PSession, request: ApiRequest,
+        wire: P2PHttpRequest): Result<P2PHttpResponse> {
+        val bytes = request.bodyBytes
+        val hash = request.headers.entries.firstOrNull { it.key.equals("X-Agentoc-Upload-Sha256", true) }?.value
+        val assetChunk = request.method.equals("PATCH", true) &&
+            wire.path.substringBefore('?').matches(Regex("^/api/assets/fasset_[a-f0-9]{24}/upload$"))
+        if (!assetChunk || bytes == null || hash == null || !hash.matches(Regex("^[a-f0-9]{64}$"))) {
+            return session.request(wire)
+        }
+        val result = session.requestStream(wire.copy(bodyBase64 = ""), bytes.size.toLong(), hash,
+            openBody = { bytes.inputStream() })
+        return if (result.exceptionOrNull() is UnsupportedOperationException)
+            session.request(wire.copy(bodyBase64 = P2PProtocol.encodeBody(bytes))) else result
+    }
+
+    private fun carrierBody(request: ApiRequest, path: String): String {
+        val hash = request.headers.entries.firstOrNull { it.key.equals("X-Agentoc-Upload-Sha256", true) }?.value
+        if (request.method.equals("PATCH", true) && request.bodyBytes != null &&
+            path.substringBefore('?').matches(Regex("^/api/assets/fasset_[a-f0-9]{24}/upload$")) &&
+            hash?.matches(Regex("^[a-f0-9]{64}$")) == true) return ""
+        return request.bodyBytes?.let(P2PProtocol::encodeBody) ?: request.body?.let(P2PProtocol::encodeBody) ?: ""
+    }
+
+    private fun isRetryableUploadLocalFailure(request: ApiRequest, error: String): Boolean {
+        if (error !in setOf("asset_upload_local_timeout", "asset_upload_local_transport")) return false
+        val path = request.path.substringBefore('?')
+        return (request.method.equals("PATCH", true) && path.matches(Regex("^/api/assets/fasset_[a-f0-9]{24}/upload$"))) ||
+            (request.method.equals("GET", true) && path.matches(Regex("^/api/assets/fasset_[a-f0-9]{24}/upload-checkpoint$")))
     }
 
     private fun reportUnavailableCarrier(failed: P2PSession?) {

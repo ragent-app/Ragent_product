@@ -1800,7 +1800,10 @@ class AndroidRuntimeGraph internal constructor(
             },
             onCarrierUnavailable = { failed -> controller.carrierRequestFailed(failed) },
         )
-        val repository = RoomSessionRepository(database, targetTransport, contentResolver = application.contentResolver, targetId = target.instanceId)
+        val attachmentRelay = AccountAttachmentRelay(application.getString(R.string.accounts_directory_base_url),
+            accountsDirectoryTransport, ensureAccount = { accountSessions.ensureActiveCredential(); Unit })
+        val repository = RoomSessionRepository(database, targetTransport, contentResolver = application.contentResolver,
+            targetId = target.instanceId, attachmentRelay = attachmentRelay)
         controller = BoundTargetConnection(
             instanceId = target.instanceId, application = application,
             onNetworkRestored = { retryAccountCapacity(target.instanceId, expedite = true) },
@@ -1837,7 +1840,8 @@ class AndroidRuntimeGraph internal constructor(
             },
         )
         runtime = TargetRuntime(target.instanceId, target.endpoint.trimEnd('/'), "", targetTransport, repository, controller,
-            childScope, disposeStorage = { database.close() })
+            childScope, relay = attachmentRelay,
+            disposeStorage = { database.close() })
         return runtime
     }
 

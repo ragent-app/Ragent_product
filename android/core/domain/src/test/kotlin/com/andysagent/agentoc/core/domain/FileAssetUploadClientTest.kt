@@ -30,6 +30,7 @@ class FileAssetUploadClientTest {
         var scopeMarker = true
         var unknown404 = false
         var resumable = false
+        var negotiatedChunkBytes = FileAssetUploadClient.UPLOAD_CHUNK_BYTES
         var failChunksBeforePersist = 0
         var checkpointOffset = 0L
         var uploadInput = input
@@ -93,7 +94,8 @@ class FileAssetUploadClientTest {
                     ApiResponse(200, buildJsonObject {
                         put("uploadContractVersion", 1); put("asset", asset())
                         if (resumable) put("resumableUpload", buildJsonObject {
-                            put("version", 1); put("chunkBytes", FileAssetUploadClient.UPLOAD_CHUNK_BYTES)
+                            put("version", if (negotiatedChunkBytes == FileAssetUploadClient.UPLOAD_BATCH_BYTES) 2 else 1)
+                            put("chunkBytes", negotiatedChunkBytes)
                             put("checksum", "sha256"); put("fixedChunks", true)
                         })
                         put("upload", buildJsonObject {
@@ -121,7 +123,7 @@ class FileAssetUploadClientTest {
         private fun checkpoint() = buildJsonObject {
             put("uploadCheckpointVersion", 1); put("assetId", assetId); put("offset", checkpointOffset)
             put("totalBytes", uploadInput.sizeBytes); put("sha256", uploadInput.sha256)
-            put("chunkBytes", FileAssetUploadClient.UPLOAD_CHUNK_BYTES)
+            put("chunkBytes", negotiatedChunkBytes)
             put("status", if (checkpointOffset == uploadInput.sizeBytes) "uploaded" else "uploading")
         }
         override fun connectInvalidationSocket() = Unit
@@ -140,7 +142,7 @@ class FileAssetUploadClientTest {
         assertEquals(listOf(FileUploadPhase.CHECKING, FileUploadPhase.PREPARING, FileUploadPhase.TRANSFERRING,
             FileUploadPhase.TRANSFERRING, FileUploadPhase.TRANSFERRING, FileUploadPhase.VERIFYING, FileUploadPhase.CONFIRMED), observed.map { it.phase })
         assertNull(observed[2].writtenBytes)
-        assertEquals(listOf(0L, bytes.size.toLong()), observed.mapNotNull { it.writtenBytes })
+        assertEquals(listOf(0L, bytes.size.toLong(), bytes.size.toLong()), observed.mapNotNull { it.writtenBytes })
         assertTrue(observed.all { it.totalBytes == input.sizeBytes })
     }
 
@@ -163,12 +165,30 @@ class FileAssetUploadClientTest {
         assertTrue(fixture.requests.any { it.path.endsWith("/upload-checkpoint") })
     }
 
+    @Test fun negotiatedBatchRetainsDurableOffsetAfterLostReply() = runTest {
+        val content = ByteArray(FileAssetUploadClient.UPLOAD_BATCH_BYTES * 2 + 19) { (it % 251).toByte() }
+        val file = input.copy(sizeBytes = content.size.toLong(), sha256 = MessageDigest.getInstance("SHA-256")
+            .digest(content).joinToString("") { "%02x".format(it) })
+        val fixture = Fixture().apply {
+            resumable = true; negotiatedChunkBytes = FileAssetUploadClient.UPLOAD_BATCH_BYTES
+            uploadInput = file; lose = "/api/assets/$assetId/upload"
+        }
+        val source = ApiRequestBodySource(file.sizeBytes, file.sha256) { content.inputStream() }
+        assertTrue(FileAssetUploadClient("pc", fixture).upload("s", file, source).ready)
+        assertEquals(listOf(0L, FileAssetUploadClient.UPLOAD_BATCH_BYTES.toLong(),
+            FileAssetUploadClient.UPLOAD_BATCH_BYTES.toLong() * 2), fixture.patchOffsets)
+        assertTrue(content.contentEquals(fixture.chunkBody.toByteArray()))
+        assertTrue(fixture.requests.any { it.path.endsWith("/upload-checkpoint") })
+    }
+
     @Test fun retryAfterTransientChunkFailureUsesServerCheckpointAndResendsSameChunk() = runTest {
         val fixture = Fixture().apply { resumable = true; failChunksBeforePersist = 1 }
+        val progress = mutableListOf<FileUploadProgress>()
         val source = com.andysagent.agentoc.core.network.ApiRequestBodySource(input.sizeBytes, input.sha256) {
             ByteArrayInputStream(bytes)
         }
-        assertTrue(FileAssetUploadClient("pc", fixture).upload("s", input, source).ready)
+        assertTrue(FileAssetUploadClient("pc", fixture).upload("s", input, source, onProgress = progress::add).ready)
+        assertEquals(0L, progress.single { it.phase == FileUploadPhase.RETRYING }.writtenBytes)
         assertEquals(bytes.size.toLong(), fixture.checkpointOffset)
         assertEquals(listOf(0L, 0L), fixture.requests.filter { it.method == "PATCH" }
             .map { it.headers.getValue("X-Agentoc-Upload-Offset").toLong() })
@@ -221,7 +241,8 @@ class FileAssetUploadClientTest {
         val client = FileAssetUploadClient("pc", wire)
         val observed = mutableListOf<FileUploadProgress>()
         assertFailsWith<IOException> { client.upload("s", input, bytes, onProgress = observed::add) }
-        assertTrue(observed.all { it.writtenBytes == null })
+        assertTrue(observed.filter { it.phase != FileUploadPhase.VERIFYING }.all { it.writtenBytes == null })
+        assertEquals(bytes.size.toLong(), observed.last().writtenBytes)
         assertEquals(FileUploadPhase.VERIFYING, observed.last().phase)
         assertTrue(observed.none { it.phase == FileUploadPhase.CONFIRMED })
         observed.clear(); wire.requests.clear()

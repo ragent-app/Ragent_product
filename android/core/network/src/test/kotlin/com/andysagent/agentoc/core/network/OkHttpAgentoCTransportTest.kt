@@ -26,6 +26,84 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class OkHttpAgentoCTransportTest {
+    @Test fun localUploadTimeoutIsRetryableOnlyForAnAttachmentChunk() = runBlocking {
+        val peer = object : P2PSession {
+            override val isOpen = true
+            override suspend fun connect() = Result.success(Unit)
+            override fun close() = Unit
+            override suspend fun request(request: P2PHttpRequest) = Result.success(
+                P2PHttpResponse(id = request.id, error = "asset_upload_local_timeout"))
+        }
+        val transport = OkHttpAgentoCTransport({ "" }, { null }, requireVerifiedCarrier = true)
+        try {
+            transport.setTurnSession(peer)
+            val chunk = assertFailsWith<ApiException> {
+                transport.execute(ApiRequest("PATCH", "/api/assets/fasset_0123456789abcdef01234567/upload"))
+            }
+            assertTrue(chunk.retryable)
+            val checkpoint = assertFailsWith<ApiException> {
+                transport.execute(ApiRequest("GET", "/api/assets/fasset_0123456789abcdef01234567/upload-checkpoint"))
+            }
+            assertTrue(checkpoint.retryable)
+            val other = assertFailsWith<ApiException> { transport.execute(ApiRequest("POST", "/api/runs")) }
+            assertFalse(other.retryable)
+        } finally { transport.close() }
+    }
+    @Test fun attachmentChunkUsesStreamWithoutReplayingTheRequest() = runBlocking {
+        val content = ByteArray(262144) { (it % 251).toByte() }
+        val digest = MessageDigest.getInstance("SHA-256").digest(content).joinToString("") { "%02x".format(it) }
+        var streams = 0
+        var requests = 0
+        val peer = object : P2PSession {
+            override val isOpen = true
+            override suspend fun connect() = Result.success(Unit)
+            override fun close() = Unit
+            override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> {
+                requests++
+                return Result.success(P2PHttpResponse(id = request.id, status = 200))
+            }
+            override suspend fun requestStream(request: P2PHttpRequest, totalBytes: Long, sha256: String,
+                openBody: () -> java.io.InputStream, onProgress: (Long, Long) -> Unit): Result<P2PHttpResponse> {
+                streams++
+                assertEquals("", request.bodyBase64)
+                assertEquals(digest, sha256)
+                assertEquals(content.size.toLong(), totalBytes)
+                assertTrue(openBody().use { it.readBytes() }.contentEquals(content))
+                return Result.success(P2PHttpResponse(id = request.id, status = 200))
+            }
+        }
+        val transport = OkHttpAgentoCTransport({ "" }, { null }, requireVerifiedCarrier = true)
+        try {
+            transport.setTurnSession(peer)
+            transport.execute(ApiRequest("PATCH", "/api/assets/fasset_0123456789abcdef01234567/upload",
+                headers = mapOf("X-Agentoc-Upload-Sha256" to digest), bodyBytes = content))
+            assertEquals(1, streams)
+            assertEquals(0, requests)
+        } finally { transport.close() }
+    }
+
+    @Test fun attachmentChunkFallsBackWhenSessionDoesNotImplementStreaming() = runBlocking {
+        val content = byteArrayOf(0, 1, -1, 4)
+        val digest = MessageDigest.getInstance("SHA-256").digest(content).joinToString("") { "%02x".format(it) }
+        var requests = 0
+        val peer = object : P2PSession {
+            override val isOpen = true
+            override suspend fun connect() = Result.success(Unit)
+            override fun close() = Unit
+            override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> {
+                requests++
+                assertTrue(java.util.Base64.getDecoder().decode(request.bodyBase64).contentEquals(content))
+                return Result.success(P2PHttpResponse(id = request.id, status = 200))
+            }
+        }
+        val transport = OkHttpAgentoCTransport({ "" }, { null }, requireVerifiedCarrier = true)
+        try {
+            transport.setTurnSession(peer)
+            transport.execute(ApiRequest("PATCH", "/api/assets/fasset_0123456789abcdef01234567/upload",
+                headers = mapOf("X-Agentoc-Upload-Sha256" to digest), bodyBytes = content))
+            assertEquals(1, requests)
+        } finally { transport.close() }
+    }
     @Test fun directUploadStreamsAndVerifiesAReopenableBody() = runBlocking {
         val server = MockWebServer().apply {
             enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody("{\"ok\":true}"))
@@ -78,7 +156,7 @@ class OkHttpAgentoCTransportTest {
     }
 
     @Test fun approvalTimeoutDoesNotTearDownAnOpenCarrierOrReplayTheDecision() = runBlocking {
-        for (turn in listOf(true)) {
+        for (turn in listOf(true, false)) {
             var calls = 0
             var recoveries = 0
             val peer = object : P2PSession {
