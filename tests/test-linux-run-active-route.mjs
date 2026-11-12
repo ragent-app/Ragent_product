@@ -15,7 +15,7 @@ test('root challenge checks fresh persisted Run state through the real local rou
       process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
-      const { createRun, requestRunCancel, runStatusPath } = await import('../chat/runs.mjs');
+      const { createRun, requestRunCancel, runStatusPath, updateRun } = await import('../chat/runs.mjs');
       const { loadOrCreatePrivilegedSigningKeys, getActivePrivilegedSigningKey } = await import('../chat/privileged-signing-keys.mjs');
       const { handleTemporaryControlRunCheck } = await import('../chat/router-temporary-control-run-check.mjs');
       const { checkLinuxRunActive } = await import('../scripts/linux-run-active-client.mjs');
@@ -46,6 +46,18 @@ test('root challenge checks fresh persisted Run state through the real local rou
         tampered.cancelRequested = false;
         await writeFile(statusPath, JSON.stringify(tampered));
         assert.equal(await checkLinuxRunActive(state, options), false);
+        for (const [suffix, update] of [['direct', { cancelRequested: true }], ['terminal', { state: 'completed' }]]) {
+          const id = `run_active${suffix}1`;
+          await createRun({ status: { id, sessionId: 's1', requestId: 't1', state: 'running',
+            runnerLaunchMode: 'runner-lifecycle', runnerLaunchAttempt: 2 },
+          manifest: { sessionId: 's1', requestId: 't1', options: { approvedActionChannel: { turnId: 't1' } } } });
+          await updateRun(id, update);
+          assert.equal(await hasLinuxRunCancelIntent(id, 2), true);
+          const file = runStatusPath(id), forged = JSON.parse(await readFile(file, 'utf8'));
+          forged.state = 'running'; forged.cancelRequested = false;
+          await writeFile(file, JSON.stringify(forged));
+          assert.equal(await checkLinuxRunActive({ ...state, runId: id }, options), false);
+        }
         assert.equal(await checkLinuxRunActive(state, { ...options, base: 'http://example.com/' }), false);
       } finally { await new Promise((resolve) => server.close(resolve)); }
     } finally { await rm(root, { recursive: true, force: true }); }

@@ -1330,7 +1330,7 @@ function mergeRunRecords(current, proposed) {
   merged.runnerSupervisorSocket = pickDefined(proposed?.runnerSupervisorSocket, current?.runnerSupervisorSocket);
   merged.toolProcessId = pickDefined(proposed?.toolProcessId, current?.toolProcessId);
   merged.runnerLaunchAttempt = pickMaxInt(current?.runnerLaunchAttempt, proposed?.runnerLaunchAttempt, 0);
-  if (current?.cancelRequested === true && Object.hasOwn(current, 'linuxScopeRevocationPending') &&
+  if ((current?.cancelRequested === true || isTerminalRunState(current?.state)) && Object.hasOwn(current, 'linuxScopeRevocationPending') &&
       merged.runnerLaunchAttempt !== (Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0)) {
     // A concurrent restart can advance the generation after an earlier one
     // was revoked. Keep the new generation in the durable retry queue too.
@@ -1815,16 +1815,34 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // runs (the observer's own no-op ticks no longer touch the watched file).
     // Object-form callers and spread-style updater callbacks produce fresh
     // objects, so compare their shallow fields too before touching disk.
-    const hasChanged = Object.keys(proposed || {}).some((key) => !runFieldEqual(proposed[key], latest[key]));
-    if (proposed === draft || !hasChanged) {
-      return clone(latest);
-    }
-    const next = retainRunPublication(latest, mergeRunRecords(latest, proposed));
+    const originalChanged = proposed !== draft && Object.keys(proposed || {}).some((key) => !runFieldEqual(proposed[key], latest[key]));
+    const scopeTracking = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
+    const mightProtectScope = scopeTracking && (latest.cancelRequested === true || isTerminalRunState(latest.state) ||
+      (proposed !== draft && (proposed?.cancelRequested === true || isTerminalRunState(proposed?.state))));
+    if (!originalChanged && !mightProtectScope) return clone(latest);
+    const next = originalChanged ? retainRunPublication(latest, mergeRunRecords(latest, proposed)) : { ...latest };
     if (Object.hasOwn(latest, 'appApiMessageVersion')) {
       if (next.appApiMessageVersion !== latest.appApiMessageVersion)
         throw sessionApiError('MESSAGE_IDEMPOTENCY_CONFLICT', 409, 'Message Run protocol cannot change');
       next.appApiMessageVersion = latest.appApiMessageVersion;
     }
+    const protectsScope = scopeTracking && (next.cancelRequested === true || isTerminalRunState(next.state));
+    if (protectsScope) {
+      // Only the control plane carries the feature flag. Its private config
+      // directory is masked from the runner. Invalidate before publishing a
+      // cancel/terminal transition, including transitions outside Stop.
+      if (beforeWrite) beforeWrite(next);
+      const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+      await persistLinuxRunCancelIntent(runId, Number.isSafeInteger(next.runnerLaunchAttempt) ? next.runnerLaunchAttempt : 0);
+      if (authorizeWrite) await authorizeWrite(latest);
+      if (!Object.hasOwn(latest, 'linuxScopeRevocationPending') ||
+          (!latest.cancelRequested && next.cancelRequested) ||
+          (!isTerminalRunState(latest.state) && isTerminalRunState(next.state))) {
+        next.linuxScopeRevocationPending = true;
+      }
+    }
+    const hasChanged = originalChanged || Object.keys(next || {}).some((key) => !runFieldEqual(next[key], latest[key]));
+    if (!hasChanged) return clone(latest);
     next.updatedAt = new Date().toISOString();
     // Admission predicates run inside the exact Run mutation queue, after
     // all suspendable reads and immediately before durable publication.
@@ -2592,21 +2610,12 @@ export async function materializeRunSpoolLine(runId, record) {
 
 export async function requestRunCancel(runId, { beforeWrite = null, authorizeWrite = null } = {}) {
   const trackRevocation = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
-  const authorizeCancel = trackRevocation ? async (current) => {
-    if (authorizeWrite) await authorizeWrite(current);
-    // Check caller predicates before creating a durable intent. A second
-    // beforeWrite check still runs immediately before publishing status.
-    if (beforeWrite) beforeWrite({ ...current, cancelRequested: true });
-    const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
-    await persistLinuxRunCancelIntent(runId, Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0);
-    if (authorizeWrite) await authorizeWrite(current);
-  } : authorizeWrite;
   const updated = await updateRun(runId, (run) => ({
     ...run,
     cancelRequested: true,
     cancelRequestedAt: new Date().toISOString(),
     ...(trackRevocation ? { linuxScopeRevocationPending: true } : {}),
-  }), { beforeWrite, authorizeWrite: authorizeCancel });
+  }), { beforeWrite, authorizeWrite });
   if (updated && trackRevocation && !await retryLinuxRunScopeRevocation(updated)) {
     console.warn(`[runs] privileged Run scope revocation pending for ${runId}`);
   }
@@ -2614,14 +2623,14 @@ export async function requestRunCancel(runId, { beforeWrite = null, authorizeWri
 }
 
 async function retryLinuxRunScopeRevocation(run) {
-  if (!run?.cancelRequested || run.linuxScopeRevocationPending !== true) return false;
+  if ((!run?.cancelRequested && !isTerminalRunState(run?.state)) || run.linuxScopeRevocationPending !== true) return false;
   const attempt = Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
   try {
     const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
     if ((await revokeLinuxRunScope(run)).state !== 'revoked') return false;
     await updateRun(run.id, (current) => {
       const currentAttempt = Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0;
-      if (!current.cancelRequested || !current.linuxScopeRevocationPending || currentAttempt !== attempt) return current;
+      if ((!current.cancelRequested && !isTerminalRunState(current.state)) || !current.linuxScopeRevocationPending || currentAttempt !== attempt) return current;
       return { ...current, linuxScopeRevocationPending: false };
     });
     return true;
@@ -2639,7 +2648,7 @@ export async function recoverLinuxRunScopeRevocations({ scanAll = false, limit =
   for (const entry of entries) {
     if (!scanAll && entry.linuxScopeRevocationPending !== true) continue;
     const run = await getRunAcceptanceEvidence(entry.id).catch(() => null);
-    if (!run?.cancelRequested || run.linuxScopeRevocationPending !== true) continue;
+    if ((!run?.cancelRequested && !isTerminalRunState(run?.state)) || run?.linuxScopeRevocationPending !== true) continue;
     if (scanAll && entry.linuxScopeRevocationPending !== true) await appendRunIndexRecord(run);
     if (attempted >= limit) {
       if (scanAll) continue;

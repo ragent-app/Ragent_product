@@ -61,6 +61,14 @@ test('persisted Run cancellation notifies the root lifecycle broker',
         assert.equal((await recoverLinuxRunScopeRevocations()).revoked, 1);
         const delayedName = `${createHash('sha256').update(delayedId).digest('hex')}-2.revoked`;
         assert.equal((await lstat(`${contextDirectory}/${delayedName}`)).mode & 0o777, 0o600);
+        const terminalId = 'run_terminalfixture1';
+        await createRun({ status: { id: terminalId, sessionId: 's1', requestId: 't6', state: 'running' },
+          manifest: { sessionId: 's1', requestId: 't6' } });
+        await updateRun(terminalId, { state: 'completed' });
+        assert.equal((await getRunAcceptanceEvidence(terminalId)).linuxScopeRevocationPending, true);
+        assert.equal((await recoverLinuxRunScopeRevocations()).revoked, 1);
+        const terminalName = `${createHash('sha256').update(terminalId).digest('hex')}-0.revoked`;
+        assert.equal((await lstat(`${contextDirectory}/${terminalName}`)).mode & 0o777, 0o600);
         const staleId = 'run_stalefixture1';
         await createRun({ status: { id: staleId, sessionId: 's1', requestId: 't4', state: 'running' },
           manifest: { sessionId: 's1', requestId: 't4' } });
