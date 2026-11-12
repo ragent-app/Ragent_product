@@ -40,4 +40,3 @@ begin
   where instance_id = target_instance and authority_state is distinct from final_state;
 end;
 $$;
-
