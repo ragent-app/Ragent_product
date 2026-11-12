@@ -55,15 +55,33 @@ export function codexThreadRunTag(message) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : '';
 }
 
+const MAC_CLEANUP_HELPER = join(dirname(process.execPath), 'agentoc-macos-run-cleanup');
+
+export function captureMacCodexIdentity(rootPid, {
+  platform = process.platform, executable = MAC_CLEANUP_HELPER, run = spawnSync,
+} = {}) {
+  if (platform !== 'darwin' || !Number.isSafeInteger(rootPid) || rootPid <= 1) return null;
+  try {
+    const result = run(executable, ['--identity', String(rootPid)], { encoding: 'utf8', timeout: 5000, maxBuffer: 256 });
+    const match = typeof result.stdout === 'string' && /^(\d{1,20}) (\d{1,6})\n$/.exec(result.stdout);
+    if (result.error || result.status !== 0 || !match || Number(match[2]) >= 1000000) return null;
+    return { seconds: match[1], microseconds: match[2] };
+  } catch { return null; }
+}
+
 export function cleanupMacCodexRun(rootPid, runTag, {
   platform = process.platform,
-  executable = join(dirname(process.execPath), 'agentoc-macos-run-cleanup'),
+  executable = MAC_CLEANUP_HELPER,
+  identity = null,
   run = spawnSync,
 } = {}) {
   if (platform !== 'darwin' || !Number.isSafeInteger(rootPid) || rootPid <= 1 ||
-      !/^[A-Za-z0-9_-]{1,160}$/.test(runTag)) return false;
-  const result = run(executable, [String(rootPid), runTag], { stdio: 'ignore', timeout: 5000 });
-  return !result.error && result.status === 0;
+      !/^[A-Za-z0-9_-]{1,160}$/.test(runTag) || !/^\d{1,20}$/.test(identity?.seconds || '') ||
+      !/^\d{1,6}$/.test(identity?.microseconds || '') || Number(identity.microseconds) >= 1000000) return false;
+  try {
+    const result = run(executable, [String(rootPid), runTag, identity.seconds, identity.microseconds], { stdio: 'ignore', timeout: 5000 });
+    return !result.error && result.status === 0;
+  } catch { return false; }
 }
 
 export const CODEX_APP_SERVER_BROKER_SCRIPT = fileURLToPath(import.meta.url);
@@ -367,6 +385,7 @@ function runBroker() {
   let nextRequestId = 10_000;
   let upstreamReady = false;
   let upstream = null;
+  let upstreamMacIdentity = null;
   let server = null;
   let oauthLock = null;
   let accountDigest = '';
@@ -548,10 +567,14 @@ function runBroker() {
     });
     upstream.on('exit', () => {
       upstreamReady = false;
+      upstreamMacIdentity = null;
       for (const client of clients) client.end();
       server?.close();
       void oauthLock?.release();
     });
+    if (process.platform === 'darwin' && upstream.exitCode === null && upstream.signalCode === null) {
+      upstreamMacIdentity = captureMacCodexIdentity(upstream.pid);
+    }
     try { upstream.stdin.write(`${JSON.stringify(initializeMessage())}\n`); } catch {}
   };
 
@@ -676,7 +699,8 @@ function runBroker() {
     }
     if (process.platform === 'darwin' && message.method === 'turn/interrupt' && owner === client) {
       const runTag = clientRunTags.get(client);
-      const cleanupAttempted = Boolean(runTag && cleanupMacCodexRun(upstream?.pid, runTag));
+      const cleanupAttempted = Boolean(runTag && upstream?.exitCode === null && upstream?.signalCode === null &&
+        cleanupMacCodexRun(upstream.pid, runTag, { identity: upstreamMacIdentity }));
       sendClient(client, { method: MAC_CLEANUP_NOTIFICATION, params: {
         threadId, runId: runTag || null, status: cleanupAttempted ? 'attempted' : 'unconfirmed',
       } });

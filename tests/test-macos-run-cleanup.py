@@ -47,11 +47,29 @@ time.sleep(120)
         assert len(pids) == 4, "fixture did not start"
         # A same-user process beneath the app-server is not a direct child of
         # this helper's caller and must not become a cleanup root.
-        rejected = subprocess.run([str(helper), str(pids[0]), "run-cancel-a"], check=False)
+        identity = subprocess.run([str(helper), "--identity", str(parent.pid)], capture_output=True, text=True, check=True).stdout.split()
+        assert len(identity) == 2 and all(value.isdigit() for value in identity)
+        denied_identity = subprocess.run([str(helper), "--identity", str(pids[0])], check=False)
+        assert denied_identity.returncode == 65
+        rejected = subprocess.run([str(helper), str(pids[0]), "run-cancel-a", *identity], check=False)
         assert rejected.returncode == 65, f"unrelated root returned {rejected.returncode}"
         assert parent.poll() is None, "shared parent was stopped by rejected cleanup"
         os.kill(pids[0], 0)
-        result = subprocess.run([str(helper), str(parent.pid), "run-cancel-a"], check=False)
+        stale = [str(int(identity[0]) + 1), identity[1]]
+        rejected = subprocess.run([str(helper), str(parent.pid), "run-cancel-a", *stale], check=False)
+        assert rejected.returncode == 65, f"stale root identity returned {rejected.returncode}"
+        os.kill(pids[0], 0)
+        # A different direct child of the same caller is still not the
+        # process for which the saved start-time identity was captured.
+        sibling = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        try:
+            rejected = subprocess.run([str(helper), str(sibling.pid), "run-cancel-a", *identity], check=False)
+            assert rejected.returncode == 65, f"different child returned {rejected.returncode}"
+            assert sibling.poll() is None
+        finally:
+            sibling.kill()
+            sibling.wait()
+        result = subprocess.run([str(helper), str(parent.pid), "run-cancel-a", *identity], check=False)
         assert result.returncode == 0, f"cleanup returned {result.returncode}"
         def alive(pid):
             output = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "state="], capture_output=True, text=True).stdout.strip()

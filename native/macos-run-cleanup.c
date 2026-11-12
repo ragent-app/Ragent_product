@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,14 +100,12 @@ static int beneath(const struct process_info *items, size_t count, size_t index,
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3) return 64;
+  int identity_only = argc == 3 && !strcmp(argv[1], "--identity");
+  if (!identity_only && argc != 5) return 64;
   char *end = NULL;
-  long parsed = strtol(argv[1], &end, 10);
-  if (!end || *end || parsed <= 1 || parsed > INT_MAX || !argv[2][0] || strlen(argv[2]) > 160) return 64;
-  for (const char *p = argv[2]; *p; p++) {
-    if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-          (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return 64;
-  }
+  const char *pid_text = argv[identity_only ? 2 : 1];
+  long parsed = strtol(pid_text, &end, 10);
+  if (!end || *end || parsed <= 1 || parsed > INT_MAX) return 64;
   pid_t root = (pid_t)parsed;
   struct process_info root_info;
   /* The broker starts both the upstream app-server and this helper. A PID
@@ -115,6 +114,26 @@ int main(int argc, char **argv) {
   pid_t caller = getppid();
   if (caller <= 1 || root == getpid() || !info(root, &root_info) ||
       root_info.uid != getuid() || root_info.ppid != caller) return 65;
+  if (identity_only) {
+    printf("%" PRIu64 " %" PRIu64 "\n", root_info.start_sec, root_info.start_usec);
+    return 0;
+  }
+  if (!argv[2][0] || strlen(argv[2]) > 160) return 64;
+  for (const char *p = argv[2]; *p; p++) {
+    if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+          (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return 64;
+  }
+  for (int i = 3; i < 5; i++) {
+    if (!argv[i][0]) return 64;
+    for (const char *p = argv[i]; *p; p++) if (*p < '0' || *p > '9') return 64;
+  }
+  errno = 0;
+  unsigned long long expected_sec = strtoull(argv[3], &end, 10);
+  if (errno || !end || *end) return 64;
+  errno = 0;
+  unsigned long long expected_usec = strtoull(argv[4], &end, 10);
+  if (errno || !end || *end || expected_usec >= 1000000) return 64;
+  if (root_info.start_sec != expected_sec || root_info.start_usec != expected_usec) return 65;
   int bytes = proc_listallpids(NULL, 0);
   if (bytes <= 0 || bytes > MAX_PROCESSES) return 70;
   size_t capacity = (size_t)bytes + 256;
