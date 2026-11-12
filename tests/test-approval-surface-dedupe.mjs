@@ -215,6 +215,8 @@ try {
   });
   const firstBatch = await sheetPage.locator("#decisionSheet .decision-sheet__batch").elementHandle();
   assert.ok(firstBatch, "batch decision sheet should be visible");
+  assert.equal(await sheetPage.locator('#decisionSheet [data-batch-decision="approve"]').count(), 1,
+    'ordinary batches retain their approval action');
   assert.equal(await firstSheet.isVisible(), true, "batch takeover must not close the decision sheet");
   assert.equal(await firstSheet.evaluate((node) => node.classList.contains("is-closing")), false);
   await sheetPage.evaluate(() => {
@@ -229,6 +231,34 @@ try {
     });
   });
   assert.equal(await firstBatch.evaluate((node) => node === document.querySelector("#decisionSheet .decision-sheet__batch")), true);
+  await sheetPage.evaluate(() => {
+    window.AgentoCDecisions.reset();
+    window.agentocGetActiveUiLanguage = () => 'zh-CN';
+    window.AgentoCDecisions.notePrivilegedBatch({
+      type: 'privileged_batch_request', batchId: 'mac-unavailable', runId: 'run-mac',
+      executorUnavailableReasonCode: 'macos_administrator_unavailable',
+      other: [{ opId: 'mac-op', command: 'launchctl kickstart system/example' }], delete: [],
+    });
+  });
+  await sheetPage.locator('#decisionSheet .decision-sheet__summary').click();
+  assert.match(await sheetPage.locator('#decisionSheet').innerText(), /此 Mac 暂不支持托管管理员执行/);
+  assert.equal(await sheetPage.locator('#decisionSheet [data-batch-decision="approve"]').count(), 0);
+  assert.equal(await sheetPage.locator('#decisionSheet [data-batch-decision="deny"]').count(), 1);
+  assert.equal(await sheetPage.locator('#decisionSheet input[type="checkbox"]').isDisabled(), true);
+  if (process.env.AGENTOC_QA_SCREENSHOT) await sheetPage.screenshot({ path: process.env.AGENTOC_QA_SCREENSHOT });
+  await page.evaluate(() => {
+    window.AgentoCAttentionPopup._reset();
+    window.agentocGetActiveUiLanguage = () => 'zh-CN';
+    window.AgentoCAttentionPopup.onRealtimeEvents('background', [{
+      type: 'privileged_batch_request', batchId: 'mac-notification', runId: 'run-mac',
+      executorUnavailableReasonCode: 'macos_administrator_unavailable',
+      other: [{ opId: 'mac-op', command: 'launchctl kickstart system/example' }], delete: [],
+    }]);
+  });
+  await page.locator('.oneui-notification').press('Enter');
+  assert.match(await page.locator('.oneui-notification').innerText(), /此 Mac 暂不支持托管管理员执行/);
+  assert.equal(await page.locator('.oneui-notification [data-action="batch-approve"]').count(), 0);
+  assert.equal(await page.locator('.oneui-notification [data-action="batch-deny"]').count(), 1);
   await sheetPage.close();
 } finally {
   if (browser) await browser.close().catch(() => {});

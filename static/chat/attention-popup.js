@@ -878,6 +878,13 @@
 
   function appendBatchDetails(parent, item, footerActions = null) {
     const event = item.event || {};
+    const unavailable = event.executorUnavailableReasonCode === "macos_administrator_unavailable";
+    if (unavailable) {
+      const zh = String(root.agentocGetActiveUiLanguage?.() || "").toLowerCase().startsWith("zh");
+      parent.appendChild(el("p", "oneui-notification__batch-unavailable", zh
+        ? "此 Mac 暂不支持托管管理员执行，无法批准执行；你可以拒绝该请求。"
+        : "Managed administrator execution is not available on this Mac. You can decline this request."));
+    }
     const categories = [];
     const defaultSelected = event.defaultSelected && typeof event.defaultSelected === "object"
       ? event.defaultSelected
@@ -905,6 +912,7 @@
         const check = doc.createElement("input");
         check.type = "checkbox";
         check.checked = defaultsFor(category).includes(String(operation?.opId || ""));
+        check.disabled = unavailable;
         check.value = String(operation?.opId || "");
         check.dataset.category = category;
         check.addEventListener("change", () => syncBatchNotificationState(section));
@@ -922,7 +930,7 @@
       // identical "approve / deny" pairs into one ambiguous footer rail.
       if (!item.resolvedCategories.has(category)) {
         const actions = el("div", "oneui-notification__actions oneui-notification__batch-actions");
-        addAction(actions, tr("attention.action.approve"), item, "batch-approve", "oneui-notification__action--primary", category);
+        if (!unavailable) addAction(actions, tr("attention.action.approve"), item, "batch-approve", "oneui-notification__action--primary", category);
         addAction(actions, tr("attention.action.deny"), item, "batch-deny", "oneui-notification__action--quiet", category);
         if (footerActions) {
           const group = el("div", "oneui-notification__batch-footer-group");

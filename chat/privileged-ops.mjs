@@ -144,7 +144,7 @@ export function summarizePrivilegedOps(ops) {
 // New event types (not yet wired into the live stream). Mirror the established
 // `{ type, role: 'system', ... }` shape so future normalizer/display wiring is
 // straightforward. Return null on invalid input, like the approval event builders.
-export function privilegedBatchRequestEvent(batch) {
+export function privilegedBatchRequestEvent(batch, { platform = process.platform } = {}) {
   if (!batch?.batchId) return null;
   // Phase 5: worst-risk tier across all batched ops, as a top-level string the
   // frontend layers already probe (decision-sheet/approval-notify/live-bar).
@@ -167,6 +167,7 @@ export function privilegedBatchRequestEvent(batch) {
     // click alone (warnings stay). Absent on older persisted events, which
     // clients must treat as required (safe default).
     passkeyRequired: isOwnerHostPasskeyRequired(),
+    ...(platform === 'darwin' ? { executorUnavailableReasonCode: 'macos_administrator_unavailable' } : {}),
     ...(worst ? { risk: worst } : {}),
   };
 }

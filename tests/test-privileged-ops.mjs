@@ -111,6 +111,8 @@ check('empty other approved 0', emptyResolved.other.approved.length === 0);
 
 // --- event builders ---
 const reqEvent = privilegedBatchRequestEvent(batch);
+check('macOS approval event declares unavailable executor', privilegedBatchRequestEvent(batch, { platform: 'darwin' }).executorUnavailableReasonCode === 'macos_administrator_unavailable');
+check('Linux approval event does not claim macOS limitation', privilegedBatchRequestEvent(batch, { platform: 'linux' }).executorUnavailableReasonCode === undefined);
 check('request event type', reqEvent.type === 'privileged_batch_request');
 check('request event role system', reqEvent.role === 'system');
 check('request summarizes other', reqEvent.other.length === 2);

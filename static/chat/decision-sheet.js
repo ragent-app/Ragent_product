@@ -562,6 +562,7 @@
   function renderBatchSection(evt, category, resolved, footerActions = null) {
     const ops = Array.isArray(evt?.[category]) ? evt[category] : [];
     if (ops.length === 0) return null;
+    const unavailable = evt?.executorUnavailableReasonCode === "macos_administrator_unavailable";
     const section = el("section", "oneui-notification__batch decision-sheet__batch-section");
     section.dataset.category = category;
     const head = el("div", "decision-sheet__batch-section-head");
@@ -582,7 +583,7 @@
       box.value = String(op?.opId || "").trim();
       const defaults = defaultSelectedForCategory(evt, category);
       box.checked = Array.isArray(defaults) && defaults.includes(String(op?.opId || "").trim());
-      box.disabled = resolved.has(category);
+      box.disabled = unavailable || resolved.has(category);
       box.addEventListener("change", () => syncBatchApproveState(section));
       row.appendChild(box);
       const body = el("span", "decision-sheet__batch-op-body");
@@ -627,7 +628,7 @@
         clearBatchError(section);
         void denyBatchCategory(category, deny);
       });
-      actions.appendChild(approve);
+      if (!unavailable) actions.appendChild(approve);
       actions.appendChild(deny);
       if (footerActions) {
         const group = el("div", "decision-sheet__batch-footer-group");
@@ -684,6 +685,12 @@
     content.id = "decisionSheetContent";
     const details = el("div", "oneui-notification__details decision-sheet__details");
     const body = el("div", "decision-sheet__batch");
+    if (evt?.executorUnavailableReasonCode === "macos_administrator_unavailable") {
+      const zh = String(root.agentocGetActiveUiLanguage?.() || "").toLowerCase().startsWith("zh");
+      body.appendChild(el("p", "decision-sheet__batch-unavailable", zh
+        ? "此 Mac 暂不支持托管管理员执行，无法批准执行；你可以拒绝该请求。"
+        : "Managed administrator execution is not available on this Mac. You can decline this request."));
+    }
     const footerActions = el("div", "decision-sheet__batch-footer-actions");
     for (const category of BATCH_CATEGORIES) {
       const section = renderBatchSection(evt, category, resolved, footerActions);
