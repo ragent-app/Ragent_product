@@ -141,6 +141,25 @@ func TestBrowserAuthGateRejectsHTTPBeforeAuthentication(t *testing.T) {
 	}
 }
 
+func TestBrowserAuthBinaryFramesRequireAuthentication(t *testing.T) {
+	binary := []byte{'A', 'G', 'B', '3', 0xff}
+	for _, phase := range []string{"NEW", "AUTHENTICATING"} {
+		if _, err := decodeBrowserAuthMessage(binary, false, phase); err == nil {
+			t.Fatalf("binary frame must be rejected in %s", phase)
+		}
+	}
+	if _, err := decodeBrowserAuthMessage(binary, false, "AUTHENTICATED"); err != nil {
+		t.Fatalf("authenticated binary frame must reach the stream assembler: %v", err)
+	}
+	msg, err := decodeBrowserAuthMessage([]byte(`{"type":"client_auth_init_v1","version":1}`), true, "AUTHENTICATING")
+	if err != nil || msg.Type != "client_auth_init_v1" || msg.Version != 1 {
+		t.Fatalf("authentication JSON was not decoded: %#v, %v", msg, err)
+	}
+	if _, err := decodeBrowserAuthMessage(binary, true, "AUTHENTICATED"); err == nil {
+		t.Fatal("malformed text frame must still be rejected")
+	}
+}
+
 func mustBase64(value string) []byte {
 	decoded, _ := base64.RawURLEncoding.DecodeString(value)
 	return decoded

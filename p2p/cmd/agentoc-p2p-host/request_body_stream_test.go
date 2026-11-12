@@ -3,11 +3,79 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"io"
 	"os"
 	"testing"
 )
+
+func binaryBodyFrame(id string, index uint32, body []byte) []byte {
+	frame := append([]byte("AGB3"), byte(len(id)))
+	frame = append(frame, []byte(id)...)
+	frame = binary.BigEndian.AppendUint32(frame, index)
+	return append(frame, body...)
+}
+
+func TestBinaryBodyStreamPreservesBytesAndRejectsOutOfOrder(t *testing.T) {
+	a := newRequestBodyStreamAssembler()
+	defer a.close()
+	body := []byte{0, 1, 2, 0xff, 0x80, 0x7f}
+	digest := initBodyStreamForTest(t, a, "binary-test", body)
+	if id, err := a.addBinary(binaryBodyFrame("binary-test", 0, body)); err != nil || id != "binary-test" {
+		t.Fatalf("binary chunk failed: id=%q err=%v", id, err)
+	}
+	_, file, _, err := a.finish(httpRequestStreamV2End{Type: "http_request_stream_v2_end", ID: "binary-test",
+		ChunkCount: 1, TotalBytes: int64(len(body)), SHA256: digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close(); _ = os.Remove(file.Name()) }()
+	actual, err := io.ReadAll(file)
+	if err != nil || string(actual) != string(body) {
+		t.Fatalf("binary content differs: %v", err)
+	}
+	initBodyStreamForTest(t, a, "bad-order", body)
+	if _, err := a.addBinary(binaryBodyFrame("bad-order", 1, body)); err == nil {
+		t.Fatal("accepted out-of-order binary chunk")
+	}
+	if _, exists := a.streams["bad-order"]; exists {
+		t.Fatal("invalid stream was not discarded")
+	}
+	if _, err := a.addBinary([]byte("bad")); err == nil {
+		t.Fatal("accepted malformed binary frame")
+	}
+}
+
+func TestAssetChunksUseBoundedMemoryAndStillVerifyDigest(t *testing.T) {
+	a := newRequestBodyStreamAssembler()
+	defer a.close()
+	body := []byte{0, 0xff, 3, 4}
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	err := a.begin(httpRequestStreamV2Init{Type: "http_request_stream_v2_init", ID: "asset",
+		Method: "PATCH", Path: "/api/assets/fasset_0123456789abcdef01234567/upload",
+		TotalBytes: int64(len(body)), SHA256: digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.streams["asset"].file != nil || a.streams["asset"].buffer == nil {
+		t.Fatal("bounded asset chunk unexpectedly used a temporary file")
+	}
+	if _, err := a.addBinary(binaryBodyFrame("asset", 0, body)); err != nil {
+		t.Fatal(err)
+	}
+	_, result, _, err := a.finish(httpRequestStreamV2End{Type: "http_request_stream_v2_end", ID: "asset",
+		ChunkCount: 1, TotalBytes: int64(len(body)), SHA256: digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Close()
+	actual, err := io.ReadAll(result)
+	if err != nil || string(actual) != string(body) {
+		t.Fatalf("asset body differs: %v", err)
+	}
+}
 
 func initBodyStreamForTest(t *testing.T, assembler *requestBodyStreamAssembler, id string, body []byte) string {
 	t.Helper()

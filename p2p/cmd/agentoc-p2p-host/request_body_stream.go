@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"hash"
@@ -22,6 +24,7 @@ const (
 )
 
 var bodyStreamRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+var boundedAssetChunkPath = regexp.MustCompile(`^/api/assets/fasset_[a-f0-9]{24}/upload$`)
 
 type httpRequestStreamV2Init struct {
 	Type                 string            `json:"type"`
@@ -56,9 +59,30 @@ type requestBodyStreamState struct {
 	written int64
 	next    int
 	file    *os.File
+	buffer  *bytes.Buffer
 	path    string
 	hasher  hash.Hash
 	timer   *time.Timer
+}
+
+// A finished body owns its staging resource until the local HTTP request is
+// complete. Small asset chunks stay in bounded memory; larger/general streams
+// retain the existing private-file staging behavior.
+type requestStreamBody struct {
+	reader io.Reader
+	file   *os.File
+	path   string
+}
+
+func (b *requestStreamBody) Read(p []byte) (int, error) { return b.reader.Read(p) }
+func (b *requestStreamBody) Name() string               { return b.path }
+func (b *requestStreamBody) Close() error {
+	if b.file == nil {
+		return nil
+	}
+	err := b.file.Close()
+	_ = os.Remove(b.path)
+	return err
 }
 
 type requestBodyStreamAssembler struct {
@@ -101,14 +125,19 @@ func (a *requestBodyStreamAssembler) begin(frame httpRequestStreamV2Init) error 
 	if _, exists := a.streams[frame.ID]; exists {
 		return errors.New("duplicate request stream id")
 	}
-	file, err := os.CreateTemp("", "agentoc-p2p-body-*")
-	if err != nil {
-		return errors.New("request stream storage unavailable")
-	}
 	state := &requestBodyStreamState{
 		request: httpRequest{ID: frame.ID, Type: "http_request", Method: frame.Method,
 			Path: frame.Path, Headers: frame.Headers, AcceptResponseStream: frame.AcceptResponseStream},
-		total: frame.TotalBytes, digest: frame.SHA256, file: file, path: file.Name(), hasher: sha256.New(),
+		total: frame.TotalBytes, digest: frame.SHA256, hasher: sha256.New(),
+	}
+	if frame.Method == "PATCH" && boundedAssetChunkPath.MatchString(frame.Path) && frame.TotalBytes <= 1<<20 {
+		state.buffer = bytes.NewBuffer(make([]byte, 0, int(frame.TotalBytes)))
+	} else {
+		file, err := os.CreateTemp("", "agentoc-p2p-body-*")
+		if err != nil {
+			return errors.New("request stream storage unavailable")
+		}
+		state.file, state.path = file, file.Name()
 	}
 	a.streams[frame.ID] = state
 	a.reservedBytes += frame.TotalBytes
@@ -124,19 +153,48 @@ func (a *requestBodyStreamAssembler) add(frame httpRequestStreamV2Chunk) error {
 	if err != nil || len(chunk) == 0 || len(chunk) > maxBodyStreamChunk {
 		return errors.New("invalid request stream chunk encoding or size")
 	}
+	return a.addBytes(frame.ID, frame.Index, chunk)
+}
+
+// Binary v3 carries the same ordered body chunks as v2 without Base64. The
+// metadata and end frames remain v2 JSON, so the existing limits, digest and
+// cleanup rules apply to both encodings.
+func (a *requestBodyStreamAssembler) addBinary(frame []byte) (string, error) {
+	if len(frame) < 10 || string(frame[:4]) != "AGB3" {
+		return "", errors.New("invalid binary request stream frame")
+	}
+	idLen := int(frame[4])
+	headerLen := 5 + idLen + 4
+	if idLen < 1 || idLen > 128 || len(frame) <= headerLen {
+		return "", errors.New("invalid binary request stream frame bounds")
+	}
+	id := string(frame[5 : 5+idLen])
+	index := binary.BigEndian.Uint32(frame[5+idLen : headerLen])
+	chunk := frame[headerLen:]
+	if !bodyStreamRequestID.MatchString(id) || len(chunk) > maxBodyStreamChunk || index > 1<<30 {
+		return "", errors.New("invalid binary request stream chunk")
+	}
+	return id, a.addBytes(id, int(index), chunk)
+}
+
+func (a *requestBodyStreamAssembler) addBytes(id string, index int, chunk []byte) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	state := a.streams[frame.ID]
+	state := a.streams[id]
 	if state == nil {
 		return errors.New("request stream is not open")
 	}
 	remaining := state.total - state.written
-	if frame.Index != state.next || remaining <= 0 || int64(len(chunk)) > remaining {
-		a.discardLocked(frame.ID, state)
+	if index != state.next || remaining <= 0 || int64(len(chunk)) > remaining {
+		a.discardLocked(id, state)
 		return errors.New("request stream chunk order or size mismatch")
 	}
-	if _, err := state.file.Write(chunk); err != nil {
-		a.discardLocked(frame.ID, state)
+	var writer io.Writer = state.file
+	if state.buffer != nil {
+		writer = state.buffer
+	}
+	if _, err := writer.Write(chunk); err != nil {
+		a.discardLocked(id, state)
 		return errors.New("request stream storage write failed")
 	}
 	_, _ = state.hasher.Write(chunk)
@@ -146,7 +204,7 @@ func (a *requestBodyStreamAssembler) add(frame httpRequestStreamV2Chunk) error {
 	return nil
 }
 
-func (a *requestBodyStreamAssembler) finish(frame httpRequestStreamV2End) (httpRequest, *os.File, int64, error) {
+func (a *requestBodyStreamAssembler) finish(frame httpRequestStreamV2End) (httpRequest, *requestStreamBody, int64, error) {
 	if frame.Type != "http_request_stream_v2_end" || !bodyStreamRequestID.MatchString(frame.ID) || frame.ChunkCount < 1 {
 		return httpRequest{}, nil, 0, errors.New("invalid request stream end")
 	}
@@ -166,13 +224,18 @@ func (a *requestBodyStreamAssembler) finish(frame httpRequestStreamV2End) (httpR
 	delete(a.streams, frame.ID)
 	a.reservedBytes -= state.total
 	state.timer.Stop()
+	if state.buffer != nil {
+		body := &requestStreamBody{reader: bytes.NewReader(state.buffer.Bytes())}
+		a.mu.Unlock()
+		return state.request, body, state.total, nil
+	}
 	if _, err := state.file.Seek(0, io.SeekStart); err != nil {
 		a.mu.Unlock()
 		a.cleanup(state)
 		return httpRequest{}, nil, 0, errors.New("request stream storage rewind failed")
 	}
 	a.mu.Unlock()
-	return state.request, state.file, state.total, nil
+	return state.request, &requestStreamBody{reader: state.file, file: state.file, path: state.path}, state.total, nil
 }
 
 func (a *requestBodyStreamAssembler) abort(id string) {

@@ -21,7 +21,7 @@ if (!['arm64', 'x64'].includes(arch)) {
   process.exit(0);
 }
 
-const binaryPath = resolveP2PHostBinary();
+const binaryPath = process.env.AGENTOC_P2P_TEST_BINARY || resolveP2PHostBinary();
 await access(binaryPath);
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
@@ -38,7 +38,7 @@ try {
       const body = Buffer.concat(chunks);
       response.writeHead(200, { 'content-type': 'application/json', 'x-agentoc-p2p': 'yes' });
       response.end(JSON.stringify({ method: request.method, url: request.url,
-        body: request.url === '/stream-probe' ? undefined : body.toString('utf8'),
+        body: request.url === '/stream-probe' || request.url.startsWith('/api/assets/') ? undefined : body.toString('utf8'),
         bodyBytes: body.length, sha256: createHash('sha256').update(body).digest('hex') }));
     });
   });
@@ -75,7 +75,8 @@ try {
   resources.push(() => close(web));
   const webAddress = await listen(web);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true,
+    ...(process.env.AGENTOC_P2P_TEST_CHROMIUM ? { executablePath: process.env.AGENTOC_P2P_TEST_CHROMIUM } : {}) });
   resources.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
@@ -84,7 +85,7 @@ try {
     const client = new AgentoCP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
     await client.connect();
     const response = await client.request({ method: 'POST', path: '/probe?q=1', body: 'hello-p2p', headers: { Authorization: `Bearer ${deviceToken}` } });
-    const streamBody = Uint8Array.from({ length: 700123 }, (_, index) => (index * 37) % 251);
+    const streamBody = Uint8Array.from({ length: 1024 * 1024 }, (_, index) => (index * 37) % 251);
     const streamDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', streamBody));
     const sha256 = [...streamDigest].map((value) => value.toString(16).padStart(2, '0')).join('');
     const streamId = crypto.randomUUID();
@@ -107,9 +108,31 @@ try {
     client.channel.send(JSON.stringify({ type: 'http_request_stream_v2_end', id: streamId,
       chunkCount: chunks, totalBytes: streamBody.byteLength, sha256 }));
     const streamed = await streamResponse;
+    const binaryId = crypto.randomUUID();
+    const binaryResponse = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { client.pending.delete(binaryId); reject(new Error('P2P binary request timed out')); }, 20000);
+      client.pending.set(binaryId, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject });
+    });
+    client.channel.send(JSON.stringify({ type: 'http_request_stream_v2_init', id: binaryId, method: 'PATCH',
+      path: '/api/assets/fasset_0123456789abcdef01234567/upload', headers, totalBytes: streamBody.byteLength, sha256 }));
+    const encodedId = new TextEncoder().encode(binaryId);
+    chunks = 0;
+    for (let offset = 0; offset < streamBody.length; offset += chunkBytes) {
+      const chunk = streamBody.subarray(offset, Math.min(offset + chunkBytes, streamBody.length));
+      const frame = new Uint8Array(5 + encodedId.length + 4 + chunk.length);
+      frame.set([65, 71, 66, 51, encodedId.length]);
+      frame.set(encodedId, 5);
+      new DataView(frame.buffer).setUint32(5 + encodedId.length, chunks++);
+      frame.set(chunk, 9 + encodedId.length);
+      client.channel.send(frame);
+    }
+    client.channel.send(JSON.stringify({ type: 'http_request_stream_v2_end', id: binaryId,
+      chunkCount: chunks, totalBytes: streamBody.byteLength, sha256 }));
+    const binaryStreamed = await binaryResponse;
     client.close();
     return { status: response.status, headers: response.headers, text: response.text,
       streamedStatus: streamed.status, streamedText: new TextDecoder().decode(Uint8Array.from(atob(streamed.bodyBase64), (char) => char.charCodeAt(0))),
+      binaryStatus: binaryStreamed.status, binaryText: new TextDecoder().decode(Uint8Array.from(atob(binaryStreamed.bodyBase64), (char) => char.charCodeAt(0))),
       streamExpectedBytes: streamBody.byteLength, streamExpectedSha256: sha256 };
   }, { signalingUrl, roomId, secret, deviceToken: DEVICE_TOKEN });
   assert.equal(result.status, 200);
@@ -118,6 +141,9 @@ try {
     bodyBytes: 9, sha256: createHash('sha256').update('hello-p2p').digest('hex') });
   assert.equal(result.streamedStatus, 200);
   assert.deepEqual(JSON.parse(result.streamedText), { method: 'POST', url: '/stream-probe',
+    bodyBytes: result.streamExpectedBytes, sha256: result.streamExpectedSha256 });
+  assert.equal(result.binaryStatus, 200);
+  assert.deepEqual(JSON.parse(result.binaryText), { method: 'PATCH', url: '/api/assets/fasset_0123456789abcdef01234567/upload',
     bodyBytes: result.streamExpectedBytes, sha256: result.streamExpectedSha256 });
   console.log('P2P browser-to-Pion DataChannel e2e passed');
 } finally {

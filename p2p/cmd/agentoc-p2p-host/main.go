@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -12,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -104,6 +106,28 @@ type browserAuthSession struct {
 	nonce      string
 	principal  *browserPrincipal
 	timer      *time.Timer
+}
+
+type browserAuthMessage struct {
+	Type            string `json:"type"`
+	Version         int    `json:"version"`
+	ConnectionGrant string `json:"connectionGrant"`
+	Proof           struct {
+		Algorithm string `json:"algorithm"`
+		Signature string `json:"signature"`
+	} `json:"proof"`
+}
+
+func decodeBrowserAuthMessage(data []byte, isString bool, phase string) (browserAuthMessage, error) {
+	var message browserAuthMessage
+	if !isString {
+		if phase != "AUTHENTICATED" {
+			return message, errors.New("binary message before authentication")
+		}
+		return message, nil
+	}
+	err := json.Unmarshal(data, &message)
+	return message, err
 }
 
 const browserAuthTimeout = 10 * time.Second
@@ -480,9 +504,23 @@ func proxyRequestBody(localBase string, request httpRequest, streamedBody io.Rea
 		req.Header.Set("X-AgentoC-Browser-Grant-Jti", principal.GrantJTI)
 		req.Header.Set("X-AgentoC-Browser-Permissions", strings.Join(principal.Permissions, ","))
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	isUploadChunk := method == http.MethodPatch && strings.HasPrefix(path, "/api/assets/fasset_") && strings.HasSuffix(path, "/upload")
+	isUploadCheckpoint := method == http.MethodGet && strings.HasPrefix(path, "/api/assets/fasset_") && strings.HasSuffix(path, "/upload-checkpoint")
+	timeout := 60 * time.Second
+	if isUploadChunk {
+		// Exceed the control server's 150-second chunk deadline while staying
+		// below the carrier's 180-second deadline, leaving time for a response.
+		timeout = 165 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
 	response, err := client.Do(req)
 	if err != nil {
+		if isUploadChunk || isUploadCheckpoint {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return httpResponse{ID: request.ID, Type: "http_response", Error: "asset_upload_local_timeout"}
+			}
+			return httpResponse{ID: request.ID, Type: "http_response", Error: "asset_upload_local_transport"}
+		}
 		return httpResponse{ID: request.ID, Type: "http_response", Error: err.Error()}
 	}
 	defer response.Body.Close()
@@ -549,6 +587,7 @@ func main() {
 		}
 		generation := peerGeneration.Add(1)
 		isCurrentPeer := func() bool { return peerGeneration.Load() == generation }
+		var activeChannels atomic.Int32
 
 		createdPeer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 			if !isCurrentPeer() {
@@ -576,11 +615,19 @@ func main() {
 				_ = channel.Close()
 				return
 			}
+			// Bound per-peer stream assemblers even when a peer opens channels
+			// with arbitrary labels. Two channels are normally used; extra slots
+			// allow a bulk channel to reconnect while its predecessor closes.
+			if activeChannels.Add(1) > 4 {
+				activeChannels.Add(-1)
+				_ = channel.Close()
+				return
+			}
 			authSession := &browserAuthSession{phase: "AUTHENTICATING"}
 			streamAssembler := newRequestStreamAssembler()
 			bodyStreamAssembler := newRequestBodyStreamAssembler()
 			responseSender := newResponseSender(channel, isCurrentPeer)
-			channel.OnClose(func() { streamAssembler.close(); bodyStreamAssembler.close() })
+			channel.OnClose(func() { streamAssembler.close(); bodyStreamAssembler.close(); activeChannels.Add(-1) })
 			if browserAuth != nil {
 				fmt.Fprintf(os.Stderr, "browser_auth event=datachannel_open state=AUTHENTICATING\n")
 				authSession.timer = time.AfterFunc(browserAuthTimeout, func() {
@@ -602,7 +649,7 @@ func main() {
 				emit(map[string]any{"type": "datachannel_open"})
 				fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_open label=%s\n", channel.Label())
 				ready := map[string]any{"type": "server_ready", "version": 1,
-					"features": []string{"http_request_stream_v1", "http_request_stream_v2", "http_response_stream_v1", "http_bulk_channel_v1"}}
+					"features": []string{"http_request_stream_v1", "http_request_stream_v2", "http_request_binary_chunks_v3", "http_response_stream_v1", "http_bulk_channel_v1"}}
 				if browserAuth != nil {
 					ready["auth"] = "client_auth_v1"
 					fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent state=AUTHENTICATING\n")
@@ -621,22 +668,14 @@ func main() {
 				_ = json.Unmarshal(message.Data, &frameType)
 				streamRequestID := ""
 				if browserAuth != nil {
-					var authMessage struct {
-						Type            string `json:"type"`
-						Version         int    `json:"version"`
-						ConnectionGrant string `json:"connectionGrant"`
-						Proof           struct {
-							Algorithm string `json:"algorithm"`
-							Signature string `json:"signature"`
-						} `json:"proof"`
-					}
-					if json.Unmarshal(message.Data, &authMessage) != nil {
+					authSession.mu.Lock()
+					defer authSession.mu.Unlock()
+					authMessage, err := decodeBrowserAuthMessage(message.Data, message.IsString, authSession.phase)
+					if err != nil {
 						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=malformed_message\n")
 						_ = channel.Close()
 						return
 					}
-					authSession.mu.Lock()
-					defer authSession.mu.Unlock()
 					if authSession.phase != "AUTHENTICATED" {
 						if browserAuthMustGate(authSession.phase, authMessage.Type) {
 							fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=http_before_auth\n")
@@ -688,6 +727,14 @@ func main() {
 						}
 					}
 				}
+				if !message.IsString {
+					id, err := bodyStreamAssembler.addBinary(message.Data)
+					if err != nil && id != "" {
+						encoded, _ := json.Marshal(httpResponse{ID: id, Type: "http_response", Error: "invalid request stream chunk"})
+						_ = channel.SendText(string(encoded))
+					}
+					return
+				}
 				switch frameType.Type {
 				case "http_request_stream_v2_init":
 					var frame httpRequestStreamV2Init
@@ -730,11 +777,10 @@ func main() {
 					}
 					if fault.shouldDrop() {
 						_ = body.Close()
-						_ = os.Remove(body.Name())
 						return
 					}
 					go func() {
-						defer func() { _ = body.Close(); _ = os.Remove(body.Name()) }()
+						defer body.Close()
 						var principal *browserPrincipal
 						if browserAuth != nil {
 							authSession.mu.Lock()
