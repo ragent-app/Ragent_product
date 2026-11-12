@@ -1,12 +1,12 @@
 #!/bin/bash
-# Stop the AgentoC chat server started by the app launcher.
+# Stop the Ragent chat server started by the app launcher.
 set -uo pipefail
 
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
 
 if ! agentoc_source_instance_env; then
-  printf 'Could not read AgentoC instance configuration; no service was stopped\n' >&2
+  printf 'Could not read Ragent instance configuration; no service was stopped\n' >&2
   exit 1
 fi
 
@@ -17,7 +17,7 @@ stop_server_pid() {
   agentoc_is_server_pid "$pid" || return 1
   kill "$pid" 2>/dev/null || {
     if agentoc_is_server_pid "$pid"; then
-      printf 'Could not stop AgentoC chat server (pid %s)\n' "$pid" >&2
+      printf 'Could not stop Ragent chat server (pid %s)\n' "$pid" >&2
       return 1
     fi
     return 0
@@ -27,10 +27,10 @@ stop_server_pid() {
     sleep 0.25
   done
   if agentoc_is_server_pid "$pid"; then
-    printf 'AgentoC chat server did not stop (pid %s)\n' "$pid" >&2
+    printf 'Ragent chat server did not stop (pid %s)\n' "$pid" >&2
     return 1
   fi
-  printf 'AgentoC chat server stopped (pid %s)\n' "$pid"
+  printf 'Ragent chat server stopped (pid %s)\n' "$pid"
 }
 
 pid="$(agentoc_server_pid 2>/dev/null || true)"
@@ -50,13 +50,13 @@ if [ -n "$pids" ]; then
       stop_server_pid "$pid" || exit 1
       stopped=1
     elif agentoc_is_packaged_server_pid "$pid"; then
-      printf 'AgentoC service belongs to another instance or its identity could not be verified; it was not stopped\n' >&2
+      printf 'Ragent service belongs to another instance or its identity could not be verified; it was not stopped\n' >&2
       exit 1
     fi
   done
-  if [ "$stopped" = 0 ]; then printf 'AgentoC chat server is not running\n'; fi
+  if [ "$stopped" = 0 ]; then printf 'Ragent chat server is not running\n'; fi
   exit 0
 fi
 
-printf 'AgentoC chat server is not running\n'
+printf 'Ragent chat server is not running\n'
 exit 0

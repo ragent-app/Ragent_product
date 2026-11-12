@@ -1,5 +1,5 @@
 #!/bin/bash
-# AgentoC.app double-click entry: bootstrap first run, start the local
+# Ragent.app double-click entry: bootstrap first run, start the local
 # chat server if it is not already running, then open the workbench URL.
 set -euo pipefail
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AgentoC CLI shim: run the packaged cli.js with the bundled Node runtime.
+# Ragent CLI shim: run the packaged cli.js with the bundled Node runtime.
 set -euo pipefail
 
 # shellcheck disable=SC1091
