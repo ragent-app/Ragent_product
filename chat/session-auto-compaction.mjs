@@ -28,7 +28,7 @@ export const INTERNAL_SESSION_ROLE_CONTEXT_COMPACTOR = 'context_compactor';
 
 const AUTO_COMPACT_MARKER_TEXT = 'Older messages above this marker are no longer in the model\'s current context. They remain visible in the transcript, but only the compressed handoff and newer messages below are loaded for continued work.';
 const CONTEXT_COMPACTOR_SYSTEM_PROMPT = [
-  'You are AgentoC\'s hidden context compactor for a user-facing session.',
+  'You are Ragent\'s hidden context compactor for a user-facing session.',
   'Your job is to condense older session context into a compact continuation package.',
   'Preserve the task objective, accepted decisions, constraints, completed work, current state, open questions, and next steps.',
   'Do not include raw tool dumps unless a tiny excerpt is essential.',
@@ -222,7 +222,7 @@ function buildQueuedCompactionOperation(sessionId, compactorSessionId, compactio
     phase: 'queued',
     trigger: automatic ? 'automatic' : 'manual',
     title: automatic ? 'Auto Compress queued' : 'Context compaction queued',
-    summary: 'AgentoC started condensing older context into a continuation handoff.',
+    summary: 'Ragent started condensing older context into a continuation handoff.',
     reason: getCompactionTriggerReason(run, { automatic }),
     targetSessionId: sessionId,
     workerSessionId: compactorSessionId,
@@ -237,7 +237,7 @@ function buildFailedCompactionOperation(sessionId, errorMessage, { automatic = f
     phase: 'failed',
     trigger: automatic ? 'automatic' : 'manual',
     title: automatic ? 'Auto Compress failed' : 'Context compaction failed',
-    summary: 'AgentoC could not replace older context with a continuation handoff.',
+    summary: 'Ragent could not replace older context with a continuation handoff.',
     reason: errorMessage,
     targetSessionId: sessionId,
     ...(workerSessionId ? { workerSessionId } : {}),
@@ -272,7 +272,7 @@ function buildFallbackCompactionHandoff(summary, toolIndex) {
     '# Auto Compress',
     '',
     '## Kept in current context',
-    '- AgentoC carried forward a compressed continuation summary for the task.',
+    '- Ragent carried forward a compressed continuation summary for the task.',
   ];
 
   const trimmedSummary = clipCompactionSection(summary, 3000);
@@ -335,7 +335,7 @@ export function buildContextCompactionPrompt({
       ];
 
   return [
-    'You are operating inside AgentoC\'s hidden compaction worker for a parent session.',
+    'You are operating inside Ragent\'s hidden compaction worker for a parent session.',
     `Compaction trigger: ${automatic ? 'automatic auto-compress' : 'manual compact request'}`,
     '',
     ...goalLines,
@@ -807,14 +807,14 @@ async function applyToolOutputTrimPolicy(sessionId, services) {
   const runtimeState = services.ensureSessionRuntimeState(sessionId);
   if (runtimeState.toolOutputTrimActive) return false;
   runtimeState.toolOutputTrimActive = true;
-  const event = statusEvent('Context window at 50% — AgentoC is trimming older tool outputs to conserve tokens.');
+  const event = statusEvent('Context window at 50% — Ragent is trimming older tool outputs to conserve tokens.');
   await services.appendEvent(sessionId, event);
   services.broadcastSessionInvalidation(sessionId);
   return true;
 }
 
 async function applyEmergencyContextClear(sessionId, services) {
-  const event = statusEvent('Context window at 85% — AgentoC is clearing provider context to prevent overflow.');
+  const event = statusEvent('Context window at 85% — Ragent is clearing provider context to prevent overflow.');
   await services.appendEvent(sessionId, event);
   await services.clearPersistedResumeIds(sessionId);
   services.broadcastSessionInvalidation(sessionId);

@@ -29,8 +29,8 @@ const block = buildLocalBridgePromptBlock({
 assert.match(block, /Local Helper Bridge/, 'prompt block should identify the local helper bridge');
 assert.match(block, /Mac Test Helper/, 'prompt block should surface the linked device name');
 assert.match(block, /`projects`/, 'prompt block should surface allowed root aliases');
-assert.match(block, /agentoc local-bridge list/, 'prompt block should include list CLI guidance');
-assert.match(block, /agentoc local-bridge stage/, 'prompt block should include stage CLI guidance');
+assert.match(block, /ragent local-bridge list/, 'prompt block should include list CLI guidance');
+assert.match(block, /ragent local-bridge stage/, 'prompt block should include stage CLI guidance');
 
 console.log('test-local-bridge-prompt: ok');
 

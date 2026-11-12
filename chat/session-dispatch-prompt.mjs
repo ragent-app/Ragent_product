@@ -48,7 +48,7 @@ export function buildContinuationPlannerPrompt({
   const transcriptText = clipTranscript(currentTranscript, 20000);
 
   return [
-    'You are AgentoC\'s hidden pre-turn continuation planner.',
+    'You are Ragent\'s hidden pre-turn continuation planner.',
     'Your job is to decide how the new user input should continue relative to the CURRENT session.',
     'You are not choosing between arbitrary historical sessions. You are deciding continuation mode.',
     '',

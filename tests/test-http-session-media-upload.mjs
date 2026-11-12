@@ -352,11 +352,11 @@ try {
     const followUpPrompt = await waitFor(() => {
       const prompts = readCapturedPrompts(promptFile);
       return prompts.find((entry) => (
-        /AgentoC session continuity handoff for this existing conversation\./.test(entry)
+        /Ragent session continuity handoff for this existing conversation\./.test(entry)
         && /\[Attached files: report\.csv\]/.test(entry)
       )) || false;
     }, 'follow-up prompt with continued attachment path');
-    assert.match(followUpPrompt, /AgentoC session continuity handoff for this existing conversation\./, 'follow-up prompt should include session continuation');
+    assert.match(followUpPrompt, /Ragent session continuity handoff for this existing conversation\./, 'follow-up prompt should include session continuation');
     assert.match(followUpPrompt, /\[Attached files: report\.csv\]/, 'follow-up prompt should carry the public attachment reference without a host path');
 
     const assistantSubmitRes = await submitAssistantMultipartMessage(port, fileSession.id, {

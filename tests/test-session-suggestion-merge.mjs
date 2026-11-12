@@ -31,7 +31,7 @@ writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
 const prompt = process.argv[process.argv.length - 1] || '';
-const isWorkflowPrompt = prompt.includes('You are updating AgentoC workflow state for a developer session.');
+const isWorkflowPrompt = prompt.includes('You are updating Ragent workflow state for a developer session.');
 const isTaskCardPrompt = prompt.includes('You are updating backend-owned task memory for a AgentoC session.');
 let text = 'fallback';
 if (isWorkflowPrompt) {

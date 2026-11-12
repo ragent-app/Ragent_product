@@ -247,7 +247,7 @@ function buildDestinationPromptInput(destination, originalMessage, { multipleDes
   const mode = trimString(destination?.mode) || 'continue';
 
   const privateLines = [
-    'AgentoC continuation planner handoff:',
+    'Ragent continuation planner handoff:',
     `- continuation mode: ${mode}`,
     ...(multipleDestinations ? ['- this user turn was split into multiple downstream destinations'] : []),
     ...(scopeFraming ? [`- scope framing: ${scopeFraming}`] : []),

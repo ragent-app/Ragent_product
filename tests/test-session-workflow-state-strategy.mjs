@@ -21,8 +21,8 @@ const prompt = process.argv[process.argv.length - 1] || '';
 // DS-05: merged suggestions (default on) coalesce task-card and workflow-state
 // into one call whose prompt carries the same strategy rules; the legacy
 // per-kind workflow prompt stays the compatibility path.
-const isMergedPrompt = prompt.includes('You are updating AgentoC backend session memory after a completed turn.');
-const isWorkflowPrompt = prompt.includes('You are updating AgentoC workflow state for a developer session.');
+const isMergedPrompt = prompt.includes('You are updating Ragent backend session memory after a completed turn.');
+const isWorkflowPrompt = prompt.includes('You are updating Ragent workflow state for a developer session.');
 
 function workflowFields(state, priority, reason) {
   return JSON.stringify({

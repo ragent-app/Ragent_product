@@ -24,9 +24,9 @@ writeFileSync(
 const { mkdirSync, writeFileSync } = require('fs');
 const { dirname, join } = require('path');
 const prompt = process.argv[process.argv.length - 1] || '';
-const isWorkflowPrompt = prompt.includes('You are updating AgentoC workflow state for a developer session')
-  || prompt.includes('You are updating AgentoC backend session memory after a completed turn');
-const isReplyReviewPrompt = prompt.includes("You are AgentoC's hidden end-of-turn completion reviewer.");
+const isWorkflowPrompt = prompt.includes('You are updating Ragent workflow state for a developer session')
+  || prompt.includes('You are updating Ragent backend session memory after a completed turn');
+const isReplyReviewPrompt = prompt.includes("You are Ragent's hidden end-of-turn completion reviewer.");
 const isRepairPrompt = prompt.includes('You are continuing the same user-facing reply after a hidden self-check found an avoidable early stop.');
 const prefersContinuationWithoutExplicitBlocker = prompt.includes('no explicit user-side blocker');
 const flagsAnalysisWithoutExecution = prompt.includes('stopping after analysis when execution was still possible');

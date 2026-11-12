@@ -182,7 +182,7 @@ try {
   assert.ok(manifest.includedContextSections.includes('systemContext'));
   assert.equal(manifest.contextRenderer.includedCarrierBySection.systemContext, 'developerInstructions');
   assert.equal(typeof manifest.contextCharCounts.prompt, 'number');
-  assert.match(manifest.developerInstructions || '', /AgentoC system context:/);
+  assert.match(manifest.developerInstructions || '', /Ragent system context:/);
 
   const detail = await waitFor(
     async () => {

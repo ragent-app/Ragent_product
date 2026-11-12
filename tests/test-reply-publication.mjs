@@ -22,7 +22,7 @@ writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
 const prompt = process.argv[process.argv.length - 1] || '';
-const isReplyReviewPrompt = prompt.includes("You are AgentoC's hidden end-of-turn completion reviewer.");
+const isReplyReviewPrompt = prompt.includes("You are Ragent's hidden end-of-turn completion reviewer.");
 const isRepairPrompt = prompt.includes('You are continuing the same user-facing reply after a hidden self-check found an avoidable early stop.');
 const isDelayedContinuationScenario = prompt.includes('延迟续写场景');
 const isDelayedBlockerScenario = prompt.includes('延迟复核场景');

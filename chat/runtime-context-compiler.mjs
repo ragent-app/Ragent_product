@@ -181,7 +181,7 @@ function makeCodexCompiler(runtimeFamily) {
       if (!isNativeResume && facts) {
         developerInstructions = appendBlock(
           developerInstructions,
-          'AgentoC canonical execution facts (authoritative)',
+          'Ragent canonical execution facts (authoritative)',
           facts,
         );
         const transcript = selectedTranscriptText(contextPlan);
@@ -218,12 +218,12 @@ function makeClaudeCompiler(runtimeFamily) {
       const sections = planned?.sections || {};
       const parts = [];
       if (planned?.hasResume !== true) {
-        if (text(sections.systemContext, 140_000)) parts.push(`AgentoC system context:\n${text(sections.systemContext, 140_000)}`);
+        if (text(sections.systemContext, 140_000)) parts.push(`Ragent system context:\n${text(sections.systemContext, 140_000)}`);
         if (text(sections.sourceRuntimePrompt, 140_000)) parts.push(`Source/runtime instructions:\n${text(sections.sourceRuntimePrompt, 140_000)}`);
         if (text(sections.templateInstructions, 140_000)) parts.push(`Template instructions:\n${text(sections.templateInstructions, 140_000)}`);
       }
       if (text(sections.continuationContext, 140_000)) {
-        parts.push(`AgentoC canonical handoff (authoritative facts and bounded evidence):\n${text(sections.continuationContext, 140_000)}`);
+        parts.push(`Ragent canonical handoff (authoritative facts and bounded evidence):\n${text(sections.continuationContext, 140_000)}`);
       }
       if (text(sections.managerTurnContext, 140_000)) parts.push(`<private>\n${text(sections.managerTurnContext, 140_000)}\n</private>`);
       if (text(sections.planArtifact, 140_000)) parts.push(`Current plan artifact:\n${text(sections.planArtifact, 140_000)}`);
@@ -281,7 +281,7 @@ function makeAgyCompiler(runtimeFamily) {
       const planned = attentionContext(context, contextPlan, options);
       const sections = planned?.sections || {};
       const parts = [];
-      if (text(sections.systemContext, 140_000)) parts.push(`AgentoC system context:\n${text(sections.systemContext, 140_000)}`);
+      if (text(sections.systemContext, 140_000)) parts.push(`Ragent system context:\n${text(sections.systemContext, 140_000)}`);
       if (text(sections.sourceRuntimePrompt, 140_000)) parts.push(`Source/runtime instructions:\n${text(sections.sourceRuntimePrompt, 140_000)}`);
       if (text(sections.templateInstructions, 140_000)) parts.push(`Template instructions:\n${text(sections.templateInstructions, 140_000)}`);
       if (text(sections.continuationContext, 140_000)) parts.push(`Canonical semantic handoff:\n${text(sections.continuationContext, 140_000)}`);

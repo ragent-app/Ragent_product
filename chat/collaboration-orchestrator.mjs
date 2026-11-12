@@ -170,7 +170,7 @@ function buildTaskPrompt(task, completedAttempts = []) {
     report: attempt.report,
   }));
   return clip([
-    'You are a bounded specialist in an AgentoC collaboration.',
+    'You are a bounded specialist in an Ragent collaboration.',
     `Task: ${task.objective}`,
     `Task id: ${task.id}`,
     `Acceptance criteria: ${task.acceptance.join('; ') || 'Return a concise result and test evidence.'}`,

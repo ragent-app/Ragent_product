@@ -315,7 +315,7 @@ export function summarizeReplySelfCheckReason(value, fallback = 'the latest repl
 
 export function buildReplySelfCheckPrompt({ userMessage, assistantTurnText }) {
   return [
-    'You are AgentoC\'s hidden end-of-turn completion reviewer.',
+    'You are Ragent\'s hidden end-of-turn completion reviewer.',
     'Judge only whether the latest assistant reply stopped too early for the current user turn.',
     'Unless the reply clearly completed the requested work or hit a real blocker, prefer "continue".',
     'Judge branch-first: the question is not "should the assistant continue?" but "does a real logical fork or forced human checkpoint require the user right now?"',

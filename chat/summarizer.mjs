@@ -1093,7 +1093,7 @@ async function runSessionWorkflowStateSuggestion(sessionMeta, options = {}) {
   const currentWorkflowPriority = normalizeSessionWorkflowPriority(workflowPriority || '');
 
   const prompt = [
-    'You are updating AgentoC workflow state for a developer session.',
+    'You are updating Ragent workflow state for a developer session.',
     'Low-visibility workflow states must be assigned very conservatively because they push the session lower in the sidebar.',
     'Use a two-step decision:',
     '1. First decide whether the latest turn supports a high-confidence durable low-visibility state at all.',
@@ -1220,7 +1220,7 @@ async function runSessionTaskCardSuggestion(sessionMeta, options = {}) {
 
   const currentTaskCard = formatTaskCardForPrompt(taskCard);
   const prompt = [
-    'You are updating backend-owned task memory for a AgentoC session.',
+    'You are updating backend-owned task memory for a Ragent session.',
     'This task card is hidden state, not user-facing prose.',
     'Update it after the latest turn using stable facts, not speculative filler.',
     'Keep it concise, cumulative, and easy for the main assistant to reuse next turn.',
@@ -1376,7 +1376,7 @@ function buildMergedSuggestionPrompt(context) {
   } = context;
 
   return [
-    'You are updating AgentoC backend session memory after a completed turn.',
+    'You are updating Ragent backend session memory after a completed turn.',
     'Low-visibility workflow states must be assigned very conservatively because they push the session lower in the sidebar.',
     'Use a two-step decision:',
     '1. First decide whether the latest turn supports a high-confidence durable low-visibility state at all.',

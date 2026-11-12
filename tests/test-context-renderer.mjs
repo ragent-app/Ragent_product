@@ -31,7 +31,7 @@ assert.match(freshRender.prompt, /<private>\nManager context\.\n<\/private>/);
 assert.match(freshRender.prompt, /User message:\nDo the work\./);
 assert.match(freshRender.prompt, /Share-link security notice for this turn/);
 assert.doesNotMatch(freshRender.prompt, /^System context\./);
-assert.match(freshRender.developerInstructions, /AgentoC system context:\nSystem context\./);
+assert.match(freshRender.developerInstructions, /Ragent system context:\nSystem context\./);
 assert.match(freshRender.developerInstructions, /Source\/runtime instructions:\nSource runtime instructions\./);
 assert.match(freshRender.developerInstructions, /Template instructions:\nTemplate instructions\./);
 assert.equal(freshRender.metadata.rendererVersion, CONTEXT_RENDERER_VERSION);

@@ -255,7 +255,7 @@ const checkpointEnvelope = await buildPromptEnvelope(
 assert.match(checkpointEnvelope.prompt, /AgentoC continuity checkpoint/);
 assert.match(checkpointEnvelope.prompt, /Repair the durable continuity path/);
 assert.match(checkpointEnvelope.freshRecoveryPrompt, /AgentoC continuity checkpoint/);
-assert.match(checkpointEnvelope.freshRecoveryDeveloperInstructions, /AgentoC system context:/);
+assert.match(checkpointEnvelope.freshRecoveryDeveloperInstructions, /Ragent system context:/);
 assert.match(checkpointEnvelope.freshRecoveryDeveloperInstructions, /TEMPLATE_INSTRUCTIONS/);
 assert.equal(checkpointEnvelope.metadata.runtimeContextCompiler, 'runtime-context-compiler-v1');
 assert.equal(checkpointEnvelope.metadata.contextPlanMode, 'compatibility-shadow');

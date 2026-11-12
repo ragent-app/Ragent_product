@@ -299,7 +299,7 @@ assert.equal(submitted[0].sessionId, 'session-source', 'first submission should 
 assert.equal(submitted[0].options.recordedUserText, '把 planner schema 定下来。', 'current session should record only its scoped user slice');
 assert.equal(submitted[1].sessionId, 'child-1', 'second submission should target the fresh child session');
 assert.equal(submitted[1].options.requestId, 'derived-fresh-1', 'child session should receive a derived request id');
-assert.match(submitted[1].text, /AgentoC continuation planner handoff:/, 'child session prompt input should include a private planner handoff');
+assert.match(submitted[1].text, /Ragent continuation planner handoff:/, 'child session prompt input should include a private planner handoff');
 assert.equal(submitted[1].options.recordedUserText, '整理下周出差行程。', 'child session should record only its scoped user slice');
 
 assert.equal(broadcastedSessionId, 'session-source', 'source session should be invalidated after appending the continuation notice');

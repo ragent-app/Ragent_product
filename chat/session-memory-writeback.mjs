@@ -89,7 +89,7 @@ export function buildMemoryWritebackPrompt({
 }) {
   const availableTargets = Array.isArray(targets) ? targets : [];
   return [
-    'You are AgentoC\'s hidden post-turn memory reviewer.',
+    'You are Ragent\'s hidden post-turn memory reviewer.',
     'Evaluate whether the just-completed conversation turn produced any durable, reusable knowledge worth persisting.',
     '',
     'What counts as worth persisting:',

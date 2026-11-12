@@ -7,13 +7,13 @@ const {
 } = await import('../chat/session-continuation.mjs');
 
 const defaultContext = buildSessionContinuationContextFromBody('[User]\ncontinue');
-assert.match(defaultContext, /AgentoC session continuity handoff for this existing conversation/);
+assert.match(defaultContext, /Ragent session continuity handoff for this existing conversation/);
 
 const switchedContext = buildSessionContinuationContextFromBody('[User]\ncontinue', {
   fromTool: 'claude',
   toTool: 'codex',
 });
-assert.match(switchedContext, /AgentoC session continuity handoff: the user switched tools from claude to codex/);
+assert.match(switchedContext, /Ragent session continuity handoff: the user switched tools from claude to codex/);
 
 const attachmentBody = prepareSessionContinuationBody([
   {

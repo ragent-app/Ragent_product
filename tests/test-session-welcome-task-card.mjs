@@ -18,7 +18,7 @@ writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
 const prompt = process.argv[process.argv.length - 1] || '';
-const isWorkflowPrompt = prompt.includes('You are updating AgentoC workflow state');
+const isWorkflowPrompt = prompt.includes('You are updating Ragent workflow state');
 const text = isWorkflowPrompt
   ? JSON.stringify({ workflowState: 'done', workflowPriority: 'low', reason: 'turn completed' })
   : [

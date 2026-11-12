@@ -20,8 +20,8 @@ writeFileSync(
 const prompt = process.argv[process.argv.length - 1] || '';
 // DS-05: merged suggestions (default on) coalesce task-card and workflow-state
 // into one call; the legacy per-kind prompts stay the compatibility path.
-const isMergedPrompt = prompt.includes('You are updating AgentoC backend session memory after a completed turn.');
-const isWorkflowPrompt = prompt.includes('You are updating AgentoC workflow state');
+const isMergedPrompt = prompt.includes('You are updating Ragent backend session memory after a completed turn.');
+const isWorkflowPrompt = prompt.includes('You are updating Ragent workflow state');
 const isTaskCardPrompt = prompt.includes('You are updating backend-owned task memory for a AgentoC session.');
 const text = isMergedPrompt
   ? JSON.stringify({

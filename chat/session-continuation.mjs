@@ -157,8 +157,8 @@ function buildContinuationIntro(options = {}) {
   const toTool = options.toTool || '';
   const switchedTools = fromTool && toTool && fromTool !== toTool;
   return switchedTools
-    ? `AgentoC session continuity handoff: the user switched tools from ${fromTool} to ${toTool}.`
-    : 'AgentoC session continuity handoff for this existing conversation.';
+    ? `Ragent session continuity handoff: the user switched tools from ${fromTool} to ${toTool}.`
+    : 'Ragent session continuity handoff for this existing conversation.';
 }
 
 export function prepareSessionContinuationBody(events) {
@@ -177,7 +177,7 @@ export function buildSessionContinuationContextFromBody(body, options = {}) {
 
   return [
     buildContinuationIntro(options),
-    'Below is the prior session state reconstructed from AgentoC\'s normalized history.',
+    'Below is the prior session state reconstructed from Ragent\'s normalized history.',
     'Treat it as the authoritative context for continuing this same session.',
     '',
     normalizedBody,
