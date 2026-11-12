@@ -248,6 +248,9 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - Windows 当前会话资产登记桥接现接受 PowerShell 未加引号的 `/api/sessions/$env:AGENTOC_SESSION_ID/assets`，仍固定当前会话、本机服务和经检查的文件。两条历史请求的只读回放现匹配桥接，目标文件存在且读取判断允许；未执行历史请求。真实 Claude 和 Codex CLI 在推荐与全自动两种模式下，通过本地模拟模型和模拟会话服务完成工作区外隔离文件登记；桥接、错误引号及跨会话边界测试通过。未使用官方模型额度，改动尚未部署，也不能据两条记录估算整体通过率。
 
+- 2026-11-12 构建并安装 Windows 提交 `a270ecf7`，公开版本 `0.0.1`、内部 MSI 版本 `0.0.72`，EXE SHA-256 `2f287f0bf0469c246863fc396dd68e1b77c33eeb91b854da2db55ee642684678`；MSI 返回 0，正式服务 ready，安装的资产桥接文件与提交一致。使用正式服务、真实 Claude/Codex 和本机模拟模型，未加引号的当前会话资产登记在两种模式中均自动执行并返回资产 ID；隔离敏感目录删除在 recommended 进入审批，在 full-auto 自动拒绝。三星正式应用连接 Windows 实例，分别对真实 Claude 和 Codex 的危险请求点按拒绝，CLI 均收到拒绝、隔离文件完整，手机审批卡随后消失；临时测试会话与 provider 经 API 清理。
+- 上述手机 Claude 验收的前两次事件读取分别遇 `OBD_ENDPOINT_UNAVAILABLE` 和 `OBC_DEADLINE_INVALID`，未能完成全链路确认；降低只读轮询频率并对只读请求重试后完成。Codex 一次危险请求拒绝提交遇 `OBC_DEADLINE_INVALID`，隔离 Run 之后经 API 取消并删除会话，后续三星真实交互通过。通道错误的根因尚未查明，不把重试成功视为故障已修复；上述指定用例也不能推算生产总体审批频率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
