@@ -1,5 +1,5 @@
-// Local-only device acceptance fixture. The HTTP carrier is a test adapter;
-// risk classification and approval queuing are the production components.
+// Local-only device acceptance fixture. Event delivery and owner identity are
+// test adapters; the approval POST route, risk gate and queue are production.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -23,7 +23,7 @@ process.env.AGENTOC_RUN_SPOOL_DIR = path.join(instance, 'data', 'chat-runs');
 
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest, trackCodexAppServerApprovalRequest } = await import('../chat/runner-sidecar.mjs');
-const { submitRuntimeApproval } = await import('../chat/session-manager.mjs');
+const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
 const sessionId = 'samsung-fixture';
 const groupedCodex = process.env.AGENTOC_SAMSUNG_APPROVAL_GROUP === '1';
 const tool = groupedCodex ? 'codex' : 'claude';
@@ -67,15 +67,20 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && url.pathname === `/api/runs/${encodeURIComponent(run.id)}/approvals/${encodeURIComponent(approvalId)}`) {
-      let body = ''; for await (const part of req) body += part;
-      const request = JSON.parse(body);
-      assert.equal(request.decision, 'deny');
-      await submitRuntimeApproval(run.id, approvalId, { decision: request.decision, requestId: request.requestId });
+      let routeStatus = 0; let routeBody;
+      const handled = await handleSessionMainRoutes({ req, res, pathname: url.pathname,
+        parsedUrl: { pathname: url.pathname, query: Object.fromEntries(url.searchParams) },
+        authSession: { role: 'owner', principalKind: 'trusted_device' },
+        requireSessionAccess: async (_response, _auth, requestedSession) => requestedSession === sessionId,
+        writeJson: (_response, status, body) => { routeStatus = status; routeBody = body; },
+      });
+      assert.equal(handled, true); assert.equal(routeStatus, 202);
+      assert.equal(routeBody?.approval?.decision, 'deny');
       const current = await getRun(run.id);
       assert.equal(current.appServerApprovalResponseQueue.filter(entry => pending.some(item => item.approvalId === entry.approvalId)
         && entry.decision === 'deny').length, pending.length);
       queued = true;
-      res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+      res.writeHead(routeStatus, { 'content-type': 'application/json' }).end(JSON.stringify(routeBody));
       return;
     }
     if (req.method === 'GET' && url.pathname === '/fixture/status') {
