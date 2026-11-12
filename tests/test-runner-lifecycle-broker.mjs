@@ -96,6 +96,7 @@ try {
       DISPLAY: ':1',
       XAUTHORITY: '/run/user/1000/gdm/Xauthority',
       XDG_RUNTIME_DIR: '/run/user/1000',
+      AGENTOC_RUNNER_ACCESS_DIR: '/srv/custom-access-state',
     },
   });
   assert.ok(args.includes('--slice'));
@@ -119,6 +120,7 @@ try {
   assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('docker')), false, 'docker must never reach the transient unit');
   assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('agentoc-privileged')), false, 'privileged executor group must never reach the transient unit');
   assert.ok(args.includes('NoNewPrivileges=false'), 'provider Runs must not inherit NoNewPrivileges');
+  assert.ok(args.includes('AGENTOC_RUNNER_ACCESS_DIR=/srv/custom-access-state'), 'cleanup must use the configured state store');
   assert.equal(args.includes('NoNewPrivileges=true'), false, 'provider Runs must not set NoNewPrivileges=true');
   const protectedArgs = buildLifecycleSystemdArgs('run_abc12345', { scopeProtection: true });
   assert.ok(protectedArgs.includes('NoNewPrivileges=true'), 'privileged scope cannot gain OS privileges');

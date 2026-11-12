@@ -19,6 +19,7 @@ import { execFile as execFileCallback } from 'child_process';
 import { createHash, randomBytes } from 'crypto';
 import {
   mkdir,
+  lstat,
   open,
   readFile,
   readdir,
@@ -29,11 +30,13 @@ import {
   writeFile,
 } from 'fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
-import { promisify } from 'util';
+import { isDeepStrictEqual, promisify } from 'util';
 
 const execFileAsync = promisify(execFileCallback);
 
-export const RUNNER_ACCESS_ROOT = process.env.AGENTOC_RUNNER_ACCESS_DIR || '/run/agentoc-runner-access';
+const DEFAULT_ACCESS_ROOT = '/var/lib/agentoc-runner-access';
+const LEGACY_ACCESS_ROOT = '/run/agentoc-runner-access';
+export const RUNNER_ACCESS_ROOT = process.env.AGENTOC_RUNNER_ACCESS_DIR || DEFAULT_ACCESS_ROOT;
 export const RUN_ID_RE = /^run_[A-Za-z0-9_-]{8,128}$/;
 const GROUP_NAME_PREFIX = 'aor-';
 const GROUP_NAME_RE = /^aor-[a-f0-9]{16}$/;
@@ -176,6 +179,60 @@ async function withLock(task, {
   } finally {
     await rmImpl(lock, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function legacyRootFor(accessRoot) {
+  return !process.env.AGENTOC_RUNNER_ACCESS_DIR && accessRoot === DEFAULT_ACCESS_ROOT ? LEGACY_ACCESS_ROOT : '';
+}
+
+async function ensureTrustedRootStore(path) {
+  if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !isAbsolute(path) || resolve(path) !== path) {
+    throw new Error('Invalid root-owned workspace access store');
+  }
+  const parents = [];
+  for (let current = dirname(path); ; current = dirname(current)) {
+    parents.push(current);
+    if (current === dirname(current)) break;
+  }
+  for (const parent of parents) {
+    const item = await lstat(parent);
+    if (!item.isDirectory() || item.isSymbolicLink() || item.uid !== 0 || (item.mode & 0o022)) {
+      throw new Error('Untrusted workspace access store parent');
+    }
+  }
+  await mkdir(path, { mode: ACCESS_ROOT_MODE, recursive: true });
+  const item = await lstat(path);
+  if (!item.isDirectory() || item.isSymbolicLink() || item.uid !== 0 || item.gid !== 0 ||
+      (item.mode & 0o7777) !== ACCESS_ROOT_MODE || await realpath(path) !== path) {
+    throw new Error('Untrusted workspace access store');
+  }
+}
+
+// Old and new processes use the same legacy lock while live records migrate.
+// Publish each durable copy before deleting its old copy; mismatches fail
+// closed rather than guessing which record is newer.
+async function withStoreLock(task, { accessRoot, legacyRoot = legacyRootFor(accessRoot) }) {
+  if (!legacyRoot) return withLock(task, { accessRoot });
+  if (legacyRoot === accessRoot) throw new Error('Workspace access stores must differ');
+  await ensureTrustedRootStore(legacyRoot);
+  await ensureTrustedRootStore(accessRoot);
+  return withLock(() => withLock(async () => {
+    await listStates(accessRoot);
+    for (const state of await listStates(legacyRoot)) {
+      const existing = await readState(state.runId, { accessRoot });
+      if (existing && !isDeepStrictEqual(existing, state)) throw new Error('Conflicting workspace access migration state');
+      if (!existing) await writeState(state, { accessRoot });
+      await rm(statePath(state.runId, legacyRoot));
+    }
+    return task();
+  }, { accessRoot }), { accessRoot: legacyRoot });
+}
+
+async function currentBootId() {
+  if (process.platform !== 'linux') return null;
+  const value = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+  if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(value)) throw new Error('Cannot establish Linux boot identity');
+  return value;
 }
 
 function assertSafeAbsolutePath(value, label) {
@@ -358,11 +415,13 @@ async function listStates(accessRoot = RUNNER_ACCESS_ROOT) {
   }
   const states = [];
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith('run_') || !entry.name.endsWith('.json')) continue;
+    if (!entry.name.startsWith('run_') || !entry.name.endsWith('.json')) continue;
+    if (!entry.isFile()) throw new Error('Invalid runner workspace access state file');
     const state = JSON.parse(await readFile(`${accessRoot}/${entry.name}`, 'utf8'));
     if (state?.runId !== entry.name.slice(0, -'.json'.length) || !normalizeRunId(state.runId) ||
         !GROUP_NAME_RE.test(state.group || '') || (state.released !== undefined && typeof state.released !== 'boolean') ||
-        (state.cleanupComplete !== undefined && typeof state.cleanupComplete !== 'boolean')) {
+          (state.cleanupComplete !== undefined && typeof state.cleanupComplete !== 'boolean') ||
+          (state.bootId !== undefined && state.bootId !== null && !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(state.bootId))) {
       throw new Error('Invalid runner workspace access state');
     }
     buildGrantPlan(state); // Reject malformed paths rather than deleting a shared group.
@@ -398,12 +457,14 @@ export async function grantRunnerWorkspaceAccess({
   cwd,
   workspaceRoot,
   accessRoot = RUNNER_ACCESS_ROOT,
+  legacyRoot = legacyRootFor(accessRoot),
   execImpl = execFileAsync,
   validateImpl = validateWorkspaceScope,
+  bootIdImpl = currentBootId,
 } = {}) {
   const normalized = normalizeRunId(runId);
   if (!normalized) throw new Error('Invalid Run id');
-  return withLock(async () => {
+  return withStoreLock(async () => {
     const validated = await validateImpl({ cwd, workspaceRoot });
     const states = await listStates(accessRoot);
     if (states.some((state) => state.runId === normalized && state.released === true)) {
@@ -414,7 +475,7 @@ export async function grantRunnerWorkspaceAccess({
       && resolve(state.cwd || '') === validated.cwd
       && GROUP_NAME_RE.test(state.group || ''));
     const group = existing?.group || runnerAccessGroupForRun(normalized);
-    const plan = buildGrantPlan({ runId: normalized, ...validated, group });
+    const plan = { ...buildGrantPlan({ runId: normalized, ...validated, group }), bootId: await bootIdImpl() };
     await ensureGroup(group, execImpl);
     await writeState(plan, { accessRoot });
     if (existing) return plan;
@@ -441,7 +502,7 @@ export async function grantRunnerWorkspaceAccess({
       await cleanupReleasedGroup([{ ...plan, released: true }], { accessRoot, execImpl }).catch(() => {});
       throw new Error(`Failed to grant runner workspace access: ${error?.message || String(error)}`);
     }
-  }, { accessRoot });
+  }, { accessRoot, legacyRoot });
 }
 
 async function removeAclFromWorkspace(state, execImpl, { timeoutMs = ACL_COMMAND_TIMEOUT_MS } = {}) {
@@ -477,12 +538,13 @@ async function cleanupReleasedGroup(states, {
 export async function revokeRunnerWorkspaceAccess({
   runId,
   accessRoot = RUNNER_ACCESS_ROOT,
+  legacyRoot = legacyRootFor(accessRoot),
   execImpl = execFileAsync,
   releasedOnly = false,
 } = {}) {
   const normalized = normalizeRunId(runId);
   if (!normalized) throw new Error('Invalid Run id');
-  return withLock(async () => {
+  return withStoreLock(async () => {
     const state = await readState(normalized, { accessRoot });
     if (!state) return { runId: normalized, revoked: false };
     if (releasedOnly && state.released !== true) return { runId: normalized, revoked: false };
@@ -490,35 +552,40 @@ export async function revokeRunnerWorkspaceAccess({
     const references = (await listStates(accessRoot)).filter((candidate) => candidate.group === state.group);
     if (!references.some((candidate) => !candidate.released)) await cleanupReleasedGroup(references, { accessRoot, execImpl });
     return { runId: normalized, revoked: true, group: state.group };
-  }, { accessRoot });
+  }, { accessRoot, legacyRoot });
 }
 
-export function createRunnerWorkspaceCleanupSweep({ accessRoot = RUNNER_ACCESS_ROOT, execImpl = execFileAsync } = {}) {
+export function createRunnerWorkspaceCleanupSweep({ accessRoot = RUNNER_ACCESS_ROOT, legacyRoot = legacyRootFor(accessRoot),
+  execImpl = execFileAsync, bootIdImpl = currentBootId } = {}) {
   let cursor = 0;
   return async ({ limit = 8 } = {}) => {
-    const pending = (await listStates(accessRoot)).filter(state => state.released === true);
+    const pending = await withStoreLock(async () => {
+      const bootId = await bootIdImpl();
+      const states = await listStates(accessRoot);
+      for (const state of states) {
+        // A task cannot survive a reboot. Old records without a boot identity
+        // remain untouched because their launch provenance is unknown.
+        if (bootId && state.bootId && state.bootId !== bootId && !state.released) {
+          state.released = true;
+          await writeState(state, { accessRoot });
+        }
+      }
+      return states.filter(state => state.released === true);
+    }, { accessRoot, legacyRoot });
     const count = Math.min(pending.length, Math.max(1, Math.min(100, Math.floor(limit) || 8)));
     const batch = Array.from({ length: count }, (_, i) => pending[(cursor + i) % pending.length]);
     if (pending.length) cursor = (cursor + count) % pending.length;
     let failed = 0;
     for (const state of batch) {
-      try { await revokeRunnerWorkspaceAccess({ runId: state.runId, accessRoot, execImpl, releasedOnly: true }); }
+      try { await revokeRunnerWorkspaceAccess({ runId: state.runId, accessRoot, legacyRoot, execImpl, releasedOnly: true }); }
       catch { failed++; }
     }
     return { attempted: count, failed };
   };
 }
 
-export async function listRunnerWorkspaceAccess({ accessRoot = RUNNER_ACCESS_ROOT } = {}) {
-  try {
-    const entries = await readdir(accessRoot, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.startsWith('run_') && entry.name.endsWith('.json'))
-      .map((entry) => entry.name.slice(0, -'.json'.length));
-  } catch (error) {
-    if (error?.code === 'ENOENT') return [];
-    throw error;
-  }
+export async function listRunnerWorkspaceAccess({ accessRoot = RUNNER_ACCESS_ROOT, legacyRoot = legacyRootFor(accessRoot) } = {}) {
+  return withStoreLock(async () => (await listStates(accessRoot)).map(state => state.runId), { accessRoot, legacyRoot });
 }
 
 async function main() {

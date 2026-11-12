@@ -445,7 +445,9 @@ export function buildLifecycleSystemdArgs(runId, {
   // paths are not allowlisted and the strip gate below drops them even if the
   // broker environment carries them.  Secrets remain inherited from the
   // broker's EnvironmentFile and are never placed in argv.
-  const inheritedKeys = [...RUNNER_ENV_ALLOWLIST, 'HOME'];
+  // ExecStopPost must use the same root-owned state store as the broker when
+  // an operator overrides it. This value is a path, not an authorization token.
+  const inheritedKeys = [...RUNNER_ENV_ALLOWLIST, 'HOME', 'AGENTOC_RUNNER_ACCESS_DIR'];
   const inheritedEnv = stripDeniedRunnerEnvKeys(
     Object.fromEntries(
       inheritedKeys
