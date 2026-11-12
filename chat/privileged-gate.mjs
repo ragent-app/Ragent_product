@@ -200,6 +200,20 @@ function hasAmbiguousCommandArgv(approval) {
     || command.some((part) => typeof part !== 'string' || !/^[A-Za-z0-9_./:@=+%,-]+$/.test(part)));
 }
 
+// A provider may wrap a single command in a shell even though the executor
+// cannot authorize shells. Recognize only a literal, single-target removal:
+// no expansions, options, relative paths, path traversal or extra commands.
+// The extracted command is what the owner reviews and what the executor signs;
+// the original provider request remains blocked after managed execution.
+function unwrapLiteralLinuxSudoRemoval(command, platform) {
+  if (platform !== 'linux' || typeof command !== 'string') return '';
+  const match = /^\/bin\/(?:bash|sh) -c (['"])sudo (rm (\/[A-Za-z0-9_.\/-]+))\1$/.exec(command);
+  if (!match) return '';
+  const segments = match[3].slice(1).split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return '';
+  return match[2];
+}
+
 // Pull the shell command out of a gate request. The two runtimes shape this
 // differently:
 //   Claude bidi        — { tool_name: 'Bash', input: { command } }
@@ -272,6 +286,9 @@ export function decidePrivilegedGate(approval, options = {}) {
   }
 
   const realCommand = sentinel?.valid ? sentinel.realCommand : command;
+  const unwrappedRemoval = !sentinel?.valid
+    ? unwrapLiteralLinuxSudoRemoval(command, options.platform || process.platform)
+    : '';
   const classification = classifyPrivilegedOperation({
     command: realCommand,
     declaredCategory: sentinel?.declaredCategory,
@@ -280,7 +297,7 @@ export function decidePrivilegedGate(approval, options = {}) {
 
   // The two real privilege signals: an explicit sentinel declaration, or an
   // actual sudo invocation the agent did not declare.
-  const isPrivileged = Boolean(sentinel?.valid) || classification.sawSudo === true;
+  const isPrivileged = Boolean(sentinel?.valid || unwrappedRemoval) || classification.sawSudo === true;
   if (!isPrivileged) {
     return {
       decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
@@ -296,13 +313,13 @@ export function decidePrivilegedGate(approval, options = {}) {
     sentinel: sentinel || null,
     op: {
       approvalId: approval.approvalId,
-      command: realCommand,
+      command: unwrappedRemoval || realCommand,
       declaredCategory: sentinel?.declaredCategory || '',
       description: sentinel?.description || '',
       cwd: trimString(options.cwd),
       // Kept so the resolve slice (P1c-6) can rewrite `updatedInput.command`
       // to the real command and drop the sentinel wrapper.
-      wrapperCommand: sentinel?.valid ? command : '',
+      wrapperCommand: sentinel?.valid || unwrappedRemoval ? command : '',
     },
   };
 }
@@ -372,6 +389,9 @@ export function decideRiskGate(approval, options = {}) {
       reason: `malformed sentinel (${sentinel.malformedReason || 'unparseable'})`, command, sentinel };
   }
   const realCommand = sentinel?.valid ? sentinel.realCommand : command;
+  const unwrappedRemoval = !sentinel?.valid && (!toolName || toolName === 'Bash')
+    ? unwrapLiteralLinuxSudoRemoval(command, options.platform || process.platform)
+    : '';
   const declaredCategory = sentinel?.valid ? trimString(sentinel.declaredCategory) : '';
 
   const risk = classifyRisk({
@@ -449,14 +469,14 @@ export function decideRiskGate(approval, options = {}) {
     };
   }
 
-  if (!sentinel?.valid && risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
+  if (!sentinel?.valid && !unwrappedRemoval && risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
     return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; safe mode requires owner approval`, command, risk };
   }
 
   // A declared managed action must never auto-allow its provider shell just
   // because the extracted inner command looks benign. Shell text before or
   // around the separator may have unrelated effects.
-  const shouldAccumulate = Boolean(sentinel?.valid) || risk.tier === RISK_TIER.DANGER
+  const shouldAccumulate = Boolean(sentinel?.valid || unwrappedRemoval) || risk.tier === RISK_TIER.DANGER
     || risk.signals?.needsPrivilegedExecution === true;
 
   if (!shouldAccumulate) {
@@ -471,11 +491,11 @@ export function decideRiskGate(approval, options = {}) {
     sentinel: sentinel || null,
     op: {
       approvalId: approval.approvalId,
-      command: realCommand,
+      command: unwrappedRemoval || realCommand,
       declaredCategory,
       description: sentinel?.description || '',
       cwd: trimString(options.cwd),
-      wrapperCommand: sentinel?.valid ? command : '',
+      wrapperCommand: sentinel?.valid || unwrappedRemoval ? command : '',
       risk,
     },
   };

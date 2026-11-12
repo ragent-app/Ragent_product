@@ -10,6 +10,8 @@ import {
   isUserFacingGateKind,
   readGateCommand,
 } from '../chat/privileged-gate.mjs';
+import { buildPrivilegedBatch, defaultSelectedOpIds, privilegedBatchRequestEvent } from '../chat/privileged-ops.mjs';
+import { verifyPrivilegedExecutableScope } from '../chat/privileged-token.mjs';
 
 let passed = 0;
 function check(label, condition) {
@@ -82,6 +84,45 @@ for (const argv of [
     eq(`ambiguous argv requires review in ${riskMode}: ${JSON.stringify(argv)}`,
       decideRiskGate(codexApproval(argv), { riskMode }).decision, PRIVILEGED_GATE_DECISION.PROMPT);
   }
+}
+
+// Only the exact literal operation is offered to the owner and signed for
+// execution; shell syntax and unmodeled forms remain on the rejecting path.
+{
+  const wrapped = "/bin/bash -c 'sudo rm /var/lib/ragent-qa/fixture'";
+  const decision = decideRiskGate(codexApproval(wrapped), { riskMode: 'safe', platform: 'linux' });
+  eq('literal Linux removal is held for managed review', decision.decision, PRIVILEGED_GATE_DECISION.ACCUMULATE);
+  eq('review and executor receive the exact direct removal', decision.op.command, 'rm /var/lib/ragent-qa/fixture');
+  eq('original provider request retained', decision.op.wrapperCommand, wrapped);
+  const legacy = decidePrivilegedGate(codexApproval(wrapped), { privilegedMode: true, platform: 'linux' });
+  eq('legacy mode holds literal sudo removal', legacy.decision, PRIVILEGED_GATE_DECISION.ACCUMULATE);
+  eq('legacy mode binds direct removal', legacy.op.command, 'rm /var/lib/ragent-qa/fixture');
+  const expanded = codexApproval(wrapped);
+  expanded.params.additionalPermissions = { network: true };
+  eq('additional capability requests still require ordinary review',
+    decideRiskGate(expanded, { riskMode: 'safe', platform: 'linux' }).decision, PRIVILEGED_GATE_DECISION.PROMPT);
+  const batch = buildPrivilegedBatch({ runId: 'run-test', turnId: 'turn-test', ops: [decision.op] });
+  eq('removal classified as delete', batch.delete.length, 1);
+  const event = privilegedBatchRequestEvent(batch, { platform: 'linux' });
+  eq('approval event retains direct operation', event.delete[0].command, 'rm /var/lib/ragent-qa/fixture');
+  eq('removal is not selected by default', defaultSelectedOpIds(batch.delete[0].category, batch.delete), []);
+  check('the executor accepts the reviewed direct command', verifyPrivilegedExecutableScope({ command: event.delete[0].command }));
+  check('the executor rejects the original shell wrapper', !verifyPrivilegedExecutableScope({ command: wrapped }));
+  for (const unsafe of [
+    "/bin/bash -c 'rm /tmp/a'",
+    "/bin/bash -c 'sudo rm /tmp/a; touch /tmp/b'",
+    "/bin/bash -c 'sudo rm /tmp/$(touch /tmp/b)'",
+    "/bin/bash -c 'sudo rm /tmp/*'",
+    "/bin/bash -c 'sudo rm /tmp/../etc/file'",
+    "/bin/bash -c 'sudo rm /tmp/a' -- extra",
+    "/bin/bash -c 'sudo rm -rf /tmp/a'",
+    "/bin/bash -c 'sudo rm /tmp/a' > /tmp/b",
+  ]) {
+    const result = decideRiskGate(codexApproval(unsafe), { riskMode: 'safe', platform: 'linux' });
+    check(`unsafe wrapper is never converted: ${unsafe}`, !result.op || result.op.command === unsafe);
+  }
+  const mac = decideRiskGate(codexApproval(wrapped), { riskMode: 'safe', platform: 'darwin' });
+  eq('macOS wrapper is not converted', mac.op.command, wrapped);
 }
 
 // --- gated permission-mode recognition (plan/on-request emit per-tool requests) ---
