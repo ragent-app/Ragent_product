@@ -120,6 +120,9 @@ try {
   assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('agentoc-privileged')), false, 'privileged executor group must never reach the transient unit');
   assert.ok(args.includes('NoNewPrivileges=false'), 'provider Runs must not inherit NoNewPrivileges');
   assert.equal(args.includes('NoNewPrivileges=true'), false, 'provider Runs must not set NoNewPrivileges=true');
+  const protectedArgs = buildLifecycleSystemdArgs('run_abc12345', { scopeProtection: true });
+  assert.ok(protectedArgs.includes('NoNewPrivileges=true'), 'privileged scope cannot gain OS privileges');
+  assert.equal(protectedArgs.includes('NoNewPrivileges=false'), false);
   assert.equal(args.at(-1), 'run_abc12345');
   assert.deepEqual(
     resolveRunnerResourceProfile({ options: { resourceProfile: 'emulator' } }),

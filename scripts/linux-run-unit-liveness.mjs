@@ -46,6 +46,8 @@ export function parseLinuxRunProcessIdentity(status, stat, expectedUid) {
     const lines = status.split('\n').filter((line) => line.startsWith('Uid:'));
     const fields = lines.length === 1 ? lines[0].slice(4).trim().split(/\s+/) : [];
     if (fields.length !== 4 || fields.some((field) => !/^\d+$/.test(field) || Number(field) !== expectedUid)) return null;
+    const noNewPrivileges = status.split('\n').filter((line) => line.startsWith('NoNewPrivs:'));
+    if (noNewPrivileges.length !== 1 || noNewPrivileges[0].slice('NoNewPrivs:'.length).trim() !== '1') return null;
     // comm is parenthesized and can itself contain spaces and parentheses.
     const close = stat.lastIndexOf(')');
     const rest = close < 0 ? [] : stat.slice(close + 1).trim().split(/\s+/);

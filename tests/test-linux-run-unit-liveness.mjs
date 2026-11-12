@@ -15,12 +15,16 @@ test('a unit must match the recorded launch generation and systemd invocation', 
   assert.equal(matchesLinuxRunUnitState(`${state}MainPID=123\n`, expected), false);
   assert.equal(matchesLinuxRunUnitState(state, { ...expected, runId: '../../etc' }), false);
 });
-test('process identity requires all UID fields and a valid kernel start time', () => {
+test('process identity requires the UID, no-new-privileges and kernel start time', () => {
   const stat = `123 (a name ) with spaces) S ${Array(18).fill('0').join(' ')} 123456 0`;
-  assert.deepEqual(parseLinuxRunProcessIdentity('Uid:\t1001\t1001\t1001\t1001\n', stat, 1001), { uid: 1001, startTime: '123456' });
+  const status = 'Uid:\t1001\t1001\t1001\t1001\nNoNewPrivs:\t1\n';
+  assert.deepEqual(parseLinuxRunProcessIdentity(status, stat, 1001), { uid: 1001, startTime: '123456' });
+  assert.equal(parseLinuxRunProcessIdentity(status.replace('NoNewPrivs:\t1', 'NoNewPrivs:\t0'), stat, 1001), null);
+  assert.equal(parseLinuxRunProcessIdentity(status.replace('NoNewPrivs:\t1\n', ''), stat, 1001), null);
+  assert.equal(parseLinuxRunProcessIdentity(`${status}NoNewPrivs:\t1\n`, stat, 1001), null);
   assert.equal(parseLinuxRunProcessIdentity('Uid:\t1001\t0\t1001\t1001\n', stat, 1001), null);
-  assert.equal(parseLinuxRunProcessIdentity('Uid:\t1001\t1001\t1001\t1001\n', stat, 0), null);
-  assert.equal(parseLinuxRunProcessIdentity('Uid:\t1001\t1001\t1001\t1001\n', 'bad', 1001), null);
+  assert.equal(parseLinuxRunProcessIdentity(status, stat, 0), null);
+  assert.equal(parseLinuxRunProcessIdentity(status, 'bad', 1001), null);
 });
 test('real systemd fixture is active only for the recorded invocation', { skip: !process.env.AGENTOC_TEST_SYSTEMD_INVOCATION }, async () => {
   const runnerUid = Number(process.env.AGENTOC_TEST_SYSTEMD_UID);

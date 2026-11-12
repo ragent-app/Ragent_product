@@ -338,6 +338,7 @@ export function buildLifecycleSystemdArgs(runId, {
   workspaceAccessScript = join(projectRoot, 'scripts', 'runner-workspace-access.mjs'),
   resourceProfile = RESOURCE_PROFILES.default,
   groupDrop = null,
+  scopeProtection = false,
   environment = process.env,
 } = {}) {
   const args = [
@@ -349,11 +350,10 @@ export function buildLifecycleSystemdArgs(runId, {
     '--property', `User=${groupDrop ? 'root' : serviceUser}`,
     '--property', `Group=${groupDrop ? 'root' : serviceGroup}`,
     '--property', 'KillMode=control-group',
-    // The provider Run must be able to reach the AgentoC approval path for
-    // approved privileged work.  Root execution is still isolated behind the
-    // signed privileged executor; the runner identity and deny-listed groups
-    // remain unchanged.
-    '--property', 'NoNewPrivileges=false',
+    // A Run with an experimental privileged context may reach the approval
+    // service, but must not gain privileges itself through setuid or file
+    // capabilities. Ordinary Runs retain their existing compatibility mode.
+    '--property', `NoNewPrivileges=${scopeProtection ? 'true' : 'false'}`,
     '--property', 'PrivateTmp=true',
     '--property', 'ProtectSystem=full',
     '--property', 'ProtectHome=false',
@@ -861,6 +861,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     inheritedGroups,
     resourceProfile,
     groupDrop,
+    scopeProtection: scopeRegistrationEligible,
     environment: runEnvironment,
   });
   try {
