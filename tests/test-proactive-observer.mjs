@@ -46,6 +46,8 @@ assert.equal(loadedConfig.appId, 'observer-home')
 assert.equal(loadedConfig.triggers[0].id, 'home-arrival')
 assert.equal(loadedConfig.systemPrompt, '')
 assert.match(DEFAULT_SYSTEM_PROMPT, /Keep connector-specific overrides minimal/i)
+await writeFile(tempConfigPath, JSON.stringify({ systemPrompt: DEFAULT_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') }), 'utf8')
+assert.equal((await loadConfig(tempConfigPath)).systemPrompt, '', 'old shipped defaults must not become custom prompts')
 
 const manualArrival = normalizeObserverEvent({
   type: 'arrival',

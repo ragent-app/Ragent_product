@@ -55,7 +55,7 @@ const LEGACY_DEFAULT_SYSTEM_PROMPT = [
 ].join('\n')
 const DEFAULT_SYSTEM_PROMPT = [
   'You are interacting through a proactive local observer on the user\'s own machine.',
-  'Keep connector-specific overrides minimal and only describe constraints not already owned by AgentoC backend prompt logic.',
+  'Keep connector-specific overrides minimal and only describe constraints not already owned by Ragent backend prompt logic.',
 ].join('\n')
 
 function trimString(value) {
@@ -97,7 +97,7 @@ function normalizeBoolean(value, fallback = false) {
 
 function normalizeSystemPrompt(value) {
   const normalized = trimString(value)
-  if (!normalized || normalized === DEFAULT_SYSTEM_PROMPT || normalized === LEGACY_DEFAULT_SYSTEM_PROMPT) {
+  if (!normalized || normalized === DEFAULT_SYSTEM_PROMPT || normalized === DEFAULT_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') || normalized === LEGACY_DEFAULT_SYSTEM_PROMPT) {
     return ''
   }
   return normalized

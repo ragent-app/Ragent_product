@@ -48,12 +48,12 @@ const LEGACY_DEFAULT_SESSION_SYSTEM_PROMPT = [
 ].join('\n')
 const DEFAULT_SESSION_SYSTEM_PROMPT = [
   'You are interacting through a local wake-word voice connector on the user\'s own machine.',
-  'Keep connector-specific overrides minimal and only describe constraints not already owned by AgentoC backend prompt logic.',
+  'Keep connector-specific overrides minimal and only describe constraints not already owned by Ragent backend prompt logic.',
 ].join('\n')
 
 function normalizeSystemPrompt(value) {
   const normalized = trimString(value)
-  if (!normalized || normalized === DEFAULT_SESSION_SYSTEM_PROMPT || normalized === LEGACY_DEFAULT_SESSION_SYSTEM_PROMPT) {
+  if (!normalized || normalized === DEFAULT_SESSION_SYSTEM_PROMPT || normalized === DEFAULT_SESSION_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') || normalized === LEGACY_DEFAULT_SESSION_SYSTEM_PROMPT) {
     return ''
   }
   return normalized

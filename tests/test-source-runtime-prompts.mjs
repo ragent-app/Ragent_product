@@ -8,6 +8,10 @@ assert.match(shortcutPrompt, /speech-friendly answer/, 'shortcut runtime prompt 
 
 const voicePrompt = buildSourceRuntimePrompt({ sourceId: 'voice' });
 assert.doesNotMatch(voicePrompt, /Siri\/Shortcuts connector/, 'voice source id should keep the existing voice prompt');
+for (const sourceId of ['voice', 'shortcut', 'email', 'observer', 'github']) {
+  const prompt = buildSourceRuntimePrompt({ sourceId });
+  assert.doesNotMatch(prompt, /AgentoC|user's own machine/i);
+}
 
 for (const sourceId of ['wechat', 'weixin', 'feishu', 'lark']) {
   assert.equal(buildSourceRuntimePrompt({ sourceId }), '', `${sourceId} no longer activates a connector prompt`);

@@ -1143,12 +1143,12 @@ function buildSessionDescription(repo, item, kind) {
 
 function buildSessionSystemPrompt() {
   return [
-    'You are replying through the AgentoC GitHub connector.',
+    'You are replying through the Ragent GitHub connector.',
     'Return only the exact GitHub comment body that should be posted back to the thread.',
     'Do not add surrounding explanation, connector notes, session ids, or hidden HTML markers.',
     'Use concise, actionable maintainer language.',
     'Match the thread language when practical.',
-    'If the inbound message says "Maintainer Test: yes", briefly confirm the GitHub -> AgentoC bridge worked and mention what was processed.',
+    'If the inbound message says "Maintainer Test: yes", briefly confirm the GitHub -> Ragent bridge worked and mention what was processed.',
   ].join('\n');
 }
 

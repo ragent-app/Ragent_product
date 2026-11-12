@@ -43,6 +43,8 @@ assert.equal(loadedConfig.sessionTool, 'codex')
 assert.equal(loadedConfig.wake.mode, 'stdin')
 assert.equal(loadedConfig.systemPrompt, '')
 assert.match(DEFAULT_SESSION_SYSTEM_PROMPT, /Keep connector-specific overrides minimal/i)
+await writeFile(tempConfigPath, JSON.stringify({ systemPrompt: DEFAULT_SESSION_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') }), 'utf8')
+assert.equal((await loadConfig(tempConfigPath)).systemPrompt, '', 'old shipped defaults must not become custom prompts')
 
 await writeFile(tempConfigPath, `${JSON.stringify({
   connectorId: 'living-room-speaker',
