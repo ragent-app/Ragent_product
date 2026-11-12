@@ -240,7 +240,7 @@ async function buildConnectorCapabilitiesSection() {
       ];
 
       connectorSections.push(`### Calendar
-This instance has an iCal subscription feed configured. Its existence does not establish that the current run can write to it. For an ordinary calendar request, use \`${agendaCommand}\` only when the run has the required access and the command is available. If \`ragent\` is unavailable in PATH but the declared CLI fallback and Node are available, use \`${agendaFallbackCommand}\` in a POSIX shell, or replace \`$RAGENT_PROJECT_ROOT\` with \`$env:RAGENT_PROJECT_ROOT\` in PowerShell. The write stays instance-local when the shell already carries \`AGENTOC_INSTANCE_ROOT\` or \`AGENTOC_CONFIG_DIR\`. If access or the command is unavailable, report the actual limitation instead of claiming success.
+This instance has an iCal subscription feed configured. Its existence does not establish that the current run can write to it. For an ordinary calendar request, use \`${agendaCommand}\` only when the run has the required access and the command is available. If \`ragent\` is unavailable in PATH but the declared CLI fallback and Node are available, use \`${agendaFallbackCommand}\` in a POSIX shell, or replace \`$RAGENT_PROJECT_ROOT\` with \`$env:RAGENT_PROJECT_ROOT\` in PowerShell. The command uses the instance configuration provided to the run. If access or the command is unavailable, report the actual limitation instead of claiming success.
 
 For workflow details, use \`${agendaHelpCommand}\` when available. If the \`ragent\` command is unavailable in PATH and the declared CLI fallback and Node are available, use \`${agendaFallbackHelpCommand}\`. Do not create completion targets for normal interactive calendar requests.
 
