@@ -18,6 +18,33 @@ SPEC.loader.exec_module(HELPER)
 
 
 class AdminHelperValidationTests(unittest.TestCase):
+    def test_turn_analytics_validates_credentials_and_aggregates_bytes(self):
+        config = {'accountId': 'a' * 32, 'token': 'x' * 40}
+        self.assertEqual(HELPER.json.loads(HELPER._validate_secret('turn-analytics', HELPER.json.dumps(config))), config)
+        with self.assertRaises(HELPER.AdminError):
+            HELPER._validate_secret('turn-analytics', HELPER.json.dumps({**config, 'accountId': 'bad'}))
+        response = SimpleNamespace(status=200, read=lambda _limit: HELPER.json.dumps({'data': {'viewer': {'accounts': [
+            {'callsTurnUsageAdaptiveGroups': [{'sum': {'ingressBytes': 31, 'egressBytes': 45}},
+                                              {'sum': {'ingressBytes': 10, 'egressBytes': 15}}]}]}}}).encode())
+        connection = SimpleNamespace(request=lambda *args, **kwargs: None, getresponse=lambda: response, close=lambda: None)
+        with patch.object(HELPER.pathlib.Path, 'read_text', return_value=HELPER.json.dumps(config)), \
+             patch.object(HELPER, 'read_env', return_value={'AGENTOC_TURN_KEY_NAME': 'b' * 32}), \
+             patch.object(HELPER.http.client, 'HTTPSConnection', return_value=connection):
+            result = HELPER._turn_analytics(HELPER.dt.datetime(2026, 11, 12, tzinfo=HELPER.dt.timezone.utc))
+        self.assertTrue(result['available'])
+        self.assertEqual((result['ingressBytes'], result['egressBytes']), (41, 60))
+        self.assertNotIn(config['token'], HELPER.json.dumps(result))
+
+    def test_turn_analytics_does_not_claim_success_on_query_error(self):
+        config = {'accountId': 'a' * 32, 'token': 'x' * 40}
+        response = SimpleNamespace(status=200, read=lambda _limit: b'{"errors":[{"message":"permission denied"}]}')
+        connection = SimpleNamespace(request=lambda *args, **kwargs: None, getresponse=lambda: response, close=lambda: None)
+        with patch.object(HELPER.pathlib.Path, 'read_text', return_value=HELPER.json.dumps(config)), \
+             patch.object(HELPER, 'read_env', return_value={'AGENTOC_TURN_KEY_NAME': 'b' * 32}), \
+             patch.object(HELPER.http.client, 'HTTPSConnection', return_value=connection):
+            result = HELPER._turn_analytics(HELPER.dt.datetime(2026, 11, 12, tzinfo=HELPER.dt.timezone.utc))
+        self.assertEqual(result['status'], 'query_failed')
+        self.assertFalse(result['available'])
     @unittest.skipUnless(hasattr(signal, "SIGALRM"), "provider deadline requires Unix signals")
     def test_asr_provider_probe_has_a_hard_deadline(self):
         buffer = io.BytesIO()

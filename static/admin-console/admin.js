@@ -277,6 +277,12 @@
 
   function renderMonitoring() {
     const overview = state.overview || {};
+    const traffic = overview.traffic || {};
+    const hostTraffic = traffic.host || {};
+    const hostMonth = hostTraffic.current || {};
+    const turnTraffic = traffic.turn || {};
+    const turnHint = turnTraffic.status === 'unconfigured' ? '请在“密钥与凭据”配置 Cloudflare Analytics' : '查询失败，请检查账号、Token 权限和网络';
+    const hostHistory = Object.entries(hostTraffic.months || {}).sort(([a], [b]) => b.localeCompare(a)).slice(0, 12);
     const db = overview.database || {};
     const platform = overview.platform || {};
     const metrics = overview.metrics || {};
@@ -312,6 +318,8 @@
     const failedFcm = fcmRows.filter((row) => /fail|error/i.test(String(row.status))).reduce((sum, row) => sum + Number(row.events || 0), 0);
     return `<div class="section-stack">
       <section class="metric-grid">${metric('主机内存使用', memoryPercent, `${bytes(usedMemory)} / ${bytes(host.memoryTotalBytes)}`, '▥')}${metric('系统负载', host.load1 == null ? '—' : Number(host.load1).toFixed(2), `1 / 5 / 15 分钟：${host.load5 ?? '—'} · ${host.load15 ?? '—'}`, '⌁')}${metric('磁盘可用', bytes(host.diskFreeBytes), `总量 ${bytes(host.diskTotalBytes)}`, '▤')}${metric('数据库连接', overview.databaseAvailable ? `${Number(db.databaseConnections || 0)} / ${Number(db.databaseMaxConnections || 0) || '—'}` : '不可用', '当前连接 / PostgreSQL 上限', '⇄')}${metric('监控采样', latest?.at ? date(latest.at) : '等待采样', '仅在面板打开并刷新时采样', '◷')}</section>
+      <section><div class="panel-title-row"><div><h2>本月网络流量</h2><p>按 UTC 自然月统计；Cloudflare TURN 与 Oracle 网卡分别计量，不能直接相加作为账单。</p></div></div><div class="metric-grid">${metric('TURN 接收', turnTraffic.available ? bytes(turnTraffic.ingressBytes) : '不可用', turnTraffic.available ? `Cloudflare · ${esc(turnTraffic.month)} UTC` : turnHint, '↓')}${metric('TURN 发送', turnTraffic.available ? bytes(turnTraffic.egressBytes) : '不可用', turnTraffic.available ? 'Cloudflare 出站，计费口径请以账单为准' : turnHint, '↑')}${metric('服务器接收', hostTraffic.available ? bytes(hostMonth.rx) : '等待采样', hostTraffic.available ? `${esc(hostMonth.interface)} · 自 ${date(hostMonth.startedAt)} 起${hostMonth.partial ? '（不完整）' : ''}` : '网卡采样尚未开始', '↓')}${metric('服务器发送', hostTraffic.available ? bytes(hostMonth.tx) : '等待采样', hostTraffic.available ? `更新于 ${date(hostMonth.updatedAt)}${hostMonth.partial ? ' · 本月数据不完整' : ''}` : '网卡采样尚未开始', '↑')}</div></section>
+      <section class="panel-card"><h2>服务器月度记录</h2><p class="muted small">采样开始前或重启、换网卡等情况下可能缺失流量；统计含服务器其他业务及内网流量。</p><div class="usage-list">${hostHistory.length ? hostHistory.map(([month, row]) => `<div class="usage-row"><span>${esc(month)}${row.partial ? ' · 不完整' : ''}</span><strong>接收 ${esc(bytes(row.rx))} / 发送 ${esc(bytes(row.tx))}</strong></div>`).join('') : '<div class="empty-state">暂无月度记录</div>'}</div></section>
       <section><div class="panel-title-row"><div><h2>中心服务资源</h2><p>CPU 为最近采样间隔的单核等效占用（100% = 一个逻辑核）；累计 CPU 为服务启动后的总量。</p></div><button class="btn btn-outline-secondary btn-sm" data-action="navigate" data-view="diagnostics">运行功能检查</button></div><div class="resource-grid">${resourceCards}</div></section>
       ${memoryChart}
       <section><div class="panel-title-row"><div><h2>业务用量趋势</h2><p>来源于中心数据库的按日汇总，不包含账号标识、音频、文本或推送内容。</p></div></div><div class="trend-grid">${trendChart('云端语音识别请求', trends.asr || [], 'requests', '次')}${trendChart('TURN 连接租约', trends.turn || [], 'connections', '条')}${trendChart('FCM 推送事件', trends.fcm || [], 'events', '条')}</div></section>
@@ -394,6 +402,7 @@
         ${secretCard({ id: 'openai-api-key', title: 'OpenAI Transcription API', description: '语音识别服务凭据。保存 key 不会自动开启转写。', inputLabel: '新的 API key', placeholder: '粘贴新的 OpenAI API key', help: '仅保存在 Accounts 服务器配置中；页面不会显示已有值。' })}
         <article class="secret-card"><div class="secret-card-head"><div><h3>FCM 服务账号</h3><p>用于账号推送通知的 Google service account JSON。</p></div>${credentialBadge(fcm)}</div><form class="secret-form" data-secret-form="fcm-service-account"><label class="form-label small">选择新的服务账号 JSON 文件<input class="form-control" type="file" accept="application/json,.json" data-secret-file required></label><div class="form-text">文件只上传到受保护的 Oracle 服务，保存后自动应用，不会保存在浏览器。</div><button class="btn btn-primary" type="submit" ${fcm.available === false ? 'disabled' : ''}>替换并应用</button></form><div class="form-text mt-2">最近配置变更：${date(fcm.updatedAt)}</div></article>
         ${secretCard({ id: 'turn-shared-secret', title: 'Cloudflare TURN 共享密钥', description: 'TURN 临时凭据签名密钥，轮换后由 broker 立即使用。', inputLabel: '新的 TURN 共享密钥', placeholder: '至少 32 个字符', help: '更新后会重启 TURN broker；现有连接在短期凭据有效期内逐步过期。' })}
+        ${secretCard({ id: 'turn-analytics', title: 'Cloudflare TURN 流量分析', description: '用于读取 TURN 流量的独立只读凭据。', inputLabel: '账号 ID 与只读 Token（JSON）', placeholder: '{"accountId":"…","token":"…"}', help: '使用具有 Account Analytics 读取权限的 Token；凭据只保存在服务器，不会显示已有值，也不会重启 TURN。' })}
         ${secretCard({ id: 'turn-broker-token', title: 'TURN broker 内部令牌', description: '服务间访问保护值，仅供 Ragent 中心服务使用。', inputLabel: '新的内部令牌', placeholder: '至少 32 个字符', help: state.secrets?.items?.find((item) => item.id === 'turn-broker-token')?.active === false ? '当前 broker 使用 Accounts 能力凭据模式；此令牌保留为未启用配置。' : '只更改受限的 TURN broker 配置项，不会显示其他配置内容。' })}
         <article class="secret-card"><div class="secret-card-head"><div><h3>Accounts 数据库密码</h3><p>自动生成新密码、更新 PostgreSQL 应用角色和 Accounts 配置，并验证服务恢复。</p></div>${credentialBadge(db)}</div><button class="btn btn-outline-secondary" data-action="rotate-db-password">生成并轮换数据库密码</button><div class="form-text mt-2">新密码不会显示或返回浏览器；如果健康检查失败，系统会自动回滚。</div></article>
       </div>

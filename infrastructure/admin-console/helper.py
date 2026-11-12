@@ -39,6 +39,8 @@ TURN_ENV = pathlib.Path("/etc/agentoc/turn-broker.env")
 FCM_FILE = pathlib.Path("/var/lib/agentoc/accounts/fcm-service-account.json")
 BACKUP_DIR = pathlib.Path("/var/lib/agentoc-admin/backups")
 METRICS_FILE = pathlib.Path("/var/lib/agentoc-admin/metrics.json")
+TRAFFIC_FILE = pathlib.Path("/var/lib/agentoc-admin/traffic.json")
+TURN_ANALYTICS_FILE = pathlib.Path("/etc/agentoc/turn-analytics.json")
 AUDIT_FILE = pathlib.Path("/var/log/agentoc-admin/audit.jsonl")
 ACCOUNTS_SERVICE = "agentoc-accounts.service"
 DATABASE_CONTAINER = "agentoc-pg"
@@ -77,6 +79,67 @@ class AdminError(Exception):
     def __init__(self, code):
         super().__init__(code)
         self.code = code
+
+
+def _traffic_metrics(now=None):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    month = now.strftime('%Y-%m')
+    try:
+        document = json.loads(TRAFFIC_FILE.read_text(encoding='utf-8'))
+        months = document['months']
+        if not isinstance(months, dict):
+            raise ValueError('invalid traffic data')
+        host = {'available': month in months, 'month': month,
+                'current': months.get(month), 'months': months, 'timezone': 'UTC'}
+    except (OSError, ValueError, KeyError, TypeError):
+        host = {'available': False, 'month': month, 'timezone': 'UTC'}
+    return {'host': host, 'turn': _turn_analytics(now)}
+
+
+def _turn_analytics(now):
+    month = now.strftime('%Y-%m')
+    try:
+        config = json.loads(TURN_ANALYTICS_FILE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {'available': False, 'status': 'unconfigured', 'month': month}
+    if not isinstance(config, dict):
+        return {'available': False, 'status': 'unconfigured', 'month': month}
+    account = config.get('accountId', '')
+    token = config.get('token', '')
+    key = read_env(TURN_ENV).get('AGENTOC_TURN_KEY_NAME', '')
+    if not all(isinstance(value, str) for value in (account, key, token)) or not re.fullmatch(r'[a-fA-F0-9]{32}', account) or not re.fullmatch(r'[a-fA-F0-9]{32}', key) or not re.fullmatch(r'[A-Za-z0-9_-]{20,200}', token):
+        return {'available': False, 'status': 'unconfigured', 'month': month}
+    start = now.strftime('%Y-%m-01')
+    end = now.strftime('%Y-%m-%d')
+    query = (f'query {{ viewer {{ accounts(filter: {{accountTag: "{account}"}}) {{ '
+             f'callsTurnUsageAdaptiveGroups(limit: 1000, filter: {{date_geq: "{start}", date_leq: "{end}", keyId: "{key}"}}) {{ '
+             'dimensions { datetimeHour } sum { ingressBytes egressBytes } } } } }')
+    body = json.dumps({'query': query})
+    conn = http.client.HTTPSConnection('api.cloudflare.com', timeout=5)
+    try:
+        conn.request('POST', '/client/v4/graphql', body=body, headers={
+            'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+        response = conn.getresponse()
+        raw = response.read(2 * 1024 * 1024 + 1)
+        if response.status != 200 or len(raw) > 2 * 1024 * 1024:
+            raise ValueError('analytics request failed')
+        payload = json.loads(raw)
+        if payload.get('errors'):
+            raise ValueError('analytics query failed')
+        accounts = payload['data']['viewer']['accounts']
+        if len(accounts) != 1:
+            raise ValueError('analytics account unavailable')
+        groups = accounts[0]['callsTurnUsageAdaptiveGroups']
+        if len(groups) >= 1000:
+            raise ValueError('analytics result truncated')
+        ingress = sum(int(row['sum']['ingressBytes'] or 0) for row in groups)
+        egress = sum(int(row['sum']['egressBytes'] or 0) for row in groups)
+        return {'available': True, 'month': month, 'ingressBytes': ingress,
+                'egressBytes': egress, 'timezone': 'UTC', 'updatedAt': utc_now()}
+    except (OSError, ValueError, TypeError, KeyError, IndexError, http.client.HTTPException):
+        return {'available': False, 'status': 'query_failed', 'month': month}
+    finally:
+        conn.close()
 
 
 def utc_now():
@@ -464,6 +527,7 @@ def _secret_metadata():
             {"id": "fcm-service-account", "label": "FCM 服务账号", "category": "推送通知", "configured": fcm["configured"], "available": fcm["available"], "updatedAt": fcm["updatedAt"], "canReplace": fcm["available"]},
             {"id": "turn-shared-secret", "label": "Cloudflare TURN 共享密钥", "category": "TURN 中继", "configured": bool(turn.get("AGENTOC_TURN_SECRET")), "updatedAt": turn_mtime, "canReplace": True},
             {"id": "turn-broker-token", "label": "TURN broker 内部令牌", "category": "TURN 中继", "configured": bool(turn.get("AGENTOC_TURN_BROKER_TOKEN")), "active": turn.get("AGENTOC_TURN_BROKER_AUTH_MODE") != "accounts-capability", "updatedAt": turn_mtime, "canReplace": True},
+            {"id": "turn-analytics", "label": "Cloudflare TURN 用量分析", "category": "TURN 中继", "configured": TURN_ANALYTICS_FILE.is_file(), "updatedAt": None, "canReplace": True},
             {"id": "database-password", "label": "Accounts 数据库应用账号", "category": "数据库", "configured": db_configured, "role": DATABASE_APP_ROLE, "updatedAt": account_mtime, "canReplace": db_configured},
         ],
         "asrEnabled": accounts.get("AGENTOC_ACCOUNTS_ASR_ENABLED") == "1" and bool(accounts.get("OPENAI_API_KEY")),
@@ -682,6 +746,7 @@ def _overview():
         "services": services,
         "platform": platform,
         "metrics": metrics,
+        "traffic": _traffic_metrics(),
         "database": database,
         "databaseAvailable": database_available,
         "migrations": {"appliedCount": len(migration["applied"]), "pendingCount": len(migration["pending"]), "latest": migration["available"][-1]["version"] if migration["available"] else None},
@@ -1190,6 +1255,16 @@ def _test_asr_transcription(actor, data):
 def _validate_secret(secret_id, value):
     if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 1024 * 1024:
         raise AdminError("INVALID_SECRET")
+    if secret_id == "turn-analytics":
+        try:
+            data = json.loads(value)
+            if not isinstance(data, dict) or set(data) != {'accountId', 'token'}:
+                raise ValueError('invalid analytics config')
+            if not re.fullmatch(r'[a-fA-F0-9]{32}', data['accountId']) or not re.fullmatch(r'[A-Za-z0-9_-]{20,200}', data['token']):
+                raise ValueError('invalid analytics config')
+            return json.dumps(data, separators=(',', ':')) + '\n'
+        except (ValueError, TypeError, KeyError):
+            raise AdminError('INVALID_SECRET')
     if secret_id == "openai-api-key":
         if len(value) < 20 or len(value) > 512 or any(char.isspace() for char in value):
             raise AdminError("INVALID_SECRET")
@@ -1216,6 +1291,10 @@ def _validate_secret(secret_id, value):
 def _set_secret(actor, data):
     secret_id = data.get("secretId")
     value = _validate_secret(secret_id, data.get("value"))
+    if secret_id == 'turn-analytics':
+        atomic_write(TURN_ANALYTICS_FILE, value, mode=0o600, owner=0, group=0)
+        _audit(actor, 'secret.rotate', secret_id, 'success')
+        return {'id': secret_id, 'configured': True, 'applied': True}
     if secret_id == "fcm-service-account":
         account = pwd.getpwnam("agentoc-accounts")
         snapshot = file_snapshot(FCM_FILE)
