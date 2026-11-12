@@ -4148,11 +4148,14 @@ async function main() {
       if (!WORKBENCH_EXECUTION_POLICY) appServerState.threadShellEnvironment = buildCodexRunShellEnvironment(spawnEnv);
       if (sharedHook) appServerState.codexWindowsInstallHook = { ...sharedHook, configPath: join(runnerCodexHomeDir, 'config.toml') };
     } catch (error) {
-      if (sharedCodexThreadSupported && (managedMcpOverlay || windowsElevationHook)) throw error;
-      await logSidecarDiagnostic(runId, 'Machine-local Codex app-server broker unavailable; using the safe exclusive fallback', {
+      await logSidecarDiagnostic(runId, 'Machine-local Codex app-server broker unavailable', {
         error: normalizeErrorMessage(error),
         code: error?.code || 'CODEX_APP_SERVER_BROKER_UNAVAILABLE',
       });
+      // A second authenticated Codex process can race the existing broker's
+      // rotating OAuth credentials even when its socket is temporarily down.
+      // Surface the failure instead of silently launching that process.
+      throw error;
     }
   }
 
@@ -4162,8 +4165,8 @@ async function main() {
     });
   }
 
-  // The only remaining exclusive path is a per-Run MCP/sandbox invocation or
-  // a broker start failure. It is a narrow safety fallback, not the normal
+  // The remaining exclusive path is a per-Run MCP/sandbox invocation.
+  // It is a narrow safety fallback, not the normal
   // same-account execution policy.
   if (isCodexAppServerFamily && codexOAuthRuntime && !codexAppServerBrokered
       && !nativeOAuthLockHandle) {
