@@ -2,13 +2,13 @@ import { win32 } from 'node:path';
 
 // Trust only the exact AgentoC-owned definition reported by the app-server.
 // Writes target the private run overlay, never the owner's provider config.
-export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = configPath, command, nextRequestId, send, onDone, timeoutMs = 10000 } = {}) {
+export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = configPath, source = 'user', command, nextRequestId, send, onDone, timeoutMs = 10000 } = {}) {
   let pending = null; let phase = 'idle'; let timer = null; let selected = null;
   const pathKey = value => win32.resolve(String(value || '')).toLowerCase();
   const finish = ready => {
     if (phase === 'done') return;
     phase = 'done'; pending = null; if (timer) clearTimeout(timer); timer = null;
-    onDone?.(ready === true);
+    onDone?.(ready === true, ready === true ? selected : null);
   };
   const request = (method, params, nextPhase) => {
     const id = nextRequestId(); pending = id; phase = nextPhase;
@@ -18,7 +18,7 @@ export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = conf
     const groups = result?.data;
     if (!Array.isArray(groups)) return null;
     const hooks = groups.flatMap(group => Array.isArray(group?.hooks) ? group.hooks : []);
-    const matches = hooks.filter(hook => hook?.source === 'user' && hook.isManaged === false && hook.enabled === true &&
+    const matches = hooks.filter(hook => hook?.source === source && hook.isManaged === false && hook.enabled === true &&
       hook.eventName === 'preToolUse' && hook.handlerType === 'command' && hook.matcher === '^Bash$' && hook.command === command &&
       typeof hook.sourcePath === 'string' && pathKey(hook.sourcePath) === pathKey(sourcePath) &&
       typeof hook.key === 'string' && hook.key.toLowerCase().startsWith(`${sourcePath.toLowerCase()}:pre_tool_use:`) &&
@@ -28,7 +28,7 @@ export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = conf
   return {
     start() {
       if (phase !== 'idle') return;
-      if (!win32.isAbsolute(configPath || '') || !win32.isAbsolute(sourcePath || '') || !win32.isAbsolute(cwd || '') || !command ||
+      if (!['user', 'sessionFlags'].includes(source) || !win32.isAbsolute(configPath || '') || !win32.isAbsolute(sourcePath || '') || !win32.isAbsolute(cwd || '') || !command ||
           typeof nextRequestId !== 'function' || typeof send !== 'function') { finish(false); return; }
       timer = setTimeout(() => finish(false), timeoutMs); timer.unref?.();
       request('hooks/list', { cwds: [cwd] }, 'list');
@@ -44,7 +44,9 @@ export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = conf
       } else if (phase === 'write') request('hooks/list', { cwds: [cwd] }, 'verify');
       else if (phase === 'verify') {
         const verified = match(message.result);
-        finish(Boolean(verified && verified.key === selected.key && verified.currentHash === selected.currentHash && verified.trustStatus === 'trusted'));
+        const ready = Boolean(verified && verified.key === selected.key && verified.currentHash === selected.currentHash && verified.trustStatus === 'trusted');
+        if (ready) selected = verified;
+        finish(ready);
       }
       return true;
     },

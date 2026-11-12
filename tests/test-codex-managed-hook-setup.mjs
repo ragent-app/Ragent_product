@@ -34,6 +34,20 @@ for (const bad of [{ ...hook, sourcePath: 'D:\\other\\config.toml' }, { ...hook,
   assert.deepEqual(done, [false]);
 }
 {
+  const sourcePath = 'C:\\<session-flags>\\config.toml';
+  const sessionHook = { ...hook, key: `${sourcePath}:pre_tool_use:0:0`, source: 'sessionFlags', sourcePath, displayOrder: 3 };
+  let id = 0, finished;
+  const sent = [];
+  const instance = createCodexManagedHookSetup({ cwd, configPath, sourcePath, source: 'sessionFlags', command,
+    nextRequestId: () => ++id, send: value => { sent.push(value); return true; }, onDone: (ready, selected) => { finished = { ready, selected }; } });
+  instance.start(); instance.consume({ id: 1, result: result(sessionHook) }); instance.consume({ id: 2, result: {} });
+  instance.consume({ id: 3, result: result({ ...sessionHook, trustStatus: 'trusted' }) });
+  assert.equal(finished.ready, true);
+  assert.equal(finished.selected.displayOrder, 3);
+  assert.equal(finished.selected.trustStatus, 'trusted');
+  assert.equal(sent[1].params.filePath, configPath);
+}
+{
   const messages = [];
   const proc = { stdin: { writable: true, write: text => { messages.push(JSON.parse(text)); return true; } } };
   const state = { initialized: false, initializeRequestId: 0, threadRequestId: 1, nextControlRequestId: 1000, cwd,
