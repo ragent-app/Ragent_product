@@ -106,6 +106,7 @@ data class WorkbenchUiState(
     val historyLoading: Boolean = false,
     /** Session id that owns the currently rendered timeline. */
     val timelineSessionId: String? = null,
+    val initialTurnEntry: Boolean = false,
     /** Structured Agent id sent with the next run; never encoded into prompt text. */
     val selectedAgentId: String? = null,
     val approval: PermissionRequestUiState? = null,
@@ -470,6 +471,7 @@ data class ChatUiState(
     val selectedAgentId: String? = null,
     val approval: PermissionRequestUiState? = null,
     val resolvingApprovalId: String? = null,
+    val initialTurnEntry: Boolean = false,
     val isLoading: Boolean = false,
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
@@ -993,7 +995,10 @@ class ChatViewModel(
             }
             ChatEvent.SendMessage -> sendMessage()
             ChatEvent.RetryPendingTurn -> retryPendingTurn()
-            ChatEvent.DiscardUnsentNewSession -> discardUnsentNewSession()
+            ChatEvent.DiscardUnsentNewSession -> {
+                discardUnsentNewSession()
+                updateState { if (initialTurnEntry) copy(initialTurnEntry = false) else this }
+            }
             is ChatEvent.SelectAgent -> {
                 updateState { copy(selectedAgentId = event.agentId) }
                 val sessionId = mutableState.value.sessionId
@@ -2202,6 +2207,7 @@ class ChatViewModel(
                 // Show the history loading state until this session's snapshot arrives.
                 timelineItems = emptyList(),
                 timelineSessionId = null,
+                initialTurnEntry = initialTurnVisible,
                 messageCount = 0,
                 historyLoading = !initialTurnVisible,
                 approval = null,

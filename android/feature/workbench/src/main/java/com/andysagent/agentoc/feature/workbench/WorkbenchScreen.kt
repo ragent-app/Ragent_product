@@ -1680,6 +1680,10 @@ private fun ChatSurface(
     val historyTransitioning = state.historyLoading || (
         state.timelineItems.isNotEmpty() && !timelineBelongsToCurrentSession
     )
+    val initialLocalTimeline = (state.sessionId != null && state.initialTurnEntry) || isInitialLocalTimeline(
+        state.sessionId, state.timelineSessionId, state.timelineItems.size,
+        state.pendingTurn != null || state.acceptedTurns.isNotEmpty(),
+    )
 
     // Run Sheet data comes from the ViewModel's server-backed projection.
     // Do not infer files or elapsed time from visible message/step counts.
@@ -1694,10 +1698,10 @@ private fun ChatSurface(
     // This presentation survives a partially reversed Back. Do not reset its
     // viewport on Close: the outgoing page must retain exactly what was read.
     // After a completed exit the child unmounts, so a fresh entry starts anew.
-    LaunchedEffect(state.chatOpen, state.sessionId, state.historyLoading, state.timelineSessionId, turnGroups.size, lastAgentEntryIndex) {
+    LaunchedEffect(state.chatOpen, state.sessionId, state.historyLoading, state.timelineSessionId, turnGroups.size, lastAgentEntryIndex, initialLocalTimeline) {
         val sessionId = state.sessionId
         if (state.chatOpen && sessionId != null && !state.historyLoading &&
-            timelineBelongsToCurrentSession && turnGroups.isEmpty()) {
+            timelineBelongsToCurrentSession && (turnGroups.isEmpty() || initialLocalTimeline)) {
             // An empty chat is ready for a new turn, not restored reading.
             // Mark it before the first streamed message can trigger restoration.
             initiallyPositionedSessionId = sessionId
@@ -1744,7 +1748,7 @@ private fun ChatSurface(
             initiallyPositionedSessionId = sessionId
         }
     }
-    val entryPreparing = turnGroups.isNotEmpty() &&
+    val entryPreparing = turnGroups.isNotEmpty() && !initialLocalTimeline &&
         initiallyPositionedSessionId != state.sessionId
     val readingPreparing = historyTransitioning || entryPreparing
     val readingReveal by animateFloatAsState(

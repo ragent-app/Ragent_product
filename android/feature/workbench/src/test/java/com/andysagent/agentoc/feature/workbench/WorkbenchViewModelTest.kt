@@ -1106,13 +1106,17 @@ class WorkbenchViewModelTest {
             assertEquals("session-created", viewModel.state.value.sessionId)
             assertEquals("first message", viewModel.state.value.pendingTurn?.text)
             assertFalse(viewModel.state.value.historyLoading)
+            assertTrue(viewModel.state.value.initialTurnEntry)
 
             sendGate.complete(Unit)
             advanceUntilIdle()
             assertEquals("first message", viewModel.state.value.acceptedTurns.single().text)
             assertFalse(viewModel.state.value.historyLoading)
+            assertTrue(viewModel.state.value.initialTurnEntry)
             historyGate.complete(Unit)
             advanceUntilIdle()
+            viewModel.onEvent(ChatEvent.DiscardUnsentNewSession)
+            assertFalse(viewModel.state.value.initialTurnEntry)
         } finally {
             Dispatchers.resetMain()
         }

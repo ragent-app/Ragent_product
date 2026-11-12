@@ -1272,6 +1272,7 @@ class MainActivity : ComponentActivity() {
                     sessionId = chatState.sessionId,
                     historyLoading = chatState.historyLoading,
                     timelineSessionId = chatState.timelineSessionId,
+                    initialTurnEntry = chatState.initialTurnEntry,
                     selectedAgentId = chatState.selectedAgentId,
                     approval = chatState.approval,
                     approvalResolving = chatState.resolvingApprovalId != null,
