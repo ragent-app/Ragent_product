@@ -242,16 +242,16 @@ async function buildConnectorCapabilitiesSection() {
       connectorSections.push(`### Calendar
 This instance has an iCal subscription feed configured. Its existence does not establish that the current run can write to it. For an ordinary calendar request, use \`${agendaCommand}\` only when the run has the required access and the command is available. If \`ragent\` is unavailable in PATH but the declared CLI fallback and Node are available, use \`${agendaFallbackCommand}\` in a POSIX shell, or replace \`$AGENTOC_PROJECT_ROOT\` with \`$env:AGENTOC_PROJECT_ROOT\` in PowerShell. The write stays instance-local when the shell already carries \`AGENTOC_INSTANCE_ROOT\` or \`AGENTOC_CONFIG_DIR\`. If access or the command is unavailable, report the actual limitation instead of claiming success.
 
-For workflow details, use \`${agendaHelpCommand}\`. If the \`ragent\` command is unavailable in PATH, use \`${agendaFallbackHelpCommand}\`. Do not create completion targets for normal interactive calendar requests.
+For workflow details, use \`${agendaHelpCommand}\` when available. If the \`ragent\` command is unavailable in PATH and the declared CLI fallback and Node are available, use \`${agendaFallbackHelpCommand}\`. Do not create completion targets for normal interactive calendar requests.
 
 If the user explicitly needs first-class external calendar notifications and a ready bound calendar connector is already present, you may use that bound connector instead of the feed.
 
 ${subscriptionLines.join('\n')}
 Events in feed: ${feedInfo.eventCount}
 
-If the user has not yet subscribed, send a markdown link such as \`[Subscribe to calendar](${buildCalendarSubscribeHelperPath()})\` directly in the conversation. Use \`${buildCalendarSubscribeHelperPath({ format: 'https' })}\` only as the manual fallback when the client does not handle the default subscription helper. Keep the message brief: describe what the subscription does, then provide the link. No separate setup page needed.
+If the user needs a subscription, offer a markdown link such as \`[Subscribe to calendar](${buildCalendarSubscribeHelperPath()})\` when that helper is accessible to them. Use \`${buildCalendarSubscribeHelperPath({ format: 'https' })}\` as a manual fallback when the client does not handle the default helper. Explain any setup, authentication, or access step that the actual client requires.
 
-Do not use the host machine's local Calendar.app or any GUI calendar application.`);
+Use a host calendar application only when it is available and appropriate to the user's request and authorization.`);
     }
   } catch {}
 
