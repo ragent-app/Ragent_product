@@ -92,6 +92,17 @@ export function isInstanceAccessGrantActive(draft, grant, { instanceId, accountI
   } catch { return false; }
 }
 
+/** Resolve an exact workspace relationship; never turn member access into ownership. */
+export function resolveInstanceWorkspaceAccess(draft, { instanceId, accountId }) {
+  if (!id(instanceId) || !id(accountId)) return null;
+  const binding = (draft.instanceBindings || []).find(item => item.instanceId === instanceId && !item.revokedAt);
+  if (!binding || !activeAccount(draft, accountId) || !activeAccount(draft, binding.accountId)) return null;
+  if (binding.accountId === accountId) return { kind: 'owner', binding };
+  const grant = (draft.instanceAccessGrants || []).find(item => item.instanceId === instanceId && item.accountId === accountId
+    && isInstanceAccessGrantActive(draft, item, { instanceId, accountId }));
+  return grant ? { kind: 'workspace', binding, grant } : null;
+}
+
 /** The authenticated owner may revoke; a repeated revoke is idempotent. */
 export function revokeInstanceAccessGrant(draft, { grantId, ownerAccountId, now = Date.now() }) {
   grantId = text(grantId); ownerAccountId = text(ownerAccountId);

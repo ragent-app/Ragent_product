@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { createPostgresStoreFromUrl } from '../accounts/store/postgres.mjs';
 import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protocol.mjs';
-import { issueInstanceAccessGrant, isInstanceAccessGrantActive, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
+import { issueInstanceAccessGrant, isInstanceAccessGrantActive, resolveInstanceWorkspaceAccess, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
 
 const pair = generateKeyPairSync('ed25519');
 const key = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -17,12 +17,17 @@ const { grant, created } = issueInstanceAccessGrant(draft, identity);
 assert.equal(created, true);
 assert.deepEqual(draft.instanceBindings[0], originalBinding, 'granting access must not replace the owner binding');
 assert.equal(isInstanceAccessGrantActive(draft, grant, identity), true);
+assert.equal(resolveInstanceWorkspaceAccess(draft, { instanceId, accountId: ownerAccountId }).kind, 'owner');
+assert.equal(resolveInstanceWorkspaceAccess(draft, { instanceId, accountId }).kind, 'workspace');
+assert.equal(resolveInstanceWorkspaceAccess(draft, { instanceId, accountId: 'acct_unrelated' }), null);
+assert.equal(resolveInstanceWorkspaceAccess(draft, { instanceId: 'inst_other_fixture', accountId }), null);
 const restored = JSON.parse(JSON.stringify(draft));
 assert.equal(isInstanceAccessGrantActive(restored, restored.instanceAccessGrants[0], identity), true, 'grant survives serialized storage');
 const sameTimestampRebind = structuredClone(restored);
 sameTimestampRebind.bindingHistory = [{ instanceId, action: 'unbind' }, { instanceId, action: 'bind' }];
 assert.equal(isInstanceAccessGrantActive(sameTimestampRebind, sameTimestampRebind.instanceAccessGrants[0], identity), false,
   'binding history fences a rebind even if timestamp and key repeat');
+assert.equal(resolveInstanceWorkspaceAccess(sameTimestampRebind, { instanceId, accountId }), null);
 assert.equal(issueInstanceAccessGrant(draft, identity).created, false, 'retries reuse the current grant');
 assert.equal(isInstanceAccessGrantActive(draft, { ...grant, grantId: 'iag_forged_fixture' }, identity), false);
 assert.equal(isInstanceAccessGrantActive(draft, grant, { ...identity, instanceId: 'inst_other_fixture' }), false);
@@ -32,6 +37,7 @@ assert.throws(() => revokeInstanceAccessGrant(draft, { grantId: grant.grantId, o
 for (const field of ['disabledAt', 'deletedAt', 'deletionRequestedAt']) {
   draft.accounts[1][field] = '2026-01-02T00:00:00.000Z';
   assert.equal(isInstanceAccessGrantActive(draft, grant, identity), false, field);
+  assert.equal(resolveInstanceWorkspaceAccess(draft, { instanceId, accountId }), null, field);
   delete draft.accounts[1][field];
 }
 draft.instanceBindings[0].boundAt = '2026-01-02T00:00:00.000Z';
@@ -45,6 +51,7 @@ assert.equal(isInstanceAccessGrantActive(draft, replacement.grant, identity), tr
 const revoked = revokeInstanceAccessGrant(draft, { grantId: replacement.grant.grantId, ownerAccountId, now: identity.now + 1 });
 assert.deepEqual(revokeInstanceAccessGrant(draft, { grantId: replacement.grant.grantId, ownerAccountId, now: identity.now + 2 }), revoked);
 assert.equal(isInstanceAccessGrantActive(draft, replacement.grant, identity), false);
+assert.equal(resolveInstanceWorkspaceAccess(draft, { instanceId, accountId }), null);
 const replayAfterRevoke = issueInstanceAccessGrant(draft, { ...identity, requestId: 'request_grant_fixture_002' });
 assert.equal(replayAfterRevoke.created, false);
 assert.ok(replayAfterRevoke.grant.revokedAt, 'replaying an issue request cannot revive a revoked grant');
