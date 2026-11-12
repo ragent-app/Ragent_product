@@ -165,7 +165,7 @@ try {
 
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
-    /AgentoC owns the higher-level workflow, memory policy, and reply style/,
+    /Ragent owns the higher-level workflow, memory policy, and reply style/,
     'default Codex developer instructions should reinforce manager ownership',
   );
   assert.match(
@@ -190,22 +190,22 @@ try {
   );
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
-    /Machine access belongs to you, not automatically to the remote user/,
+    /Work within the permissions granted to this run; do not assume the user's device or host access/,
     'default Codex developer instructions should distinguish agent machine access from user access',
   );
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
-    /execution substrate, not as the end user's personal Mac or default app container/,
+    /do not assume the user's device or host access/,
     'default Codex developer instructions should frame the host as execution substrate rather than the user\'s personal app container',
   );
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
-    /operational work yourself on this machine or another AgentoC-visible surface rather than giving the user a manual how-to/,
+    /operational work yourself on this machine or another Ragent-visible surface rather than giving the user a manual how-to/,
     'default Codex developer instructions should prefer agent-side execution over manual user recipes',
   );
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
-    /If another service needs login, access, or approval, prefer bringing that checkpoint onto this machine or another AgentoC-exposed surface/,
+    /If another service needs login, access, or approval, prefer bringing that checkpoint onto this machine or another Ragent-exposed surface/,
     'default Codex developer instructions should prefer AgentoC-side login and authorization checkpoints',
   );
   assert.match(
@@ -220,7 +220,7 @@ try {
   );
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
-    /local-only file is internal working state, not a completed handoff/,
+    /local-only file is internal working state unless the user can access it/,
     'default Codex developer instructions should prevent local-only delivery from counting as completion',
   );
   assert.match(
@@ -265,12 +265,12 @@ try {
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
-    /host machine is your private execution surface, not the default user interface/,
+    /host is an execution surface; do not assume whether the user can access it locally/,
     'manager runtime boundary should define the host as the agent execution surface rather than the user interface',
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
-    /execution substrate, not as the end user's personal Mac or default app container/,
+    /do not assume whether the user can access it locally/,
     'manager runtime boundary should block treating the host as the end user\'s personal app container',
   );
   assert.match(
@@ -280,22 +280,22 @@ try {
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
-    /absorbing the operational work on the AgentoC side instead of turning the user into the fallback operator with a recipe of manual steps/,
+    /absorbing the operational work on the Ragent side instead of turning the user into the fallback operator with a recipe of manual steps/,
     'manager runtime boundary should prefer AgentoC-side execution over manual user recipes',
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
-    /When another service needs access, login, or authorization, prefer completing that checkpoint on this machine or another AgentoC-exposed surface/,
+    /When another service needs access, login, or authorization, prefer completing that checkpoint on this machine or another Ragent-exposed surface/,
     'manager runtime boundary should prefer AgentoC-side access and login checkpoints',
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
-    /only use connectors and delivery channels that are explicitly configured|prefer instance-scoped connectors/,
+    /use only connectors and delivery channels actually authorized for this session/,
     'manager runtime boundary should prefer bound connectors over host app state for external side effects',
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
-    /missing-capability state to the user instead of improvising|binding-needed state instead of silently falling back/,
+    /report the limitation instead of improvising an unauthorized workaround/,
     'manager runtime boundary should block silent fallback to owner-local accounts when connector bindings are missing',
   );
   assert.match(
