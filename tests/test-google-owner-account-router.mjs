@@ -47,6 +47,7 @@ function response(status, body) {
 
 globalThis.fetch = async (url, options = {}) => {
   const target = new URL(url);
+  if (target.pathname === '/v1/owner-auth/demo-status' && options.method === 'GET') return response(200, { status: 'configured' });
   if (target.pathname === '/v1/owner-auth/transactions' && options.method === 'POST') {
     const body = JSON.parse(options.body);
     started.set(body.transactionId, body);
@@ -132,6 +133,12 @@ async function check(name, fn) {
 }
 
 try {
+  const demoDenied = makeRes();
+  await handleGoogleOwnerAuthRoutes({ req: makeReq({ method: 'GET' }), res: demoDenied, pathname: '/api/auth/demo/status', authSession: null, writeJson });
+  assert.equal(demoDenied.statusCode, 403);
+  const demoStatus = makeRes();
+  await handleGoogleOwnerAuthRoutes({ req: makeReq({ method: 'GET' }), res: demoStatus, pathname: '/api/auth/demo/status', authSession: { role: 'owner' }, writeJson });
+  assert.deepEqual(parseJson(demoStatus), { status: 'configured' });
   const status = makeRes();
   await handleGoogleOwnerAuthRoutes({ req: makeReq({ method: 'GET' }), res: status, pathname: '/api/auth/google/status', authSession: null, writeJson });
   await check('status 在无本机 OAuth client 时仍以 Accounts broker 启用', async () => {

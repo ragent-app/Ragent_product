@@ -19,10 +19,12 @@ try {
     window.agentocT = (key) => key;
     window.agentocResolveProductPath = (path) => `http://localhost${path}`;
     window.__bound = false;
+    window.__demoStatus = 'unconfigured';
     window.__opened = [];
     window.open = (url) => window.__opened.push(url);
     window.fetchJsonOrRedirect = async (path) => {
       if (path === '/api/auth/google/status') return { enabled: true, bound: window.__bound, mode: 'accounts', capabilities: { accountJoin: true } };
+      if (path === '/api/auth/demo/status') return { status: window.__demoStatus };
       if (path === '/api/device-pairing/invitations') return { invitation: { id: 'inv_fixture', shortCode: '123456', accountHandoff: window.__bound, pairingUri: 'agentoc://pair?v=3&i=fixture&t=fixture', expiresAt: new Date(Date.now() + 120000).toISOString() } };
       if (path === '/api/device-pairing/account-invitations/inv_fixture') return { status: 'PENDING' };
       if (path === '/api/auth/google/devices') return { devices: [] };
@@ -39,6 +41,17 @@ try {
     return Boolean(qr.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
   assert.equal(order, true, 'QR must precede sign-in buttons');
+  const demoButton = page.getByRole('button', { name: 'Test account sign-in' });
+  await page.getByText('Test account sign-in has not been configured.').waitFor();
+  assert.equal(await demoButton.isEnabled(), false);
+  if (process.env.RAGENT_QA_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.RAGENT_QA_SCREENSHOT_DIR}/demo-unconfigured.png`, fullPage: true });
+  await page.evaluate(() => { window.__demoStatus = 'unavailable'; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await page.getByText('Test account sign-in is currently unavailable.').waitFor();
+  assert.equal(await demoButton.isEnabled(), false);
+  await page.evaluate(() => { window.__demoStatus = 'configured'; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await demoButton.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === 'Test account sign-in' && !button.disabled));
+  if (process.env.RAGENT_QA_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.RAGENT_QA_SCREENSHOT_DIR}/demo-configured.png`, fullPage: true });
   await page.getByRole('button', { name: 'Test account sign-in' }).click();
   assert.match((await page.evaluate(() => window.__opened))[0], /\/api\/auth\/google\/bind\/redirect\?flow=demo$/);
   await page.evaluate(() => { window.__bound = true; window.AgentoCCrossDevicePanel.refreshManager(); });

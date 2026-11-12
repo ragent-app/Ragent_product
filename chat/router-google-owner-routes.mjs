@@ -23,6 +23,7 @@ import {
   getOwnerAccountBinding,
   getOwnerAccountBindingHistory,
   getOwnerAccountBrokerStatus,
+  getDemoSignInStatus,
   getOwnerAccountNativePending,
   getOwnerAccountTransactionStatus,
   recoverOwnerAccountNativePending,
@@ -106,6 +107,15 @@ export async function handleGoogleOwnerAuthRoutes({ req, res, pathname, authSess
   const path = qIndex >= 0 ? requestTarget.slice(0, qIndex) : requestTarget;
   const query = new URLSearchParams(qIndex >= 0 ? requestTarget.slice(qIndex + 1) : '');
   const accountBroker = getOwnerAccountBrokerStatus();
+
+  if (path === '/api/auth/demo/status' && req.method === 'GET') {
+    if (authSession?.role !== 'owner') {
+      writeJson(res, 403, { error: 'Owner access required' });
+      return true;
+    }
+    writeJson(res, 200, { status: await getDemoSignInStatus() });
+    return true;
+  }
 
   // 受控 Accounts broker 回跳：不接触 Google code/client/token，实例只兑换一次性 grant。
   if (path === '/api/auth/google/complete' && req.method === 'GET') {

@@ -676,8 +676,28 @@
       root.open(bindUrl.toString(), "_blank", "noopener");
     };
     actions.appendChild(action(fallback("crossDevice.claim.google", "Sign in with Google"), () => openSignIn("google")));
-    actions.appendChild(action(fallback("crossDevice.claim.demo", "Test account sign-in"), () => openSignIn("demo")));
+    const demoAction = action(fallback("crossDevice.claim.demo", "Test account sign-in"), () => openSignIn("demo"));
+    demoAction.disabled = true;
+    actions.appendChild(demoAction);
     body.appendChild(actions);
+    const demoStatus = make("p", "cross-device-helper", fallback("crossDevice.demo.checking", "Checking test account availability…"));
+    body.appendChild(demoStatus);
+    void (async () => {
+      try {
+        const result = await api("/api/auth/demo/status");
+        if (!card.isConnected) return;
+        if (result?.status === "configured") {
+          demoAction.disabled = false;
+          demoStatus.textContent = "";
+        } else {
+          demoStatus.textContent = result?.status === "unconfigured"
+            ? fallback("crossDevice.demo.unconfigured", "Test account sign-in has not been configured.")
+            : fallback("crossDevice.demo.unavailable", "Test account sign-in is currently unavailable.");
+        }
+      } catch {
+        if (card.isConnected) demoStatus.textContent = fallback("crossDevice.demo.unavailable", "Test account sign-in is currently unavailable.");
+      }
+    })();
     if (managerClaimTimer) root.clearTimeout(managerClaimTimer);
     const poll = async () => {
       if (!card.isConnected || document.body?.dataset.desktopManagerTab !== "account") return;

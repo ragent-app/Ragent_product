@@ -20,6 +20,7 @@ delete process.env.AGENTOC_INSTANCE_ROOT;
 const {
   getOwnerAccountBinding,
   getOwnerAccountBrokerStatus,
+  getDemoSignInStatus,
   getOwnerAccountBindingHistory,
   listOwnerAccountDevices,
   publishOwnerAccountEndpoint,
@@ -29,6 +30,10 @@ const {
 } = await import(pathToFileURL(join(repoRoot, 'lib', 'owner-account-auth.mjs')).href);
 
 const signing = generateKeyPairSync('ed25519');
+assert.equal(await getDemoSignInStatus({ fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'configured' }) }) }), 'configured');
+assert.equal(await getDemoSignInStatus({ fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'unconfigured' }) }) }), 'unconfigured');
+assert.equal(await getDemoSignInStatus({ fetchImpl: async () => ({ ok: false }) }), 'unavailable');
+assert.equal(await getDemoSignInStatus({ fetchImpl: async () => { throw new Error('offline'); } }), 'unavailable');
 const kid = 'accounts-test-key';
 const publicJwk = { ...signing.publicKey.export({ format: 'jwk' }), kid, use: 'sig', alg: 'EdDSA' };
 let now = Date.parse('2026-08-09T12:00:00.000Z');
