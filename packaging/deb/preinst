@@ -19,15 +19,16 @@ if [ "${DPKG_MAINTSCRIPT_PACKAGE:-}" = ragent ] && [ "${1:-}" = install ]; then
         echo 'Cannot verify the legacy package file inventory; refusing migration.' >&2
         exit 1
       fi
-      while IFS= read -r legacy_file; do
+      if ! while IFS= read -r legacy_file; do
         [ -n "$legacy_file" ] || continue
         if [ -d "$legacy_file" ] && [ ! -L "$legacy_file" ]; then continue; fi
-        if ! grep -Fxq -- "$legacy_file" "$manifest"; then
-          echo "Legacy package owns a file absent from the Ragent package: $legacy_file" >&2
-          echo 'Upgrade the legacy package to the migration-ready release before retrying.' >&2
-          exit 1
-        fi
-      done < "$legacy_files"
+        printf '%s\n' "$legacy_file"
+      done < "$legacy_files" | awk 'NR == FNR {payload[$0]=1; next}
+        !($0 in payload) {print "Legacy package owns a file absent from the Ragent package: " $0 > "/dev/stderr"; missing=1}
+        END {exit missing ? 1 : 0}' "$manifest" -; then
+        echo 'Upgrade the legacy package to the migration-ready release before retrying.' >&2
+        exit 1
+      fi
       rm -f -- "$manifest" "$legacy_files"
       trap - EXIT HUP INT TERM
       # The remaining checks below are also required when dpkg calls this
