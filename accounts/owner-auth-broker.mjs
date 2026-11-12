@@ -2676,7 +2676,7 @@ export function createOwnerAuthBroker({
             instanceId: instance.instanceId,
             accountId,
             provider: 'account-session',
-            deviceAlias: normalizeDeviceAlias(intent.computerAlias) || 'AgentoC computer',
+            deviceAlias: normalizeDeviceAlias(intent.computerAlias) || 'Ragent computer',
             instancePublicKey: instance.publicKey,
             instanceKeyFingerprint: instance.keyFingerprint,
             publicEndpoint: claimEndpoint,
@@ -2686,7 +2686,7 @@ export function createOwnerAuthBroker({
             deviceId: instance.instanceId,
             instanceId: instance.instanceId,
             accountId,
-            alias: normalizeDeviceAlias(intent.computerAlias) || 'AgentoC computer',
+            alias: normalizeDeviceAlias(intent.computerAlias) || 'Ragent computer',
             deviceKind: 'computer',
             now,
           });
@@ -3264,7 +3264,7 @@ export function createOwnerAuthBroker({
       devices.push({
         deviceId: binding.instanceId,
         instanceId: binding.instanceId,
-        alias: binding.deviceAlias || 'AgentoC computer',
+        alias: binding.deviceAlias || 'Ragent computer',
         sub: accountId,
         deviceKind: 'computer',
         endpoint: binding.publicEndpoint || null,
@@ -4140,7 +4140,7 @@ export function createOwnerAuthBroker({
           const rendezvousReady = hasRendezvousIdentity(binding);
           return {
             instanceId: binding.instanceId,
-            alias: binding.deviceAlias || device?.alias || 'AgentoC computer',
+            alias: binding.deviceAlias || device?.alias || 'Ragent computer',
             endpoint: binding.publicEndpoint || null,
             ...(rendezvousReady ? {
               instancePublicKey: binding.instancePublicKey,
