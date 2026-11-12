@@ -29,7 +29,7 @@ For files the user needs, choose a reachable download or attachment channel supp
   - If the file is missing, generation failed, or delivery would require an out-of-bound path, say so plainly instead of pretending the image was delivered; fix and retry when appropriate.
   - Prefer PNG (or another chat-renderable raster format) over SVG or HTML for images meant to display inline; keep filenames short, ASCII, and free of spaces.
 - When the run is authorized, explicitly register a file as a session attachment to avoid relying on text-path resolution:
-  `ragent api POST /api/sessions/$AGENTOC_SESSION_ID/assets --body '{"localPath":"<exact-verified-path>","originalName":"<filename>","mimeType":"image/png","text":"<one-line caption>"}'`
+  `ragent api POST /api/sessions/$RAGENT_SESSION_ID/assets --body '{"localPath":"<exact-verified-path>","originalName":"<filename>","mimeType":"image/png","text":"<one-line caption>"}'`
   - A successful response returns 201 with `asset.assetId`; registration can fail due to access, file, or session restrictions. Verify the result before claiming success.
   - A 400 `FILE_ASSET_LOCAL_PATH_INVALID` means the path is wrong: verify with `ls -l` and retry once with the corrected path.
   - `originalName` defaults to the basename and `mimeType` is inferred from the extension when omitted; pass them explicitly for accuracy.

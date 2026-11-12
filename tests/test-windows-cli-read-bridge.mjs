@@ -18,6 +18,8 @@ for (const riskMode of ['recommended', 'full-auto']) {
     const fallback = await bridge(`node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${suffix} | Out-String`, { state: { ...state, riskMode, windowsManagedActionChannel: false, windowsManagedActionBinding: null } });
     assert.equal(fallback?.updatedCommand, "& 'C:\\Program Files\\AgentoC\\bin\\agentoc-cli-read-bridge.exe' trigger-list 'http://127.0.0.1:7690' --json", suffix);
   }
+  const renamedFallback = await bridge('node "$env:RAGENT_PROJECT_ROOT/cli.js" trigger list --session $env:RAGENT_SESSION_ID --json | Out-String', { state: { ...state, riskMode } });
+  assert.ok(renamedFallback?.updatedCommand.includes(' trigger-list '));
   const help = await bridge('node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --help | Out-String', { state: { ...state, riskMode } });
   assert.equal(help?.updatedCommand, "& 'C:\\Program Files\\AgentoC\\bin\\agentoc-cli-read-bridge.exe' trigger-help 'http://127.0.0.1:7690'");
 }
@@ -65,6 +67,7 @@ try {
     assert.ok(result?.updatedCommand.includes(' asset-publish '), `${riskMode}: ${prefix}`);
     assert.deepEqual(JSON.parse(Buffer.from(result.updatedCommand.match(/'([A-Za-z0-9_-]+)'$/)[1], 'base64url').toString()), JSON.parse(body));
   }
+  assert.ok((await asset(`ragent api POST "/api/sessions/$RAGENT_SESSION_ID/assets" --body '${body}'`))?.updatedCommand.includes(' asset-publish '));
   for (const command of [
     `agentoc api POST "/api/sessions/other/assets" --body '${body}'`,
     `agentoc api POST '__SESSION_ASSETS__' --body '${body}'`,

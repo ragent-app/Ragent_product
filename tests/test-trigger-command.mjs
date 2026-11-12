@@ -11,7 +11,8 @@ writeFileSync(join(homeDir, '.config', 'agentoc', 'auth.json'), `${JSON.stringif
 process.env.HOME = homeDir;
 process.env.LOCALAPPDATA = join(tempRoot, 'local-app-data');
 process.env.AGENTOC_CONFIG_DIR = join(homeDir, '.config', 'agentoc');
-process.env.AGENTOC_SESSION_ID = 'sess-current';
+process.env.AGENTOC_SESSION_ID = 'sess-legacy';
+process.env.RAGENT_SESSION_ID = 'sess-current';
 
 const requests = [];
 let triggerCounter = 0;
@@ -128,6 +129,9 @@ const address = server.address();
 assert(address && typeof address === 'object');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 
+process.env.RAGENT_CHAT_BASE_URL = baseUrl;
+process.env.AGENTOC_CHAT_BASE_URL = 'http://127.0.0.1:1';
+
 const { runTriggerCommand } = await import('../lib/trigger-command.mjs');
 
 async function runCli(args) {
@@ -155,6 +159,10 @@ assert.equal(created.trigger.title, 'Later');
 assert.equal(requests.at(-1)?.body?.sessionId, 'sess-current');
 assert.equal(requests.at(-1)?.body?.text, 'remind me later');
 assert.ok(typeof requests.at(-1)?.body?.scheduledAt === 'string' && requests.at(-1).body.scheduledAt.includes('T'));
+
+const defaultList = JSON.parse((await runCli(['list', '--json'])).stdout);
+assert.equal(defaultList.triggers.length, 1);
+assert.equal(requests.at(-1)?.query?.get('sessionId'), 'sess-current');
 
 const listed = JSON.parse((await runCli(['list', '--session', 'sess-current', '--base-url', baseUrl, '--json'])).stdout);
 assert.equal(listed.triggers.length, 1);

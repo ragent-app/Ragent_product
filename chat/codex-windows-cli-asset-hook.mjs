@@ -30,7 +30,7 @@ export async function verifyCodexWindowsCliAssetApproval({ approval, state, runI
   if (!encoded || encoded.length > 10924) return false;
   let body;
   try { body = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')); } catch { return false; }
-  const original = `ragent api POST "/api/sessions/$env:AGENTOC_SESSION_ID/assets" --body '${JSON.stringify(body).replaceAll("'", "''")}'`;
+  const original = `ragent api POST "/api/sessions/$env:RAGENT_SESSION_ID/assets" --body '${JSON.stringify(body).replaceAll("'", "''")}'`;
   const source = { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: original } } };
   const expected = await buildWindowsCliAssetBridge({ approval: source, state: { ...state, cwd: params.cwd, turnActive: true }, runId, helperPath, port });
   return Boolean(expected && expected.updatedCommand === command);

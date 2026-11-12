@@ -21,14 +21,14 @@ export async function buildWindowsCliAssetBridge({ approval, state, helperPath, 
       typeof input.command !== 'string' || input.command.length > 8192 || /[\r\n\0]/.test(input.command)) return null;
   let rawBody;
   if (params.tool_name === 'PowerShell') {
-    const match = /^\s*(?:agentoc(?:\.cmd)?|ragent(?:\.cmd)?|node(?:\.exe)?\s+"\$env:AGENTOC_PROJECT_ROOT[\\/]cli\.js")\s+api\s+POST\s+"\/api\/sessions\/\$env:AGENTOC_SESSION_ID\/assets"\s+--body\s+'((?:[^']|'')*)'\s*$/i.exec(input.command);
+    const match = /^\s*(?:agentoc(?:\.cmd)?|ragent(?:\.cmd)?|node(?:\.exe)?\s+"\$env:(?:AGENTOC|RAGENT)_PROJECT_ROOT[\\/]cli\.js")\s+api\s+POST\s+"\/api\/sessions\/\$env:(?:AGENTOC|RAGENT)_SESSION_ID\/assets"\s+--body\s+'((?:[^']|'')*)'\s*$/i.exec(input.command);
     if (!match) return null;
     rawBody = match[1].replaceAll("''", "'");
   } else {
-    const sessionRoute = /(?:"\/api\/sessions\/(?:\$AGENTOC_SESSION_ID|\$\{AGENTOC_SESSION_ID\})\/assets"|\/api\/sessions\/(?:\$AGENTOC_SESSION_ID|\$\{AGENTOC_SESSION_ID\})\/assets)(?=\s|$)/;
+    const sessionRoute = /(?:"\/api\/sessions\/(?:\$(?:AGENTOC|RAGENT)_SESSION_ID|\$\{(?:AGENTOC|RAGENT)_SESSION_ID\})\/assets"|\/api\/sessions\/(?:\$(?:AGENTOC|RAGENT)_SESSION_ID|\$\{(?:AGENTOC|RAGENT)_SESSION_ID\})\/assets)(?=\s|$)/;
     if (!sessionRoute.test(input.command)) return null;
     const command = input.command.replace(/^\s*MSYS_NO_PATHCONV=1\s+/, '')
-      .replace(/^\s*node(?:\.exe)?\s+"(?:\$AGENTOC_PROJECT_ROOT|\$\{AGENTOC_PROJECT_ROOT\})\/cli\.js"\s+/, 'agentoc ')
+      .replace(/^\s*node(?:\.exe)?\s+"(?:\$(?:AGENTOC|RAGENT)_PROJECT_ROOT|\$\{(?:AGENTOC|RAGENT)_PROJECT_ROOT\})\/cli\.js"\s+/, 'agentoc ')
       .replace(sessionRoute, "'__SESSION_ASSETS__'");
     const words = parseLiteralBashWords(command);
     if (!words || words.length !== 6 || !['agentoc', 'ragent'].includes(words[0]) || words[1] !== 'api' || words[2] !== 'POST' ||
@@ -76,7 +76,7 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
   // The documented fallback uses only these two Run-provided environment
   // variables. Replace the whole command with the fixed helper; do not pass
   // shell text or environment-derived paths to the helper.
-  const fallback = /^\s*node(?:\.exe)?\s+"\$env:AGENTOC_PROJECT_ROOT[\\/]cli\.js"\s+trigger\s+list(?:\s+--(?:session|source-session)\s+(?:\$env:AGENTOC_SESSION_ID|"\$env:AGENTOC_SESSION_ID"))?(?:\s+(--json|--help))?\s*(?:2\s*>\s*&\s*1\s*)?(?:\|\s*Out-String\s*)?$/i.exec(command);
+  const fallback = /^\s*node(?:\.exe)?\s+"\$env:(?:AGENTOC|RAGENT)_PROJECT_ROOT[\\/]cli\.js"\s+trigger\s+list(?:\s+--(?:session|source-session)\s+(?:\$env:(?:AGENTOC|RAGENT)_SESSION_ID|"\$env:(?:AGENTOC|RAGENT)_SESSION_ID"))?(?:\s+(--json|--help))?\s*(?:2\s*>\s*&\s*1\s*)?(?:\|\s*Out-String\s*)?$/i.exec(command);
   let ast, binary;
   try { [ast, binary] = await Promise.all([parse(command), inspect(helperPath)]); } catch { return null; }
   if (!binary?.isFile() || binary.isSymbolicLink() || ast.errors.length || (!fallback && ast.dynamicNodes.length) ||

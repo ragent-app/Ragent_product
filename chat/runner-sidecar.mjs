@@ -1314,8 +1314,12 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
   delete env.CLAUDE_CODE_ENTRYPOINT;
   env.AGENTOC_CHAT_BASE_URL = `http://127.0.0.1:${CHAT_PORT}`;
   env.AGENTOC_PROJECT_ROOT = process.env.AGENTOC_PROJECT_ROOT || PROJECT_ROOT;
+  env.RAGENT_CHAT_BASE_URL = env.AGENTOC_CHAT_BASE_URL;
+  env.RAGENT_PROJECT_ROOT = env.AGENTOC_PROJECT_ROOT;
+  delete env.RAGENT_SESSION_ID;
   if (typeof manifest?.sessionId === 'string' && manifest.sessionId.trim()) {
     env.AGENTOC_SESSION_ID = manifest.sessionId.trim();
+    env.RAGENT_SESSION_ID = env.AGENTOC_SESSION_ID;
   }
   if (runId) {
     env.AGENTOC_RUN_ID = runId;

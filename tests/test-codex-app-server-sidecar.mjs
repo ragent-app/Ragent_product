@@ -147,7 +147,7 @@ let mcpReadySent = false;
 let fixtureHookTrusted = false;
 let mcpMode = process.env.FAKE_CODEX_APP_SERVER_MCP_MODE || '';
 const delayedTurnStartMs = Number(process.env.FAKE_CODEX_APP_SERVER_TURN_START_DELAY_MS || '0');
-if (recordPath) fs.appendFileSync(recordPath, JSON.stringify({ agentocFixtureProcessArgs: process.argv.slice(2) }) + '\\n');
+if (recordPath) fs.appendFileSync(recordPath, JSON.stringify({ agentocFixtureProcessArgs: process.argv.slice(2), ragentEnv: { session: process.env.RAGENT_SESSION_ID, baseUrl: process.env.RAGENT_CHAT_BASE_URL, projectRoot: process.env.RAGENT_PROJECT_ROOT } }) + '\\n');
 function record(message) {
   messages.push(message);
   // A stale-resume handoff starts a second app-server process. Append each
@@ -1012,6 +1012,10 @@ try {
   await waitForSessionCodexThread(port, session.id, 'thread-fake-plan');
 
   let recorded = readRecordedMessages(recordPath);
+  const ragentEnv = recorded.find(message => message.ragentEnv)?.ragentEnv;
+  assert.equal(ragentEnv?.session, session.id);
+  assert.equal(ragentEnv?.baseUrl, `http://127.0.0.1:${port}`);
+  assert.equal(ragentEnv?.projectRoot, repoRoot);
   const planThreadStarts = recorded.filter((message) => message.method === 'thread/start');
   const planThreadStart = planThreadStarts[0];
   const planTurnStart = recorded.find((message) => message.method === 'turn/start');

@@ -36,13 +36,13 @@ function buildSessionControlApiAndSpawnSection({ currentSessionId, chatPort }) {
 - Multi-session routing is a core dispatch principle; this is not primarily a user-facing UI action. Split only when a turn has 2+ independently actionable goals and the separate context or parallelism is useful; keep one bounded workflow in this Session otherwise.
 - Do not split a single bounded workflow just because the user expressed it as a numbered checklist, bug-triage rubric, or ordered step sequence. If the user asks to continue in the same session/workflow or not to create another child session, treat that as a strong no-split signal; if work stays here, have a clear no-split reason. A spawned session is an independent worker that simply received bounded handoff context; a parent session may coordinate while each child session owns one goal. A delegated "Delegation handoff:" is already a focused task; do not spawn again unless it contains genuinely independent work.
 - Use \`ragent session-spawn --task "<focused task>" --json\`; add \`--wait\` when the parent needs the result and \`--final-only\` when only a bounded summary should return. The handoff is just the focused task plus the parent session id; let the child fetch it from the parent session when needed.
-- If the \`ragent\` command is unavailable, use \`node "$AGENTOC_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\` in a POSIX shell, or \`node "$env:AGENTOC_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\` in PowerShell.
+- If the \`ragent\` command is unavailable, use \`node "$RAGENT_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\` in a POSIX shell, or \`node "$env:RAGENT_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json\` in PowerShell.
 
 ## Session Control API
 This is a product route index, not a grant of authority. Availability depends on the current run's principal, capability, feature flags and server authorization. Use only operations actually granted to this run; do not attempt to bypass a denial.
 
-- Call \`ragent api <METHOD> <PATH> --body '<JSON>'\`; use \`--wait-run\` only when a started Run's terminal result is needed. Fallback: \`node "$AGENTOC_PROJECT_ROOT/cli.js" api ...\` in a POSIX shell or \`node "$env:AGENTOC_PROJECT_ROOT/cli.js" api ...\` in PowerShell.
-- Use \`AGENTOC_SESSION_ID\`, \`AGENTOC_CHAT_BASE_URL\`, and \`AGENTOC_PROJECT_ROOT\`; URL-encode ids and use stable \`requestId\`/\`idempotencyKey\` values for retryable mutations.
+- Call \`ragent api <METHOD> <PATH> --body '<JSON>'\`; use \`--wait-run\` only when a started Run's terminal result is needed. Fallback: \`node "$RAGENT_PROJECT_ROOT/cli.js" api ...\` in a POSIX shell or \`node "$env:RAGENT_PROJECT_ROOT/cli.js" api ...\` in PowerShell.
+- Use \`RAGENT_SESSION_ID\`, \`RAGENT_CHAT_BASE_URL\`, and \`RAGENT_PROJECT_ROOT\`; URL-encode ids and use stable \`requestId\`/\`idempotencyKey\` values for retryable mutations.
 - Responses are authoritative: 202 means accepted/queued, then inspect \`run\` or poll \`GET /api/runs/:runId\`; 401/403/409 means an auth, capability, or state boundary. \`/ws\` emits invalidation hints only; refetch the HTTP resource. Never forge headers or reuse a capability across resources.
 
 Session lifecycle and conversation:
@@ -77,7 +77,7 @@ Artifacts:
 Scope exclusions:
 
 - \`/api/internal/*\`, device-auth/pairing/bootstrap, connectivity/onboarding, provider-sync, and raw connector OAuth/login routes are specialized infrastructure, not general session APIs. Use only a declared capability or dedicated command when the server prompt grants it; never invent auth, credential, cookie, or raw \`curl\` fallbacks.
-- The shell environment exposes \`AGENTOC_SESSION_ID\` — current source session${sessionIdSuffix}, \`AGENTOC_CHAT_BASE_URL\` — local control plane (usually http://127.0.0.1:${chatPort}), and \`AGENTOC_PROJECT_ROOT\` — CLI fallback root. The trigger and local-bridge commands default to AGENTOC_SESSION_ID; \`--source-session\` is usually unnecessary for spawn.
+- The shell environment exposes \`RAGENT_SESSION_ID\` — current source session${sessionIdSuffix}, \`RAGENT_CHAT_BASE_URL\` — local control plane (usually http://127.0.0.1:${chatPort}), and \`RAGENT_PROJECT_ROOT\` — CLI fallback root. The trigger and local-bridge commands default to RAGENT_SESSION_ID; \`--source-session\` is usually unnecessary for spawn.
 - This API index is a routing aid, not a schema substitute. Let live responses, command \`--help\`, and linked contract docs define optional fields and feature flags.`;
 }
 
@@ -227,9 +227,9 @@ No startup memory index was found. This does not block the user's task. Use expl
 async function buildConnectorCapabilitiesSection() {
   const connectorSections = [];
   const agendaCommand = 'ragent agenda add --title "Title" --start "ISO8601" --duration 60';
-  const agendaFallbackCommand = 'node "$AGENTOC_PROJECT_ROOT/cli.js" agenda add --title "Title" --start "ISO8601" --duration 60';
+  const agendaFallbackCommand = 'node "$RAGENT_PROJECT_ROOT/cli.js" agenda add --title "Title" --start "ISO8601" --duration 60';
   const agendaHelpCommand = 'ragent agenda --help';
-  const agendaFallbackHelpCommand = 'node "$AGENTOC_PROJECT_ROOT/cli.js" agenda --help';
+  const agendaFallbackHelpCommand = 'node "$RAGENT_PROJECT_ROOT/cli.js" agenda --help';
 
   try {
     const feedInfo = await getFeedInfo();
@@ -240,7 +240,7 @@ async function buildConnectorCapabilitiesSection() {
       ];
 
       connectorSections.push(`### Calendar
-This instance has an iCal subscription feed configured. Its existence does not establish that the current run can write to it. For an ordinary calendar request, use \`${agendaCommand}\` only when the run has the required access and the command is available. If \`ragent\` is unavailable in PATH but the declared CLI fallback and Node are available, use \`${agendaFallbackCommand}\` in a POSIX shell, or replace \`$AGENTOC_PROJECT_ROOT\` with \`$env:AGENTOC_PROJECT_ROOT\` in PowerShell. The write stays instance-local when the shell already carries \`AGENTOC_INSTANCE_ROOT\` or \`AGENTOC_CONFIG_DIR\`. If access or the command is unavailable, report the actual limitation instead of claiming success.
+This instance has an iCal subscription feed configured. Its existence does not establish that the current run can write to it. For an ordinary calendar request, use \`${agendaCommand}\` only when the run has the required access and the command is available. If \`ragent\` is unavailable in PATH but the declared CLI fallback and Node are available, use \`${agendaFallbackCommand}\` in a POSIX shell, or replace \`$RAGENT_PROJECT_ROOT\` with \`$env:RAGENT_PROJECT_ROOT\` in PowerShell. The write stays instance-local when the shell already carries \`AGENTOC_INSTANCE_ROOT\` or \`AGENTOC_CONFIG_DIR\`. If access or the command is unavailable, report the actual limitation instead of claiming success.
 
 For workflow details, use \`${agendaHelpCommand}\` when available. If the \`ragent\` command is unavailable in PATH and the declared CLI fallback and Node are available, use \`${agendaFallbackHelpCommand}\`. Do not create completion targets for normal interactive calendar requests.
 
