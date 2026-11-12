@@ -1,5 +1,5 @@
 #!/bin/bash
-# AgentoC macOS app shared environment bootstrap.
+# Ragent macOS app environment bootstrap.
 # Sourced by the main launcher and the helper scripts in Contents/Resources.
 # shellcheck shell=bash
 
@@ -17,7 +17,7 @@ AGENTOC_APP_DIR="$AGENTOC_RESOURCES_DIR/app"
 AGENTOC_NODE_BIN="$AGENTOC_RESOURCES_DIR/runtime/node"
 AGENTOC_CONFIG_DIR_DEFAULT="$HOME/.config/agentoc"
 
-agentoc_log() { printf '[AgentoC] %s\n' "$*"; }
+agentoc_log() { printf '[Ragent] %s\n' "$*"; }
 
 agentoc_config_dir() {
   if [ -n "${AGENTOC_CONFIG_DIR:-}" ]; then
@@ -130,7 +130,7 @@ const envFile = path('instance.env');
 if (!existing(envFile)) {
   const secret = randomBytes(32).toString('hex');
   const created = publish(envFile, [
-    '# AgentoC macOS instance environment (sourced by the app launcher).',
+    '# Ragent macOS instance environment (sourced by the app launcher).',
     '# Edits survive app upgrades. Restart the app after changing values.',
     `AGENTOC_AUTH_SESSION_SECRET=${secret}`,
     'SECURE_COOKIES=0',
@@ -149,7 +149,7 @@ const credsFile = path('owner-credentials.txt');
 if (!existing(authFile)) {
   const candidate = randomBytes(12).toString('hex');
   const creds = [
-    '# AgentoC owner login (generated on first run)',
+    '# Ragent owner login (generated on first run)',
     `# Web: http://127.0.0.1:${process.env.CHAT_PORT || '7690'}/`,
     'username: owner', `password: ${candidate}`,
     '# Change it in Settings after first login, then delete this file.', '',
