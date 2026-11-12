@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { appendFile, chmod, chown, lstat, mkdir, readFile, unlink } from 'fs/promises';
+import { chmod, chown, lstat, mkdir, open, readFile, unlink } from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import { createPublicKey, randomBytes } from 'crypto';
 import { dirname, isAbsolute } from 'path';
 import { spawn } from 'child_process';
@@ -617,15 +618,35 @@ async function spawnFixedArgv(executable, argv, options = {}) {
 
 // ── audit ────────────────────────────────────────────────────────────────────
 
+let auditQueue = Promise.resolve();
 async function appendAuditRecord(event = {}, { required = false } = {}) {
+  const write = auditQueue.catch(() => {}).then(() => writeAuditRecord(event, { required }));
+  auditQueue = write;
+  return write;
+}
+
+async function writeAuditRecord(event = {}, { required = false } = {}) {
+  let file;
   try {
     const groupGid = await lookupGroupGid(EXECUTOR_GROUP);
     const ownerUid = isUnprivilegedTestProcess() ? process.geteuid() : 0;
     await mkdir(dirname(AUDIT_FILE), { recursive: true, mode: 0o750 });
     const line = `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`;
-    await appendFile(AUDIT_FILE, line, { mode: 0o640 });
-    await chmod(AUDIT_FILE, 0o640);
-    await chownIfPrivileged(AUDIT_FILE, ownerUid, groupGid);
+    file = await open(AUDIT_FILE, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | fsConstants.O_NOFOLLOW, 0o640);
+    const auditStat = await file.stat();
+    if (!auditStat.isFile() || auditStat.uid !== ownerUid || auditStat.nlink !== 1 || (auditStat.mode & 0o022) !== 0) {
+      throw new Error('Privileged audit is not an owner-controlled regular file');
+    }
+    await file.chmod(0o640);
+    if (!isUnprivilegedTestProcess()) await file.chown(ownerUid, groupGid);
+    await file.writeFile(line);
+    if (required) {
+      // Both file data and its directory entry must survive a crash before
+      // the associated operation is allowed to start.
+      await file.sync();
+      const dir = await open(dirname(AUDIT_FILE), 'r');
+      try { await dir.sync(); } finally { await dir.close(); }
+    }
   } catch (err) {
     console.error(`[privileged-executor] audit write failed: ${err.message}`);
     if (required) {
@@ -633,7 +654,7 @@ async function appendAuditRecord(event = {}, { required = false } = {}) {
       error.code = 'PRIVILEGED_AUDIT_REQUIRED';
       throw error;
     }
-  }
+  } finally { if (file) await file.close(); }
 }
 
 async function appendAudit(event = {}) {
@@ -642,7 +663,7 @@ async function appendAudit(event = {}) {
 
 // Semantic capabilities are one-shot across executor restarts. Their consume
 // record is therefore an execution precondition, not best-effort telemetry.
-async function appendSemanticAuditRequired(event = {}) {
+async function appendRequiredAudit(event = {}) {
   return appendAuditRecord(event, { required: true });
 }
 
@@ -653,12 +674,28 @@ function createAuditId() {
 // ── consumed set rebuild from audit (lifecycle §2.3) ──────────────────────────
 
 async function rebuildConsumedSetFromAudit() {
+  let content;
+  let file;
   try {
-    const content = await readFile(AUDIT_FILE, 'utf8').catch(() => '');
+    file = await open(AUDIT_FILE, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const auditStat = await file.stat();
+    const ownerUid = isUnprivilegedTestProcess() ? process.geteuid() : 0;
+    if (!auditStat.isFile() || auditStat.uid !== ownerUid || auditStat.nlink !== 1 || (auditStat.mode & 0o022) !== 0) {
+      throw new Error('Privileged audit is not an owner-controlled regular file');
+    }
+    content = new TextDecoder('utf-8', { fatal: true }).decode(await file.readFile());
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw new Error(`Cannot read privileged audit for replay protection: ${error.message}`);
+  } finally { if (file) await file.close(); }
+  if (content && !content.endsWith('\n')) throw new Error('Privileged audit ends with an incomplete record');
+  try {
     for (const line of content.split('\n')) {
       if (!line.trim()) continue;
       try {
         const record = JSON.parse(line);
+        if (!record || typeof record !== 'object' || Array.isArray(record)
+            || typeof record.event !== 'string' || !record.event.trim()) throw new Error('Invalid audit record');
         const opId = trimString(record?.opId);
         if (opId && (record?.event === 'command_started' || record?.event === 'command_completed')) {
           consumedOpIds.add(opId);
@@ -669,7 +706,7 @@ async function rebuildConsumedSetFromAudit() {
           || record?.event === 'semantic_command_completed')) {
           consumedSemanticNonces.add(semanticNonce);
         }
-      } catch {}
+      } catch { throw new Error('Privileged audit contains an invalid record'); }
     }
     if (consumedOpIds.size > 0) {
       console.log(`[privileged-executor] Rebuilt consumed set: ${consumedOpIds.size} opIds`);
@@ -677,7 +714,7 @@ async function rebuildConsumedSetFromAudit() {
     if (consumedSemanticNonces.size > 0) {
       console.log(`[privileged-executor] Rebuilt semantic nonce set: ${consumedSemanticNonces.size} nonces`);
     }
-  } catch {}
+  } catch (error) { throw new Error(`Cannot rebuild privileged replay state: ${error.message}`); }
 }
 
 // ── request handling ─────────────────────────────────────────────────────────
@@ -734,7 +771,7 @@ export async function handleSemanticRequest(request, context = {}) {
     return { ok: false, id: requestId, error: 'Semantic capability nonce already consumed', code: 'SEMANTIC_CAPABILITY_CONSUMED' };
   }
   consumedSemanticNonces.add(nonce);
-  await appendSemanticAuditRequired({
+  await appendRequiredAudit({
     event: 'semantic_capability_consumed',
     requestId,
     capabilityId: trimString(capability.capabilityId),
@@ -782,7 +819,7 @@ export async function handleSemanticRequest(request, context = {}) {
 
   const auditId = createAuditId();
   const invocation = revalidation.invocation;
-  await appendSemanticAuditRequired({
+  await appendRequiredAudit({
     event: 'semantic_command_started',
     requestId,
     auditId,
@@ -881,8 +918,15 @@ export async function handleRequest(request, socket, options = {}) {
   const auditId = createAuditId();
   const auditLabel = trimString(request?.auditLabel);
 
-  // Audit: command_started
-  await appendAudit({
+  // Reserve synchronously after verification: concurrent requests must not
+  // both pass the prior asynchronous liveness check with the same token.
+  if (consumedOpIds.has(opId)) {
+    return { ok: false, id: requestId, error: 'Token already consumed', code: 'PRIVILEGED_TOKEN_CONSUMED' };
+  }
+  consumedOpIds.add(opId);
+  // Execution requires a durable start record so replay remains blocked
+  // after a crash, including when audit storage is full or unavailable.
+  await appendRequiredAudit({
     event: 'command_started',
     requestId,
     opId,
@@ -896,11 +940,6 @@ export async function handleRequest(request, socket, options = {}) {
     cgroup: trimString(token.cgroup),
     auditLabel: auditLabel || undefined,
   });
-
-  // Mark as consumed BEFORE execution (defense against crash-then-replay).
-  // If the process crashes mid-exec, the audit has command_started but no
-  // command_completed — the consumed set still blocks replay.
-  consumedOpIds.add(opId);
 
   // Execute (§4.1)
   const execResult = await spawnCaptured(command, { cwd, timeoutMs: DEFAULT_EXEC_TIMEOUT_MS });

@@ -3,7 +3,7 @@ import assert from 'assert/strict';
 import { spawn } from 'child_process';
 import { tmpdir, userInfo } from 'os';
 import { join } from 'path';
-import { chmod, mkdtemp, rm, stat, writeFile } from 'fs/promises';
+import { chmod, mkdir, mkdtemp, rm, stat, symlink, unlink, writeFile } from 'fs/promises';
 import { execFileSync } from 'child_process';
 
 import { generatePrivilegedSigningKeyPair, signPrivilegedToken, createPrivilegedKeyId } from '../chat/privileged-token.mjs';
@@ -286,7 +286,7 @@ const token1 = signPrivilegedToken({
     at: new Date().toISOString(),
     event: 'command_started',
     opId: restartOpId,
-  }) + '\n');
+  }) + '\n', { mode: 0o600 });
   const restartExecutor = await startExecutor({
     socketPath: restartSocket,
     keysFilePath: keysFile,
@@ -306,6 +306,63 @@ const token1 = signPrivilegedToken({
 }
 
 // ── test 4: rejected — expired token ─────────────────────────────────────────
+
+// Competing uses of one signed token must reserve it before either request
+// reaches asynchronous audit I/O.
+{
+  const opId = 'pop_test_concurrent_replay';
+  const command = 'df /tmp';
+  const token = signPrivilegedToken({ kid, opId, category: 'privileged_other', command, cwd: '/tmp',
+    manifestHash: computeOpManifestHash({ command, category: 'privileged_other', cwd: '/tmp' }),
+    sessionId: 'sess_test', runId: 'run_test', turnId: 'turn_test', cgroup: 'agentoc-runner-run_test',
+    authMode: 'passkey', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }, keyPair.privateKey, { kid });
+  const responses = await Promise.all(Array.from({ length: 8 }, () => requestPrivilegedExecutor(
+    { action: 'exec', token }, { socketPath, timeoutMs: 10_000 },
+  )));
+  check('concurrent replay: exactly one execution', responses.filter((entry) => entry.ok).length === 1);
+  check('concurrent replay: all others refused', responses.filter((entry) => entry.code === 'PRIVILEGED_TOKEN_CONSUMED').length === 7);
+}
+
+// A truncated ledger cannot be treated as an empty replay history.
+{
+  const brokenDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-broken-audit-'));
+  try {
+    const brokenAudit = join(brokenDir, 'audit.jsonl');
+    await writeFile(brokenAudit, '{"event":"command_started"', { mode: 0o600 });
+    await assert.rejects(startExecutor({ socketPath: join(brokenDir, 'exec.sock'), keysFilePath: keysFile, auditFile: brokenAudit }),
+      /incomplete record/);
+    await writeFile(brokenAudit, 'not json\n');
+    await assert.rejects(startExecutor({ socketPath: join(brokenDir, 'exec.sock'), keysFilePath: keysFile, auditFile: brokenAudit }),
+      /invalid record/);
+    await unlink(brokenAudit);
+    await symlink(keysFile, brokenAudit);
+    await assert.rejects(startExecutor({ socketPath: join(brokenDir, 'exec.sock'), keysFilePath: keysFile, auditFile: brokenAudit }),
+      /Cannot read privileged audit/);
+    check('broken audit prevents startup', true);
+  } finally { await rm(brokenDir, { recursive: true, force: true }); }
+}
+
+// A write failure after startup must prevent the requested operation.
+{
+  const failedDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-audit-failure-'));
+  const failedSocket = join(failedDir, 'exec.sock');
+  const failedAudit = join(failedDir, 'audit.jsonl');
+  const marker = join(failedDir, 'must-not-exist');
+  const failedExecutor = await startExecutor({ socketPath: failedSocket, keysFilePath: keysFile, auditFile: failedAudit });
+  try {
+    await mkdir(failedAudit);
+    const command = `touch ${marker}`;
+    const token = signPrivilegedToken({ kid, opId: 'pop_test_audit_failure', category: 'privileged_other', command, cwd: '/tmp',
+      manifestHash: computeOpManifestHash({ command, category: 'privileged_other', cwd: '/tmp' }),
+      sessionId: 'sess_test', runId: 'run_test', turnId: 'turn_test', cgroup: 'agentoc-runner-run_test',
+      authMode: 'passkey', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }, keyPair.privateKey, { kid });
+    const response = await requestPrivilegedExecutor({ action: 'exec', token }, { socketPath: failedSocket, timeoutMs: 10_000 });
+    check('audit failure refuses execution', !response.ok && response.code === 'PRIVILEGED_AUDIT_REQUIRED');
+    await assert.rejects(stat(marker), { code: 'ENOENT' });
+  } finally { await stopExecutor(failedExecutor); await rm(failedDir, { recursive: true, force: true }); }
+}
 
 {
   const expiredToken = signPrivilegedToken({

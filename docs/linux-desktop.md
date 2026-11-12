@@ -53,6 +53,16 @@ configurations. On one Ubuntu 24.04 x86-64 host, a real same-user Codex request
 completed and a process-identity probe confirmed restricted groups were absent.
 Broader host, security and release acceptance are still outstanding.
 
+The privileged executor records one-shot approvals in
+`/var/log/agentoc-privileged/audit.jsonl` before execution. If that file is
+unreadable, malformed, incomplete, linked or writable by other users, the
+executor refuses to start; if a required record cannot be persisted, it
+refuses that operation. An administrator should investigate and restore a
+trusted audit history before retrying. Deleting or replacing the audit file
+loses replay history; do not treat an empty replacement as a repair. These
+checks depend on the audit directory and its contents remaining protected from
+unauthorized deletion or replacement by the host administrator.
+
 ## Optional runner sandbox
 
 When `AGENTOC_RUN_SANDBOX=1` is configured, Runs require the root-owned system
