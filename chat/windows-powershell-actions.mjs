@@ -23,6 +23,21 @@ export function analyzeWindowsVersion(programName, args) {
       && !(flag === 'version' && program === 'go')) return null;
   return { kind: 'read', program: `${program} version`, target: null };
 }
+// Recognize a small pure JavaScript expression language, not arbitrary -e
+// code. String escapes remain inside a JS string literal; calls, properties
+// and statements outside the explicitly listed forms cannot match.
+const NODE_LITERAL = String.raw`(?:'(?:[^'\\\r\n]|\\[^\r\n])*'|"(?:[^"\\\r\n]|\\[^\r\n])*"|\d+(?:\.\d+)?|true|false|null)`;
+const NODE_VALUE = String.raw`(?:${NODE_LITERAL}|process\.(?:platform|arch|version|versions\.node))`;
+const NODE_LOG = String.raw`console\.(?:log|info|warn|error)\s*\(\s*(?:${NODE_VALUE}(?:\s*,\s*${NODE_VALUE})*)?\s*\)`;
+const NODE_PURE_SCRIPT = new RegExp(String.raw`^\s*(?:${NODE_LOG}\s*;?|setTimeout\s*\(\s*\(\s*\)\s*=>\s*\{\s*${NODE_LOG}\s*;?\s*\}\s*,\s*\d+\s*\)\s*;?)\s*$`);
+const NODE_PURE_EXPRESSION = new RegExp(String.raw`^\s*${NODE_VALUE}\s*;?\s*$`);
+export function analyzeWindowsPureNode(programName, args) {
+  const program = String(programName || '').toLowerCase();
+  if (!['node', 'node.exe'].includes(program) || !Array.isArray(args) || args.length !== 2 || typeof args[1] !== 'string' || args[1].length > 8192) return null;
+  const valid = ['-e', '--eval'].includes(args[0]) ? NODE_PURE_SCRIPT.test(args[1])
+    : ['-p', '--print'].includes(args[0]) && NODE_PURE_EXPRESSION.test(args[1]);
+  return valid ? { kind: 'read', program: 'node literal output', target: null } : null;
+}
 const FILE_COMMANDS = new Map([
   ['get-content', 'read'], ['get-item', 'read'], ['get-childitem', 'read'], ['get-filehash', 'read'], ['test-path', 'read'], ['resolve-path', 'read'],
   ['set-content', 'write'], ['add-content', 'write'], ['clear-content', 'write'], ['new-item', 'write'], ['out-file', 'write'], ['remove-item', 'delete'],
@@ -601,6 +616,8 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const versionArgs = staticExternalArguments(entry.elements);
     const version = entry.pipelineInput === false && versionArgs && analyzeWindowsVersion(entry.name, versionArgs);
     if (version) { actions.push(version); continue; }
+    const pureNode = entry.pipelineInput === false && analyzeWindowsPureNode(program, versionArgs);
+    if (pureNode) { actions.push(pureNode); continue; }
     if (entry.pipelineInput === false && isWindowsPingProbe(program, versionArgs)) {
       actions.push({ kind: 'read', program: 'ping', target: null, caution: true }); continue;
     }

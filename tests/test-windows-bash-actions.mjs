@@ -31,6 +31,8 @@ if (process.platform === 'win32') {
   assert.equal((await inspect('ping -n 1 127.0.0.1')).decision, 'allow');
   assert.equal((await inspect('ping -n $COUNT 127.0.0.1')).decision, 'review');
   assert.equal((await inspect('ping -n 1 127.0.0.1; rm -rf secret/.ssh')).decision, 'review');
+  assert.equal((await inspect(`node -e 'setTimeout(() => { console.log("ready"); }, 20)'`)).decision, 'allow');
+  assert.equal((await inspect(`node -e 'console.log(require("fs").readFileSync("secret"))'`)).decision, 'review');
   for (const command of ['which --read-alias node', 'command node script.js', 'type -x node', 'which $TARGET']) {
     assert.equal((await inspect(command)).decision, 'review', command);
   }
@@ -151,6 +153,7 @@ if (process.platform === 'win32') {
     const state = { riskMode, cwd: workspace, riskContext: context };
     assert.equal((await decideWindowsApproval(request('which node; echo done'), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request('ping -n 1 127.0.0.1'), state)).decision, 'auto-allow');
+    assert.equal((await decideWindowsApproval(request(`node -e 'console.log("ready")'`), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request('command node script.js'), state)).decision, 'prompt');
     assert.equal((await decideWindowsApproval(request('git status --short'), state)).decision, 'auto-allow');
     assert.equal((await decideWindowsApproval(request("git log -1 --format='%h %s'"), state)).decision, 'auto-allow');

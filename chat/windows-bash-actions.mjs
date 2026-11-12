@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsVersion, analyzeWindowsWorkspaceScriptTask, isWindowsPingProbe } from './windows-powershell-actions.mjs';
+import { analyzeWindowsFileChanges, analyzeWindowsRipgrep, analyzeWindowsVersion, analyzeWindowsWorkspaceScriptTask, analyzeWindowsPureNode, isWindowsPingProbe } from './windows-powershell-actions.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 // Parse a literal simple command only. Anything requiring shell expansion,
@@ -297,6 +297,8 @@ export async function analyzeWindowsBash(command, context = {}, { analyzeFiles =
     const analyzed = await analyzeWindowsRipgrep(words.slice(1), context, { pathResolver: gitBashPath });
     return withOutput(analyzed);
   }
+  const pureNode = analyzeWindowsPureNode(program, words.slice(1));
+  if (pureNode) return withOutput({ complete: true, actions: [pureNode] });
   const workspaceTask = await analyzeWindowsWorkspaceScriptTask(program, words.slice(1), context, { pathResolver: gitBashPath });
   if (workspaceTask) {
     if (context.requireAbsolutePaths) return { complete: false, actions: [], reason: 'working directory is not attested' };
