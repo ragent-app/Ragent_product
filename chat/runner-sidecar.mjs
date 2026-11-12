@@ -4080,7 +4080,7 @@ async function main() {
         if (windowsBrokerMcpRequested) {
           requiredServers.push({
             name: serverNamesByKind.get('broker'),
-            requiredToolNames: ['agentoc_restart_qa_service', 'agentoc_restart_qa_service_status'],
+            requiredToolNames: ['ragent_restart_qa_service', 'ragent_restart_qa_service_status'],
           });
         }
         if (browserMcpRequested) {

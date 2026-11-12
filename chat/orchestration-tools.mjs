@@ -93,15 +93,15 @@ export async function getOrchestrationStatusTool({ executionId } = {}) {
 
 export const ORCHESTRATION_TOOL_DEFINITIONS = Object.freeze([
   Object.freeze({
-    name: 'agentoc_validate_collaboration_plan',
+    name: 'ragent_validate_collaboration_plan',
     description: 'Validate a durable collaboration plan without creating Sessions or Runs. Returns a short-lived validationId.',
   }),
   Object.freeze({
-    name: 'agentoc_dispatch_validated_collaboration_plan',
+    name: 'ragent_dispatch_validated_collaboration_plan',
     description: 'Dispatch exactly the plan referenced by validationId. Does not accept an arbitrary plan payload.',
   }),
   Object.freeze({
-    name: 'agentoc_get_orchestration_status',
+    name: 'ragent_get_orchestration_status',
     description: 'Read a durable execution checkpoint, steps, commands and interrupts.',
   }),
 ]);

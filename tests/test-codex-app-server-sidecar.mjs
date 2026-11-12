@@ -340,8 +340,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           resources: [],
           resourceTemplates: [],
         }, ...(process.platform === 'win32' ? [{ name: managedBrokerServerName(), tools: {
-          agentoc_restart_qa_service: { name: 'agentoc_restart_qa_service', inputSchema: { type: 'object', properties: {} } },
-          agentoc_restart_qa_service_status: { name: 'agentoc_restart_qa_service_status', inputSchema: { type: 'object', properties: {} } },
+          ragent_restart_qa_service: { name: 'ragent_restart_qa_service', inputSchema: { type: 'object', properties: {} } },
+          ragent_restart_qa_service_status: { name: 'ragent_restart_qa_service_status', inputSchema: { type: 'object', properties: {} } },
         }, resources: [], resourceTemplates: [] }] : [])],
       },
     });

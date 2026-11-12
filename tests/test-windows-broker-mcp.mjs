@@ -49,14 +49,17 @@ function rpc(method, params = {}) {
 try {
   const listed = await rpc('tools/list');
   assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
-    'agentoc_restart_qa_service', 'agentoc_restart_qa_service_status',
+    'ragent_restart_qa_service', 'ragent_restart_qa_service_status',
   ]);
-  const bad = await rpc('tools/call', { name: 'agentoc_restart_qa_service', arguments: { requestKey: 'same', command: 'whoami' } });
+  const bad = await rpc('tools/call', { name: 'ragent_restart_qa_service', arguments: { requestKey: 'same', command: 'whoami' } });
   assert.equal(bad.result.isError, true);
   assert.equal(received.length, 0);
-  const proposal = await rpc('tools/call', { name: 'agentoc_restart_qa_service', arguments: { requestKey: 'same' } });
+  const oldBad = await rpc('tools/call', { name: 'agentoc_restart_qa_service', arguments: { requestKey: 'same', command: 'whoami' } });
+  assert.equal(oldBad.result.isError, true);
+  assert.equal(received.length, 0);
+  const proposal = await rpc('tools/call', { name: 'ragent_restart_qa_service', arguments: { requestKey: 'same' } });
   assert.equal(JSON.parse(proposal.result.content[0].text).status, 'awaiting_device');
-  const status = await rpc('tools/call', { name: 'agentoc_restart_qa_service_status', arguments: { requestKey: 'same' } });
+  const status = await rpc('tools/call', { name: 'ragent_restart_qa_service_status', arguments: { requestKey: 'same' } });
   assert.equal(JSON.parse(status.result.content[0].text).status, 'succeeded');
   assert.deepEqual(received.map((item) => item.method), ['POST', 'GET']);
   assert.equal(received[0].token, 'test-token');

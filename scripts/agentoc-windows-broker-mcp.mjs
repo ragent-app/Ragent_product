@@ -3,7 +3,7 @@
 import { createInterface } from 'node:readline';
 import { request as httpRequest } from 'node:http';
 
-const names = new Set(['agentoc_restart_qa_service', 'agentoc_restart_qa_service_status']);
+const names = new Set(['ragent_restart_qa_service', 'ragent_restart_qa_service_status']);
 const config = {
   endpoint: process.env.AGENTOC_WINDOWS_BROKER_ENDPOINT || '',
   token: process.env.AGENTOC_WINDOWS_BROKER_TOKEN || '',
@@ -45,14 +45,14 @@ async function callControlPlane(method, requestKey) {
 
 async function handle(message) {
   const { id, method } = message;
-  if (method === 'initialize') return result(id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'agentoc-windows-broker', version: '1.0.0' } });
+  if (method === 'initialize') return result(id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'ragent-windows-broker', version: '1.0.0' } });
   if (method === 'ping') return result(id, {});
   if (method === 'tools/list') return result(id, { tools: [
-    { name: 'agentoc_restart_qa_service', description: 'Request a signed phone approval to restart the one administrator-configured Ragent QA test service. Returns a request ID; it never runs a shell command.', inputSchema: { type: 'object', additionalProperties: false, properties: { requestKey: { type: 'string', description: 'Stable retry key, 1-128 letters, digits, dots, underscores, colons, or dashes.' } }, required: ['requestKey'] } },
-    { name: 'agentoc_restart_qa_service_status', description: 'Read the result of an earlier QA service restart request using its requestKey.', inputSchema: { type: 'object', additionalProperties: false, properties: { requestKey: { type: 'string' } }, required: ['requestKey'] } },
+    { name: 'ragent_restart_qa_service', description: 'Request a signed phone approval to restart the one administrator-configured Ragent QA test service. Returns a request ID; it never runs a shell command.', inputSchema: { type: 'object', additionalProperties: false, properties: { requestKey: { type: 'string', description: 'Stable retry key, 1-128 letters, digits, dots, underscores, colons, or dashes.' } }, required: ['requestKey'] } },
+    { name: 'ragent_restart_qa_service_status', description: 'Read the result of an earlier QA service restart request using its requestKey.', inputSchema: { type: 'object', additionalProperties: false, properties: { requestKey: { type: 'string' } }, required: ['requestKey'] } },
   ] });
   if (method === 'tools/call') {
-    const name = message.params?.name;
+    const name = typeof message.params?.name === 'string' ? message.params.name.replace(/^agentoc_restart_qa_service/, 'ragent_restart_qa_service') : '';
     if (!names.has(name)) return result(id, textResult({ error: 'Unknown tool' }, true));
     const args = message.params?.arguments;
     if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some((key) => key !== 'requestKey') || !/^[A-Za-z0-9._:-]{1,128}$/.test(args.requestKey || '')) {
