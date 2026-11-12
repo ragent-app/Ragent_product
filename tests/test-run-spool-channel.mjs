@@ -11,7 +11,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const home = mkdtempSync(join(tmpdir(), 'agentoc-spool-channel-'));
-const spoolDir = join(home, 'chat-runs');
+// Windows runners derive the instance root from data/chat-runs; the same
+// controlled path is valid on Linux and macOS.
+const spoolDir = join(home, 'data', 'chat-runs');
 
 const previousEnv = {
   HOME: process.env.HOME,
