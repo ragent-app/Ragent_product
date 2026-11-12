@@ -5,7 +5,7 @@ import { prepareReadOnlyCodexMcp } from './codex-readonly-mcp.mjs';
 // Called on the Run's private broker connection. A thread may start only
 // after its scoped MCP config and authenticated executor have been verified.
 export function createCodexReadOnlyEnvironmentSetup({ environmentId, cwd, workspace, hidePaths, executor,
-  nextRequestId, send, onReady, onFailure, prepareMcp = prepareReadOnlyCodexMcp, timeoutMs = 30_000, readOnly = true } = {}) {
+  nextRequestId, send, onReady, onFailure, prepareMcp = prepareReadOnlyCodexMcp, timeoutMs = 30_000, readOnly = true, runnerHome = '' } = {}) {
   if (typeof cwd !== 'string' || !isAbsolute(cwd) || !executor?.stop || typeof nextRequestId !== 'function'
       || typeof send !== 'function' || typeof onReady !== 'function' || typeof onFailure !== 'function'
       || !Number.isFinite(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
@@ -50,7 +50,7 @@ export function createCodexReadOnlyEnvironmentSetup({ environmentId, cwd, worksp
         if (stage === 'config') {
           const config = message.result.config;
           if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Missing configuration');
-          resources = await prepareMcp({ servers: config.mcp_servers ?? {}, cwd, workspace, hidePaths, readOnly });
+          resources = await prepareMcp({ servers: config.mcp_servers ?? {}, cwd, workspace, hidePaths, readOnly, runnerHome });
           if (stage !== 'config') { await resources?.cleanup?.(); return true; }
           stage = 'register';
           const id = nextRequestId();

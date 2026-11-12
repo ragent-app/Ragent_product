@@ -25,20 +25,21 @@ export async function startReadOnlyCodexExecutor({ command, cwd, workspace, hide
   if (requireSandbox({ required: true }) !== true) throw new Error('Read-only Codex executor requires an available sandbox');
   const token = randomBytes(32).toString('hex');
   const tokenHash = createHash('sha256').update(token).digest('hex');
-  const sandbox = sandboxBuilder({ command, cwd, readOnly, hidePaths, bindReadOnlyPaths: readOnly ? [workspace] : [],
+  const sandbox = sandboxBuilder({ command, cwd, readOnly, hidePaths, runnerHome: readOnly ? '' : env.HOME,
+    bindReadOnlyPaths: readOnly ? [workspace] : [],
     readOnlyProviderFamily: readOnly ? 'codex' : '', args: ['exec-server', '--listen', 'ws://127.0.0.1:0',
       '--ws-auth', 'capability-token', '--ws-token-sha256', tokenHash] });
   // Bubblewrap terminates the executor when the owning sidecar disappears.
   const separator = sandbox.args.indexOf('--');
   if (separator < 0) { await rmdir(sandbox.emptyDir).catch(() => {}); throw new Error('Invalid executor sandbox'); }
   const privateHome = readOnly ? [] : ['--perms', '0700', '--dir', '/tmp/agentoc-executor',
-    '--perms', '0700', '--dir', '/tmp/agentoc-executor/home', '--perms', '0700', '--dir', '/tmp/agentoc-executor/codex',
-    '--setenv', 'HOME', '/tmp/agentoc-executor/home', '--setenv', 'CODEX_HOME', '/tmp/agentoc-executor/codex',
+    '--perms', '0700', '--dir', '/tmp/agentoc-executor/codex', '--setenv', 'CODEX_HOME', '/tmp/agentoc-executor/codex',
     '--setenv', 'AGENTOC_CODEX_HOME_DIR', '/tmp/agentoc-executor/codex',
     '--setenv', 'TMPDIR', '/tmp', '--setenv', 'TMP', '/tmp', '--setenv', 'TEMP', '/tmp'];
   sandbox.args.splice(separator, 0, '--die-with-parent', ...privateHome);
   const childEnv = Object.fromEntries(Object.entries(env).filter(([key, value]) => EXECUTOR_ENV_KEYS.has(key)
     && typeof value === 'string' && !value.includes('\0')));
+  if (!readOnly && typeof env.HOME === 'string' && isAbsolute(env.HOME)) childEnv.HOME = env.HOME;
   let child;
   try {
     child = spawnImpl(sandbox.command, sandbox.args, { cwd, env: childEnv, stdio: ['ignore', 'pipe', 'ignore'] });
