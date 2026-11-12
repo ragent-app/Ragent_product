@@ -5,11 +5,15 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.andysagent.agentoc.core.database.AgentoCDatabase
 import com.andysagent.agentoc.core.database.ApprovalEntity
+import com.andysagent.agentoc.core.database.PendingOperationEntity
 import com.andysagent.agentoc.core.database.SessionEntity
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.model.SessionStatus
 import com.andysagent.agentoc.core.network.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
@@ -23,6 +27,50 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], manifest = Config.NONE)
 class RoomSessionDirectorySyncTest {
+    @Test fun reconnectDoesNotReplayAnOperationStillSending() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AgentoCDatabase::class.java).allowMainThreadQueries().build()
+        database.dao().upsertSessions(listOf(SessionEntity("live", "Live", "project", "idle", 1L, 1L)))
+        val release = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val sent = AtomicInteger()
+        val carrier = object : AgentoCTransport {
+            override val connectionState = MutableStateFlow(RuntimeConnectionState.Connected)
+            override val invalidations: Flow<InvalidationHint> = emptyFlow()
+            override suspend fun execute(request: ApiRequest): ApiResponse = when {
+                request.method == "POST" && request.path == "/api/sessions/live/messages" -> {
+                    sent.incrementAndGet()
+                    started.complete(Unit)
+                    release.await()
+                    ApiResponse(200, "{}")
+                }
+                request.method == "GET" && request.path == "/api/sessions/live" -> ApiResponse(200,
+                    """{"session":{"id":"live","projectId":"project","status":"idle","latestSeq":1}}""")
+                else -> error("Unexpected request: ${request.method} ${request.path}")
+            }
+            override fun connectInvalidationSocket() = Unit
+            override suspend fun close() = Unit
+        }
+        val repository = RoomSessionRepository(database, carrier)
+        try {
+            val sending = async(start = CoroutineStart.UNDISPATCHED) { repository.sendMessage("live", "hello", "request") }
+            withTimeout(5_000) { started.await() }
+            assertEquals(1, sent.get())
+            assertEquals(0, repository.resumePendingOperations())
+            assertEquals(1, sent.get())
+            release.complete(Unit)
+            sending.await()
+            assertNull(database.dao().getPendingOperation("request"))
+            database.dao().upsertOperation(PendingOperationEntity(
+                requestId = "recovered", kind = "send_message", path = "/api/sessions/live/messages",
+                payload = "{}", state = "sending", createdAt = 1L, updatedAt = 1L,
+            ))
+            assertEquals(1, repository.resumePendingOperations())
+            assertEquals(2, sent.get())
+            assertNull(database.dao().getPendingOperation("recovered"))
+        } finally { release.complete(Unit); repository.close(); database.close() }
+    }
+
     @Test fun staleIdleDetailDoesNotRetireApprovalForAcceptedFirstTurn() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AgentoCDatabase::class.java).allowMainThreadQueries().build()

@@ -207,6 +207,12 @@ class RoomSessionRepository(
     private val sessionSyncMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private fun sessionSyncMutex(sessionId: String): Mutex = sessionSyncMutexes.computeIfAbsent(sessionId) { Mutex() }
     private val sessionListRefreshMutex = Mutex()
+    private val activePendingOperationIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private suspend fun <T> withPendingOperationClaim(requestId: String, action: suspend () -> T): T {
+        check(activePendingOperationIds.add(requestId)) { "Pending operation is already executing" }
+        try { return action() } finally { activePendingOperationIds.remove(requestId) }
+    }
     private val targetSummaryRefreshMutex = Mutex()
     private val liveProjectionMutex = Mutex()
     private val dedicatedLiveSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -995,7 +1001,7 @@ class RoomSessionRepository(
             executePending(sessionId, requestId, "resend_edited_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
             }
-        } else {
+        } else withPendingOperationClaim(requestId) {
             var operation = PendingOperationEntity(
                 requestId = requestId,
                 kind = "resend_edited_message_with_attachments",
@@ -1849,37 +1855,39 @@ class RoomSessionRepository(
         // every finalized asset id before starting it, so a process death after
         // upload but before message POST can resume with the same refs instead
         // of silently losing the user's message or creating duplicate assets.
-        var operation = PendingOperationEntity(
-            requestId = requestId,
-            kind = "send_message_with_attachments",
-            path = path,
-            payload = encodeAttachmentSendCommand(sessionId, text, requestId, selection, agentId, attachments, harnessCapabilityIds),
-            state = "pending",
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis(),
-            method = "POST",
-            idempotencyKey = requestId,
-        )
-        dao.upsertOperation(operation)
-        try {
-            val materialized = materializePendingAttachments(operation)
-            operation = materialized.first
-            val body = encodeMessage(
-                text = text,
+        withPendingOperationClaim(requestId) {
+            var operation = PendingOperationEntity(
                 requestId = requestId,
-                selection = selection,
-                agentId = agentId,
-                attachments = materialized.second,
-                harnessCapabilityIds = harnessCapabilityIds,
+                kind = "send_message_with_attachments",
+                path = path,
+                payload = encodeAttachmentSendCommand(sessionId, text, requestId, selection, agentId, attachments, harnessCapabilityIds),
+                state = "pending",
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+                method = "POST",
+                idempotencyKey = requestId,
             )
-            dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
-            execute(ApiRequest("POST", path, body, requestId, requestId))
-            markFirstTurnAccepted(sessionId)
-            dao.deleteOperation(requestId)
-        } catch (error: Throwable) {
-            val recoverable = dao.getPendingOperation(requestId) ?: operation
-            dao.upsertOperation(recoverable.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
-            throw error
+            dao.upsertOperation(operation)
+            try {
+                val materialized = materializePendingAttachments(operation)
+                operation = materialized.first
+                val body = encodeMessage(
+                    text = text,
+                    requestId = requestId,
+                    selection = selection,
+                    agentId = agentId,
+                    attachments = materialized.second,
+                    harnessCapabilityIds = harnessCapabilityIds,
+                )
+                dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
+                execute(ApiRequest("POST", path, body, requestId, requestId))
+                markFirstTurnAccepted(sessionId)
+                dao.deleteOperation(requestId)
+            } catch (error: Throwable) {
+                val recoverable = dao.getPendingOperation(requestId) ?: operation
+                dao.upsertOperation(recoverable.copy(state = "pending", updatedAt = System.currentTimeMillis(), lastError = error.message))
+                throw error
+            }
         }
         runCatching { refreshSessionDetail(sessionId) }
     }
@@ -2709,75 +2717,80 @@ class RoomSessionRepository(
 
     override suspend fun resumePendingOperations(): Int {
         var completed = 0
-        for (operation in dao.pendingOperations()) {
-            if (operation.path.isBlank()) continue
-            dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
+        for (snapshot in dao.pendingOperations()) {
+            if (!activePendingOperationIds.add(snapshot.requestId)) continue
             try {
-                val response = if (operation.kind == "send_message_with_attachments") {
-                    val materialized = materializePendingAttachments(operation)
-                    val payload = AgentocProtocol.json.parseToJsonElement(materialized.first.payload).jsonObject
-                    val body = encodeMessage(
-                        text = payload.string("text").orEmpty(),
-                        requestId = payload.string("requestId") ?: operation.requestId,
-                        selection = RuntimeSelection(
-                            tool = payload.string("tool").orEmpty(),
-                            providerProfile = payload.string("providerProfile"),
-                            model = payload.string("model"),
-                            effort = payload.string("effort"),
-                            serviceTier = payload.string("serviceTier") ?: "standard",
-                            interactionMode = payload.string("interactionMode") ?: "agent",
-                            permissionMode = payload.string("permissionMode"),
-                            planAction = payload.string("planAction"),
-                            planId = payload.string("planId"),
-                        ),
-                        agentId = payload.string("agentId"),
-                        attachments = materialized.second,
-                        harnessCapabilityIds = payload["harnessCapabilityIds"]?.jsonArray
-                            ?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
-                    )
-                    execute(ApiRequest("POST", operation.path, body, operation.requestId, operation.idempotencyKey ?: operation.requestId))
-                } else if (operation.kind == "resend_edited_message_with_attachments") {
-                    val materialized = materializePendingAttachments(operation)
-                    val payload = AgentocProtocol.json.parseToJsonElement(materialized.first.payload).jsonObject
-                    val body = encodeEditedMessage(
-                        parentRequestId = payload.string("parentRequestId").orEmpty(),
-                        prompt = payload.string("prompt").orEmpty(),
-                        requestId = payload.string("requestId") ?: operation.requestId,
-                        selection = selectionFromAttachmentPayload(payload),
-                        attachments = materialized.second,
-                    )
-                    execute(ApiRequest("POST", operation.path, body, operation.requestId, operation.idempotencyKey ?: operation.requestId))
-                } else {
-                    execute(
-                        ApiRequest(
-                            method = operation.method.ifBlank { "POST" },
-                            path = operation.path,
-                            body = operation.payload,
-                            requestId = operation.requestId,
-                            idempotencyKey = operation.idempotencyKey ?: operation.requestId,
-                            headers = decodeHeaders(operation.headersJson),
-                        ),
-                    )
+                val operation = dao.getPendingOperation(snapshot.requestId) ?: continue
+                if (operation.path.isBlank()) continue
+                dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
+                try {
+                    val response = if (operation.kind == "send_message_with_attachments") {
+                        val materialized = materializePendingAttachments(operation)
+                        val payload = AgentocProtocol.json.parseToJsonElement(materialized.first.payload).jsonObject
+                        val body = encodeMessage(
+                            text = payload.string("text").orEmpty(),
+                            requestId = payload.string("requestId") ?: operation.requestId,
+                            selection = RuntimeSelection(
+                                tool = payload.string("tool").orEmpty(),
+                                providerProfile = payload.string("providerProfile"),
+                                model = payload.string("model"),
+                                effort = payload.string("effort"),
+                                serviceTier = payload.string("serviceTier") ?: "standard",
+                                interactionMode = payload.string("interactionMode") ?: "agent",
+                                permissionMode = payload.string("permissionMode"),
+                                planAction = payload.string("planAction"),
+                                planId = payload.string("planId"),
+                            ),
+                            agentId = payload.string("agentId"),
+                            attachments = materialized.second,
+                            harnessCapabilityIds = payload["harnessCapabilityIds"]?.jsonArray
+                                ?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
+                        )
+                        execute(ApiRequest("POST", operation.path, body, operation.requestId, operation.idempotencyKey ?: operation.requestId))
+                    } else if (operation.kind == "resend_edited_message_with_attachments") {
+                        val materialized = materializePendingAttachments(operation)
+                        val payload = AgentocProtocol.json.parseToJsonElement(materialized.first.payload).jsonObject
+                        val body = encodeEditedMessage(
+                            parentRequestId = payload.string("parentRequestId").orEmpty(),
+                            prompt = payload.string("prompt").orEmpty(),
+                            requestId = payload.string("requestId") ?: operation.requestId,
+                            selection = selectionFromAttachmentPayload(payload),
+                            attachments = materialized.second,
+                        )
+                        execute(ApiRequest("POST", operation.path, body, operation.requestId, operation.idempotencyKey ?: operation.requestId))
+                    } else {
+                        execute(
+                            ApiRequest(
+                                method = operation.method.ifBlank { "POST" },
+                                path = operation.path,
+                                body = operation.payload,
+                                requestId = operation.requestId,
+                                idempotencyKey = operation.idempotencyKey ?: operation.requestId,
+                                headers = decodeHeaders(operation.headersJson),
+                            ),
+                        )
+                    }
+                    if (operation.kind == "fork_at") {
+                        persistForkedSessionResponse(response.body)
+                    }
+                    if (operation.kind.startsWith("queue_")) {
+                        runCatching { persistQueueMutationSession(response.body, sessionIdFromPath(operation.path)) }
+                    }
+                    if (operation.kind == "send_message" || operation.kind == "send_message_with_attachments") {
+                        markFirstTurnAccepted(sessionIdFromPath(operation.path))
+                    }
+                    dao.deleteOperation(operation.requestId)
+                    completed += 1
+                } catch (error: Throwable) {
+                    val recoverable = dao.getPendingOperation(operation.requestId) ?: operation
+                    dao.upsertOperation(recoverable.copy(
+                        state = if (isPermanentClientFailure(error)) "failed" else "pending",
+                        updatedAt = System.currentTimeMillis(),
+                        lastError = error.message,
+                    ))
+                    if (error is CancellationException) throw error
                 }
-                if (operation.kind == "fork_at") {
-                    persistForkedSessionResponse(response.body)
-                }
-                if (operation.kind.startsWith("queue_")) {
-                    runCatching { persistQueueMutationSession(response.body, sessionIdFromPath(operation.path)) }
-                }
-                if (operation.kind == "send_message" || operation.kind == "send_message_with_attachments") {
-                    markFirstTurnAccepted(sessionIdFromPath(operation.path))
-                }
-                dao.deleteOperation(operation.requestId)
-                completed += 1
-            } catch (error: Throwable) {
-                val recoverable = dao.getPendingOperation(operation.requestId) ?: operation
-                dao.upsertOperation(recoverable.copy(
-                    state = if (isPermanentClientFailure(error)) "failed" else "pending",
-                    updatedAt = System.currentTimeMillis(),
-                    lastError = error.message,
-                ))
-            }
+            } finally { activePendingOperationIds.remove(snapshot.requestId) }
         }
         return completed
     }
@@ -2841,7 +2854,7 @@ class RoomSessionRepository(
         headers: Map<String, String> = emptyMap(),
         idempotencyKey: String = requestId,
         action: suspend () -> com.andysagent.agentoc.core.network.ApiResponse,
-    ): com.andysagent.agentoc.core.network.ApiResponse {
+    ): com.andysagent.agentoc.core.network.ApiResponse = withPendingOperationClaim(requestId) {
         val now = System.currentTimeMillis()
         val operation = PendingOperationEntity(
             requestId = requestId,
@@ -2861,7 +2874,7 @@ class RoomSessionRepository(
             val response = action()
             if (kind == "send_message") markFirstTurnAccepted(scope)
             dao.deleteOperation(requestId)
-            return response
+            response
         } catch (error: Throwable) {
             dao.upsertOperation(operation.copy(
                 state = if (isPermanentClientFailure(error)) "failed" else "pending",
