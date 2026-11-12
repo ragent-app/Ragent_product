@@ -17,7 +17,9 @@ import {
 const DEFAULT_INITIAL_DELAY_MS = 5_000;
 const DEFAULT_INTERVAL_MS = 60 * 1_000;
 const DEFAULT_RETRY_BASE_DELAY_MS = 30 * 1_000;
-const DEFAULT_RETRY_MAX_DELAY_MS = 30 * 60 * 1_000;
+// A computer can return from sleep or regain network access at any time.
+// Do not let a long offline period defer account convergence for half an hour.
+const DEFAULT_RETRY_MAX_DELAY_MS = 60 * 1_000;
 
 let schedulerTimer = null;
 let schedulerStarted = false;
