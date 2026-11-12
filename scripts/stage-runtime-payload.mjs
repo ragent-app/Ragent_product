@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -219,6 +220,11 @@ async function main() {
   const result = await stageRuntimePayload(options);
   console.log(JSON.stringify({ profile: result.profile, sourceRevision: result.sourceRevision, files: result.files.length }));
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isDirectInvocation() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+}
+if (isDirectInvocation()) {
   main().catch((error) => { console.error(error.message); process.exitCode = 1; });
 }
