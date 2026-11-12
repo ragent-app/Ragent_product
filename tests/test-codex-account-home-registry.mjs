@@ -31,8 +31,11 @@ test('verified accounts converge on one guarded home across provider profiles', 
       guarded = true;
     } }), first);
   assert.equal(guarded, true);
+  assert.deepEqual(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true }), { home: first, sources: [second] });
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: first, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_OWNED' });
-  assert.equal(await resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: second, initialize: true }), second);
+  await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: second, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_OWNED' });
+  const third = join(providerHomesRoot, 'by-provider', 'third');
+  assert.equal(await resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: third, initialize: true }), third);
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: '', candidateHomeRoot: first, initialize: true }), { code: 'CODEX_ACCOUNT_UNVERIFIED' });
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: root, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_INVALID' });
   const registry = join(configDir, 'native-provider-runtime', 'codex-canonical-accounts');
