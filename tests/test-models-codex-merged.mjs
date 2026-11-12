@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Native provider model catalog contract:
 // - every model is scoped as model@providerId;
-// - official OAuth rows use their isolated app-server catalogs with a stable fallback;
+// - official OAuth rows use their account's discovered catalog or last successful cache;
 // - API-key rows use their own /models endpoint and never bleed into another row.
 import assert from 'assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
@@ -207,10 +207,9 @@ try {
   const ids = result.models.map((model) => model.id);
   assert.equal(new Set(ids).size, ids.length, 'scoped ids must be unique');
   assert.equal(result.defaultModel, null, 'Native catalog leaves selection to the session/provider picker');
-  assert.equal(result.models.find((m) => m.id === 'gpt-5.6-sol@codex-official-2').label, 'GPT-5.6-Sol · person-4@example.test');
+  assert.equal(result.models.some((m) => m.id.endsWith('@codex-official-2')), false, 'failed first discovery must not fabricate model choices');
   assert.equal(result.models.find((m) => m.id === 'gpt-5.6-sol@codex-official').label, 'GPT-5.6-Sol · person-5@example.test');
   assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official').label, 'GPT-6 Astra · person-5@example.test');
-  assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official-2').label, 'GPT-6 Astra · person-4@example.test');
   assert.deepEqual(
     result.models.find((m) => m.id === 'gpt-5.6-sol@codex-official').effortLevels,
     ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
@@ -225,11 +224,10 @@ try {
   assert.equal(result.models.some((m) => m.id === 'gpt-official-extra@codex-official-2'), false, 'a failed account falls back without borrowing another account catalog');
   const catalogs = await getToolModelCatalogs('codex');
   assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official').source, 'discovered');
-  assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'static');
+  assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official-2').status, 'unavailable');
   assert.match(catalogs.find((entry) => entry.providerProfileId === 'codex-official-2').error?.code || '', /^MODEL_LIST_[A-Z_]+$/);
   assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official').error, undefined);
   assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official').capabilities.effort.source, 'upstream');
-  assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official-2').capabilities.effort.source, 'builtin');
   assert.equal(result.models.find((m) => m.id === 'deepseek-v4-flash@deepseek-v4-flash-codex').label, 'deepseek-v4-flash · DeepSeek');
   const deepseekModel = result.models.find((m) => m.id === 'deepseek-v4-flash@deepseek-v4-flash-codex');
   assert.deepEqual(deepseekModel.effortLevels, ['low', 'medium', 'high', 'xhigh']);
@@ -239,7 +237,7 @@ try {
   assert.equal(result.models.find((m) => m.id === 'gpt-5.6-sol@custom-gpt-5.6-luna').label, 'gpt-5.6-sol · Custom');
   assert.equal(result.models.find((m) => m.id === 'deepseek-v4-flash-free@opencode-go-chat-deepseek-v4-flash-free').label, 'deepseek-v4-flash-free · Zen Free');
   assert.equal(result.models.some((m) => m.id === 'gpt-5.4@custom-gpt-5.6-luna'), true, 'custom keeps gpt-5.4');
-  assert.equal(result.models.some((m) => m.id === 'gpt-5.4@codex-official-2'), true, 'official keeps gpt-5.4');
+  assert.equal(result.models.some((m) => m.id === 'gpt-5.4@codex-official'), true, 'official discovery retains advertised models');
   assert.equal(result.models.some((m) => m.id === 'gpt-5.4@opencode-go-chat-deepseek-v4-flash-free'), false, 'zen filters gpt-5.4');
   assert.equal(result.models.some((m) => m.id === 'gpt-5.5@opencode-go-chat-deepseek-v4-flash-free'), false, 'zen filters gpt-5.5');
   assert.equal(result.models.some((m) => m.id === 'fallback-only@broken-upstream'), true, 'failed upstream falls back to configured model');
@@ -263,6 +261,16 @@ try {
   const recoveredCatalogs = await getToolModelCatalogs('codex');
   assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').error, undefined);
   assert.equal(recoveredCatalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'discovered');
+
+  // Reusing a provider profile for another account must never reuse the old
+  // account's successful catalog, even during its freshness window.
+  rmSync(process.env.FIXTURE_MODEL_RECOVERY_FILE);
+  writeFileSync(join(secretsDir, 'secret-codex-official-2.json'), JSON.stringify({ authType: 'oauth',
+    tokens: { access_token: 'replacement', refresh_token: 'replacement', account_id: 'replacement-account' } }));
+  const switched = await getModelsForTool('codex', { providerProfile: 'codex-official-2' });
+  assert.equal(switched.models.length, 0, 'a replacement account must not inherit another account catalog');
+  const switchedCatalog = (await getToolModelCatalogs('codex', 'codex-official-2'))[0];
+  assert.equal(switchedCatalog.status, 'unavailable');
 
   console.log('test-models-codex-merged: ok');
 } finally {

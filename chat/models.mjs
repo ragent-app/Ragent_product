@@ -774,9 +774,14 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
         ...(Number.isFinite(model?.contextWindow) ? { contextWindow: model.contextWindow } : {}),
       });
     }
+    const officialStates = new Map((result?.officialCatalogStates || []).map((state) => [state.providerProfileId, state]));
+    for (const [providerId] of officialStates) {
+      if (!providerGroups.has(providerId)) providerGroups.set(providerId, []);
+    }
     for (const [groupKey, entries] of providerGroups) {
-      const discoveryError = (tool === 'codex' || tool === 'codex-cli')
-        ? cacheGet(officialCodexModelListCache, groupKey)?.errorCode : null;
+      const official = officialStates.get(groupKey);
+      const discoveryError = official?.errorCode || (!official?.fetchedAt && official ? 'MODEL_LIST_UNAVAILABLE' : '');
+      const stale = Boolean(official?.fetchedAt && (official.failedAt || now - official.fetchedAt >= PROVIDER_MODEL_LIST_TTL_MS));
       catalogs.set(groupKey, normalizeModelCatalog({
         providerProfileId: groupKey,
         entries,
@@ -785,9 +790,9 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
         // providerModelListCache) already carry freshness semantics; this
         // projection is 'discovered' when it came from provider enumeration
         // and static for tool-definition fallbacks.
-        source: sourceFromModelOrigins(providerOrigins.get(groupKey)),
-        fetchedAt: new Date(now).toISOString(),
-        expiresAt: now + TOOL_CATALOG_CACHE_TTL_MS,
+        source: stale ? 'stale-cache' : sourceFromModelOrigins(providerOrigins.get(groupKey)),
+        fetchedAt: official ? (official.fetchedAt ? new Date(official.fetchedAt).toISOString() : '') : new Date(now).toISOString(),
+        expiresAt: official ? (official.fetchedAt ? official.fetchedAt + PROVIDER_MODEL_LIST_TTL_MS : '') : now + TOOL_CATALOG_CACHE_TTL_MS,
         nowMs: now,
       }));
     }
@@ -829,9 +834,8 @@ const RETIRED_CODEX_MODEL_SLUGS = new Set(['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5']
 // 保证唯一；spawn 侧（runner-sidecar）用 parseScopedCodexModel 拆出
 // providerId 后按行镜像 managed home，真实 model id 再发给 codex。
 
-// 官方账号（ChatGPT OAuth）模型目录兜底。正常路径通过每个 Provider 的
-// 隔离 home + app-server model/list 动态发现；只有账号离线、登录失效或
-// app-server 暂时不可用时才使用此表，保证模型选择器不会被清空。
+// Known capability hints for custom providers which omit effort metadata.
+// These entries are never used as an official account's model catalog.
 const OFFICIAL_CODEX_MODEL_CATALOG = [
   { id: 'gpt-6-astra', label: 'GPT-6 Astra', effortLevels: CODEX_GPT_6_ASTRA_EFFORT_LEVELS },
   { id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', effortLevels: CODEX_GPT_56_SOL_EFFORT_LEVELS },
@@ -1024,15 +1028,6 @@ async function fetchProviderModelList(provider, { allowNetwork = true } = {}) {
   }
 }
 
-function fallbackOfficialCodexCatalog() {
-  return OFFICIAL_CODEX_MODEL_CATALOG.map((m) => ({
-    ...m,
-    effortLevels: Array.isArray(m.effortLevels) ? [...m.effortLevels] : [],
-    defaultEffort: m.defaultEffort || '',
-    catalogSource: 'builtin',
-  }));
-}
-
 async function discoverOfficialCodexCatalog(provider) {
   const providerId = String(provider?.id || '').trim();
   if (!providerId) throw new Error('Official Codex provider id is missing');
@@ -1115,9 +1110,8 @@ function refreshOfficialCodexCatalog(provider, cacheKey, staleEntry = null) {
 // refresh asks that account's app-server for its real picker catalog; fast
 // reads serve the cached/stable result immediately and refresh in background.
 async function readOfficialCodexCatalog(provider, { allowNetwork = true } = {}) {
-  const fallback = fallbackOfficialCodexCatalog();
-  const cacheKey = String(provider?.id || '').trim();
-  if (!cacheKey) return fallback;
+  const cacheKey = String(provider?.catalogAccountKey || '').trim();
+  if (!cacheKey) return [];
   const now = Date.now();
   const cached = cacheGet(officialCodexModelListCache, cacheKey);
   const staleModels = Array.isArray(cached?.models) ? cached.models : null;
@@ -1125,13 +1119,13 @@ async function readOfficialCodexCatalog(provider, { allowNetwork = true } = {}) 
     return staleModels;
   }
   if (cached?.failedAt && now - cached.failedAt < PROVIDER_MODEL_LIST_FAIL_COOLDOWN_MS) {
-    return staleModels || fallback;
+    return staleModels || [];
   }
   if (!allowNetwork) {
     void refreshOfficialCodexCatalog(provider, cacheKey, cached);
-    return staleModels || fallback;
+    return staleModels || [];
   }
-  return await refreshOfficialCodexCatalog(provider, cacheKey, cached) || fallback;
+  return await refreshOfficialCodexCatalog(provider, cacheKey, cached) || [];
 }
 
 // 拆 `model@providerId`：providerId 只接受已知 id 形态（字母数字 . _ -），
@@ -1149,7 +1143,7 @@ export function parseScopedCodexModel(model) {
 
 // Native registry rows are normalized to the internal catalog shape.
 async function listProviderRowsForModelCatalog() {
-  const { createNativeProviderRegistry, createSecretStore } = await import('../lib/provider-runtime/index.mjs');
+  const { createNativeProviderRegistry, createSecretStore, nativeOAuthAccountId } = await import('../lib/provider-runtime/index.mjs');
   const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
   const secretStore = createSecretStore({ configDir: CONFIG_DIR });
   const profiles = await registry.listProviderProfiles().catch(() => []);
@@ -1158,9 +1152,7 @@ async function listProviderRowsForModelCatalog() {
     if (profile.agentType !== 'codex') continue;
     const authProfile = await registry.getAuthProfile(profile.authProfileId).catch(() => null);
     if (!authProfile) continue;
-    const resolvedSecret = authProfile.authType === 'api-key'
-      ? await secretStore.resolveSecret(authProfile.storageRef).catch(() => null)
-      : null;
+    const resolvedSecret = await secretStore.resolveSecret(authProfile.storageRef).catch(() => null);
     const apiKey = resolvedSecret?.ok && resolvedSecret.authType === 'api-key'
       ? resolvedSecret.apiKey
       : '';
@@ -1169,6 +1161,11 @@ async function listProviderRowsForModelCatalog() {
       : { OPENAI_API_KEY: apiKey };
     rows.push({
       id: profile.id,
+      // Bind the cache to both provider and verified account identity, so a
+      // relogin or replacement account cannot inherit another account's list.
+      catalogAccountKey: authProfile.authType === 'oauth' && resolvedSecret?.ok
+        && nativeOAuthAccountId(resolvedSecret.tokens)
+        ? createHash('sha256').update(JSON.stringify([profile.id, nativeOAuthAccountId(resolvedSecret.tokens)])).digest('hex') : '',
       name: profile.displayName,
       isCurrent: 0,
       settingsConfig: {
@@ -1206,6 +1203,7 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
   }
   const rowsFingerprint = rows.map((row) => [
     row.id,
+    row.catalogAccountKey,
     row.isCurrent ? 1 : 0,
     isOfficialRow(row) ? 'oauth' : 'api',
     providerApiFormat(row),
@@ -1231,7 +1229,7 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
   );
   for (const row of rows) {
     if (isOfficialRow(row)) {
-      const officialCatalog = officialCatalogByProvider.get(row.id) || fallbackOfficialCodexCatalog();
+      const officialCatalog = officialCatalogByProvider.get(row.id) || [];
       for (const entry of officialCatalog) {
         merged.push(buildCodexModelRecord({
           id: `${entry.id}@${row.id}`,
@@ -1290,6 +1288,11 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
   const effortLevels = [...new Set(merged.flatMap((m) => m.effortLevels || []))];
   const result = {
     models: merged,
+    officialCatalogStates: officialRows.map((row) => {
+      const entry = cacheGet(officialCodexModelListCache, row.catalogAccountKey);
+      return { providerProfileId: row.id, fetchedAt: entry?.at || 0,
+        failedAt: entry?.failedAt || 0, errorCode: entry?.errorCode || '' };
+    }),
     effortLevels: effortLevels.length > 0 ? effortLevels : null,
     defaultModel: null,
     reasoning: effortLevels.length > 0
@@ -1305,7 +1308,7 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
   // merged result for the full TTL would hide a successful account refresh
   // after the shorter failure cooldown has elapsed.
   const allOfficialCatalogsFresh = mayCacheMergedCodexCatalog(officialRows,
-    (id) => cacheGet(officialCodexModelListCache, id), Date.now(), PROVIDER_MODEL_LIST_TTL_MS);
+    (id) => cacheGet(officialCodexModelListCache, officialRows.find((row) => row.id === id)?.catalogAccountKey), Date.now(), PROVIDER_MODEL_LIST_TTL_MS);
   if (allowNetwork && allOfficialCatalogsFresh) cacheSet(codexModelsCache, cacheKey, { at: Date.now(), result });
   return result;
 }
