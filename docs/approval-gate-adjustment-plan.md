@@ -225,6 +225,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - Windows 已安装实例后来恢复为 ready，owner activation 处于 listening；未从本次验收操作中重启或修改服务，恢复的具体原因尚未查明。安装件源码标识为 `cece257997e28f315a94cd4a231ca40cd0e305a3`。同样通过真实服务、已安装 Claude 和 Codex 以及本机模拟模型各验证 recommended/full-auto：工作区外普通读取四次均成功，隔离 `.ssh` 删除在 recommended 经审批 API 拒绝、在 full-auto 自动拒绝，CLI 收到拒绝且文件完整。临时 provider 和会话均经 API 删除；一次临时 provider 清理遇到 `OBD_ENDPOINT_UNAVAILABLE`，重试成功，不能把这次恢复视作信任故障根因已修复。上述是指定命令场景，尚未覆盖三星连接真实实例，也不能推算总体审批率。
 - 检查 Windows 正式实例近期记录时发现 14 次 Claude 自动拒绝标记为语法不支持；从原始事件重建请求并使用当时 Run 风险上下文只读回放。现在自动识别字面量 `Start-Sleep`/`sleep` 及 Bash 的 `which`、`command -v`、`type` 静态命令查询；实际命令仍会按链中所有操作分别判断。该批 14 条中一条普通等待由拒绝变为直接放行，其余 13 条未由本次所测路径放行，两种模式的自动放行结果一致；不执行历史命令，这批拒绝样本也不能用于推算总体通过率。PowerShell 带名称的 `Get-Command` 可能触发模块初始化执行，暂未将其直接视为只读查询。
 - 三星 `RFCT5155C1P` 的正式 Ragent 应用连接指定 Mac 实例后，使用 Mac 实例中真实 Claude CLI、本机模拟模型和隔离测试文件进行推荐模式验收：工作区外普通读取自动通过，隔离 `.ssh` 删除显示为手机审批卡；在三星点按拒绝后，真实 Claude 收到 `User denied this tool request`，测试文件保持完整。会话和临时 provider 已通过 API 删除，远端隔离目录已按标记核对后清理；未调用官方模型额度。此项覆盖三星到 Mac 实例的真实交互，尚未证明三星到 Windows/Linux 实例的同等链路。
+- Windows 补充字面量 `ping` 网络探测及 `Get-Date -Format`/`-UFormat`，命令链中的后续操作仍独立检查。对上述 14 条近期语法类拒绝再次只读回放，推荐与全自动自动通过标准一致，其中普通等待和连通性检查共 2 条由拒绝转为直接通过，12 条仍未由本次所测路径通过。样本均来自曾被拒绝的请求，不能用于估计全部请求的通过率；该源码修改尚未部署到正式 Windows 实例。
 
 ## 外部依据
 

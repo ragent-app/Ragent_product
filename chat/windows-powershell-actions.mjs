@@ -120,6 +120,23 @@ export function staticExternalArguments(elements) {
   return args;
 }
 
+// A literal ICMP probe has no file or process mutation. Reject flags that
+// require complex route lists and leave dynamic expressions for review.
+function isPingProbe(program, args) {
+  if (!['ping', 'ping.exe'].includes(program) || !Array.isArray(args)) return false;
+  let host = '';
+  const switches = new Set(['-4', '-6', '-a', '-f', '-t']);
+  const numeric = new Set(['-n', '-w', '-l', '-i', '-v', '-r', '-s']);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (switches.has(arg)) continue;
+    if (numeric.has(arg)) { if (!/^\d+$/.test(args[++i] || '')) return false; continue; }
+    if (arg.startsWith('-') || host || !/^[\p{L}\p{N}._:%-]+$/u.test(arg)) return false;
+    host = arg;
+  }
+  return Boolean(host);
+}
+
 export function parseWindowsSelectStringArgs(elements) {
   const args = parseArguments(elements, new Set(['pattern', 'path', 'literalpath', 'encoding', 'simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']),
     new Set(['simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']));
@@ -584,6 +601,9 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const versionArgs = staticExternalArguments(entry.elements);
     const version = entry.pipelineInput === false && versionArgs && analyzeWindowsVersion(entry.name, versionArgs);
     if (version) { actions.push(version); continue; }
+    if (entry.pipelineInput === false && isPingProbe(program, versionArgs)) {
+      actions.push({ kind: 'read', program: 'ping', target: null, caution: true }); continue;
+    }
     if (entry.pipelineInput === false && isWingetListQuery(program, versionArgs)) {
       actions.push({ kind: 'read', program: 'winget list', target: null }); continue;
     }
@@ -670,7 +690,8 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       actions.push({ kind: 'read', program, target: null }); continue;
     }
     if (FILTERS.has(program)) {
-      const filterArgs = parseArguments(entry.elements, SAFE_FILTER_PARAMS, SAFE_FILTER_SWITCHES);
+      const allowedFilterParams = program === 'get-date' ? new Set([...SAFE_FILTER_PARAMS, 'format', 'uformat']) : SAFE_FILTER_PARAMS;
+      const filterArgs = parseArguments(entry.elements, allowedFilterParams, SAFE_FILTER_SWITCHES);
       if (!filterArgs) return { complete: false, actions, reason: 'unsupported filter arguments' };
       // Named lookups can execute module initialization, including with
       // -ListImported, so only unnamed inventories are automatically safe.

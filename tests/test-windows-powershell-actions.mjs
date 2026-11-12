@@ -295,6 +295,10 @@ assert.equal((await inspect('sleep -Milliseconds 5')).decision, 'allow');
 assert.equal((await inspect('Start-Sleep 0.1')).decision, 'allow');
 assert.equal((await inspect('Start-Sleep -Seconds $env:WAIT')).decision, 'review');
 assert.equal((await inspect('Start-Sleep -Seconds 1; Remove-Item . -Recurse')).decision, 'review');
+assert.equal((await inspect('ping -n 1 127.0.0.1 | Out-Null; Get-Date')).decision, 'allow');
+assert.equal((await inspect("ping -n 1 127.0.0.1 | Out-Null; Get-Date -Format 'HH:mm:ss'")).decision, 'allow');
+assert.equal((await inspect('ping -n $env:COUNT 127.0.0.1')).decision, 'review');
+assert.equal((await inspect('ping -n 1 127.0.0.1; Remove-Item . -Recurse')).decision, 'review');
 assert.equal((await inspect('Get-Process -Id $env:PID')).decision, 'review');
 assert.equal((await inspect('Get-Command -Name Get-Content; Remove-Item . -Recurse')).decision, 'review');
 result = await inspect('Set-Content -Path result.txt -Value hello');
@@ -399,6 +403,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const approval = (script) => ({ kind: 'command', params: { command: [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', script] } });
   const state = { riskMode, cwd: workspace, riskContext: context };
   assert.equal((await decideWindowsApproval(approval('Start-Sleep -Milliseconds 1'), state)).decision, 'auto-allow', `${riskMode}: ordinary sleep`);
+  assert.equal((await decideWindowsApproval(approval('ping -n 1 127.0.0.1 | Out-Null; Get-Date'), state)).decision, 'auto-allow', `${riskMode}: ordinary network probe`);
   assert.equal((await decideWindowsApproval(approval('Start-Sleep -Seconds 1; Remove-Item . -Recurse'), state)).decision, 'prompt', `${riskMode}: subsequent dangerous operation`);
   assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported AgentoCFixture\\Invoke-AgentoCProbe'), state)).decision, 'prompt', `${riskMode}: module lookup`);
   assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported -Name Invoke-AgentoCProbe'), state)).decision, 'prompt', `${riskMode}: unqualified lookup`);
