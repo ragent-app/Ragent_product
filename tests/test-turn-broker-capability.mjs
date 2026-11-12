@@ -22,7 +22,7 @@ import {
 
 const root = mkdtempSync(join(tmpdir(), 'agentoc-turn-capability-'));
 const now = Date.parse('2026-08-31T12:00:00.000Z');
-const issuer = 'https://accounts.example.test';
+const issuer = 'https://ragent.agentoncloud.com';
 const ring = await loadOrCreateSigningKeyRing(join(root, 'turn-signing-key.json'), { clock: () => now });
 const jwks = { keys: activePublicKeys(ring, { clock: () => now }).map((key) => ({
   ...key.publicJwk,
@@ -71,6 +71,15 @@ check('capability signature and bindings verify against the dedicated JWKS', () 
   });
   assert.equal(claims.scope, 'turn:mint');
   assert.equal(claims.sub, identity.instanceId);
+});
+
+const legacyCapability = await issueTurnBrokerCapability({
+  signCapability, issuer: 'https://agentoc.andyscodexagent.cyou', ...identity, nowMs: now,
+});
+check('new issuer rejects credentials signed for the legacy origin', () => {
+  assert.throws(() => verifyTurnBrokerCapability({
+    token: legacyCapability.token, jwks, issuer, ...identity, nowMs: now,
+  }));
 });
 
 check('capability rejects a changed connection binding', () => {

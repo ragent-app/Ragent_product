@@ -22,7 +22,7 @@ grep -Fxq 'AGENTOC_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts' "$AGEN
 grep -Fxq 'AGENTOC_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json' "$AGENTOC_CONFIG_DIR/instance.env"
 grep -Fxq 'AGENTOC_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn' "$AGENTOC_CONFIG_DIR/instance.env"
 grep -Fxq 'AGENTOC_P2P_SIGNALING_URL=https://ragent.agentoncloud.com/signal' "$AGENTOC_CONFIG_DIR/instance.env"
-grep -Fxq 'AGENTOC_ACCOUNTS_ISSUER=https://agentoc.andyscodexagent.cyou' "$AGENTOC_CONFIG_DIR/instance.env"
+grep -Fxq 'AGENTOC_ACCOUNTS_ISSUER=https://ragent.agentoncloud.com' "$AGENTOC_CONFIG_DIR/instance.env"
 cp "$AGENTOC_CONFIG_DIR/instance.env" "$test_dir/env-before"
 cp "$AGENTOC_CONFIG_DIR/auth.json" "$test_dir/auth-before"
 cp "$AGENTOC_CONFIG_DIR/owner-credentials.txt" "$test_dir/credentials-before"
