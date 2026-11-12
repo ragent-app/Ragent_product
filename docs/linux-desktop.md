@@ -40,7 +40,8 @@ set `AGENTOC_RUNNER_SAME_USER=0`, `AGENTOC_RUNNER_USER` and
 `AGENTOC_RUNNER_GROUP` in `/etc/agentoc/agentoc.env`, then restart the lifecycle
 broker and service. Its workspace access must be set up separately.
 Transparent safe group removal for same-user runs remains to be implemented
-and validated.
+and validated. The numeric group-drop command builder is a development
+building block only; it is not yet wired into the runner or a release boundary.
 
 ## Optional runner sandbox
 
