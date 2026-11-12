@@ -82,6 +82,17 @@ const terminal = await service.collectNormalizedRunEvents({ id: 'group-fixture',
   { tool: 'codex', options: { runtimeFamily: 'codex-app-server-json' } }, { skipNormalizedEvents: 3 });
 assert.equal(terminal.normalizedEventCount, 3);
 assert.equal(terminal.normalizedEvents.length, 0, 'terminal replay must skip the same number of original events');
+const emitted = [];
+const retainedTerminal = await service.collectNormalizedRunEvents(
+  { id: 'group-retained-fixture', sessionId: 's', state: 'completed', runtimeFamily: 'codex-app-server-json',
+    appServerPendingApprovals: [a, b, c].map(item => ({ ...item, state: 'responded' })) },
+  { tool: 'codex', options: { runtimeFamily: 'codex-app-server-json' } },
+  { skipNormalizedEvents: 3, retainNormalizedEvents: 2, retainSkippedNormalizedEvents: true,
+    onNormalizedEvents: batch => emitted.push(...batch) },
+);
+assert.equal(retainedTerminal.normalizedEventCount, 3);
+assert.equal(retainedTerminal.normalizedEvents.length, 2, 'finalization retains a bounded tail of the complete run');
+assert.equal(emitted.length, 0, 'already streamed events are not emitted to history again');
 frames = [{ id: b.providerRequestId, method, params: b.params }];
 const missingLeader = await service.collectNormalizedRunEventDelta({ id: 'group-missing-leader', sessionId: 's', runtimeFamily: 'codex-app-server-json',
   approvalSuppressionSeeded: true, appServerPendingApprovals: [a, b] }, { tool: 'codex', options: { runtimeFamily: 'codex-app-server-json' } });

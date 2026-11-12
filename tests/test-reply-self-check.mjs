@@ -250,6 +250,7 @@ process.env.AGENTOC_MEMORY_DIR = memoryDir;
 process.env.AGENTOC_WORK_ROOT_DIR = workDir;
 process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
 process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+process.env.AGENTOC_WORKFLOW_STATE_SUGGESTIONS = 'on';
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
 
 const sessionManager = await import(

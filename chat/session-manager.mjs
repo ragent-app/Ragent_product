@@ -6469,6 +6469,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     ? await collectNormalizedRunEvents(run, manifest, {
       skipNormalizedEvents: nextNormalizedEventCount,
       retainNormalizedEvents: MAX_TERMINAL_RETAINED_EVENTS,
+      retainSkippedNormalizedEvents: true,
       onNormalizedEvents: async (batch) => {
         terminalStreamed = true;
         await queueTerminalNormalizedEvents(batch);

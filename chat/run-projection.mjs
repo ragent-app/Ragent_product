@@ -360,7 +360,7 @@ export function createRunProjectionService({
       if (typeof options.onNormalizedEvents === 'function') {
         await options.onNormalizedEvents(visible);
       }
-      if (retainLimit <= 0) return;
+      if (retainLimit <= 0 || options.retainSkippedNormalizedEvents) return;
       normalizedEvents.push(...visible);
       if (normalizedEvents.length > retainLimit) {
         normalizedEvents.splice(0, normalizedEvents.length - retainLimit);
@@ -372,6 +372,14 @@ export function createRunProjectionService({
       if (source.length === 0) return;
       const startIndex = normalizedEventCount;
       normalizedEventCount += source.length;
+      // Finalization side effects need a bounded tail of the whole run even
+      // when already-streamed events must not be emitted to history again.
+      if (options.retainSkippedNormalizedEvents && retainLimit > 0) {
+        normalizedEvents.push(...source);
+        if (normalizedEvents.length > retainLimit) {
+          normalizedEvents.splice(0, normalizedEvents.length - retainLimit);
+        }
+      }
       for (const event of source) {
         if (event?.type === 'usage') {
           usageSeen = true;
@@ -831,6 +839,7 @@ export function createRunProjectionService({
       includeCodexContextMetrics: true,
       skipNormalizedEvents: options.skipNormalizedEvents,
       retainNormalizedEvents: options.retainNormalizedEvents,
+      retainSkippedNormalizedEvents: options.retainSkippedNormalizedEvents,
       onNormalizedEvents: options.onNormalizedEvents,
     });
     const value = {
