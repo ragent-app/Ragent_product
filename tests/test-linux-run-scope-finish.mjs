@@ -16,7 +16,7 @@ test('runner terminal write invalidates only its protected control binding',
       process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
-      const { createRun, runStatusPath } = await import('../chat/runs.mjs');
+      const { createRun, getRunResult, runPendingResultPath, runResultPath, runStatusPath, updateRun } = await import('../chat/runs.mjs');
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
       const { notifyLinuxRunScopeFinished } = await import('../chat/linux-run-scope-finish-client.mjs');
@@ -119,6 +119,48 @@ test('runner terminal write invalidates only its protected control binding',
         process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
         assert.equal(await notifyLinuxRunScopeFinished(offlineRun, manifest, { base }), false);
         assert.equal(await hasLinuxRunCancelIntent(offlineId, 0), true);
+        execFileSync('/usr/bin/chown', ['-R', `${owner.uid}:${runner.gid}`, `${root}/spool/${offlineId}`]);
+        execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:rwx`, `${root}/spool/${offlineId}`]);
+        for (const filename of ['status.json', 'manifest.json'])
+          execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:r`, `${root}/spool/${offlineId}/${filename}`]);
+        const outcome = { completedAt: '2026-11-12T00:00:00.000Z', exitCode: 0, signal: null };
+        const staged = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
+          process.execPath, '--input-type=module', '-e',
+          `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; try { await writeRunResult(${JSON.stringify(offlineId)}, ${JSON.stringify(outcome)}); process.exit(1); } catch (e) { process.exit(e.code === 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' ? 23 : 2); }`],
+        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
+        let stagedError = ''; staged.stderr.on('data', (chunk) => { stagedError += chunk; });
+        const stagedCode = await new Promise((resolve, reject) => { staged.once('error', reject); staged.once('close', resolve); });
+        assert.equal(stagedCode, 23, stagedError);
+        assert.equal(JSON.parse(await readFile(runPendingResultPath(offlineId), 'utf8')).result.exitCode, 0);
+        await assert.rejects(readFile(runResultPath(offlineId), 'utf8'), { code: 'ENOENT' });
+        assert.equal(await getRunResult(offlineId), null);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        const pending = JSON.parse(await readFile(runPendingResultPath(offlineId), 'utf8'));
+        await writeFile(runPendingResultPath(offlineId), JSON.stringify({ ...pending, publicationId: 'tampered' }));
+        assert.equal(await getRunResult(offlineId), null);
+        await writeFile(runPendingResultPath(offlineId), JSON.stringify(pending));
+        assert.deepEqual(await getRunResult(offlineId), outcome);
+        await assert.rejects(readFile(runPendingResultPath(offlineId), 'utf8'), { code: 'ENOENT' });
+        const offlineMarker = `${root}/contexts/${createHash('sha256').update(offlineId).digest('hex')}-0.revoked`;
+        assert.equal(JSON.parse(await readFile(offlineMarker, 'utf8')).version, 1);
+        const pausedId = 'run_finishpaused1';
+        await createRun({ status: { id: pausedId, sessionId: 's1', requestId: 't1', state: 'running', runnerLaunchAttempt: 0 }, manifest });
+        await issueLinuxRunScopeGrant(pausedId, 0);
+        await updateRun(pausedId, { state: 'waiting_user', approvedActionPending: { batchId: 'batch-test' },
+          actionPause: { kind: 'approved_action', state: 'waiting_user' } });
+        execFileSync('/usr/bin/chown', ['-R', `${owner.uid}:${runner.gid}`, `${root}/spool/${pausedId}`]);
+        execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:rwx`, `${root}/spool/${pausedId}`]);
+        for (const filename of ['status.json', 'manifest.json'])
+          execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:r`, `${root}/spool/${pausedId}/${filename}`]);
+        const paused = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
+          process.execPath, '--input-type=module', '-e',
+          `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; await writeRunResult(${JSON.stringify(pausedId)}, ${JSON.stringify(outcome)});`],
+        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: 'http://127.0.0.1:1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+        let pausedError = ''; paused.stderr.on('data', (chunk) => { pausedError += chunk; });
+        const pausedCode = await new Promise((resolve, reject) => { paused.once('error', reject); paused.once('close', resolve); });
+        assert.equal(pausedCode, 0, pausedError);
+        assert.deepEqual(await getRunResult(pausedId), outcome);
+        assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), false);
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });

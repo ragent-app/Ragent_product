@@ -4,6 +4,7 @@ import { appendFile, chmod, open, readFile, readdir } from 'fs/promises';
 import { dirname, join } from 'path';
 import { StringDecoder } from 'string_decoder';
 import { isDeepStrictEqual } from 'node:util';
+import { constants as fsConstants } from 'node:fs';
 import { createGunzip, createZstdDecompress } from 'zlib';
 import { archiveMetaPath, resolveCodec } from './run-spool-archive.mjs';
 import { isEnvToggleEnabled } from '../lib/env-toggle.mjs';
@@ -1057,6 +1058,32 @@ export function runResultPath(runId) {
   return join(runDir(runId), 'result.json');
 }
 
+export function runPendingResultPath(runId) {
+  return join(runDir(runId), 'result.pending.json');
+}
+
+function isolatedScopeRunner() {
+  return process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS !== '1' &&
+    process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY === '1' && process.env.AGENTOC_LINUX_SCOPE_FINISH_ENABLED === '1';
+}
+
+function hasUnresolvedResultApproval(run, result) {
+  return result?.cancelled !== true && Boolean(run?.approvedActionPending?.batchId &&
+    run?.actionPause?.kind === 'approved_action' && run?.actionPause?.state === 'waiting_user');
+}
+
+async function requireRunnerScopeFinalization(run, manifest) {
+  let invalidated = false;
+  try {
+    const { notifyLinuxRunScopeFinished } = await import('./linux-run-scope-finish-client.mjs');
+    invalidated = await notifyLinuxRunScopeFinished(run, manifest);
+  } catch { /* Fail closed below. */ }
+  if (!invalidated) {
+    console.warn(`[runs] control-plane Run finalization unavailable for ${run?.id}`);
+    throw Object.assign(new Error('Run scope finalization could not be confirmed'), { code: 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' });
+  }
+}
+
 export function runArtifactsDir(runId) {
   return join(runDir(runId), 'artifacts');
 }
@@ -1847,17 +1874,8 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // Admission predicates run inside the exact Run mutation queue, after
     // all suspendable reads and immediately before durable publication.
     if (beforeWrite) beforeWrite(next);
-    if (!scopeTracking && process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY === '1' &&
-        process.env.AGENTOC_LINUX_SCOPE_FINISH_ENABLED === '1' && isTerminalRunState(next.state) && !isTerminalRunState(latest.state)) {
-      let invalidated = false;
-      try {
-        const { notifyLinuxRunScopeFinished } = await import('./linux-run-scope-finish-client.mjs');
-        invalidated = await notifyLinuxRunScopeFinished(next, await getRunManifestUnlocked(runId));
-      } catch { /* Refuse publication below. */ }
-      if (!invalidated) {
-        console.warn(`[runs] control-plane Run finalization unavailable for ${runId}`);
-        throw Object.assign(new Error('Run scope finalization could not be confirmed'), { code: 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' });
-      }
+    if (isolatedScopeRunner() && isTerminalRunState(next.state) && !isTerminalRunState(latest.state)) {
+      await requireRunnerScopeFinalization(next, await getRunManifestUnlocked(runId));
       if (authorizeWrite) await authorizeWrite(latest);
       if (beforeWrite) beforeWrite(next);
     }
@@ -2031,13 +2049,65 @@ export async function renewRunSessionControlCapability({
 }
 
 export async function getRunResult(runId) {
+  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1') {
+    return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
+      let handle;
+      try {
+        handle = await open(runPendingResultPath(runId), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      } catch (error) {
+        if (error.code === 'ENOENT') return getRunResultUnlocked(runId);
+        return null;
+      }
+      let pending;
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.nlink !== 1 || stat.size < 1 || stat.size > 4 * 1024 * 1024) return null;
+        pending = JSON.parse(await handle.readFile('utf8'));
+      } catch { return null; }
+      finally { await handle.close(); }
+      const run = await getRunUnlocked(runId), manifest = await getRunManifestUnlocked(runId);
+      const attempt = Number.isSafeInteger(run?.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
+      if (!pending || Object.keys(pending).sort().join(',') !== 'launchAttempt,publicationId,result,runId,version' ||
+          pending.version !== 1 || pending.runId !== runId || pending.launchAttempt !== attempt ||
+          pending.publicationId !== run?.runPublication?.publicationId || !pending.result ||
+          typeof pending.result !== 'object' || Array.isArray(pending.result) || hasUnresolvedResultApproval(run, pending.result)) return null;
+      try {
+        const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+        if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: attempt })) return null;
+        const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+        await persistLinuxRunCancelIntent(runId, attempt);
+        const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
+        if ((await revokeLinuxRunScope(run, { timeoutMs: 10_000 })).state !== 'revoked') return null;
+        await writeJsonAtomic(runResultPath(runId), pending.result, { ...COMPACT_JSON_OPTIONS, durable: true });
+        runResultCache.set(runId, pending.result);
+        await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
+        await removePath(runPendingResultPath(runId));
+        return clone(pending.result);
+      } catch { return null; }
+    }));
+  }
   return getRunResultUnlocked(runId);
 }
 
 export async function writeRunResult(runId, result) {
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     await ensureRunDirectory(runId);
+    let staged = false;
+    if (isolatedScopeRunner()) {
+      const run = await getRunUnlocked(runId);
+      if (!run) throw new Error('Run unavailable');
+      if (!hasUnresolvedResultApproval(run, result)) {
+        const pending = { version: 1, runId, launchAttempt: Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0,
+          publicationId: run.runPublication?.publicationId, result: result || {} };
+        if (Buffer.byteLength(JSON.stringify(pending), 'utf8') > 4 * 1024 * 1024) throw new Error('Run result too large');
+        await writeJsonAtomic(runPendingResultPath(runId), pending,
+          await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: true }));
+        staged = true;
+        await requireRunnerScopeFinalization(run, await getRunManifestUnlocked(runId));
+      }
+    }
     await writeJsonAtomic(runResultPath(runId), result || {}, COMPACT_JSON_OPTIONS);
+    if (staged) await removePath(runPendingResultPath(runId));
     runResultCache.set(runId, result || {});
     await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
   }));
@@ -2047,6 +2117,7 @@ export async function writeRunResult(runId, result) {
 export async function clearRunResult(runId) {
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     await removePath(runResultPath(runId));
+    await removePath(runPendingResultPath(runId));
     runResultCache.delete(runId);
     runResultCacheMeta.delete(runId);
   }));
