@@ -31,6 +31,7 @@ test('verified accounts converge on one guarded home across provider profiles', 
       guarded = true;
     } }), first);
   assert.equal(guarded, true);
+  await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: first, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_OWNED' });
   assert.equal(await resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: second, initialize: true }), second);
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: '', candidateHomeRoot: first, initialize: true }), { code: 'CODEX_ACCOUNT_UNVERIFIED' });
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: root, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_INVALID' });
@@ -54,4 +55,8 @@ test('concurrent provider initialization elects a single home', async (t) => {
     assertMigrationSafe: async () => {} };
   const homes = await Promise.all(['one', 'two'].map((name) => resolveCanonicalCodexAccountHome({ ...options, candidateHomeRoot: join(options.providerHomesRoot, name) })));
   assert.equal(homes[0], homes[1]);
+  const sharedCandidate = join(options.providerHomesRoot, 'cross-account');
+  const claims = await Promise.allSettled(['third', 'fourth'].map((accountId) => resolveCanonicalCodexAccountHome({ ...options, accountId, candidateHomeRoot: sharedCandidate })));
+  assert.equal(claims.filter((claim) => claim.status === 'fulfilled').length, 1);
+  assert.equal(claims.find((claim) => claim.status === 'rejected').reason.code, 'CODEX_ACCOUNT_HOME_OWNED');
 });
