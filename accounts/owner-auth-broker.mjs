@@ -37,7 +37,7 @@ import {
   publicTurnAuthorization,
 } from '../lib/turn-authorization.mjs';
 import { getTurnConnectionLeases, resolveAccountEntitlement, effectiveDeviceKind,
-  isActiveTurnConnectionLease, activeTurnConnectionState, ACCOUNT_FILE_UPLOAD_POLICY_VERSION, ACCOUNT_FILE_HARD_MAX_BYTES,
+  isActiveTurnConnectionLease, activeTurnConnectionState, ACCOUNT_FILE_UPLOAD_POLICY_VERSION,
   resolveAccountFileUploadLimits } from './turn-lease-policy.mjs';
 import { prepareTurnHandoff, commitTurnHandoff, expireTurnHandoffs } from './turn-handoff-policy.mjs';
 import { issueTurnBrokerCapability } from '../lib/turn-broker-capability.mjs';
@@ -208,7 +208,7 @@ function normalizeAccountFileUploadQuotaInput(input, operation, clock) {
     || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !isProtocolField(accountId, { min: 8, max: 160 })
     || !isProtocolField(requestId, { min: 1, max: 200 })
     || !isProtocolField(quotaBatchId, { min: 1, max: 200 }) || !Number.isSafeInteger(sizeBytes)
-    || sizeBytes <= 0 || sizeBytes > ACCOUNT_FILE_HARD_MAX_BYTES || !/^[a-f0-9]{64}$/.test(sha256)
+    || sizeBytes <= 0 || !/^[a-f0-9]{64}$/.test(sha256)
     || !issuedMs || !isProtocolField(issuedAt, { min: 20, max: 64 })
     || trimString(input?.audience) !== 'agentoc-account-file-upload') {
     throw createError('account_file_upload_request_invalid', 'Invalid account file upload quota request.', 400);
@@ -3449,7 +3449,7 @@ export function createOwnerAuthBroker({
           ...accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now) };
       }
       const usage = accountFileUploadUsage(draft, normalized.accountId, normalized.quotaBatchId, now);
-      if (usage.usedBytes + usage.reservedBytes + normalized.sizeBytes > limits.maxTotalBytes) {
+      if (!limits.unlimited && usage.usedBytes + usage.reservedBytes + normalized.sizeBytes > limits.maxTotalBytes) {
         throw createError('account_file_upload_total_limit', 'This message exceeds the 100 MiB attachment limit.', 429);
       }
       const timestamp = new Date(now).toISOString();
@@ -3494,7 +3494,7 @@ export function createOwnerAuthBroker({
         const activeReservation = Date.parse(row.reservedUntil || '') > now;
         const usedAfter = usage.usedBytes + Math.max(0, usage.reservedBytes - (activeReservation ? normalized.sizeBytes : 0))
           + normalized.sizeBytes;
-        if (normalized.sizeBytes > limits.maxFileBytes || usedAfter > limits.maxTotalBytes) {
+        if (!limits.unlimited && (normalized.sizeBytes > limits.maxFileBytes || usedAfter > limits.maxTotalBytes)) {
           throw createError('account_file_upload_total_limit', 'This message exceeds the 100 MiB attachment limit.', 429);
         }
         row.status = 'committed';

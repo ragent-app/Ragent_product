@@ -8,6 +8,9 @@ export const ACCOUNT_FREE_FILE_TOTAL_BYTES = 100 * 1024 * 1024;
 export const ACCOUNT_FILE_HARD_MAX_BYTES = 1024 * 1024 * 1024;
 
 export function resolveAccountFileUploadLimits(plan) {
+  if (text(plan).toLowerCase() === 'test') {
+    return { maxFileBytes: Number.MAX_SAFE_INTEGER, maxTotalBytes: Number.MAX_SAFE_INTEGER, unlimited: true };
+  }
   return text(plan).toLowerCase() === 'free'
     ? { maxFileBytes: ACCOUNT_FREE_FILE_MAX_BYTES, maxTotalBytes: ACCOUNT_FREE_FILE_TOTAL_BYTES }
     : { maxFileBytes: ACCOUNT_FILE_HARD_MAX_BYTES, maxTotalBytes: Number.MAX_SAFE_INTEGER };

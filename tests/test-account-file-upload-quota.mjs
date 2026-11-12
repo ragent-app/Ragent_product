@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { loadOrCreateInstanceIdentity, publicInstanceIdentity, signAccountFileUploadQuotaProof } from '../lib/instance-identity.mjs';
 import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protocol.mjs';
 import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
+import { createDemoAccountAuth, createDemoAccountPolicy } from '../accounts/demo-credentials.mjs';
+import { createAccountEntitlementResolver } from '../accounts/turn-lease-policy.mjs';
 
 const home = mkdtempSync(join(tmpdir(), 'agentoc-account-file-quota-'));
 process.env.HOME = home;
@@ -31,8 +33,8 @@ const broker = createOwnerAuthBroker({ store, clock: () => now,
   verifyNativeGoogleCredential: async () => ({ providerSubject: 'unused' }),
   resolveAccount: async () => ({ accountId }), signAssertion: async () => 'unused' });
 const digest = (char) => char.repeat(64);
-function request(operation, requestId, sizeBytes, sha256 = digest('a'), actor = identity, quotaBatchId = requestId) {
-  const fields = { accountId, operation, requestId, quotaBatchId, sizeBytes, sha256, issuedAt: new Date(now).toISOString(),
+function request(operation, requestId, sizeBytes, sha256 = digest('a'), actor = identity, quotaBatchId = requestId, owner = accountId) {
+  const fields = { accountId: owner, operation, requestId, quotaBatchId, sizeBytes, sha256, issuedAt: new Date(now).toISOString(),
     audience: 'agentoc-account-file-upload' };
   const proof = signAccountFileUploadQuotaProof(actor, fields);
   return { ...fields, instance: publicInstanceIdentity(actor), signature: proof.signature };
@@ -92,6 +94,25 @@ try {
   state.accountEntitlements[0].plan = 'plus';
   const paid = await broker.reserveAccountFileUpload(request('reserve', 'paid-file', 200 * 1024 * 1024, digest('9'), identity, 'paid-message'));
   assert.equal(paid.limits.maxFileBytes, 1024 * 1024 * 1024);
+  await assert.rejects(() => broker.reserveAccountFileUpload(request('reserve', 'paid-too-large', 1024 * 1024 * 1024 + 1)),
+    { code: 'account_file_upload_file_limit' });
+
+  const policy = await createDemoAccountPolicy({ username: 'ragent-fixture', password: 'long-test-fixture-password' });
+  const demoAuth = createDemoAccountAuth(policy);
+  state.accounts.push({ accountId: policy.accountId, provider: 'demo' });
+  const secondIdentity = await loadOrCreateInstanceIdentity({ filePath: join(home, 'test-instance.json') });
+  state.instanceBindings.push({ instanceId: secondIdentity.instanceId, accountId: policy.accountId, provider: 'demo',
+    boundAt: new Date(now).toISOString(), revokedAt: '', instancePublicKey: secondIdentity.publicKey,
+    instanceKeyFingerprint: createInstancePublicKeyFingerprint(secondIdentity.publicKey) });
+  const testBroker = createOwnerAuthBroker({ store, clock: () => now, demoAccountAuth: demoAuth,
+    resolveEntitlement: createAccountEntitlementResolver(demoAuth), signAssertion: async () => 'unused',
+    verifyGoogleCredential: async () => ({ providerSubject: 'unused' }), resolveAccount: async () => ({ accountId }) });
+  const largeSize = 2 * 1024 * 1024 * 1024;
+  const largeRequest = (op) => request(op, 'test-large', largeSize, digest('b'), secondIdentity, 'test-batch', policy.accountId);
+  const testReservation = await testBroker.reserveAccountFileUpload(largeRequest('reserve'));
+  assert.equal(testReservation.limits.unlimited, true);
+  assert.equal(testReservation.reservedBytes, largeSize);
+  assert.equal((await testBroker.completeAccountFileUpload(largeRequest('complete'))).usedBytes, largeSize);
 
   const forged = request('reserve', 'tampered-proof', 1, digest('8'));
   forged.quotaBatchId = 'changed-message';
