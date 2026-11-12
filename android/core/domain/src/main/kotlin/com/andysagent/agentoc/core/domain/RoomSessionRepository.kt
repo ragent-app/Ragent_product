@@ -2088,15 +2088,15 @@ class RoomSessionRepository(
         val specs = payload["attachments"]?.jsonArray.orEmpty()
         val messageRequestId = payload.string("requestId") ?: operation.requestId
         val sessionId = operationScope(payload)
-        val totalBytes = specs.sumOf { element ->
+        val totals = AttachmentProgressTotals(specs.map { element ->
             element.jsonObject["sizeBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
-        }
+        })
         val refs = mutableListOf<AttachmentItemDto>()
-        var completedBytes = 0L
         var lastProgressAt = 0L
         var lastProgress: AttachmentUploadProgress? = null
         fun publishProgress(phase: FileUploadPhase, transferredBytes: Long, force: Boolean = false) {
-            if (totalBytes <= 0L || sessionId.isBlank()) return
+            val totalBytes = totals.total() ?: return
+            if (sessionId.isBlank()) return
             val progress = AttachmentUploadProgress(
                 sessionId = sessionId,
                 phase = phase,
@@ -2110,7 +2110,7 @@ class RoomSessionRepository(
             lastProgress = progress
             attachmentUploadProgressState.update { it + (operation.requestId to progress) }
         }
-        if (totalBytes > 0L) publishProgress(FileUploadPhase.PREPARING, 0L, force = true)
+        publishProgress(FileUploadPhase.PREPARING, 0L, force = true)
         try {
             specs.forEachIndexed { index, element ->
                 val spec = element.jsonObject
@@ -2129,19 +2129,21 @@ class RoomSessionRepository(
                         assetId = spec.string("assetId"),
                     ),
                     onProgress = { uploadProgress ->
-                        val currentBytes = if (uploadProgress.phase == FileUploadPhase.CONFIRMED) attachmentSize
+                        totals.discover(index, uploadProgress.totalBytes)
+                        val currentBytes = if (uploadProgress.phase == FileUploadPhase.CONFIRMED) uploadProgress.totalBytes
                             else uploadProgress.writtenBytes ?: 0L
-                        publishProgress(uploadProgress.phase, completedBytes + currentBytes)
+                        publishProgress(uploadProgress.phase, totals.transferred(currentBytes))
                     },
                 )
                 refs += ref
-                completedBytes = (completedBytes + attachmentSize).coerceAtMost(totalBytes)
-                if (existing != null) publishProgress(FileUploadPhase.TRANSFERRING, completedBytes)
+                ref.sizeBytes?.let { totals.discover(index, it) }
+                totals.complete(index)
+                if (existing != null) publishProgress(FileUploadPhase.TRANSFERRING, totals.transferred(0))
                 payload = payloadWithAttachmentRef(payload, index, ref)
                 operation = operation.copy(payload = payload.toString(), updatedAt = System.currentTimeMillis(), lastError = null)
                 dao.upsertOperation(operation)
             }
-            if (totalBytes > 0L) publishProgress(FileUploadPhase.CONFIRMED, totalBytes, force = true)
+            totals.total()?.let { publishProgress(FileUploadPhase.CONFIRMED, it, force = true) }
             return operation to refs
         } finally {
             attachmentUploadProgressState.update { it - operation.requestId }
