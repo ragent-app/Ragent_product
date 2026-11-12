@@ -69,6 +69,17 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(await notifyLinuxRunScopeFinished({ ...run, runnerLaunchAttempt: 1 }, manifest, { base }), false);
         assert.equal(await hasLinuxRunCancelIntent(runId, 0), false);
         const moduleUrl = new URL('../chat/runs.mjs', import.meta.url).href;
+        const isolatedEnv = { ...process.env, HOME: `${root}/runner-config`, AGENTOC_CONFIG_DIR: `${root}/runner-config`,
+          AGENTOC_MEMORY_DIR: `${root}/runner-config/memory`, AGENTOC_WORK_ROOT_DIR: `${root}/runner-config/workspace`,
+          AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1', AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1' };
+        const offline = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
+          process.execPath, '--input-type=module', '-e',
+          `import {updateRun} from ${JSON.stringify(moduleUrl)}; try { await updateRun(${JSON.stringify(runId)}, {state:'completed'}); process.exit(1); } catch (e) { process.exit(e.code === 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' ? 23 : 2); }`],
+        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: 'http://127.0.0.1:1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+        let offlineError = ''; offline.stderr.on('data', (chunk) => { offlineError += chunk; });
+        const offlineCode = await new Promise((resolve, reject) => { offline.once('error', reject); offline.once('close', resolve); });
+        assert.equal(offlineCode, 23, offlineError);
+        assert.equal(JSON.parse(await readFile(runStatusPath(runId), 'utf8')).state, 'running');
         let release, locked;
         const acquired = new Promise((resolve) => { locked = resolve; });
         const held = new Promise((resolve) => { release = resolve; });
@@ -80,10 +91,7 @@ test('runner terminal write invalidates only its protected control binding',
         const child = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
           process.execPath, '--input-type=module', '-e',
           `import {updateRun} from ${JSON.stringify(moduleUrl)}; await updateRun(${JSON.stringify(runId)}, {state:'completed'});`],
-        { env: { ...process.env, HOME: `${root}/runner-config`, AGENTOC_CONFIG_DIR: `${root}/runner-config`,
-          AGENTOC_MEMORY_DIR: `${root}/runner-config/memory`, AGENTOC_WORK_ROOT_DIR: `${root}/runner-config/workspace`,
-          AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1',
-          AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1', AGENTOC_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
+        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
         let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });
         const completion = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
         try {

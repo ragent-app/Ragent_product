@@ -1849,12 +1849,15 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     if (beforeWrite) beforeWrite(next);
     if (!scopeTracking && process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY === '1' &&
         process.env.AGENTOC_LINUX_SCOPE_FINISH_ENABLED === '1' && isTerminalRunState(next.state) && !isTerminalRunState(latest.state)) {
+      let invalidated = false;
       try {
         const { notifyLinuxRunScopeFinished } = await import('./linux-run-scope-finish-client.mjs');
-        if (!await notifyLinuxRunScopeFinished(next, await getRunManifestUnlocked(runId))) {
-          console.warn(`[runs] control-plane Run finalization unavailable for ${runId}`);
-        }
-      } catch { console.warn(`[runs] control-plane Run finalization unavailable for ${runId}`); }
+        invalidated = await notifyLinuxRunScopeFinished(next, await getRunManifestUnlocked(runId));
+      } catch { /* Refuse publication below. */ }
+      if (!invalidated) {
+        console.warn(`[runs] control-plane Run finalization unavailable for ${runId}`);
+        throw Object.assign(new Error('Run scope finalization could not be confirmed'), { code: 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' });
+      }
       if (authorizeWrite) await authorizeWrite(latest);
       if (beforeWrite) beforeWrite(next);
     }
