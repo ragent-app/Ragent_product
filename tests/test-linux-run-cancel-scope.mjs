@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { appendFile, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 test('persisted Run cancellation notifies the root lifecycle broker',
@@ -19,6 +19,7 @@ test('persisted Run cancellation notifies the root lifecycle broker',
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
       const { createRunnerLifecycleServer } = await import('../scripts/runner-lifecycle-broker.mjs');
       const { createRun, getRunAcceptanceEvidence, requestRunCancel, recoverLinuxRunScopeRevocations, runIndexPath, updateRun } = await import('../chat/runs.mjs');
+      const { hasLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
       const broker = await createRunnerLifecycleServer({ socketPath: process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET,
         serviceUser: 'root', serviceGroup: 'root', controlUser: 'root', controlGroup: 'root', chownImpl: async () => {},
         runScopeRegistration: { directory: contextDirectory, pinDirectory: `${root}/unused` } });
@@ -36,6 +37,16 @@ test('persisted Run cancellation notifies the root lifecycle broker',
         await assert.rejects(requestRunCancel(deniedId, { beforeWrite: () => { throw new Error('cancel denied'); } }));
         const deniedName = `${createHash('sha256').update(deniedId).digest('hex')}-0.revoked`;
         await assert.rejects(lstat(`${contextDirectory}/${deniedName}`), { code: 'ENOENT' });
+        assert.equal(await hasLinuxRunCancelIntent(deniedId, 0), false);
+        const unsafeId = 'run_unsafeconfig1';
+        await createRun({ status: { id: unsafeId, sessionId: 's1', requestId: 't5', state: 'running' },
+          manifest: { sessionId: 's1', requestId: 't5' } });
+        const configMode = (await lstat(process.env.AGENTOC_CONFIG_DIR)).mode & 0o777;
+        await chmod(process.env.AGENTOC_CONFIG_DIR, 0o777);
+        try {
+          await assert.rejects(requestRunCancel(unsafeId), { code: 'LINUX_CANCEL_INTENT_UNAVAILABLE' });
+          assert.equal((await getRunAcceptanceEvidence(unsafeId)).cancelRequested, false);
+        } finally { await chmod(process.env.AGENTOC_CONFIG_DIR, configMode); }
         const delayedId = 'run_delayedfixture1';
         await createRun({ status: { id: delayedId, sessionId: 's1', requestId: 't3', state: 'running', runnerLaunchAttempt: 1 },
           manifest: { sessionId: 's1', requestId: 't3' } });

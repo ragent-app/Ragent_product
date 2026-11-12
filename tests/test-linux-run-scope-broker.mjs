@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { connect } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { createRunnerLifecycleServer } from '../scripts/runner-lifecycle-broker.mjs';
+import { createRunnerLifecycleServer, isLinuxRunScopeRegistrationEligible } from '../scripts/runner-lifecycle-broker.mjs';
 import { launchDetachedRunnerViaLifecycleBroker } from '../chat/run-launcher.mjs';
 import { revokeLinuxRunScope } from '../chat/linux-run-scope-lifecycle.mjs';
 
@@ -19,6 +19,15 @@ async function request(socketPath, payload) {
     socket.on('error', reject);
   });
 }
+test('privileged registration requires different numeric users and no forwarded desktop endpoints', () => {
+  const base = { runnerUid: 1001, controlUid: 1000, distinctIdentity: true, guiEnvironment: {} };
+  assert.equal(isLinuxRunScopeRegistrationEligible(base), true);
+  assert.equal(isLinuxRunScopeRegistrationEligible({ ...base, runnerUid: 1000 }), false);
+  assert.equal(isLinuxRunScopeRegistrationEligible({ ...base, controlUid: undefined }), false);
+  assert.equal(isLinuxRunScopeRegistrationEligible({ ...base, distinctIdentity: false }), false);
+  assert.equal(isLinuxRunScopeRegistrationEligible({ ...base, guiEnvironment: { DISPLAY: ':0' } }), false);
+  assert.equal(isLinuxRunScopeRegistrationEligible({ ...base, guiEnvironment: { XDG_RUNTIME_DIR: '/run/user/1000' } }), false);
+});
 test('broker only accepts its own root-configured store paths', { skip: process.platform !== 'linux' }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentoc-scope-broker-'));
   const calls = [], revocations = [], configuration = { directory: '/root/trusted-context', pinDirectory: '/root/trusted-pin' };

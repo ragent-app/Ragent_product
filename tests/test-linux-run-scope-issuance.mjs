@@ -14,7 +14,7 @@ function fixture() {
     options: { approvedActionChannel: { turnId: 't1' } } });
   const keys = generateKeyPairSync('ed25519');
   return { run, manifest, keys, options: { enabled: true, platform: 'linux', readBoundary: async () => ({ run, manifest }),
-    loadKeys: async () => {}, getKey: () => keys } };
+    loadKeys: async () => {}, getKey: () => keys, ensureIntentStore: async () => {}, hasIntent: async () => false } };
 }
 test('control plane issues a launch-specific grant from fresh bound Run data', async () => {
   const { run, manifest, keys, options } = fixture();

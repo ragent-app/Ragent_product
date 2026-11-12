@@ -5,11 +5,13 @@ import { assertRunLaunchBoundary } from './run-execution-boundary.mjs';
 import { getActivePrivilegedSigningKey, loadOrCreatePrivilegedSigningKeys } from './privileged-signing-keys.mjs';
 import { resolveApprovedActionRunDirectories } from './approved-action-run-directories.mjs';
 import { signLinuxRunScopeGrant } from './linux-run-scope-grant.mjs';
+import { ensureLinuxRunCancelIntentStore, hasLinuxRunCancelIntent } from './linux-run-cancel-intent.mjs';
 
 export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
   enabled = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1', platform = process.platform,
   readBoundary = assertRunLaunchBoundary, loadKeys = loadOrCreatePrivilegedSigningKeys,
-  getKey = getActivePrivilegedSigningKey,
+  getKey = getActivePrivilegedSigningKey, ensureIntentStore = ensureLinuxRunCancelIntentStore,
+  hasIntent = hasLinuxRunCancelIntent,
 } = {}) {
   if (!enabled || platform !== 'linux') return null;
   const { run, manifest } = await readBoundary(runId);
@@ -20,6 +22,8 @@ export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
     throw Object.assign(new Error('Run is no longer eligible for scope registration'), { code: 'LINUX_RUN_SCOPE_INACTIVE' });
   }
   resolveApprovedActionRunDirectories({ run, manifest, session: {}, platform: 'linux' });
+  await ensureIntentStore();
+  if (await hasIntent(runId, launchAttempt)) throw new Error('Run scope was cancelled');
   await loadKeys();
   const key = getKey();
   if (!key?.privateKey) throw Object.assign(new Error('Linux Run scope signing key is unavailable'), { code: 'LINUX_RUN_SCOPE_KEY_UNAVAILABLE' });

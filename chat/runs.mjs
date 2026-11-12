@@ -2592,12 +2592,21 @@ export async function materializeRunSpoolLine(runId, record) {
 
 export async function requestRunCancel(runId, { beforeWrite = null, authorizeWrite = null } = {}) {
   const trackRevocation = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
+  const authorizeCancel = trackRevocation ? async (current) => {
+    if (authorizeWrite) await authorizeWrite(current);
+    // Check caller predicates before creating a durable intent. A second
+    // beforeWrite check still runs immediately before publishing status.
+    if (beforeWrite) beforeWrite({ ...current, cancelRequested: true });
+    const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+    await persistLinuxRunCancelIntent(runId, Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0);
+    if (authorizeWrite) await authorizeWrite(current);
+  } : authorizeWrite;
   const updated = await updateRun(runId, (run) => ({
     ...run,
     cancelRequested: true,
     cancelRequestedAt: new Date().toISOString(),
     ...(trackRevocation ? { linuxScopeRevocationPending: true } : {}),
-  }), { beforeWrite, authorizeWrite });
+  }), { beforeWrite, authorizeWrite: authorizeCancel });
   if (updated && trackRevocation && !await retryLinuxRunScopeRevocation(updated)) {
     console.warn(`[runs] privileged Run scope revocation pending for ${runId}`);
   }

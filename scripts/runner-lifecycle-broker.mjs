@@ -280,6 +280,16 @@ export function buildControlPlaneMaskPaths(environment = process.env) {
   return [configDir, '/var/log/agentoc'];
 }
 
+// The same desktop UID can ask its user service manager to start a process
+// outside this unit's mount namespace. A config-path mask alone is therefore
+// not an identity boundary for privileged Run records. GUI endpoints can
+// likewise delegate actions to the logged-in desktop session.
+export function isLinuxRunScopeRegistrationEligible({ runnerUid, controlUid, distinctIdentity, guiEnvironment } = {}) {
+  return distinctIdentity === true && Number.isSafeInteger(runnerUid) && runnerUid > 0 &&
+    Number.isSafeInteger(controlUid) && controlUid > 0 && runnerUid !== controlUid &&
+    Object.keys(pickRunnerGuiEnvironment(guiEnvironment || {})).length === 0;
+}
+
 const GiB = 1024 * 1024 * 1024;
 const RESOURCE_PROFILES = Object.freeze({
   default: { memoryHigh: 4 * GiB, memoryMax: 6 * GiB, tasksMax: 256, cpuWeight: 100 },
@@ -867,7 +877,10 @@ async function launchLifecycleRunnerUnlocked(runId, {
   }
   const pid = await readSystemdMainPid(resolvedUnitName, { execFileImpl });
   let privilegedContextRegistered = false;
-  if (scopeGrant && runScopeRegistration && manifest?.runPublication) {
+  if (scopeGrant && runScopeRegistration && manifest?.runPublication && isLinuxRunScopeRegistrationEligible({
+    runnerUid: runnerOwnership.uid, controlUid: controlOwnership?.uid, distinctIdentity,
+    guiEnvironment: { ...environment, ...guiEnvironment },
+  })) {
     // This branch is reached only after this broker created the unit. Never
     // claim a reused pre-existing unit as a newly authenticated launch.
     const run = { id: normalized, sessionId: manifest.sessionId, requestId: manifest.requestId,
