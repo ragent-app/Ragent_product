@@ -19,6 +19,8 @@ assert.match(buildScript, /npm ci --omit=dev --ignore-scripts --no-audit --no-fu
 assert.match(buildScript, /Accounts Node runtime checksum mismatch/);
 assert.match(buildScript, /stage-runtime-payload\.mjs/);
 assert.match(buildScript, /--profile accounts/);
+assert.match(buildScript, /actual_source_revision.*agentoc-source-commit/);
+assert.match(buildScript, /actual_source_revision.*!=.*SOURCE_REVISION/);
 assert.match(buildScript, /verify-runtime-payload\.mjs/);
 assert.match(buildScript, /mktemp -d "\$OUTPUT_DIR\/\.ragent-accounts-release/);
 assert.doesNotMatch(buildScript, /mktemp -d \/tmp\//, 'release build work files must stay under its output directory');

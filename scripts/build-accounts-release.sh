@@ -38,6 +38,11 @@ trap cleanup EXIT
 mkdir -p "$APP_DIR" "$RELEASE_DIR/runtime"
 node "$ROOT/scripts/stage-runtime-payload.mjs" \
   --source "$ROOT" --destination "$APP_DIR" --profile accounts --source-mode "$SOURCE_MODE"
+actual_source_revision="$(tr -d '\r\n' < "$APP_DIR/.agentoc-source-commit")"
+if [[ "$actual_source_revision" != "$SOURCE_REVISION" ]]; then
+  echo "Accounts staged source revision differs from the requested release revision" >&2
+  exit 1
+fi
 install -m 0644 "$ROOT/deploy/accounts/ragent-accounts.service" "$RELEASE_DIR/ragent-accounts.service"
 
 (cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
