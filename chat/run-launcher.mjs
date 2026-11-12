@@ -17,6 +17,7 @@ import {
 import { parseScopedCodexModel } from './models.mjs';
 import { getRunManifest, updateRun, updateRunManifest } from './runs.mjs';
 import { normalizeRunAuthRecovery } from '../lib/provider-runtime/run-auth-recovery.mjs';
+import { resolveCodexRuntimeRolloutSources } from '../lib/provider-runtime/codex-rollout-sources.mjs';
 import {
   pickRunnerEnvAllowlist,
   pickRunnerGuiEnvironment,
@@ -380,6 +381,18 @@ export async function prepareDetachedRunnerProvider(runId, {
     }));
     return { environment, manifest, ...selection };
   }
+  let codexRolloutSources = [];
+  if (selection.app === 'codex' && nativeResult.oauthAccountId && nativeResult.homeDir) {
+    try {
+      codexRolloutSources = await resolveCodexRuntimeRolloutSources({
+        configDir: trimString(environment.AGENTOC_NATIVE_REGISTRY_DIR) || trimString(environment.AGENTOC_CONFIG_DIR) || CONFIG_DIR,
+        providerHomesRoot: providerHomesDir, homeRoot: nativeResult.homeDir, accountId: nativeResult.oauthAccountId,
+      });
+    } catch (error) {
+      await nativeResult?.oauthLock?.release?.();
+      throw error;
+    }
+  }
   await persistProviderPreparation(runId, providerPreparationEvidence({
     state: 'ready',
     stage: 'verified',
@@ -395,9 +408,11 @@ export async function prepareDetachedRunnerProvider(runId, {
     app: selection.app,
     providerId: nativeResult.providerId,
     providerHomesDir: nativeResult.homeDir,
+    codexRolloutSources,
     environment: {
       ...environment,
       AGENTOC_PROVIDER_HOMES_DIR: nativeResult.homeDir,
+      AGENTOC_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
       ...(selection.app === 'codex'
         ? { AGENTOC_CODEX_HOME_DIR: trimString(nativeResult.codexHomeDir) }
         : {}),
@@ -500,6 +515,9 @@ export function buildDetachedRunnerEnvironment({
     HOME: homedir(),
     AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${CHAT_PORT}`,
     AGENTOC_PROJECT_ROOT: projectRoot,
+    // Populated only from the verified provider-home registry below, never
+    // inherited from the service environment or a user shell snapshot.
+    AGENTOC_CODEX_ROLLOUT_SOURCES: '[]',
     // Controlled spool write-back channel: the sidecar writes run results to
     // the control plane's chat-runs directory without being told the
     // production AGENTOC_CONFIG_DIR.
@@ -674,6 +692,7 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
     const request = {
       type: 'launch', runId,
       ...(providerHomesDir ? { providerHomesDir } : {}),
+      ...(prepared?.codexRolloutSources?.length ? { codexRolloutSources: prepared.codexRolloutSources } : {}),
       ...(prepared?.oauthLock?.path && prepared?.oauthLock?.token ? { oauthLockPath: prepared.oauthLock.path, oauthLockToken: prepared.oauthLock.token } : {}),
     };
     const managedWindows = process.platform === 'win32' && process.env.AGENTOC_WINDOWS_SERVICE_MODE === '1'

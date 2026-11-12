@@ -39,3 +39,28 @@ test('ambiguous rollout matches fail closed without starting another thread', as
   }), { code: 'CODEX_ROLLOUT_AMBIGUOUS' });
   assert.equal(sent.length, 0);
 });
+
+test('a verified source home restores the original thread after account migration', async (t) => {
+  const parent = resolve(tmpdir());
+  const root = await mkdtemp(join(parent, 'ragent-rollout-sources-'));
+  t.after(async () => {
+    const suffix = relative(parent, root);
+    if (!suffix || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) throw new Error('Unsafe test cleanup');
+    await rm(root, { recursive: true, force: true });
+  });
+  const canonical = join(root, 'canonical', 'codex');
+  const oldRoot = join(root, 'old');
+  const oldHome = join(oldRoot, 'codex');
+  const folder = join(oldHome, 'sessions', '2026', '11', '12');
+  await mkdir(canonical, { recursive: true });
+  await mkdir(folder, { recursive: true });
+  for (const home of [canonical, oldHome]) await writeFile(join(home, 'auth.json'), JSON.stringify({ tokens: { account_id: 'account-a' } }));
+  const id = '12345678-1234-1234-1234-123456789abc';
+  const rollout = join(folder, `rollout-${id}.jsonl`);
+  await writeFile(rollout, `${JSON.stringify({ type: 'session_meta', payload: { id } })}\n`);
+  const sent = [];
+  const proc = { stdin: { writable: true, write: (data) => sent.push(JSON.parse(data)) } };
+  const state = { useResume: true, threadId: id, nextControlRequestId: 50, threadRequestSent: true, cwd: root, model: 'fixture' };
+  assert.equal(await retryManagedCodexRolloutResume(proc, state, canonical, undefined, [oldRoot]), true);
+  assert.equal(sent[0].params.path.toLowerCase(), rollout.toLowerCase());
+});

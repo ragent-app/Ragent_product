@@ -8,6 +8,12 @@ const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 // but allow normal multi-hundred-kilobyte headers from existing sessions.
 const MAX_HEADER_BYTES = 4 * 1024 * 1024;
 
+export function codexRolloutAccountId(auth) {
+  const tokens = auth?.tokens || {};
+  return ['account_id', 'accountId', 'account_uuid', 'accountUuid', 'user_id', 'userId']
+    .map((key) => typeof tokens[key] === 'string' ? tokens[key].trim() : '').find(Boolean) || '';
+}
+
 async function entries(directory) {
   try {
     const stat = await lstat(directory);
@@ -104,7 +110,6 @@ export async function findAccountCodexRollout(homeRoots, accountId, threadId) {
         : canonicalRoot === resolve(root);
       if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || !homeStat.isDirectory() || homeStat.isSymbolicLink() || !sameRoot) throw new Error('Invalid account home');
     } catch (error) {
-      if (error?.code === 'ENOENT') continue;
       throw Object.assign(new Error('Could not verify an account rollout source'), { code: 'CODEX_ROLLOUT_SOURCE_INVALID', cause: error });
     }
     try {
@@ -114,11 +119,9 @@ export async function findAccountCodexRollout(homeRoots, accountId, threadId) {
     } catch (error) {
       throw Object.assign(new Error('Could not verify the account of a rollout source'), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED', cause: error });
     }
-    const tokens = auth?.tokens || {};
-    const actual = ['account_id', 'accountId', 'account_uuid', 'accountUuid', 'user_id', 'userId']
-      .map((key) => typeof tokens[key] === 'string' ? tokens[key].trim() : '').find(Boolean) || '';
+    const actual = codexRolloutAccountId(auth);
     if (!actual) throw Object.assign(new Error('Could not verify the account of a rollout source'), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED' });
-    if (actual !== expected) continue;
+    if (actual !== expected) throw Object.assign(new Error('A rollout source is now bound to another account'), { code: 'CODEX_ROLLOUT_ACCOUNT_MISMATCH' });
     const found = await findManagedCodexRollout(home, threadId);
     if (found) matches.add(found);
   }

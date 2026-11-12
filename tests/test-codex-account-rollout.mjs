@@ -27,8 +27,8 @@ test('account rollout lookup checks ownership and rejects ambiguous histories', 
   }
   await assert.rejects(findAccountCodexRollout(roots, 'account-a', id), { code: 'CODEX_ROLLOUT_AMBIGUOUS' });
   await writeFile(join(roots[1], 'codex', 'auth.json'), JSON.stringify({ tokens: { account_id: 'account-b' } }));
-  assert.equal((await findAccountCodexRollout(roots, 'account-a', id)).toLowerCase(), files[0].toLowerCase());
-  assert.equal(await findAccountCodexRollout(roots, 'account-c', id), null);
+  await assert.rejects(findAccountCodexRollout(roots, 'account-a', id), { code: 'CODEX_ROLLOUT_ACCOUNT_MISMATCH' });
+  assert.equal((await findAccountCodexRollout([roots[0]], 'account-a', id)).toLowerCase(), files[0].toLowerCase());
   await writeFile(join(roots[0], 'codex', 'auth.json'), '{}');
   await assert.rejects(findAccountCodexRollout(roots, 'account-a', id), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED' });
   await rm(join(roots[0], 'codex', 'auth.json'));

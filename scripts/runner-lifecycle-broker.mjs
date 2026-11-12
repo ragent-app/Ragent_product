@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 
 import { CONFIG_DIR } from '../lib/config.mjs';
+import { resolveCodexRuntimeRolloutSources } from '../lib/provider-runtime/codex-rollout-sources.mjs';
 import {
   RUNNER_ENV_ALLOWLIST,
   buildRunnerGuiBindPaths,
@@ -647,6 +648,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   // native Codex no longer adopts them or shares their refresh-token chain.
   let runProviderHomesDir = providerHomesDir;
   let runCodexHomeDir = '';
+  let codexRolloutSources = [];
   let runAgyHomeDir = '';
   let effectiveCodexServiceTier = '';
   // Codex OAuth is machine-local. The old environment flag is intentionally
@@ -743,6 +745,10 @@ async function launchLifecycleRunnerUnlocked(runId, {
     }
     runProviderHomesDir = nativeResult.homeDir.trim();
     runCodexHomeDir = isCodex ? trimString(nativeResult.codexHomeDir) : '';
+    if (isCodex && nativeResult.oauthAccountId) {
+      codexRolloutSources = await resolveCodexRuntimeRolloutSources({ configDir: CONFIG_DIR, providerHomesRoot: providerHomesDir,
+        homeRoot: nativeResult.homeDir, accountId: nativeResult.oauthAccountId });
+    }
     runAgyHomeDir = isAgy ? trimString(nativeResult.agyHomeDir) : '';
     if (isCodex) {
       effectiveCodexServiceTier = trimString(nativeResult.snapshot?.serviceTier) || 'standard';
@@ -795,6 +801,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     ...(useGroupDrop ? { USER: resolvedServiceUser, LOGNAME: resolvedServiceUser } : {}),
     AGENTOC_RUNNER_DISTINCT_IDENTITY: distinctIdentity ? '1' : '0',
     AGENTOC_CODEX_HOME_DIR: runCodexHomeDir,
+    AGENTOC_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
     AGENTOC_AGY_HOME_DIR: isAgy ? runAgyHomeDir : '',
     AGENTOC_RUN_SPOOL_DIR: environment.AGENTOC_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs'),
     AGENTOC_PROVIDER_HOMES_DIR: runProviderHomesDir,

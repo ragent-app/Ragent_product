@@ -82,10 +82,15 @@ export function validateScopedProviderHomesDir(value, {
     && /^[a-f0-9]{32}$/.test(parts[1])
     && parts[2] === 'by-run'
     && /^[a-f0-9]{32}$/.test(parts[3]);
+  const isProviderAccountHome = parts.length === 4
+    && parts[0] === 'by-provider'
+    && /^[a-f0-9]{32}$/.test(parts[1])
+    && parts[2] === 'by-account'
+    && /^[a-f0-9]{32}$/.test(parts[3]);
   const isAgyRunHome = parts.length === 2
     && parts[0] === 'by-run'
     && /^run_[A-Za-z0-9_-]{8,128}$/.test(parts[1]);
-  if (!isProviderHome && !isProviderRunHome && !isAgyRunHome) {
+  if (!isProviderHome && !isProviderRunHome && !isProviderAccountHome && !isAgyRunHome) {
     throw new Error('Invalid scoped Provider homes directory');
   }
   return resolvedCandidate;
@@ -101,6 +106,7 @@ export async function spawnSupervisedRunner(runId, {
   processExecPath = process.execPath,
   runnerScriptPath = runnerEntry,
   providerHomesDir = '',
+  codexRolloutSources = [],
   oauthLockPath = '',
   oauthLockToken = '',
   platform = process.platform,
@@ -122,6 +128,7 @@ export async function spawnSupervisedRunner(runId, {
     launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE,
     proxyEnv,
   });
+  env.AGENTOC_CODEX_ROLLOUT_SOURCES = JSON.stringify(codexRolloutSources);
   if (providerHomesDir) {
     env.AGENTOC_PROVIDER_HOMES_DIR = providerHomesDir;
     // The supervisor receives only a validated provider-home root over its
@@ -234,6 +241,17 @@ export async function createRunnerSupervisorServer({
         const providerHomesDir = validateScopedProviderHomesDir(request?.providerHomesDir || '', {
           providerHomesRoot,
         });
+        if (request?.codexRolloutSources !== undefined && !Array.isArray(request.codexRolloutSources)) {
+          throw new Error('Invalid Codex rollout sources');
+        }
+        const codexRolloutSources = (request?.codexRolloutSources || []).map((source) => {
+          const validated = validateScopedProviderHomesDir(source, { providerHomesRoot });
+          const parts = relative(resolve(providerHomesRoot), validated).split(sep);
+          if (parts[0] !== 'by-provider' || (parts.length !== 2 && !(parts.length === 4 && parts[2] === 'by-account'))) {
+            throw new Error('Invalid Codex rollout source home');
+          }
+          return validated;
+        });
         const requestedLockPath = trimString(request?.oauthLockPath);
         const requestedLockToken = trimString(request?.oauthLockToken);
         if (requestedLockPath || requestedLockToken) {
@@ -247,6 +265,7 @@ export async function createRunnerSupervisorServer({
         }
         const launched = await spawnRunner(runId, {
           providerHomesDir,
+          ...(codexRolloutSources.length ? { codexRolloutSources } : {}),
           ...(requestedLockPath && requestedLockToken
             ? { oauthLockPath: requestedLockPath, oauthLockToken: requestedLockToken }
             : {}),

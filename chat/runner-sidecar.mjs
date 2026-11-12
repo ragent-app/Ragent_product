@@ -61,7 +61,7 @@ import {
   buildCodexContextMetricsPayload,
   readLatestCodexSessionMetrics,
 } from './codex-session-metrics.mjs';
-import { findManagedCodexRollout } from './codex-managed-rollout.mjs';
+import { codexRolloutAccountId, findAccountCodexRollout, findManagedCodexRollout } from './codex-managed-rollout.mjs';
 import {
   buildCodexAppServerInitializeMessage,
   buildCodexAppServerInitializedNotification,
@@ -2222,10 +2222,14 @@ function isCodexAppServerStaleResumeError(parsed, state) {
 // Codex's thread index can be missing even when the authorized home still
 // contains the complete rollout. Try its verified path before creating a new
 // thread, so a recoverable history is not silently replaced.
-export async function retryManagedCodexRolloutResume(proc, state, codexHomeDir, findRollout = findManagedCodexRollout) {
+export async function retryManagedCodexRolloutResume(proc, state, codexHomeDir, findRollout = findManagedCodexRollout, accountSources = []) {
   if (!state?.useResume || state.rolloutResumeAttempted || !state.threadId) return false;
   state.rolloutResumeAttempted = true;
-  const rolloutPath = await findRollout(codexHomeDir, state.threadId);
+  let rolloutPath;
+  if (accountSources.length) {
+    const auth = await readJsonIfPresent(join(codexHomeDir, 'auth.json'), readFile);
+    rolloutPath = await findAccountCodexRollout([dirname(codexHomeDir), ...accountSources], codexRolloutAccountId(auth), state.threadId);
+  } else rolloutPath = await findRollout(codexHomeDir, state.threadId);
   if (!rolloutPath) return false;
   state.rolloutPath = rolloutPath;
   state.threadRequestId = state.nextControlRequestId++;
@@ -4956,7 +4960,9 @@ async function main() {
     if (appServerState && parsed && isCodexAppServerStaleResumeError(parsed, appServerState)) {
       const staleThreadId = appServerState.threadId;
       try {
-        if (await retryManagedCodexRolloutResume(proc, appServerState, runnerCodexHomeDir)) {
+        const accountSources = JSON.parse(process.env.AGENTOC_CODEX_ROLLOUT_SOURCES || '[]');
+        if (!Array.isArray(accountSources)) throw new Error('Invalid managed rollout sources');
+        if (await retryManagedCodexRolloutResume(proc, appServerState, runnerCodexHomeDir, findManagedCodexRollout, accountSources)) {
           await logSidecarDiagnostic(runId, 'Codex thread index missed an existing managed rollout; retrying resume', { staleThreadId });
           return;
         }
