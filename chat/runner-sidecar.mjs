@@ -61,6 +61,7 @@ import {
   buildCodexContextMetricsPayload,
   readLatestCodexSessionMetrics,
 } from './codex-session-metrics.mjs';
+import { findManagedCodexRollout } from './codex-managed-rollout.mjs';
 import {
   buildCodexAppServerInitializeMessage,
   buildCodexAppServerInitializedNotification,
@@ -1600,6 +1601,8 @@ export async function createCodexAppServerRunState({
     developerInstructions: forceFreshRecovery ? recoveryDeveloperInstructions : normalDeveloperInstructions,
     freshRecoveryDeveloperInstructions: recoveryDeveloperInstructions,
     useResume: !forceFreshRecovery && options.codexResume === true,
+    rolloutPath: '',
+    rolloutResumeAttempted: false,
     threadRequestId: CODEX_APP_SERVER_REQUEST_IDS.thread,
     initializeRequestId: CODEX_APP_SERVER_REQUEST_IDS.initialize,
     initialized: false,
@@ -1862,6 +1865,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     id: state.threadRequestId,
     threadId: state.threadId,
     useResume: state.useResume,
+    rolloutPath: state.rolloutPath,
     cwd: state.cwd,
     model: state.model,
     reasoningEffort: state.reasoningEffort,
@@ -2215,6 +2219,22 @@ function isCodexAppServerStaleResumeError(parsed, state) {
   return payloadContainsText(parsed, /no rollout found for thread id/i);
 }
 
+// Codex's thread index can be missing even when the authorized home still
+// contains the complete rollout. Try its verified path before creating a new
+// thread, so a recoverable history is not silently replaced.
+export async function retryManagedCodexRolloutResume(proc, state, codexHomeDir, findRollout = findManagedCodexRollout) {
+  if (!state?.useResume || state.rolloutResumeAttempted || !state.threadId) return false;
+  state.rolloutResumeAttempted = true;
+  const rolloutPath = await findRollout(codexHomeDir, state.threadId);
+  if (!rolloutPath) return false;
+  state.rolloutPath = rolloutPath;
+  state.threadRequestId = state.nextControlRequestId++;
+  state.threadRequestSent = false;
+  state.providerStage = 'thread_resume_by_rollout';
+  if (!writeCodexAppServerThreadStart(proc, state)) throw new Error('Codex rollout resume could not write to app-server');
+  return true;
+}
+
 function recoverCodexAppServerFromStaleResume(proc, state) {
   if (!state || state.resumeRecoveryAttempted) return false;
   if (state.turnRetryTimer) {
@@ -2224,6 +2244,7 @@ function recoverCodexAppServerFromStaleResume(proc, state) {
   state.resumeRecoveryAttempted = true;
   state.useResume = false;
   state.threadId = '';
+  state.rolloutPath = '';
   state.prompt = state.freshRecoveryPrompt || state.prompt;
   state.developerInstructions = state.freshRecoveryDeveloperInstructions || state.developerInstructions;
   state.threadRequestId = state.nextControlRequestId;
@@ -4934,6 +4955,19 @@ async function main() {
     }
     if (appServerState && parsed && isCodexAppServerStaleResumeError(parsed, appServerState)) {
       const staleThreadId = appServerState.threadId;
+      try {
+        if (await retryManagedCodexRolloutResume(proc, appServerState, runnerCodexHomeDir)) {
+          await logSidecarDiagnostic(runId, 'Codex thread index missed an existing managed rollout; retrying resume', { staleThreadId });
+          return;
+        }
+      } catch (error) {
+        markCodexAppServerFailure(appServerState, { error: { message: 'Could not safely recover the existing Codex session' } });
+        await logSidecarDiagnostic(runId, 'Codex managed rollout recovery failed', {
+          phase: 'codex-app-server-rollout-recovery', staleThreadId, error: normalizeErrorMessage(error),
+        });
+        await terminateManagedProcess();
+        return;
+      }
       if (recoverCodexAppServerFromStaleResume(proc, appServerState)) {
         await logSidecarDiagnostic(runId, 'Codex thread resume target was unavailable; started a fresh thread', {
           staleThreadId,
