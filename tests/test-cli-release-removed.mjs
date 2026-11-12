@@ -15,6 +15,6 @@ const result = spawnSync(process.execPath, ['cli.js', 'release'], {
 assert.equal(result.status, 1, 'removed release command should exit non-zero');
 assert.match(result.stderr, /agentoc release/i, 'stderr should mention the removed command');
 assert.match(result.stderr, /current source tree after restart/i, 'stderr should explain the new source-backed model');
-assert.match(result.stderr, /agentoc restart chat/i, 'stderr should point to the restart replacement');
+assert.match(result.stderr, /ragent restart chat/i, 'stderr should point to the restart replacement');
 
 console.log('test-cli-release-removed: ok');

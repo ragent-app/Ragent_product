@@ -277,7 +277,7 @@ switch (command) {
     break;
 
   case 'release': {
-    console.error('`agentoc release` has been removed. Ragent now runs the current source tree after restart. Use `agentoc restart chat` for the owner surface.');
+    console.error('`agentoc release` has been removed. Ragent now runs the current source tree after restart. Use `ragent restart chat` for the owner surface.');
     process.exit(1);
     break;
   }
@@ -449,12 +449,12 @@ switch (command) {
 
     function printConsultHelp(stdout = process.stdout) {
       stdout.write(`Usage:
-  agentoc consult create --root-session <id> --objective <text> --question <text> --experts <json> --quorum <n> --deadline <iso> [options]
-  agentoc consult status <round-id>
-  agentoc consult dispatch <round-id> [--expert-assignment <id>] [--agent <id>] [--expert-session <id>] [--attempt <id>] [--version <n>]
-  agentoc consult decide <round-id> --decision <text> [options]
-  agentoc consult cancel <round-id> [--reason <text>] [--version <n>]
-  agentoc consult decisions <round-id>
+  ragent consult create --root-session <id> --objective <text> --question <text> --experts <json> --quorum <n> --deadline <iso> [options]
+  ragent consult status <round-id>
+  ragent consult dispatch <round-id> [--expert-assignment <id>] [--agent <id>] [--expert-session <id>] [--attempt <id>] [--version <n>]
+  ragent consult decide <round-id> --decision <text> [options]
+  ragent consult cancel <round-id> [--reason <text>] [--version <n>]
+  ragent consult decisions <round-id>
 
 Options:
   --root-session <id>      Root session that initiates the consultation
@@ -619,6 +619,6 @@ Options:
 
   default:
     console.error(`Unknown command: ${command}`);
-    console.error('Run "agentoc --help" for usage.');
+    console.error('Run "ragent --help" for usage.');
     process.exit(1);
 }
