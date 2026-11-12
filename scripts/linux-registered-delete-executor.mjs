@@ -7,6 +7,7 @@ import { createLinuxDeleteExecutor } from './linux-delete-execution.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
 import { readLinuxRunContext } from './linux-run-context-store.mjs';
 import { withLinuxRunOperationLock } from './linux-run-operation-lock.mjs';
+import { checkLinuxRunActive } from './linux-run-active-client.mjs';
 
 function absolute(value) {
   return typeof value === 'string' && value.startsWith('/') && path.normalize(value) === value && !/[\x00-\x1f\x7f]/.test(value);
@@ -16,7 +17,7 @@ const rejected = () => ({ state: 'rejected', code: 'LINUX_DELETE_CAPABILITY_REJE
 // Every option is root-controlled configuration, not an operation request.
 // In particular launchAttempt must come from trusted lifecycle state.
 export function createLinuxRegisteredDeleteExecutor({ runId, launchAttempt, contextDirectory, pinDirectory,
-  trustedHome, trustedProtectedRoots, rootPublicKey, rootPrivateKey, helperPath, expectedHelperSha256, ledgerDirectory } = {}) {
+  trustedHome, trustedProtectedRoots, rootPublicKey, rootPrivateKey, helperPath, expectedHelperSha256, ledgerDirectory, activeCheckBase } = {}) {
   return async (capability) => {
     let enteredExecution = false;
     try {
@@ -46,7 +47,10 @@ export function createLinuxRegisteredDeleteExecutor({ runId, launchAttempt, cont
         enteredExecution = true;
         const execute = createLinuxDeleteExecutor({ servicePublicKey, rootPublicKey, rootPrivateKey, helperPath,
           expectedHelperSha256, ledgerDirectory, resolveTrustedRun: getRun, lockFd,
-          isRunActive: async () => Boolean(await readLinuxRunContext({ directory: contextDirectory, pinDirectory, runId, launchAttempt })) });
+          isRunActive: async () => {
+            const state = await readLinuxRunContext({ directory: contextDirectory, pinDirectory, runId, launchAttempt });
+            return !!state && await checkLinuxRunActive(state, { publicKey: servicePublicKey, base: activeCheckBase });
+          } });
         return await execute(saved);
       });
     } catch { return enteredExecution ? { state: 'unknown', code: 'LINUX_DELETE_RESULT_UNKNOWN' } : rejected(); }

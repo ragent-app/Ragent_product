@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { inspectAndAttestLinuxTarget } from '../scripts/linux-target-inspection.mjs';
 import { loadOrCreateLinuxTargetKey } from '../chat/linux-target-key-store.mjs';
 import { bindLinuxDeleteObservation } from '../chat/linux-delete-observation.mjs';
@@ -19,6 +20,7 @@ import { signLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
 import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext, revokeLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
 import { createLinuxRegisteredDeleteExecutor } from '../scripts/linux-registered-delete-executor.mjs';
+import { signLinuxRunActiveProof } from '../chat/linux-run-active-proof.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.argv[2]) throw new Error('requires Linux root and native helper');
 const sourceStat = await lstat(process.argv[2]);
@@ -196,17 +198,35 @@ process.stdout.write(JSON.stringify(result.projection));`;
       consumeOwnerProof: async (proof) => proof.manifestHash === selected.selectionManifestHash,
     });
     const authorized = signSemanticCapability(selectedCapability, serviceKeys.privateKey);
+    let controlRunActive = true;
+    const proofServer = createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (!controlRunActive) { res.writeHead(403).end(); return; }
+        try { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ proof: signLinuxRunActiveProof({ context: JSON.parse(body), privateKey: serviceKeys.privateKey }) })); }
+        catch { res.writeHead(400).end(); }
+      });
+    });
+    await new Promise((resolve) => proofServer.listen(0, '127.0.0.1', resolve));
+    try {
     const registeredConfig = { runId, launchAttempt: attempt, contextDirectory, pinDirectory,
       trustedHome: testHome, trustedProtectedRoots: revalidation.trustedProtectedRoots,
-      rootPublicKey: keys.publicKey, rootPrivateKey: keys.privateKey, helperPath: helper, expectedHelperSha256: digest, ledgerDirectory };
+      rootPublicKey: keys.publicKey, rootPrivateKey: keys.privateKey, helperPath: helper, expectedHelperSha256: digest, ledgerDirectory,
+      activeCheckBase: `http://127.0.0.1:${proofServer.address().port}` };
     const wrongAttemptExecutor = createLinuxRegisteredDeleteExecutor({ ...registeredConfig, launchAttempt: attempt + 1 });
     assert.equal((await wrongAttemptExecutor(authorized)).state, 'rejected');
     assert.equal(await readFile(target, 'utf8'), 'registered-fixture');
     const registeredExecutor = createLinuxRegisteredDeleteExecutor(registeredConfig);
+    controlRunActive = false;
+    assert.equal((await registeredExecutor(authorized)).state, 'rejected');
+    assert.equal(await readFile(target, 'utf8'), 'registered-fixture');
+    controlRunActive = true;
     assert.equal((await registeredExecutor(authorized)).state, 'completed');
     await assert.rejects(readFile(target), { code: 'ENOENT' });
     await revokeLinuxRunContext({ directory: contextDirectory, runId, launchAttempt: attempt });
     assert.equal((await registeredExecutor(authorized)).state, 'rejected');
+    } finally { await new Promise((resolve) => proofServer.close(resolve)); }
   }
   console.log('linux delete observation: native, resolver and root revalidation checks passed');
 } finally {

@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { generateKeyPairSync } from 'node:crypto';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+
+test('root challenge checks fresh persisted Run state through the real local route',
+  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
+    const root = await mkdtemp('/srv/agentoc-active-proof-');
+    try {
+      await mkdir(`${root}/home`, { mode: 0o700 });
+      process.env.HOME = `${root}/home`;
+      process.env.AGENTOC_CONFIG_DIR = `${root}/config`;
+      process.env.AGENTOC_RUN_SPOOL_DIR = `${root}/spool`;
+      process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
+      process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+      process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
+      const { createRun, requestRunCancel } = await import('../chat/runs.mjs');
+      const { loadOrCreatePrivilegedSigningKeys, getActivePrivilegedSigningKey } = await import('../chat/privileged-signing-keys.mjs');
+      const { handleTemporaryControlRunCheck } = await import('../chat/router-temporary-control-run-check.mjs');
+      const { checkLinuxRunActive } = await import('../scripts/linux-run-active-client.mjs');
+      await loadOrCreatePrivilegedSigningKeys(`${root}/keys.json`);
+      const runId = 'run_activefixture1';
+      await createRun({ status: { id: runId, sessionId: 's1', requestId: 't1', state: 'running',
+        runnerLaunchMode: 'runner-lifecycle', runnerLaunchAttempt: 2 },
+      manifest: { sessionId: 's1', requestId: 't1', options: { approvedActionChannel: { turnId: 't1' } } } });
+      const server = createServer((req, res) => {
+        void handleTemporaryControlRunCheck({ req, res, pathname: new URL(req.url, 'http://127.0.0.1').pathname,
+          writeJson: (response, status, body) => response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body)) });
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const state = { runId, sessionId: 's1', turnId: 't1', launchAttempt: 2, invocationId: 'a'.repeat(32) };
+        const options = { base: `http://127.0.0.1:${server.address().port}`, publicKey: getActivePrivilegedSigningKey().publicKey };
+        assert.equal(await checkLinuxRunActive(state, options), true);
+        assert.equal(await checkLinuxRunActive(state, { ...options, publicKey: generateKeyPairSync('ed25519').publicKey }), false);
+        assert.equal(await checkLinuxRunActive({ ...state, launchAttempt: 3 }, options), false);
+        await requestRunCancel(runId);
+        assert.equal(await checkLinuxRunActive(state, options), false);
+        assert.equal(await checkLinuxRunActive(state, { ...options, base: 'http://example.com/' }), false);
+      } finally { await new Promise((resolve) => server.close(resolve)); }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
