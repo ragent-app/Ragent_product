@@ -29,3 +29,18 @@ test('failed reconciliation releases both locks and never starts canonical', asy
   }), /ambiguous credentials/);
   assert.deepEqual(events, ['legacy-released', 'creation-released']);
 });
+
+test('a briefly busy legacy broker can finish before handoff', async () => {
+  let attempts = 0;
+  const result = await withCodexAccountHomeHandoff({ accountId: 'account', legacyHomeRoot: join(tmpdir(), 'legacy'), canonicalHomeRoot: join(tmpdir(), 'canonical'),
+    timeoutMs: 1000, pollMs: 1,
+    acquireCreationLock: async () => ({ release: async () => {} }),
+    retireAndAcquireHome: async () => {
+      if (++attempts === 1) throw Object.assign(new Error('busy'), { code: 'CODEX_RETIRE_BUSY' });
+      return { release: async () => {} };
+    },
+    reconcileCredentials: async () => {}, installFence: async () => {}, startCanonical: async () => 'ready',
+  });
+  assert.equal(result, 'ready');
+  assert.equal(attempts, 2);
+});
