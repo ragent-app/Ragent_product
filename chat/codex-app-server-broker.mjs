@@ -55,7 +55,7 @@ export function codexThreadRunTag(message) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : '';
 }
 
-const MAC_CLEANUP_HELPER = join(dirname(process.execPath), 'agentoc-macos-run-cleanup');
+const MAC_CLEANUP_HELPER = join(dirname(process.execPath), 'ragent-macos-run-cleanup');
 
 export function captureMacCodexIdentity(rootPid, {
   platform = process.platform, executable = MAC_CLEANUP_HELPER, run = spawnSync,

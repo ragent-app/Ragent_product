@@ -1,5 +1,5 @@
 // Native macOS integration test. Run with a private copy of Node whose sibling
-// is the freshly built agentoc-macos-run-cleanup helper.
+// is the freshly built ragent-macos-run-cleanup helper.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';

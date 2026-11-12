@@ -341,11 +341,11 @@ install -m 0755 "$WORK_DIR/$NODE_DIST/bin/node" "$CONTENTS/Resources/runtime/nod
 lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/node"
 lipo -verify_arch "$ARCH" "$MANAGER/Contents/MacOS/Electron"
 xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=13.0 \
-  "$ROOT/native/macos-run-cleanup.c" -o "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
-lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
+  "$ROOT/native/macos-run-cleanup.c" -o "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
+lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
 xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=13.0 \
-  "$ROOT/native/macos-instance-check.c" -o "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
-lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
+  "$ROOT/native/macos-instance-check.c" -o "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
+lipo -verify_arch "$ARCH" "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
 install -m 0755 "$ROOT/packaging/macos/runtime-codex" "$CONTENTS/Resources/runtime/codex"
 install -m 0755 "$ROOT/packaging/macos/runtime-claude" "$CONTENTS/Resources/runtime/claude"
 
@@ -478,8 +478,8 @@ if [ -n "$SIGN_IDENTITY" ]; then
   codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
     --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/node"
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR/bin/agentoc-p2p-host"
-  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
-  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
   codesign --force --options runtime --timestamp --entitlements "$ROOT/packaging/macos/entitlements.plist" \
     --sign "$SIGN_IDENTITY" "$STAGE/Ragent.app"
   codesign --display --entitlements :- "$CONTENTS/Resources/runtime/node" > "$WORK_DIR/node-entitlements.plist" 2>/dev/null
@@ -499,14 +499,14 @@ if [ -n "$SIGN_IDENTITY" ]; then
 else
   codesign --force --sign - --entitlements "$ROOT/packaging/macos/entitlements.plist" "$CONTENTS/Resources/runtime/node"
   codesign --force --sign - "$APP_DIR/bin/agentoc-p2p-host"
-  codesign --force --sign - "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
-  codesign --force --sign - "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
+  codesign --force --sign - "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
+  codesign --force --sign - "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
   codesign --force --sign - "$STAGE/Ragent.app"
 fi
 codesign --verify --strict "$CONTENTS/Resources/runtime/node"
 codesign --verify --strict "$APP_DIR/bin/agentoc-p2p-host"
-codesign --verify --strict "$CONTENTS/Resources/runtime/agentoc-macos-run-cleanup"
-codesign --verify --strict "$CONTENTS/Resources/runtime/agentoc-macos-instance-check"
+codesign --verify --strict "$CONTENTS/Resources/runtime/ragent-macos-run-cleanup"
+codesign --verify --strict "$CONTENTS/Resources/runtime/ragent-macos-instance-check"
 codesign --verify --deep --strict "$MANAGER"
 codesign --verify --strict "$APP_DIR/bin/claude"
 while IFS= read -r -d '' native_file; do

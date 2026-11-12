@@ -44,7 +44,7 @@ agentoc_is_packaged_server_pid() {
 # against other processes owned by the same user.
 agentoc_is_server_pid() {
   agentoc_is_packaged_server_pid "$1" || return 1
-  "$AGENTOC_RESOURCES_DIR/runtime/agentoc-macos-instance-check" "$1" "$HOME" \
+  "$AGENTOC_RESOURCES_DIR/runtime/ragent-macos-instance-check" "$1" "$HOME" \
     "$(agentoc_config_dir)" "${AGENTOC_INSTANCE_ROOT:-}" >/dev/null 2>&1
 }
 
