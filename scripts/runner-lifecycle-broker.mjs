@@ -41,6 +41,7 @@ import {
 import {
   grantRunnerWorkspaceAccess,
   revokeRunnerWorkspaceAccess,
+  createRunnerWorkspaceCleanupSweep,
 } from './runner-workspace-access.mjs';
 import { normalizeRunnerInheritedGroups, RUNNER_DENIED_GROUPS } from '../lib/runner-user-groups.mjs';
 import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGroupIds,
@@ -1108,9 +1109,23 @@ async function main() {
   // them. The feature remains inactive until both protected stores are set up.
   const runScopeRegistration = directory && pinDirectory ? { directory, pinDirectory } : null;
   const server = await createRunnerLifecycleServer({ runScopeRegistration });
+  const sweepWorkspaceCleanup = createRunnerWorkspaceCleanupSweep();
+  let cleanupPending = false;
+  const retryWorkspaceCleanup = () => {
+    if (cleanupPending) return;
+    cleanupPending = true;
+    void sweepWorkspaceCleanup()
+      .then(({ failed }) => { if (failed) console.warn(`[runner-lifecycle] ${failed} workspace ACL cleanups remain pending`); })
+      .catch(error => console.warn(`[runner-lifecycle] workspace cleanup scan failed: ${error.message}`))
+      .finally(() => { cleanupPending = false; });
+  };
+  retryWorkspaceCleanup();
+  const cleanupTimer = setInterval(retryWorkspaceCleanup, 60_000);
+  cleanupTimer.unref?.();
   const shutdown = async () => {
     process.removeListener('SIGTERM', shutdown);
     process.removeListener('SIGINT', shutdown);
+    clearInterval(cleanupTimer);
     await server.close();
     process.exit(0);
   };

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { access, chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   buildGrantPlan,
+  createRunnerWorkspaceCleanupSweep,
   grantRunnerWorkspaceAccess,
   listRunnerWorkspaceAccess,
   normalizeRunId,
@@ -229,15 +230,45 @@ try {
     groupDeleteCountBeforeReferences,
     'releasing one launch generation must not delete a group retained by another generation',
   );
-  assert.deepEqual(await listRunnerWorkspaceAccess({ accessRoot }), ['run_generation_a1']);
+  assert.deepEqual((await listRunnerWorkspaceAccess({ accessRoot })).sort(), ['run_generation_a1', 'run_generation_a2']);
   await revokeRunnerWorkspaceAccess({ runId: 'run_generation_a1', accessRoot, execImpl });
   assert.equal(
     calls.filter((call) => call.command === '/usr/sbin/groupdel').length,
     groupDeleteCountBeforeReferences + 1,
     'the final generation release removes the shared group',
   );
+  const sibling = join(workspace, 'sibling');
+  await mkdir(sibling);
+  const siblingA = await grantRunnerWorkspaceAccess({ runId: 'run_siblingone1', cwd: sub, workspaceRoot: workspace, accessRoot, execImpl });
+  const siblingB = await grantRunnerWorkspaceAccess({ runId: 'run_siblingtwo2', cwd: sibling, workspaceRoot: workspace, accessRoot, execImpl });
+  assert.notEqual(siblingA.group, siblingB.group, 'different grant roots require separate ACL groups');
+  await revokeRunnerWorkspaceAccess({ runId: 'run_siblingone1', accessRoot, execImpl });
+  await revokeRunnerWorkspaceAccess({ runId: 'run_siblingtwo2', accessRoot, execImpl });
+  // Older versions could share one group across different grant roots. Keep
+  // every released reference until the final release can clean both roots.
+  const oldA = await grantRunnerWorkspaceAccess({ runId: 'run_legacyroot1', cwd: sub, workspaceRoot: workspace, accessRoot, execImpl });
+  await grantRunnerWorkspaceAccess({ runId: 'run_legacyroot2', cwd: sibling, workspaceRoot: workspace, accessRoot, execImpl });
+  const oldBPath = join(accessRoot, 'run_legacyroot2.json');
+  const oldB = JSON.parse(await readFile(oldBPath, 'utf8'));
+  await writeFile(oldBPath, JSON.stringify({ ...oldB, group: oldA.group }));
+  await revokeRunnerWorkspaceAccess({ runId: 'run_legacyroot1', accessRoot, execImpl });
+  const legacyStart = calls.length;
+  await revokeRunnerWorkspaceAccess({ runId: 'run_legacyroot2', accessRoot, execImpl });
+  const legacyFindRoots = calls.slice(legacyStart).filter(call => call.command === '/usr/bin/find').map(call => call.args[0]);
+  assert.ok(legacyFindRoots.includes(sub) && legacyFindRoots.includes(sibling));
 
-  // A grant failure must not leave a group behind (best-effort rollback).
+  const corruptRun = 'run_corruptref1';
+  await grantRunnerWorkspaceAccess({ runId: corruptRun, cwd: sub, workspaceRoot: workspace, accessRoot, execImpl });
+  const malformed = join(accessRoot, 'run_corruptref2.json');
+  await writeFile(malformed, '{');
+  const beforeCorrupt = calls.filter(call => call.command === '/usr/sbin/groupdel').length;
+  await assert.rejects(revokeRunnerWorkspaceAccess({ runId: corruptRun, accessRoot, execImpl }));
+  assert.equal(calls.filter(call => call.command === '/usr/sbin/groupdel').length, beforeCorrupt);
+  await rm(malformed);
+  await revokeRunnerWorkspaceAccess({ runId: corruptRun, accessRoot, execImpl });
+
+  // A failed cleanup must retain both the group and retryable state: deleting
+  // the group could allow its numeric GID to be reused while ACLs remain.
   // Only the ACL/find steps fail — groupadd succeeds, so the rollback has a
   // real group and a written state record to unwind.
   const failCalls = [];
@@ -264,10 +295,35 @@ try {
     failCalls.some((call) => call.args.includes('--system')),
     'the group was created before the failing ACL step',
   );
-  assert.ok(
-    failCalls.some((call) => call.command === '/usr/sbin/groupdel'),
-    'the group is removed when the grant fails part-way',
-  );
+  assert.equal(failCalls.some((call) => call.command === '/usr/sbin/groupdel'), false);
+  await access(join(root, 'state2', 'run_def67890.json'));
+  await revokeRunnerWorkspaceAccess({ runId: 'run_def67890', accessRoot: join(root, 'state2'), execImpl });
+  await assert.rejects(access(join(root, 'state2', 'run_def67890.json')), { code: 'ENOENT' });
+
+  const failureRun = 'run_cleanupretry';
+  await grantRunnerWorkspaceAccess({ runId: failureRun, cwd: sub, workspaceRoot: workspace, accessRoot, execImpl });
+  const beforeFailure = calls.filter((call) => call.command === '/usr/sbin/groupdel').length;
+  await assert.rejects(revokeRunnerWorkspaceAccess({ runId: failureRun, accessRoot, execImpl: failingExec }));
+  assert.equal(calls.filter((call) => call.command === '/usr/sbin/groupdel').length, beforeFailure);
+  await access(join(accessRoot, `${failureRun}.json`));
+  await assert.rejects(grantRunnerWorkspaceAccess({ runId: failureRun, cwd: sub, workspaceRoot: workspace, accessRoot, execImpl }), /cleanup is pending/);
+  await revokeRunnerWorkspaceAccess({ runId: failureRun, accessRoot, execImpl });
+  await assert.rejects(access(join(accessRoot, `${failureRun}.json`)), { code: 'ENOENT' });
+
+  const groupFailureRun = 'run_groupdelretry';
+  await grantRunnerWorkspaceAccess({ runId: groupFailureRun, cwd: sub, workspaceRoot: workspace, accessRoot, execImpl });
+  const failGroupDelete = async (command, args, options) => {
+    if (command === '/usr/sbin/groupdel') throw new Error('group database unavailable');
+    return execImpl(command, args, options);
+  };
+  await assert.rejects(revokeRunnerWorkspaceAccess({ runId: groupFailureRun, accessRoot, execImpl: failGroupDelete }));
+  const afterCleanup = JSON.parse(await readFile(join(accessRoot, `${groupFailureRun}.json`), 'utf8'));
+  assert.equal(afterCleanup.cleanupComplete, true);
+  const priorFinds = calls.filter((call) => call.command === '/usr/bin/find').length;
+  const sweep = createRunnerWorkspaceCleanupSweep({ accessRoot, execImpl });
+  assert.deepEqual(await sweep(), { attempted: 1, failed: 0 });
+  await assert.rejects(access(join(accessRoot, `${groupFailureRun}.json`)), { code: 'ENOENT' });
+  assert.equal(calls.filter((call) => call.command === '/usr/bin/find').length, priorFinds);
 
   console.log('test-runner-workspace-access: PASS');
 } finally {

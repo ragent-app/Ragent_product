@@ -16,9 +16,10 @@
 // root lifecycle broker / root ExecStopPost command in the packaged service.
 
 import { execFile as execFileCallback } from 'child_process';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import {
   mkdir,
+  open,
   readFile,
   readdir,
   realpath,
@@ -308,22 +309,34 @@ async function ensureGroup(group, execImpl = execFileAsync) {
 async function removeGroup(group, execImpl = execFileAsync) {
   if (!GROUP_NAME_RE.test(group)) return;
   await execImpl(GROUPDEL, [group], { timeout: 10_000, maxBuffer: 64 * 1024 }).catch((error) => {
-    // A group may already have been removed during a failed install or a
-    // previous cleanup.  Treat that as idempotent; other failures are useful
-    // diagnostics but must not prevent ACL cleanup from completing.
-    if (!['ENOENT', 'ESRCH'].includes(error?.code)
-      && !/does not exist|cannot find/i.test(String(error?.stderr || error?.message || ''))) {
-      throw error;
-    }
+    // Check NSS explicitly: ENOENT can mean groupdel itself is missing, and
+    // localized stderr is not reliable evidence that a group is absent.
+    return execImpl('/usr/bin/getent', ['group', group], { timeout: 2_000, maxBuffer: 64 * 1024 })
+      .then(() => { throw error; }, (lookupError) => {
+        if (lookupError?.code !== 2 || lookupError?.signal || lookupError?.killed) throw error;
+      });
   });
 }
 
 async function writeState(state, { accessRoot = RUNNER_ACCESS_ROOT } = {}) {
   await mkdir(accessRoot, { recursive: true, mode: ACCESS_ROOT_MODE });
   const target = statePath(state.runId, accessRoot);
-  const temporary = `${target}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(state)}\n`, { mode: STATE_MODE });
-  await rename(temporary, target);
+  const temporary = `${target}.${randomBytes(16).toString('hex')}.tmp`;
+  let file;
+  try {
+    file = await open(temporary, 'wx', STATE_MODE);
+    await file.writeFile(`${JSON.stringify(state)}\n`);
+    await file.sync();
+    await file.close(); file = null;
+    await rename(temporary, target);
+    if (process.platform === 'linux') {
+      const dir = await open(accessRoot, 'r');
+      try { await dir.sync(); } finally { await dir.close(); }
+    }
+  } finally {
+    await file?.close();
+    await rm(temporary, { force: true });
+  }
 }
 
 async function readState(runId, { accessRoot = RUNNER_ACCESS_ROOT, readFileImpl = readFile } = {}) {
@@ -336,18 +349,26 @@ async function readState(runId, { accessRoot = RUNNER_ACCESS_ROOT, readFileImpl 
 }
 
 async function listStates(accessRoot = RUNNER_ACCESS_ROOT) {
+  let entries;
   try {
-    const entries = await readdir(accessRoot, { withFileTypes: true });
-    const states = [];
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.startsWith('run_') || !entry.name.endsWith('.json')) continue;
-      try { states.push(JSON.parse(await readFile(`${accessRoot}/${entry.name}`, 'utf8'))); } catch {}
-    }
-    return states;
+    entries = await readdir(accessRoot, { withFileTypes: true });
   } catch (error) {
     if (error?.code === 'ENOENT') return [];
     throw error;
   }
+  const states = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith('run_') || !entry.name.endsWith('.json')) continue;
+    const state = JSON.parse(await readFile(`${accessRoot}/${entry.name}`, 'utf8'));
+    if (state?.runId !== entry.name.slice(0, -'.json'.length) || !normalizeRunId(state.runId) ||
+        !GROUP_NAME_RE.test(state.group || '') || (state.released !== undefined && typeof state.released !== 'boolean') ||
+        (state.cleanupComplete !== undefined && typeof state.cleanupComplete !== 'boolean')) {
+      throw new Error('Invalid runner workspace access state');
+    }
+    buildGrantPlan(state); // Reject malformed paths rather than deleting a shared group.
+    states.push(state);
+  }
+  return states;
 }
 
 export function buildGrantPlan({ runId, cwd, workspaceRoot, group } = {}) {
@@ -384,8 +405,13 @@ export async function grantRunnerWorkspaceAccess({
   if (!normalized) throw new Error('Invalid Run id');
   return withLock(async () => {
     const validated = await validateImpl({ cwd, workspaceRoot });
-    const existing = (await listStates(accessRoot)).find((state) =>
+    const states = await listStates(accessRoot);
+    if (states.some((state) => state.runId === normalized && state.released === true)) {
+      throw new Error('Runner workspace cleanup is pending');
+    }
+    const existing = states.find((state) => state.released !== true &&
       resolve(state.workspaceRoot || '') === validated.workspaceRoot
+      && resolve(state.cwd || '') === validated.cwd
       && GROUP_NAME_RE.test(state.group || ''));
     const group = existing?.group || runnerAccessGroupForRun(normalized);
     const plan = buildGrantPlan({ runId: normalized, ...validated, group });
@@ -410,7 +436,9 @@ export async function grantRunnerWorkspaceAccess({
       }, execImpl);
       return plan;
     } catch (error) {
-      await revokeState(plan, { accessRoot, execImpl }).catch(() => {});
+      // Persist a retryable cleanup before trying to undo a partial grant.
+      await writeState({ ...plan, released: true }, { accessRoot });
+      await cleanupReleasedGroup([{ ...plan, released: true }], { accessRoot, execImpl }).catch(() => {});
       throw new Error(`Failed to grant runner workspace access: ${error?.message || String(error)}`);
     }
   }, { accessRoot });
@@ -421,42 +449,64 @@ async function removeAclFromWorkspace(state, execImpl, { timeoutMs = ACL_COMMAND
   // Revoke without the sensitive-directory prune. Older versions could have
   // granted the group through .codex/.ssh/etc.; cleanup must remove those
   // legacy ACLs too, even though new grants never enter them.
-  await runFind(root, `g:${state.group}`, { type: 'd', remove: true, timeoutMs, excludeSensitive: false }, execImpl).catch(() => {});
-  await runFind(root, `d:g:${state.group}`, { type: 'd', remove: true, timeoutMs, excludeSensitive: false }, execImpl).catch(() => {});
-  await runFind(root, `g:${state.group}`, { type: 'f', remove: true, timeoutMs, excludeSensitive: false }, execImpl).catch(() => {});
-  await setAcl(state.ancestors || ancestorPaths(state.workspaceRoot), `g:${state.group}`, execImpl, { remove: true, timeoutMs }).catch(() => {});
+  await runFind(root, `g:${state.group}`, { type: 'd', remove: true, timeoutMs, excludeSensitive: false }, execImpl);
+  await runFind(root, `d:g:${state.group}`, { type: 'd', remove: true, timeoutMs, excludeSensitive: false }, execImpl);
+  await runFind(root, `g:${state.group}`, { type: 'f', remove: true, timeoutMs, excludeSensitive: false }, execImpl);
+  await setAcl(state.ancestors || ancestorPaths(state.workspaceRoot), `g:${state.group}`, execImpl, { remove: true, timeoutMs });
 }
 
-async function revokeState(state, {
+async function cleanupReleasedGroup(states, {
   accessRoot = RUNNER_ACCESS_ROOT,
   execImpl = execFileAsync,
   timeoutMs = ACL_COMMAND_TIMEOUT_MS,
 } = {}) {
-  if (!state || !GROUP_NAME_RE.test(state.group || '')) return;
-  // Each step is independently best-effort so a missing group or a filesystem
-  // without ACL support never prevents the state record from being removed.
-  // That record is what stops a later revoke from retrying, so dropping it
-  // first-class keeps partial-failure cleanup idempotent.
-  await removeAclFromWorkspace(state, execImpl, { timeoutMs }).catch(() => {});
-  await removeGroup(state.group, execImpl).catch(() => {});
-  await rm(statePath(state.runId, accessRoot), { force: true });
+  if (!states.length || states.some(state => state.released !== true || state.group !== states[0].group)) {
+    throw new Error('Runner workspace group is still in use');
+  }
+  for (const state of states) {
+    if (!state.cleanupComplete) await removeAclFromWorkspace(state, execImpl, { timeoutMs });
+  }
+  // Record completion for every reference before deleting the group. If the
+  // process dies after groupdel, retry must not need the now-missing name to
+  // remove ACLs that have already been removed.
+  for (const state of states) await writeState({ ...state, cleanupComplete: true }, { accessRoot });
+  await removeGroup(states[0].group, execImpl);
+  for (const state of states) await rm(statePath(state.runId, accessRoot), { force: true });
 }
 
 export async function revokeRunnerWorkspaceAccess({
   runId,
   accessRoot = RUNNER_ACCESS_ROOT,
   execImpl = execFileAsync,
+  releasedOnly = false,
 } = {}) {
   const normalized = normalizeRunId(runId);
   if (!normalized) throw new Error('Invalid Run id');
   return withLock(async () => {
     const state = await readState(normalized, { accessRoot });
     if (!state) return { runId: normalized, revoked: false };
-    await rm(statePath(normalized, accessRoot), { force: true });
-    const remaining = (await listStates(accessRoot)).some((candidate) => candidate.group === state.group);
-    if (!remaining) await revokeState(state, { accessRoot, execImpl });
+    if (releasedOnly && state.released !== true) return { runId: normalized, revoked: false };
+    if (!state.released) await writeState({ ...state, released: true }, { accessRoot });
+    const references = (await listStates(accessRoot)).filter((candidate) => candidate.group === state.group);
+    if (!references.some((candidate) => !candidate.released)) await cleanupReleasedGroup(references, { accessRoot, execImpl });
     return { runId: normalized, revoked: true, group: state.group };
   }, { accessRoot });
+}
+
+export function createRunnerWorkspaceCleanupSweep({ accessRoot = RUNNER_ACCESS_ROOT, execImpl = execFileAsync } = {}) {
+  let cursor = 0;
+  return async ({ limit = 8 } = {}) => {
+    const pending = (await listStates(accessRoot)).filter(state => state.released === true);
+    const count = Math.min(pending.length, Math.max(1, Math.min(100, Math.floor(limit) || 8)));
+    const batch = Array.from({ length: count }, (_, i) => pending[(cursor + i) % pending.length]);
+    if (pending.length) cursor = (cursor + count) % pending.length;
+    let failed = 0;
+    for (const state of batch) {
+      try { await revokeRunnerWorkspaceAccess({ runId: state.runId, accessRoot, execImpl, releasedOnly: true }); }
+      catch { failed++; }
+    }
+    return { attempted: count, failed };
+  };
 }
 
 export async function listRunnerWorkspaceAccess({ accessRoot = RUNNER_ACCESS_ROOT } = {}) {
