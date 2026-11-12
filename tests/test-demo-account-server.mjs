@@ -75,7 +75,20 @@ async function run(store) {
     await restarted.broker.logoutAccountSession({ credential: demo.credential.token });
     await assert.rejects(app.broker.discoverInstances({}, { credential: demo.credential.token }), { statusCode: 401 });
     assert.equal((await app.broker.discoverInstances({}, { credential: google.credential.token })).instances.length, 0);
-    await assert.rejects(createAccountsServer({ ...options, demoAccountPolicyFile: join(dir, 'missing-policy') }));
+    const unavailableApp = await createAccountsServer({ ...options, demoAccountPolicyFile: join(dir, 'missing-policy') });
+    assert.equal(unavailableApp.broker.demoSignInStatus, 'unavailable');
+    await assert.rejects(unavailableApp.broker.completeDemoAccountSession({}), { code: 'owner_auth_demo_unavailable' });
+    assert.equal((await unavailableApp.broker.discoverInstances({}, { credential: google.credential.token })).instances.length, 0,
+      'an unavailable test policy must not interrupt an existing Google session');
+    const requestId = 'request_server_fixture_google_after_invalid_policy';
+    const deviceId = 'adev_server_google_after_invalid_policy';
+    const challenge = await unavailableApp.broker.createAccountSessionChallenge({ requestId, device: { deviceId, publicKey } });
+    const googleAfterFailure = await unavailableApp.broker.completeAccountSession({
+      requestId, transactionId: challenge.transactionId, idToken: 'google-fixture',
+      signature: sign('sha256', Buffer.from(buildAccountSessionMessage({ transactionId: challenge.transactionId, requestId,
+        deviceId, publicKeyFingerprint: createDevicePublicKeyFingerprint(publicKey), nonce: challenge.nonce })), key.privateKey).toString('base64url'),
+    });
+    assert.match(googleAfterFailure.accountId, /^acct_google_/, 'Google sign-in remains available when the test policy is broken');
     console.log(`PASS demo server ${store ? 'Postgres' : 'file'}: configured HTTP login, separate key rows, restart persistence, logout and unchanged Google session`);
   } finally { await new Promise(resolve => server.close(resolve)); }
 }

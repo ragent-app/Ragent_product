@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createServer } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createDemoAccountPolicy, createDemoAccountAuth, loadDemoAccountAuth } from '../accounts/demo-credentials.mjs';
 import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { handleOwnerAuthRoutes } from '../accounts/owner-auth-routes.mjs';
@@ -12,6 +15,21 @@ const instanceId = 'inst_demo_fixture';
 const policy = await createDemoAccountPolicy({ username, password, instanceId });
 assert.equal(JSON.stringify(policy).includes(password), false);
 assert.equal(await loadDemoAccountAuth(''), null);
+const invalidPolicyDir = await mkdtemp(join(tmpdir(), 'ragent-demo-invalid-'));
+let unavailableDemo;
+try {
+  const invalidPath = join(invalidPolicyDir, 'policy.json');
+  await writeFile(invalidPath, '{ invalid json');
+  for (const path of [invalidPath, join(invalidPolicyDir, 'missing.json')]) {
+    const disabled = await loadDemoAccountAuth(path);
+    unavailableDemo = disabled;
+    assert.equal(disabled.instanceAccess, 'unavailable');
+    await assert.rejects(disabled.verify({ username, password }), { code: 'owner_auth_demo_unavailable' });
+    assert.throws(() => disabled.assertAccount({}, policy.accountId), { code: 'owner_auth_demo_unavailable' });
+  }
+} finally {
+  await rm(invalidPolicyDir, { recursive: true, force: true });
+}
 assert.throws(() => createDemoAccountAuth({ ...policy, accessMode: 'invalid' }));
 assert.throws(() => createDemoAccountAuth({ ...policy, accountId: 'acct_google_personal' }));
 assert.throws(() => createDemoAccountAuth({ ...policy, allowedInstanceIds: ['inst_demo_fixture', 'inst_personal'] }));
@@ -29,6 +47,8 @@ function fixture(enabled = true, accessMode = "restricted") {
     verifyGoogleCredential: async () => { googleCalls++; return { sub: 'google-owner' }; },
     resolveAccount: async () => ({ accountId: 'acct_google_personal' }), signAssertion: async () => '' });
   assert.equal(createBroker(null).demoSignInStatus, 'unconfigured');
+  assert.equal(createBroker(unavailableDemo).demoSignInStatus, 'unavailable');
+  assert.equal(createBroker(unavailableDemo).canSignInDemoInstances, false);
   return { broker: createBroker(enabled ? auth : null), disabledBroker: () => createBroker(null),
     state: () => state, googleCalls: () => googleCalls };
 }

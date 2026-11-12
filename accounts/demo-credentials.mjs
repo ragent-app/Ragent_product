@@ -26,9 +26,23 @@ export async function createDemoAccountPolicy({ username, password, instanceId, 
 
 export async function loadDemoAccountAuth(path, options = {}) {
   if (!path) return null; // No implicit demo account, default password or fallback.
-  const input = await readFile(path);
-  if (input.length > 4096) throw new Error('Demo policy is too large.');
-  return createDemoAccountAuth(JSON.parse(input.toString('utf8')), options);
+  try {
+    const input = await readFile(path);
+    if (input.length > 4096) throw new Error('Demo policy is too large.');
+    return createDemoAccountAuth(JSON.parse(input.toString('utf8')), options);
+  } catch {
+    // A broken optional test policy must not prevent normal owner sign-in or
+    // silently enable an account. Expose the unavailable state without logging
+    // the policy, path, or credentials; restart after an operator fixes it.
+    console.error('[accounts] Test account policy unavailable; test sign-in is disabled.');
+    return Object.freeze({
+      accountId: '',
+      instanceAccess: 'unavailable',
+      unlimitedConnections: false,
+      async verify() { throw unavailable(); },
+      assertAccount() { throw unavailable(); },
+    });
+  }
 }
 
 export function createDemoAccountAuth(policy, { clock = Date.now } = {}) {
