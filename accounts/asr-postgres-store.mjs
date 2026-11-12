@@ -62,7 +62,7 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
 
   async function reserve({ accountId, deviceId, requestId, periodStart, audioSha256,
     audioBytes, audioDurationMs, monthlyLimitMs, providerName = ACCOUNT_ASR_PROVIDER, modelId = ACCOUNT_ASR_MODEL,
-    priceVersion, policyVersion, maxConcurrent = 2 }) {
+    priceVersion, policyVersion, maxConcurrent = 2, unlimited = false }) {
     return transaction(async (client) => {
       await client.query(`insert into account_asr_usage (account_id, period_start)
         values ($1, $2::date) on conflict (account_id, period_start) do nothing`, [accountId, periodStart]);
@@ -97,13 +97,13 @@ export function createAccountAsrPostgresStore({ pool, schema = 'public', clock =
 
       const activeResult = await client.query(`select count(*)::int as count from account_asr_requests
         where account_id=$1 and state in ('reserved','processing')`, [accountId]);
-      if (number(activeResult.rows[0]?.count) >= maxConcurrent) {
+      if (!unlimited && number(activeResult.rows[0]?.count) >= maxConcurrent) {
         throw asrError('asr_concurrency_limit', 429, 'Too many concurrent transcriptions are active for this account.');
       }
       const usage = usageResult.rows[0];
       const usedMs = number(usage.used_audio_ms);
       const reservedMs = number(usage.reserved_audio_ms);
-      if (usedMs + reservedMs + audioDurationMs > monthlyLimitMs) {
+      if (!unlimited && usedMs + reservedMs + audioDurationMs > monthlyLimitMs) {
         throw asrError('asr_monthly_quota_exceeded', 429, 'The account has reached its monthly speech recognition limit.');
       }
       await client.query(`insert into account_asr_requests

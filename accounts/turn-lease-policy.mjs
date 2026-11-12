@@ -55,10 +55,14 @@ export function activeTurnConnectionState(draft, accountId, nowMs, { excludeConn
     activeInstanceIds: [...new Set(active.map((lease) => lease.instanceId).filter(Boolean))] };
 }
 
-/** All account providers use the same stored entitlement and quota policy. */
+/** Only the configured, active Ragent account receives the special test plan. */
 export function createAccountEntitlementResolver(demoAccountAuth = null) {
   return (draft, accountId, nowMs) => {
-    if (demoAccountAuth?.accountId === accountId) demoAccountAuth.assertAccount(draft, accountId);
+    if (demoAccountAuth?.accountId === accountId) {
+      demoAccountAuth.assertAccount(draft, accountId);
+      return { plan: 'test', limits: { phones: 2147483647, computers: 2147483647, unlimited: true },
+        status: 'active', source: 'ragent-account', expiresAt: '' };
+    }
     return resolveAccountEntitlement(draft, accountId, nowMs);
   };
 }

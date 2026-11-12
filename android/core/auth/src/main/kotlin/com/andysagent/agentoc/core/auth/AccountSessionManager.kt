@@ -852,7 +852,7 @@ class AccountSessionManager(
             turn.overLimit.computers == (turn.used.computers > turn.limits.computers) &&
             turn.connections.reserved >= 0 && turn.connections.connected >= 0 &&
             turn.connections.active.toLong() == turn.connections.reserved.toLong() + turn.connections.connected.toLong() &&
-            usage.subscription.plan in setOf("free", "plus", "pro") &&
+            usage.subscription.plan in setOf("free", "plus", "pro", "test") &&
             usage.subscription.status in setOf("default", "active", "expired") &&
             runCatching { Instant.parse(usage.asOf) }.isSuccess
         if (!valid) throw AccountSessionException(502, "account_usage_invalid", "Accounts returned invalid usage information.")
@@ -889,7 +889,7 @@ class AccountSessionManager(
         val usage = decode<AccountAsrUsageDto>(executeAuthenticated(ApiRequest(method = "GET", path = path)))
         val valid = usage.contractVersion == 1 && usage.policyVersion == "account-asr-monthly-v1"
             && usage.period.matches(Regex("^\\d{4}-(0[1-9]|1[0-2])$"))
-            && usage.plan in setOf("free", "plus", "pro")
+            && usage.plan in setOf("free", "plus", "pro", "test")
             && listOf(usage.limitMs, usage.usedMs, usage.reservedMs, usage.remainingMs,
                 usage.requestCount).all { it >= 0 }
             && usage.remainingMs == (usage.limitMs - usage.usedMs - usage.reservedMs).coerceAtLeast(0)

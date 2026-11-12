@@ -185,6 +185,7 @@ export function createAccountAsrService({
       audioBytes: audio.length,
       audioDurationMs: inspected.durationMs,
       monthlyLimitMs: limits.monthlyLimitMs,
+      unlimited: limits.unlimited === true,
       maxConcurrent: maxConcurrentPerAccount,
     });
     if (reservation.kind === 'result_expired') {

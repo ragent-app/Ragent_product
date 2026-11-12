@@ -43,8 +43,8 @@ class MemoryRepository {
     }
     const active = [...this.requests.values()].filter((row) => row.accountId === input.accountId
       && ['reserved', 'processing'].includes(row.state)).length;
-    if (active >= input.maxConcurrent) throw Object.assign(new Error('concurrency'), { code: 'asr_concurrency_limit', statusCode: 429 });
-    if (usage.usedMs + usage.reservedMs + input.audioDurationMs > input.monthlyLimitMs) {
+    if (!input.unlimited && active >= input.maxConcurrent) throw Object.assign(new Error('concurrency'), { code: 'asr_concurrency_limit', statusCode: 429 });
+    if (!input.unlimited && usage.usedMs + usage.reservedMs + input.audioDurationMs > input.monthlyLimitMs) {
       throw Object.assign(new Error('quota'), { code: 'asr_monthly_quota_exceeded', statusCode: 429 });
     }
     const row = { ...input, reservedDurationMs: input.audioDurationMs, key, state: 'reserved', errorCode: null };
@@ -108,6 +108,8 @@ const wrongRate = wav(); wrongRate.writeUInt32LE(8_000, 24);
 assert.throws(() => inspectAccountAsrWav(wrongRate), { code: 'asr_audio_format_unsupported' });
 assert.equal(ACCOUNT_ASR_MAX_AUDIO_BYTES, 1024 * 1024);
 assert.equal(resolveAccountAsrLimits('free', { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '2' }).monthlyLimitMs, 120_000);
+assert.equal(resolveAccountAsrLimits('test').unlimited, true);
+assert.equal(resolveAccountAsrLimits('free').unlimited, undefined);
 assert.equal(estimateAccountAsrCostMicroUsd(1000), 75);
 assert.equal(accountAsrPeriodStart(Date.UTC(2026, 10, 10)), '2026-11-01');
 
@@ -245,6 +247,20 @@ const auditEvents = [];
 let providerCalls = 0;
 let providerRequestId;
 const credential = `rac_${'x'.repeat(40)}`;
+const unlimitedRepository = new MemoryRepository();
+await unlimitedRepository.setConsent({ accountId: 'acct_special', deviceId: 'adev_special',
+  action: 'accepted', policyVersion: ACCOUNT_ASR_CONSENT_POLICY_VERSION });
+unlimitedRepository.usage.set('acct_special:2026-11-01',
+  { usedMs: 120_000, reservedMs: 0, providerCostMicroUsd: 0, requestCount: 0 });
+for (let i = 0; i < 2; i++) unlimitedRepository.requests.set(`pending-${i}`,
+  { accountId: 'acct_special', state: 'processing' });
+const unlimitedService = createAccountAsrService({
+  authenticateAccount: async () => ({ accountId: 'acct_special', deviceId: 'adev_special', plan: 'test' }),
+  repository: unlimitedRepository, transcribe: async () => ({ text: 'ok' }), enabled: true,
+  clock: () => Date.UTC(2026, 10, 10),
+});
+assert.equal((await unlimitedService.transcribeAudio({ credential, requestId: 'unlimited-request-1234', audio })).text, 'ok');
+assert.equal(unlimitedRepository.requests.get('acct_special:unlimited-request-1234').unlimited, true);
 const priorConsentRepository = new MemoryRepository();
 await priorConsentRepository.setConsent({ accountId: 'acct_prior_consent', deviceId: 'adev_prior_consent',
   action: 'accepted', policyVersion: 'account-asr-third-party-processing-v1' });

@@ -14,6 +14,10 @@ function positiveMinutes(value, fallback) {
 
 export function resolveAccountAsrLimits(plan, env = process.env) {
   const normalized = String(plan || '').trim().toLowerCase();
+  if (normalized === 'test') return {
+    plan: 'test', policyVersion: ACCOUNT_ASR_POLICY_VERSION, unlimited: true,
+    monthlyLimitMs: Number.MAX_SAFE_INTEGER, monthlyLimitMinutes: Math.floor(Number.MAX_SAFE_INTEGER / 60_000),
+  };
   const key = normalized === 'plus' || normalized === 'pro' ? normalized : 'free';
   const minutes = positiveMinutes(env[`AGENTOC_ACCOUNTS_ASR_${key.toUpperCase()}_MINUTES`], DEFAULT_MINUTES[key]);
   return {
