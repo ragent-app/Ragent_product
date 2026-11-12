@@ -7,10 +7,12 @@ import { lstat, open, unlink } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export async function createReleaseBuildinfo(artifact, version, commit) {
+export async function createReleaseBuildinfo(artifact, version, commit, buildVersion = version) {
   const name = basename(artifact);
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)
       || !version.split('.').every((part) => Number.isSafeInteger(Number(part)))
+      || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(buildVersion)
+      || !buildVersion.split('.').every((part) => Number.isSafeInteger(Number(part)))
       || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)
       || ![`ragent_${version}_amd64.deb`, `ragent_${version}-darwin-arm64.dmg`,
         `Ragent-${version}-ubuntu24.04-x86_64.deb`, `Ragent-${version}-macos13plus-arm64.dmg`].includes(name)) {
@@ -34,7 +36,7 @@ export async function createReleaseBuildinfo(artifact, version, commit) {
     }
     digest = hash.digest('hex');
   } finally { await input.close(); }
-  const marker = `<!-- ragent-asset-build:${name}:${version}:${commit}:sha256:${digest} -->\n`;
+  const marker = `<!-- ragent-asset-build:${name}:${buildVersion}:${commit}:sha256:${digest} -->\n`;
   const output = `${artifact}.BUILDINFO.txt`;
   let file;
   try {
@@ -51,7 +53,7 @@ export async function createReleaseBuildinfo(artifact, version, commit) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.length !== 5) throw new Error('Usage: create-release-buildinfo.mjs ARTIFACT VERSION COMMIT');
+    if (process.argv.length < 5 || process.argv.length > 6) throw new Error('Usage: create-release-buildinfo.mjs ARTIFACT PUBLIC_VERSION COMMIT [BUILD_VERSION]');
     const result = await createReleaseBuildinfo(...process.argv.slice(2));
     console.log(result.output);
   } catch (error) { console.error(error.message); process.exitCode = 1; }

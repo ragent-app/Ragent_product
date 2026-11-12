@@ -27,5 +27,12 @@ try {
     await assert.rejects(createReleaseBuildinfo(artifact, '1.2.4', commit));
     await assert.rejects(createReleaseBuildinfo(artifact, version, 'bad'));
   }
+  const rebuilt = join(dir, 'Ragent-1.2.3-ubuntu24.04-x86_64.deb');
+  await rm(`${rebuilt}.BUILDINFO.txt`);
+  const result = await createReleaseBuildinfo(rebuilt, version, commit, '1.2.80');
+  assert.deepEqual(releaseBuildInfo({ body: await readFile(result.output, 'utf8') },
+    { name: 'Ragent-1.2.3-ubuntu24.04-x86_64.deb', digest: `sha256:${result.digest}` }, { allowLegacy: false }),
+    { build: [1, 2, 80, 0], commit });
+  await assert.rejects(createReleaseBuildinfo(rebuilt, version, commit, '1.2.invalid'));
   console.log('Release build markers match finished artifacts and desktop update parsing');
 } finally { await rm(dir, { recursive: true, force: true }); }

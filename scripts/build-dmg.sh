@@ -175,6 +175,10 @@ else
   VERSION="$PKG_VERSION+main.$SOURCE_SHORT.$(date +%Y%m%d%H%M)"
 fi
 BUNDLE_VERSION="${VERSION%%+*}"
+BUILD_VERSION="${AGENTOC_PACKAGE_BUILD_VERSION:-$BUNDLE_VERSION}"
+[[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+  echo 'Internal build version must have three numeric components.' >&2; exit 1
+}
 [[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo 'macOS bundle version must have three numeric components.' >&2
   exit 1
@@ -285,6 +289,7 @@ fi
 }
 # Keep the explicit version so frontend asset URLs change per packaged build.
 printf '%s\n' "$VERSION" > "$APP_DIR/.agentoc-package-version"
+printf '%s\n' "$BUILD_VERSION" > "$APP_DIR/.agentoc-package-build"
 # The vendored Codex launcher is assembled from verified downloads below.
 rm -rf "$APP_DIR/vendor"
 
@@ -434,6 +439,7 @@ printf 'claude_sha256=%s\n' "$CLAUDE_BINARY_SHA" >> "$CONTENTS/Resources/runtime
 
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$CONTENTS/Info.plist"
 install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/Ragent"
 install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/ragent-service"
 install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/ragent-stop"
@@ -587,7 +593,7 @@ assert_source_unchanged
 [ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
 mv "$DMG_PATH" "$FINAL_OUTPUT"
 if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && [ "$ARCH" = arm64 ]; then
-  node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT"
+  node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT" "$BUILD_VERSION"
 fi
 printf '%s\n' "$SIGNING_STATUS" > "$OUTPUT_DIR/${OUTPUT_NAME}.signing-status.txt"
 if [ -n "$NOTARY_PROFILE" ]; then

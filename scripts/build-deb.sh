@@ -128,6 +128,10 @@ if [ -n "${AGENTOC_PACKAGE_VERSION:-}" ]; then
 else
   VERSION="$(resolve_package_version)"
 fi
+BUILD_VERSION="${AGENTOC_PACKAGE_BUILD_VERSION:-$VERSION}"
+if [ -n "${AGENTOC_PACKAGE_BUILD_VERSION:-}" ] && ! [[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo 'Internal build version must have three numeric components.' >&2; exit 1
+fi
 if [ "${AGENTOC_PRINT_VERSION_ONLY:-0}" = "1" ]; then
   printf '%s\n' "$VERSION"
   exit 0
@@ -311,6 +315,7 @@ tar -xzf "$WORK_DIR/$PACK_FILE" -C "$APP_DIR" --strip-components=1 \
 # still change after each packaged deployment instead of reusing a stale PWA
 # cache when the normalized mtimes happen to be identical.
 printf '%s\n' "$VERSION" > "$APP_DIR/.agentoc-package-version"
+printf '%s\n' "${BUILD_VERSION%%+*}" > "$APP_DIR/.agentoc-package-build"
 printf '%s\n' "$SOURCE_COMMIT" > "$APP_DIR/.agentoc-source-commit"
 
 PROD_DIRECT_DEPENDENCY_LIST="$WORK_DIR/prod-direct-dependencies.txt"
@@ -604,7 +609,7 @@ chmod 0640 "$ACCOUNT_AUTH_ENV"
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: $PACKAGE_NAME
-Version: $VERSION
+Version: $BUILD_VERSION
 Section: net
 Priority: optional
 Architecture: $ARCH
@@ -713,6 +718,6 @@ fi
 mv -n "$OUTPUT" "$FINAL_OUTPUT"
 [ ! -e "$OUTPUT" ] || { echo 'Candidate output appeared during publishing; refusing to overwrite it.' >&2; exit 1; }
 if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && [ "$ARCH" = amd64 ]; then
-  node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT"
+  node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT" "$BUILD_VERSION"
 fi
 printf '%s\n' "$FINAL_OUTPUT"
