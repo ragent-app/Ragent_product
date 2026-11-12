@@ -142,10 +142,10 @@ function writeLine(socket, value) {
   }
 }
 
-async function probeBroker(socketPath, timeoutMs = 1_500) {
+async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied = false } = {}) {
   const normalized = normalizeSocketPath(socketPath);
   if (!normalized) return false;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
     let buffer = '';
     const socket = connect(normalized);
@@ -158,7 +158,19 @@ async function probeBroker(socketPath, timeoutMs = 1_500) {
     };
     const timer = setTimeout(() => finish(false), Math.max(100, timeoutMs));
     timer.unref?.();
-    socket.on('error', () => finish(false));
+    socket.on('error', (error) => {
+      if (failOnAccessDenied && ['EACCES', 'EPERM'].includes(error?.code)) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        socket.destroy();
+        const denied = new Error('The Codex broker pipe cannot be accessed by this process. Check the Windows service identities and pipe permissions before restarting the broker.');
+        denied.code = 'CODEX_APP_SERVER_BROKER_ACCESS_DENIED';
+        reject(denied);
+        return;
+      }
+      finish(false);
+    });
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       let newline;
@@ -241,7 +253,7 @@ export async function ensureCodexAppServerBroker({
     throw error;
   }
   if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
-  if (await probeBroker(normalizedSocket)) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
+  if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true })) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
 
   if (!isWindowsNamedPipePath(normalizedSocket)) {
     await mkdir(dirname(normalizedSocket), { recursive: true, mode: 0o770 });
@@ -255,7 +267,7 @@ export async function ensureCodexAppServerBroker({
       pollMs: 50,
     });
     if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
-    if (await probeBroker(normalizedSocket)) {
+    if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true })) {
       return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
     }
     // A refused connection means the previous broker is gone. Only remove the
