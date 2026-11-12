@@ -6,6 +6,7 @@ import { inspectAndAttestLinuxTarget } from '../scripts/linux-target-inspection.
 import { loadOrCreateLinuxTargetKey } from '../chat/linux-target-key-store.mjs';
 import { bindLinuxDeleteObservation } from '../chat/linux-delete-observation.mjs';
 import { buildSemanticCapabilitySelection } from '../chat/semantic-capability.mjs';
+import { revalidateLinuxDeleteSelection } from '../scripts/linux-delete-revalidation.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.argv[2]) throw new Error('requires Linux root and native helper');
 const sourceStat = await lstat(process.argv[2]);
@@ -46,8 +47,24 @@ process.stdout.write(JSON.stringify(result.projection));`;
   const selection = buildSemanticCapabilitySelection([bound]);
   assert.equal(selection.operations[0].adapterInput.linuxTargetAttestation.binding.path, target);
   assert.match(selection.selectionManifestHash, /^[a-f0-9]{64}$/);
+  const revalidation = {
+    boundDecision: bound, expectedSelectionHash: selection.selectionManifestHash, expectedContext: context,
+    trustedContext: { cwd: root, projectRoot: root, home: testHome },
+    trustedProtectedRoots: [{ label: 'service-config', path: `${testHome}/config` }],
+    rootPublicKey: keys.publicKey, rootPrivateKey: keys.privateKey, helperPath: helper, expectedHelperSha256: digest,
+  };
+  assert.equal((await revalidateLinuxDeleteSelection(revalidation)).ok, true);
+  assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, expectedSelectionHash: '0'.repeat(64) })).ok, false);
+  assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, expectedContext: { ...context, runId: 'other' } })).ok, false);
+  assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, trustedProtectedRoots: [] })).ok, false);
+  assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, trustedContext: { ...revalidation.trustedContext, projectRoot: '/srv' } })).ok, false);
+  assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, trustedProtectedRoots: [{ path: target }] })).ok, false);
+  assert.equal((await revalidateLinuxDeleteSelection({ ...revalidation, expectedHelperSha256: '0'.repeat(64) })).ok, false);
   assert.equal(await readFile(target, 'utf8'), 'fixture');
-  console.log('linux delete observation: native and unprivileged resolver identities agree');
+  await writeFile(target, 'changed');
+  assert.equal((await revalidateLinuxDeleteSelection(revalidation)).ok, false);
+  assert.equal(await readFile(target, 'utf8'), 'changed');
+  console.log('linux delete observation: native, resolver and root revalidation checks passed');
 } finally {
   await rm(root, { recursive: true });
 }
