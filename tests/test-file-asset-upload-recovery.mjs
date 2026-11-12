@@ -208,6 +208,10 @@ if (process.argv[2] === 'restart') {
     assert.equal((await route('GET', null, { sessionId: 'session-a', requestId: 'absent' })).status, 404);
     assert.equal((await route('GET', null, { sessionId: 'session-a', requestId: [] })).status, 400);
     assert.equal((await route('POST', input)).body.upload, null);
+    const batched = await route('POST', { ...input, requestId: 'router-batched', resumableChunkBytes: 1024 * 1024 });
+    assert.equal(batched.status, 200);
+    assert.equal(batched.body.resumableUpload.version, 2);
+    assert.equal(batched.body.resumableUpload.chunkBytes, 1024 * 1024);
     const conflict = await route('POST', { ...input, sha256: 'e'.repeat(64) });
     assert.equal(conflict.status, 409);
     assert.equal(conflict.body.code, 'FILE_ASSET_IDEMPOTENCY_CONFLICT');

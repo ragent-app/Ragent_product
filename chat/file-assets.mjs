@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'crypto';
 import { createReadStream, createWriteStream } from 'fs';
 import { basename, extname, isAbsolute, join, relative, resolve } from 'path';
-import { copyFile, rename, open, readdir } from 'fs/promises';
+import { copyFile, link, rename, open, readdir } from 'fs/promises';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import {
@@ -31,7 +31,8 @@ import {
 } from './fs-utils.mjs';
 import { parseUploadScope, storedUploadScope, withUploadScope } from './file-asset-scope.mjs';
 import { assertOutsideSessionMetaTransaction } from './session-meta-store.mjs';
-import { FileAssetUploadCheckpoints, MAX_STABLE_UPLOAD_BYTES, RESUMABLE_UPLOAD_CONTRACT } from './file-asset-upload-checkpoints.mjs';
+import { FileAssetUploadCheckpoints, MAX_STABLE_UPLOAD_BYTES, RESUMABLE_UPLOAD_CONTRACT,
+  RESUMABLE_UPLOAD_BATCH_CONTRACT, UPLOAD_BATCH_BYTES, uploadChunkBytes } from './file-asset-upload-checkpoints.mjs';
 
 const FILE_ASSET_ID_PATTERN = /^fasset_[a-f0-9]{24}$/;
 const runFileAssetMutation = createSerialTaskQueue();
@@ -488,6 +489,7 @@ export async function createFileAssetUploadIntent({
   forceRemote = false,
   requestId,
   quotaBatchId,
+  resumableChunkBytes,
   sha256,
   principalScope = 'owner',
   scopeCondition = null,
@@ -505,6 +507,7 @@ export async function createFileAssetUploadIntent({
     throw createError('Scoped uploads require a stable request identity', 'INVALID_ARGUMENT', 400);
   const uploadRequest = parseUploadRequest({ requestId, quotaBatchId, principalScope, sessionId: normalizedSessionId,
     originalName, mimeType, sizeBytes, sha256, scopeCondition: scope });
+  if (uploadRequest && resumableChunkBytes === UPLOAD_BATCH_BYTES) uploadRequest.chunkBytes = UPLOAD_BATCH_BYTES;
   return runFileAssetMutation(async () => {
     const assetId = uploadRequest ? uploadRequest.assetId : generateFileAssetId();
     const existing = uploadRequest ? await readUploadRequestAsset(uploadRequest) : null;
@@ -567,7 +570,8 @@ export async function createFileAssetUploadIntent({
 
 async function buildUploadIntent(record, duplicate) {
   const identity = record.uploadRequest ? { uploadContractVersion: 1, duplicate,
-    ...(record.storage.provider === 'local' ? { resumableUpload: RESUMABLE_UPLOAD_CONTRACT } : {}) } : {};
+    ...(record.storage.provider === 'local' ? { resumableUpload: uploadChunkBytes(record) === UPLOAD_BATCH_BYTES
+      ? RESUMABLE_UPLOAD_BATCH_CONTRACT : RESUMABLE_UPLOAD_CONTRACT } : {}) } : {};
   if (record.status === 'ready') {
     return { ...identity, asset: await buildClientFileAsset(record), upload: null };
   }
@@ -702,7 +706,7 @@ export async function readFileAssetUploadCheckpoint(assetId, { scopeCondition = 
     const fence = effect => withUploadScope(record, scopeCondition, effect, authorize);
     if (record.status === 'ready') return fence(() => ({ uploadCheckpointVersion: 1, assetId,
       status: 'ready', offset: record.sizeBytes, totalBytes: record.sizeBytes, sha256: record.sha256,
-      chunkBytes: RESUMABLE_UPLOAD_CONTRACT.chunkBytes, expiresAt: null }));
+      chunkBytes: uploadChunkBytes(record), expiresAt: null }));
     return uploadCheckpoints.state(record, fence);
   });
 }
@@ -806,6 +810,50 @@ async function ingestFileAssetUploadLocked(assetId, readableStream, scopeConditi
   }
 }
 
+/** Verify a second name for the durable checkpoint, then atomically publish it
+ * with the ready receipt. The checkpoint stays available across interruption.
+ * Filesystems without hard links retain the verified-copy fallback. */
+async function finalizeCheckpointLink(record, { sizeBytes, etag, scopeCondition, authorize }) {
+  if (sizeBytes !== undefined && (!Number.isSafeInteger(sizeBytes) || sizeBytes !== record.sizeBytes))
+    throw createError('File asset size mismatch', 'FILE_ASSET_SIZE_MISMATCH', 409);
+  const normalizedEtag = normalizeString(etag).replace(/^W\//, '').replace(/^"|"$/g, '');
+  const targetPath = resolveLocalObjectPath(record);
+  const tempPath = `${targetPath}.link-${process.pid}-${randomBytes(8).toString('hex')}`;
+  await ensureDir(CHAT_FILE_ASSET_OBJECTS_DIR);
+  try {
+    try { await link(uploadCheckpoints.paths(record).body, tempPath); }
+    catch (error) {
+      if (['EXDEV', 'EPERM', 'EACCES', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EMLINK'].includes(error?.code)) return false;
+      throw error;
+    }
+    const hash = createHash('sha256');
+    let total = 0;
+    for await (const bytes of createReadStream(tempPath)) {
+      await authorize?.(record);
+      total += bytes.length;
+      if (total > record.sizeBytes) throw createError('File asset size mismatch', 'FILE_ASSET_SIZE_MISMATCH', 409);
+      hash.update(bytes);
+    }
+    if (total !== record.sizeBytes) throw createError('File asset size mismatch', 'FILE_ASSET_SIZE_MISMATCH', 409);
+    if (hash.digest('hex') !== record.sha256) throw createError('File asset hash mismatch', 'FILE_ASSET_HASH_MISMATCH', 409);
+    const staged = await mutateFileAsset(record.id, async draft => {
+      if (draft.status !== 'pending_upload' || draft.sha256 !== record.sha256 || draft.sizeBytes !== record.sizeBytes)
+        throw createError('Upload receipt changed during finalization', 'FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
+      await rename(tempPath, targetPath);
+      draft.status = 'ready';
+      draft.uploadCompletedAt = nowIso();
+      draft.localizedPath = targetPath;
+      draft.localizedAt = nowIso();
+      if (normalizedEtag) draft.etag = normalizedEtag;
+      return true;
+    }, { scopeCondition, authorize });
+    if (!staged) throw createError('File asset not found', 'FILE_ASSET_NOT_FOUND', 404);
+    return buildClientFileAsset(staged, { includeDirectUrl: true });
+  } finally {
+    await removePath(tempPath).catch(() => {});
+  }
+}
+
 export async function finalizeFileAssetUpload(assetId, { sizeBytes, etag, scopeCondition = null, authorize } = {}) {
   assertOutsideSessionMetaTransaction();
   return runUploadMutation(assetId, async () => {
@@ -817,11 +865,18 @@ export async function finalizeFileAssetUpload(assetId, { sizeBytes, etag, scopeC
           effect => withUploadScope(record, scopeCondition, effect, authorize));
         if (state.offset !== record.sizeBytes)
           throw createError('Attachment chunks are incomplete', 'FILE_ASSET_UPLOAD_INCOMPLETE', 409);
-        // Reuse the full-file digest gate and atomic object publication. Keeping
-        // the checkpoint body until ready makes a crash during finalize retryable.
-        const source = createReadStream(uploadCheckpoints.paths(record).body);
-        try { await ingestFileAssetUploadLocked(assetId, source, scopeCondition, authorize, undefined, true); }
-        finally { source.destroy(); }
+        // Keep the checkpoint name until ready, so interruption at any point
+        // remains retryable. Verify and publish one hard-linked object where
+        // supported; otherwise use the existing verified-copy path.
+        const linkedReady = await finalizeCheckpointLink(record, { sizeBytes, etag, scopeCondition, authorize });
+        if (linkedReady) {
+          await uploadCheckpoints.clear(record);
+          return linkedReady;
+        } else {
+          const source = createReadStream(uploadCheckpoints.paths(record).body);
+          try { await ingestFileAssetUploadLocked(assetId, source, scopeCondition, authorize, undefined, true); }
+          finally { source.destroy(); }
+        }
       }
       const ready = await finalizeFileAssetUploadLocked(assetId, { sizeBytes, etag, scopeCondition, authorize });
       await uploadCheckpoints.clear(record);

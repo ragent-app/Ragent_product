@@ -1388,7 +1388,7 @@ function parseTriggerRoute(pathname) {
 }
 
 function parseFileAssetRoute(pathname) {
-  const match = /^\/api\/assets\/(fasset_[a-f0-9]{24})(?:\/(download|finalize|upload|upload-checkpoint))?$/.exec(pathname || '');
+  const match = /^\/api\/assets\/(fasset_[a-f0-9]{24})(?:\/(download|finalize|upload|upload-checkpoint|relay))?$/.exec(pathname || '');
   if (!match) return null;
   return {
     assetId: match[1],

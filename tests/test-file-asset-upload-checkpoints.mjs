@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, writeFile, stat, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, open, readFile, writeFile, stat, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
@@ -14,7 +16,7 @@ process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
 for (const key of ['AGENTOC_MEMORY_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR',
   'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR', 'AGENTOC_INSTANCE_KEY_FILE']) delete process.env[key];
 const assets = await import('../chat/file-assets.mjs');
-const { FileAssetUploadCheckpoints, UPLOAD_CHUNK_BYTES: chunkBytes, UPLOAD_CHECKPOINT_TTL_MS,
+const { FileAssetUploadCheckpoints, UPLOAD_CHUNK_BYTES: chunkBytes, UPLOAD_BATCH_BYTES, UPLOAD_CHECKPOINT_TTL_MS,
   UPLOAD_CHECKPOINT_MAX_LIFETIME_MS, MAX_STABLE_UPLOAD_BYTES, uploadChunkHeaders } = await import('../chat/file-asset-upload-checkpoints.mjs');
 const { CHAT_FILE_ASSETS_DIR } = await import('../lib/config.mjs');
 assert.equal(resolve(CHAT_FILE_ASSETS_DIR), resolve(join(root, 'config', 'file-assets')));
@@ -39,11 +41,64 @@ if (process.argv[2] === 'crash-before-manifest') {
   process.exit(1);
 } else if (process.argv[2] === 'cold-state') {
   console.log(JSON.stringify(await assets.readFileAssetUploadCheckpoint(process.argv[3])));
+} else if (process.argv[2] === 'cold-finalize') {
+  console.log(JSON.stringify(await assets.finalizeFileAssetUpload(process.argv[3])));
+} else if (process.argv[2] === 'crash-finalize') {
+  const id = process.argv[3], phase = process.argv[4];
+  const originalRename = fs.promises.rename, originalRm = fs.promises.rm;
+  fs.promises.rename = async (source, target) => {
+    await originalRename(source, target);
+    if (phase === 'object-published' && String(source).includes('.link-')) process.exit(87);
+  };
+  fs.promises.rm = async (target, options) => {
+    if (phase === 'receipt-written' && String(target) === paths(id).body) process.exit(88);
+    return originalRm(target, options);
+  };
+  syncBuiltinESMExports();
+  await assets.finalizeFileAssetUpload(id);
+  process.exit(1);
 } else {
   test('resumable uploads preserve durable offsets, full digest and original authority', async t => {
     t.after(async () => {
       assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep));
       await rm(root, { recursive: true, force: true });
+    });
+
+    await t.test('negotiated batches retain their size and durable offset across recovery', async () => {
+      const body = Buffer.concat([Buffer.alloc(UPLOAD_BATCH_BYTES, 53), Buffer.from('batch-tail')]);
+      const metadata = { ...input, requestId: 'checkpoint-batched', sizeBytes: body.length, sha256: hash(body),
+        resumableChunkBytes: UPLOAD_BATCH_BYTES };
+      const intent = await assets.createFileAssetUploadIntent(metadata);
+      assert.equal(intent.resumableUpload.version, 2);
+      assert.equal(intent.resumableUpload.chunkBytes, UPLOAD_BATCH_BYTES);
+      const id = intent.asset.id;
+      const first = body.subarray(0, UPLOAD_BATCH_BYTES);
+      await assets.appendFileAssetUploadChunk(id, Readable.from([first]),
+        { offset: 0, length: first.length, sha256: hash(first) });
+      const resumed = await assets.readFileAssetUploadCheckpoint(id);
+      assert.equal(resumed.offset, UPLOAD_BATCH_BYTES);
+      assert.equal(resumed.chunkBytes, UPLOAD_BATCH_BYTES);
+      const recordPath = join(CHAT_FILE_ASSETS_DIR, `${id}.json`);
+      const originalRecord = await readFile(recordPath, 'utf8');
+      const changedRecord = JSON.parse(originalRecord);
+      changedRecord.uploadRequest.chunkBytes = chunkBytes;
+      await writeFile(recordPath, JSON.stringify(changedRecord));
+      await assert.rejects(assets.readFileAssetUploadCheckpoint(id), { code: 'FILE_ASSET_RECEIPT_UNAVAILABLE' });
+      await writeFile(recordPath, originalRecord);
+      const staged = await open(paths(id).body, 'a');
+      try { await staged.write(Buffer.from('unconfirmed-tail')); await staged.sync(); } finally { await staged.close(); }
+      const cold = await promisify(execFile)(process.execPath,
+        [import.meta.filename, 'cold-state', id], { env: childEnv, timeout: 30_000 });
+      assert.equal(JSON.parse(cold.stdout.trim().split('\n').at(-1)).offset, UPLOAD_BATCH_BYTES);
+      assert.equal((await stat(paths(id).body)).size, UPLOAD_BATCH_BYTES);
+      const duplicate = await assets.createFileAssetUploadIntent({ ...metadata, resumableChunkBytes: undefined });
+      assert.equal(duplicate.resumableUpload.version, 2);
+      const tail = body.subarray(UPLOAD_BATCH_BYTES);
+      await assets.appendFileAssetUploadChunk(id, Readable.from([tail]),
+        { offset: UPLOAD_BATCH_BYTES, length: tail.length, sha256: hash(tail) });
+      const ready = await assets.finalizeFileAssetUpload(id, { sizeBytes: body.length });
+      assert.equal(ready.status, 'ready');
+      assert.equal((await assets.readFileAssetUploadCheckpoint(id)).chunkBytes, UPLOAD_BATCH_BYTES);
     });
 
     await t.test('chunk headers reject ambiguous, unbounded and non-binary input', () => {
@@ -118,6 +173,50 @@ if (process.argv[2] === 'crash-before-manifest') {
       const results = await Promise.all(Array.from({ length: 5 }, () => chunk(id)));
       assert.deepEqual(results.map(r => r.offset), Array(5).fill(chunkBytes));
       assert.equal((await stat(paths(id).body)).size, chunkBytes);
+    });
+
+    await t.test('finalization interrupted after staging keeps checkpoint recoverable', async () => {
+      const id = await seed();
+      await chunk(id); await chunk(id, chunkBytes); await chunk(id, 2 * chunkBytes);
+      const denied = Object.assign(new Error('revoked'), { code: 'temporary_pairing_inactive', statusCode: 403 });
+      let authorizations = 0;
+      await assert.rejects(assets.finalizeFileAssetUpload(id, { authorize: async record => {
+        if (++authorizations >= 5) throw denied;
+      } }), { code: 'temporary_pairing_inactive' });
+      assert.equal((await assets.getFileAsset(id)).status, 'pending_upload');
+      assert.equal((await assets.readFileAssetUploadCheckpoint(id)).offset, bytes.length);
+      const ready = await assets.finalizeFileAssetUpload(id);
+      assert.equal(ready.status, 'ready');
+      assert.deepEqual(await readFile((await assets.getFileAsset(id)).localizedPath), bytes);
+    });
+
+    await t.test('finalization falls back to a verified copy when hard links are unsupported', async () => {
+      const id = await seed();
+      await chunk(id); await chunk(id, chunkBytes); await chunk(id, 2 * chunkBytes);
+      const original = fs.promises.link;
+      fs.promises.link = async () => { throw Object.assign(new Error('unsupported'), { code: 'ENOTSUP' }); };
+      syncBuiltinESMExports();
+      try {
+        const ready = await assets.finalizeFileAssetUpload(id);
+        assert.equal(ready.status, 'ready');
+        assert.deepEqual(await readFile((await assets.getFileAsset(id)).localizedPath), bytes);
+      } finally { fs.promises.link = original; syncBuiltinESMExports(); }
+    });
+
+    await t.test('finalization survives process exit after object publication and after receipt publication', async () => {
+      for (const [phase, code] of [['object-published', 87], ['receipt-written', 88]]) {
+        const id = await seed();
+        await chunk(id); await chunk(id, chunkBytes); await chunk(id, 2 * chunkBytes);
+        await assert.rejects(promisify(execFile)(process.execPath,
+          [import.meta.filename, 'crash-finalize', id, phase], { env: childEnv, timeout: 30_000 }), { code });
+        assert.equal((await stat(paths(id).body)).size, bytes.length, `${phase}: checkpoint retained`);
+        const cold = await promisify(execFile)(process.execPath,
+          [import.meta.filename, 'cold-finalize', id], { env: childEnv, timeout: 30_000 });
+        assert.equal(JSON.parse(cold.stdout.trim().split('\n').at(-1)).status, 'ready');
+        assert.deepEqual(await readFile((await assets.getFileAsset(id)).localizedPath), bytes);
+        await assert.rejects(stat(paths(id).body), { code: 'ENOENT' });
+        await assert.rejects(stat(paths(id).manifest), { code: 'ENOENT' });
+      }
     });
 
     await t.test('fresh process discards the fsynced tail left by an actual process exit', async () => {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { writeJsonAtomic } from './fs-utils.mjs';
 
 export const UPLOAD_CHUNK_BYTES = 256 * 1024;
+export const UPLOAD_BATCH_BYTES = 1024 * 1024;
 export const MAX_STABLE_UPLOAD_BYTES = 1024 * 1024 * 1024;
 export const UPLOAD_CHUNK_REQUEST_TIMEOUT_MS = 150_000;
 export const UPLOAD_CHECKPOINT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -13,6 +14,13 @@ const LEGACY_UPLOAD_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
 export const RESUMABLE_UPLOAD_CONTRACT = Object.freeze({ version: 1,
   chunkBytes: UPLOAD_CHUNK_BYTES, checkpointTtlMs: UPLOAD_CHECKPOINT_TTL_MS,
   checksum: 'sha256', fixedChunks: true });
+export const RESUMABLE_UPLOAD_BATCH_CONTRACT = Object.freeze({ ...RESUMABLE_UPLOAD_CONTRACT,
+  version: 2, chunkBytes: UPLOAD_BATCH_BYTES });
+export function uploadChunkBytes(record) {
+  const bytes = record?.uploadRequest?.chunkBytes ?? UPLOAD_CHUNK_BYTES;
+  if (bytes !== UPLOAD_CHUNK_BYTES && bytes !== UPLOAD_BATCH_BYTES) fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
+  return bytes;
+}
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = (code, status = 409) => {
   const error = new Error('Attachment upload checkpoint is unavailable or conflicts with this request');
@@ -40,12 +48,14 @@ export class FileAssetUploadCheckpoints {
 
   initial(record) {
     const created = Date.parse(record.createdAt);
+    const chunkBytes = uploadChunkBytes(record);
     if (!Number.isFinite(created) || !/^[a-f0-9]{64}$/.test(record.uploadRequest.fingerprint || '')
       || !Number.isSafeInteger(record.sizeBytes) || record.sizeBytes < 1
       || record.sizeBytes > MAX_STABLE_UPLOAD_BYTES || !/^[a-f0-9]{64}$/.test(record.sha256 || ''))
       fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
     const hardExpiresAt = created + UPLOAD_CHECKPOINT_MAX_LIFETIME_MS;
-    return { version: 2, assetId: record.id, fingerprint: record.uploadRequest.fingerprint,
+    return { version: 2, ...(chunkBytes === UPLOAD_BATCH_BYTES ? { chunkBytes } : {}),
+      assetId: record.id, fingerprint: record.uploadRequest.fingerprint,
       totalBytes: record.sizeBytes, sha256: record.sha256, offset: 0, cancelled: false,
       hardExpiresAt, expiresAt: Math.min(created + UPLOAD_CHECKPOINT_TTL_MS, hardExpiresAt) };
   }
@@ -65,11 +75,12 @@ export class FileAssetUploadCheckpoints {
         value = { ...value, version: 2, hardExpiresAt: expected.hardExpiresAt };
       }
       if (Object.keys(expected).some(key => !['offset', 'cancelled', 'expiresAt'].includes(key) && value[key] !== expected[key])
+        || (value.chunkBytes ?? UPLOAD_CHUNK_BYTES) !== uploadChunkBytes(record)
         || typeof value.cancelled !== 'boolean' || !Number.isSafeInteger(value.offset)
         || !Number.isSafeInteger(value.expiresAt) || value.expiresAt < Date.parse(record.createdAt)
         || value.expiresAt > expected.hardExpiresAt
         || value.offset < 0 || value.offset > record.sizeBytes
-        || (value.offset !== record.sizeBytes && value.offset % UPLOAD_CHUNK_BYTES !== 0))
+        || (value.offset !== record.sizeBytes && value.offset % uploadChunkBytes(record) !== 0))
         fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
       return value;
     } catch (error) {
@@ -113,7 +124,7 @@ export class FileAssetUploadCheckpoints {
 
   project(value) {
     return { uploadCheckpointVersion: 1, assetId: value.assetId, offset: value.offset,
-      totalBytes: value.totalBytes, sha256: value.sha256, chunkBytes: UPLOAD_CHUNK_BYTES,
+      totalBytes: value.totalBytes, sha256: value.sha256, chunkBytes: value.chunkBytes || UPLOAD_CHUNK_BYTES,
       expiresAt: value.expiresAt,
       status: value.cancelled ? 'cancelled' : value.offset === value.totalBytes ? 'uploaded' : 'uploading' };
   }
@@ -130,8 +141,12 @@ export class FileAssetUploadCheckpoints {
   }
 
   async append(record, { offset, length, sha256 }, stream, fence, signal) {
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset % UPLOAD_CHUNK_BYTES !== 0
-      || offset >= record.sizeBytes || length !== Math.min(UPLOAD_CHUNK_BYTES, record.sizeBytes - offset)
+    const chunkBytes = uploadChunkBytes(record);
+    const diagnostics = process.env.AGENTOC_UPLOAD_DIAGNOSTICS === '1';
+    const startedAt = diagnostics ? performance.now() : 0;
+    let receivedAt = 0, syncedAt = 0;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset % chunkBytes !== 0
+      || offset >= record.sizeBytes || length !== Math.min(chunkBytes, record.sizeBytes - offset)
       || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256)) fail('INVALID_ARGUMENT', 400);
     signal?.throwIfAborted();
     const value = await this.load(record);
@@ -149,6 +164,7 @@ export class FileAssetUploadCheckpoints {
     const bytes = Buffer.concat(parts);
     if (size !== length) fail('FILE_ASSET_SIZE_MISMATCH');
     if (digest(bytes) !== sha256) fail('FILE_ASSET_HASH_MISMATCH');
+    if (diagnostics) receivedAt = performance.now();
     const handle = await fence(() => this.openBody(record, value.offset));
     try {
       if (offset < value.offset) {
@@ -170,12 +186,20 @@ export class FileAssetUploadCheckpoints {
         written += result.bytesWritten;
       }
       await handle.sync();
+      if (diagnostics) syncedAt = performance.now();
       const next = { ...value, offset: offset + length,
         expiresAt: Math.min(this.clock() + UPLOAD_CHECKPOINT_TTL_MS, value.hardExpiresAt) };
       return await fence(async () => {
         signal?.throwIfAborted();
         if (this.clock() >= next.expiresAt) fail('FILE_ASSET_UPLOAD_EXPIRED', 410);
         await writeJsonAtomic(this.paths(record).manifest, next, { mode: 0o600, durable: true });
+        if (diagnostics) {
+          const finishedAt = performance.now();
+          try { console.error(JSON.stringify({ event: 'attachment_chunk_timing', bytes: length,
+            receiveAndValidateMs: Math.round(receivedAt - startedAt),
+            openWriteAndSyncMs: Math.round(syncedAt - receivedAt),
+            checkpointMs: Math.round(finishedAt - syncedAt) })); } catch { /* Diagnostics cannot change the receipt. */ }
+        }
         return this.project(next);
       });
     } finally { await handle.close(); }

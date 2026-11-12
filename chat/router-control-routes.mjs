@@ -18,7 +18,7 @@ import {
   verifyOwnerWebAuthnRegistration,
 } from '../lib/owner-webauthn.mjs';
 import { setOwnerPasswordAsync } from '../lib/auth.mjs';
-import { getOwnerAccountBinding, reserveOwnerAccountFileUpload,
+import { getOwnerAccountBinding, getOwnerAccountBrokerStatus, reserveOwnerAccountFileUpload,
   completeOwnerAccountFileUpload, releaseOwnerAccountFileUpload } from '../lib/owner-account-auth.mjs';
 import { getModelsForTool, getToolModelCatalog, getToolModelCatalogs } from './models.mjs';
 import { getGloballyInstalledHarnessIdsForProviders } from '../lib/harness-installation-sync.mjs';
@@ -93,6 +93,7 @@ import {
 } from './file-assets.mjs';
 import { RESUMABLE_UPLOAD_CONTRACT, UPLOAD_CHUNK_REQUEST_TIMEOUT_MS,
   uploadChunkHeaders, MAX_STABLE_UPLOAD_BYTES } from './file-asset-upload-checkpoints.mjs';
+import { fileAssetRelayJobs } from './file-asset-relay-jobs.mjs';
 import { pathExists } from './fs-utils.mjs';
 import { queryUsageLedger } from './usage-ledger.mjs';
 import { broadcastAll } from './ws-clients.mjs';
@@ -507,7 +508,7 @@ export async function handleControlRoutes({
     return true;
   }
   const conditionalUpload = Object.hasOwn(req.headers || {}, SESSION_API_SCOPE_HEADER) &&
-    (pathname === '/api/assets/upload-intents' || ['upload', 'finalize', 'upload-checkpoint'].includes(fileAssetRoute?.action));
+    (pathname === '/api/assets/upload-intents' || ['upload', 'finalize', 'upload-checkpoint', 'relay'].includes(fileAssetRoute?.action));
   if (conditionalUpload) {
     res.setHeader?.('Cache-Control', 'private, no-store');
     if (authSession?.role !== 'owner' ||
@@ -1302,6 +1303,8 @@ export async function handleControlRoutes({
     writeJson(res, 200, { version: 1, maximumBytes: MAX_STABLE_UPLOAD_BYTES, requestIdMaximumLength: 200,
       sha256Required: true, readonlyReceiptLookup: true,
       resumableUpload: RESUMABLE_UPLOAD_CONTRACT,
+      ...(process.env.AGENTOC_ASSET_RELAY_ENABLED !== '0' && getOwnerAccountBrokerStatus().configured
+        ? { encryptedRelay: { version: 1, recordBytes: 256 * 1024, finalizeWaitsForRelay: true } } : {}),
       scopeConditionVersion: 1, scopeContractPath: '/api/session-scope-contract' });
     return true;
   }
@@ -1387,6 +1390,7 @@ export async function handleControlRoutes({
           originalName: typeof payload?.originalName === 'string' ? payload.originalName : '',
           mimeType: typeof payload?.mimeType === 'string' ? payload.mimeType : '',
           sizeBytes: payload?.sizeBytes,
+          resumableChunkBytes: payload?.resumableChunkBytes,
           createdBy: authSession?.role === 'visitor' ? 'visitor' : 'owner',
           scopeCondition: readSessionApiScopeHeader(req, sessionId),
           ...(Object.hasOwn(payload, 'requestId') ? { requestId: payload.requestId, quotaBatchId: payload.quotaBatchId, sha256: payload.sha256 } : {}),
@@ -1424,6 +1428,48 @@ export async function handleControlRoutes({
       includeDirectUrl: asset.status === 'ready',
     });
     writeJson(res, 200, { asset: clientAsset });
+    return true;
+  }
+
+  if (fileAssetRoute?.action === 'relay' && ['POST', 'GET', 'DELETE'].includes(req.method)) {
+    res.setHeader?.('Cache-Control', 'private, no-store');
+    if (process.env.AGENTOC_ASSET_RELAY_ENABLED === '0') { req.resume?.(); writeJson(res, 404, { code: 'RESOURCE_NOT_FOUND' }); return true; }
+    if (authSession?.role !== 'owner' || isRunCapability(authSession) ||
+        (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
+      req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true;
+    }
+    const asset = await getFileAsset(fileAssetRoute.assetId);
+    if (!asset) { req.resume?.(); writeJson(res, 404, { code: 'FILE_ASSET_NOT_FOUND' }); return true; }
+    if (!await requireSessionAccess(res, authSession, asset.sessionId, { metadataOnly: true })) { req.resume?.(); return true; }
+    if (asset.uploadRequest?.principalScope !== 'owner' || !getGrantedCapability(authSession, 'uploadAttachments', true)) {
+      req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true;
+    }
+    try {
+      const scopeCondition = readSessionApiScopeHeader(req, asset.sessionId);
+      // Fence every operation against the same session revision used by chunks.
+      const checkpoint = await readFileAssetUploadCheckpoint(asset.id, { scopeCondition });
+      if (req.method === 'POST') {
+        if (checkpoint.offset !== 0) throw Object.assign(new Error('Resume the existing attachment upload'),
+          { code: 'FILE_ASSET_UPLOAD_MODE_CONFLICT', statusCode: 409 });
+        const raw = await readBody(req, 4096);
+        const payload = JSON.parse(raw || '{}');
+        if (!payload || Array.isArray(payload) || typeof payload !== 'object' ||
+            Object.keys(payload).sort().join(',') !== 'key,readToken,relayId,transferId') {
+          throw Object.assign(new Error('Invalid relay upload'), { code: 'INVALID_ARGUMENT', statusCode: 400 });
+        }
+        const { accountsUrl } = getOwnerAccountBrokerStatus();
+        const job = fileAssetRelayJobs.start({ asset, accountsBaseUrl: accountsUrl, scopeCondition, ...payload });
+        writeJson(res, 202, job);
+      } else {
+        const jobId = typeof parsedUrl?.query?.jobId === 'string' ? parsedUrl.query.jobId : '';
+        if (!/^[a-f0-9]{32}$/.test(jobId)) throw Object.assign(new Error('Invalid relay job'), { code: 'INVALID_ARGUMENT', statusCode: 400 });
+        const job = req.method === 'DELETE' ? await fileAssetRelayJobs.cancel(asset.id, jobId) : fileAssetRelayJobs.status(asset.id, jobId);
+        writeJson(res, job ? 200 : 404, job || { code: 'RESOURCE_NOT_FOUND' });
+      }
+    } catch (error) {
+      req.resume?.();
+      writeUploadFailure(res, error, writeJson, true, 'Attachment relay is unavailable');
+    }
     return true;
   }
 
@@ -1509,6 +1555,7 @@ export async function handleControlRoutes({
     }
 
     try {
+      await fileAssetRelayJobs.waitForReceived(asset.id);
       const next = await finalizeFileAssetUpload(asset.id, {
         sizeBytes: payload?.sizeBytes,
         etag: typeof payload?.etag === 'string' ? payload.etag : '',
@@ -1522,6 +1569,7 @@ export async function handleControlRoutes({
             sizeBytes: asset.sizeBytes, sha256: asset.sha256 });
         }
       }
+      if (next?.status === 'ready') fileAssetRelayJobs.forgetReceived(asset.id);
       writeJson(res, 200, { asset: next });
     } catch (error) {
       writeUploadFailure(res, error, writeJson, conditionalUpload, 'Failed to finalize asset upload');
