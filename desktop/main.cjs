@@ -5,6 +5,7 @@ const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const updateCheck = require("./update-check.cjs");
+const autoUpdate = require("./auto-update.cjs");
 
 const portArg = process.platform === "darwin" ? process.argv.find((value) => value.startsWith("--agentoc-service-port=")) : "";
 const configuredPort = portArg ? portArg.slice("--agentoc-service-port=".length) : process.env.AGENTOC_DESKTOP_PORT || "7690";
@@ -28,6 +29,7 @@ let managerLoaded = false;
 let updateState = { status: "checking" };
 let updatePending = null;
 let updateTimer = null;
+let installationPending = null;
 let tray = null;
 let quitting = false;
 let trayServiceReady = false;
@@ -65,6 +67,7 @@ function createTray() {
 }
 
 async function refreshUpdate() {
+  if (installationPending) return updateState;
   if (updatePending) return updatePending;
   updatePending = (async () => {
     let currentVersion;
@@ -84,6 +87,53 @@ async function refreshUpdate() {
   return updatePending;
 }
 
+function publishUpdate(state) {
+  updateState = { ...updateState, ...state };
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:update-state", updateState);
+}
+
+async function readUpdateResult(attempt = 0) {
+  if (typeof app.getPath !== "function") return;
+  const resultFile = path.join(app.getPath("userData"), "ragent-update-result.json");
+  try {
+    const result = JSON.parse(await fs.readFile(resultFile, "utf8"));
+    if (result.status === "pending" && attempt < 120) {
+      setTimeout(() => void readUpdateResult(attempt + 1), 2000);
+    } else if (result.status === "installed" || result.status === "failed") {
+      publishUpdate({ status: result.status === "installed" ? "installed" : "installError" });
+      await fs.unlink(resultFile).catch(() => {});
+    }
+  } catch { /* No previous update result. */ }
+}
+
+async function installUpdate() {
+  if (installationPending) return false;
+  if (!updateState.updateAvailable || !updateCheck.releaseAssetUrl(updateState.downloadUrl)) return false;
+  installationPending = (async () => {
+    let packageDir;
+    let resultFile;
+    try {
+      publishUpdate({ status: "downloading", progress: 0 });
+      const downloaded = await autoUpdate.downloadPackage(updateState, { onProgress: (bytes, total) => publishUpdate({ status: "downloading", progress: total ? Math.floor(bytes * 100 / total) : null }) });
+      packageDir = downloaded.directory;
+      publishUpdate({ status: "waiting" });
+      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
+      const appRoot = process.platform === "darwin" ? path.resolve(metadataDir, "../..") : metadataDir;
+      resultFile = path.join(app.getPath("userData"), "ragent-update-result.json");
+      await fs.writeFile(resultFile, '{"status":"pending"}\n', { mode: 0o600 });
+      const result = await autoUpdate.startInstaller({ ...downloaded, appRoot, executable: process.execPath, resultFile, packageSha256: updateState.packageSha256, servicePort: Number(configuredPort),
+        onStatus: status => publishUpdate({ status }), onReadyToQuit: () => app.quit() });
+      if (result.installed) { await fs.writeFile(resultFile, '{"status":"installed"}\n', { mode: 0o600 }); await fs.rm(packageDir, { recursive: true, force: true }); publishUpdate({ status: "installed" }); app.relaunch(); app.quit(); }
+    } catch (error) {
+      console.error("Ragent update failed:", error.message);
+      publishUpdate({ status: "installError" });
+      if (resultFile) await fs.unlink(resultFile).catch(() => {});
+      if (packageDir) await fs.rm(packageDir, { recursive: true, force: true }).catch(() => {});
+    }
+  })().finally(() => { installationPending = null; });
+  return true;
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -96,6 +146,7 @@ if (!app.requestSingleInstanceLock()) {
     createMainWindow();
     createTray();
     void refreshUpdate();
+    void readUpdateResult();
     updateTimer = setInterval(() => void refreshUpdate(), 6 * 60 * 60 * 1000);
   });
 
@@ -225,7 +276,7 @@ function createMainWindow() {
   ipcMain.handle("desktop:update-check", (event) => event.sender === mainWindow?.webContents ? refreshUpdate() : { status: "error" });
   ipcMain.handle("desktop:update-open", async (event) => {
     if (event.sender !== mainWindow?.webContents || !updateState.updateAvailable || !updateCheck.releaseAssetUrl(updateState.downloadUrl)) return false;
-    try { await shell.openExternal(updateState.downloadUrl); return true; } catch { return false; }
+    return installUpdate();
   });
   ipcMain.handle("desktop:write-text", async (event, value) => {
     if (event.sender !== mainWindow?.webContents || typeof value !== "string") return false;

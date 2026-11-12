@@ -76,7 +76,7 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
         const candidateVersion = assetVersion(candidate);
         return candidateVersion && compare(parsed, candidateVersion) === 0 && releaseAsset(candidate, platform, arch);
       });
-      if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, buildInfo: releaseBuildInfo(release, asset, { allowLegacy: platform === "win32" }) };
+      if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, asset, buildInfo: releaseBuildInfo(release, asset, { allowLegacy: platform === "win32" }) };
     }
     if (releases.length < 100) break;
     if (page === 10) throw new Error("release-list-too-long");
@@ -95,7 +95,7 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
   const buildIdentityUnavailable = versionOrder === 0 && (!newest.buildInfo ||
     ((buildOrder === null || buildOrder === 0) && !installedCommit));
   return { currentVersion, latestVersion: newest.tag, updateAvailable: versionOrder > 0 || buildChanged,
-    downloadUrl: newest.url, ...(buildChanged ? { buildChanged: true } : {}),
+    downloadUrl: newest.url, ...(newest.buildInfo ? { packageSha256: newest.asset.digest.slice(7), packageSize: newest.asset.size || null } : {}), ...(buildChanged ? { buildChanged: true } : {}),
     ...(buildIdentityUnavailable ? { buildIdentityUnavailable: true } : {}) };
 }
 module.exports = { check, version, compare, windowsAsset, windowsAssetUrl, releaseAsset, releaseAssetUrl, sourceCommit, releaseBuildInfo };

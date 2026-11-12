@@ -129,12 +129,13 @@
     if (!state) return;
     if (currentVersion) currentVersion.textContent = state.currentVersion || "—";
     if (latestVersion) latestVersion.textContent = state.latestVersion || "—";
-    if (updateButton) updateButton.hidden = !state.updateAvailable;
-    if (checkButton) checkButton.disabled = state.status === "checking";
+    const busy = ["downloading", "waiting", "installing"].includes(state.status);
+    if (updateButton) { updateButton.hidden = !state.updateAvailable; updateButton.disabled = busy; }
+    if (checkButton) checkButton.disabled = state.status === "checking" || busy;
     if (updateStatus) {
-      const key = state.status === "checking" ? "checking" : state.status === "error" ? "error" : state.buildChanged ? "buildChanged" : state.updateAvailable ? "available" : state.buildIdentityUnavailable ? "buildUnknown" : "current";
-      const fallback = { checking: "Checking for updates…", error: "Could not check for updates. Please try again.", available: "A new version is available.", buildChanged: "The published build differs from this installation.", buildUnknown: "The published build could not be compared with this installation.", current: "You are up to date." };
-      updateStatus.textContent = translate(`desktopManager.updateStatus.${key}`, fallback[key]);
+      const key = ["checking", "error", "downloading", "waiting", "installing", "installed", "installError"].includes(state.status) ? state.status : state.buildChanged ? "buildChanged" : state.updateAvailable ? "available" : state.buildIdentityUnavailable ? "buildUnknown" : "current";
+      const fallback = { checking: "Checking for updates…", error: "Could not check for updates. Please try again.", available: "A new version is available.", buildChanged: "The published build differs from this installation.", buildUnknown: "The published build could not be compared with this installation.", current: "You are up to date.", downloading: "Downloading update…", waiting: "Waiting for running tasks to finish…", installing: "Installing update…", installed: "Update installed. Restarting…", installError: "Update failed. Please retry or download the installer from the website." };
+      updateStatus.textContent = translate(`desktopManager.updateStatus.${key}`, fallback[key]) + (key === "downloading" && Number.isInteger(state.progress) ? ` ${state.progress}%` : "");
     }
   }
   root.agentocDesktop?.onUpdateState?.(renderUpdate);
@@ -145,7 +146,7 @@
   });
   updateButton?.addEventListener("click", async () => {
     try { if (await root.agentocDesktop.openUpdate()) return; } catch {}
-    const message = translate("desktopManager.updateOpenFailed", "Could not open the download in your browser.");
+    const message = translate("desktopManager.updateStatus.installError", "Update failed. Please retry or download the installer from the website.");
     if (updateStatus) updateStatus.textContent = message;
     if (externalStatus) { externalStatus.textContent = message; externalStatus.hidden = false; }
   });

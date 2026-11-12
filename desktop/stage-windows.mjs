@@ -37,7 +37,7 @@ if (process.argv[6] === '--move-staged-electron') {
     // Windows treats the committed "desktop" source directory and the
     // generated "Desktop" runtime as the same directory. Merge only into
     // the exact source files the payload stager is allowed to create.
-    const allowed = new Set(['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html']);
+    const allowed = new Set(['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html']);
     if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) throw new Error('Invalid desktop staging directory.');
     for (const name of await readdir(destination)) {
       const item = await lstat(join(destination, name));
@@ -58,7 +58,7 @@ await rename(originalExe, brandedExe);
 const appRoot = join(destination, 'resources', 'app');
 const assetsRoot = join(appRoot, 'assets');
 await mkdir(assetsRoot, { recursive: true });
-for (const name of ['main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html']) {
+for (const name of ['main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html']) {
   await cp(join(desktopRoot, name), join(appRoot, name));
 }
 await cp(join(repositoryRoot, 'static', 'desktop', 'agentoc-android-logo.png'), join(assetsRoot, 'agentoc-android-logo.png'));

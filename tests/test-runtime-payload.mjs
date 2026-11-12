@@ -109,10 +109,11 @@ try {
   });
   await check('Windows build inputs and runtime are frozen to the same commit despite dirty source', async () => {
     const committedManifest = readFileSync(new URL('../packaging/runtime-payload.json', import.meta.url));
-    const names = ['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html', 'stage-windows.mjs'];
+    const names = ['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html', 'stage-windows.mjs'];
     const inputs = Object.fromEntries(names.map(name => [`desktop/${name}`, `committed ${name}\n`]));
     inputs['android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png'] = Buffer.from([0, 255, 1]);
     inputs['static/desktop/agentoc-android-logo.png'] = Buffer.from([0, 255, 1]);
+    inputs['static/icon-512.png'] = Buffer.from([0, 255, 1]);
     const f = fixture({ 'packaging/runtime-payload.json': committedManifest, ...inputs });
     writeFileSync(join(f.source, 'desktop/main.cjs'), 'dirty desktop code');
     writeFileSync(join(f.source, 'android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png'), 'dirty logo');
@@ -120,7 +121,7 @@ try {
     const result = await stageRuntimePayload({ ...f, profile: 'desktop', sourceMode: 'git-objects', windowsBuildDestination: buildDestination });
     const buildManifest = JSON.parse(readFileSync(join(buildDestination, 'windows-build-inputs-manifest.json')));
     assert.equal(buildManifest.sourceRevision, result.sourceRevision);
-    assert.equal(buildManifest.files.length, 9);
+    assert.equal(buildManifest.files.length, 14);
     assert.equal(readFileSync(join(buildDestination, 'desktop/main.cjs'), 'utf8'), 'committed main.cjs\n');
     assert.deepEqual(readFileSync(join(buildDestination, 'android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png')), Buffer.from([0, 255, 1]));
     assert.equal(readFileSync(join(f.source, 'desktop/main.cjs'), 'utf8'), 'dirty desktop code');

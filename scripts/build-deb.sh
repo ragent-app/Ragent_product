@@ -354,7 +354,7 @@ DESKTOP_MACHINE="$(od -An -tx1 -j18 -N2 "$DESKTOP_ROOT/ragent" | tr -d ' \n')"
 [ "$DESKTOP_MACHINE" = "$EXPECTED_ELF_MACHINE" ] || { echo 'Electron architecture mismatch' >&2; exit 1; }
 DESKTOP_APP="$DESKTOP_ROOT/resources/app"
 mkdir -p "$DESKTOP_APP/assets"
-for name in main.cjs preload.cjs update-check.cjs wait.html; do
+for name in main.cjs preload.cjs update-check.cjs auto-update.cjs update-linux.sh update-macos.sh update-windows.ps1 wait.html; do
   install -m 0644 "$ROOT/desktop/$name" "$DESKTOP_APP/$name"
 done
 install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$DESKTOP_APP/assets/agentoc-android-logo.png"

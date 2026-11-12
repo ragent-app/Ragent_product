@@ -14,7 +14,7 @@ const windowsBuildInputs = [
   'android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png',
   'static/desktop/agentoc-android-logo.png',
   'static/icon-512.png',
-  ...['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html', 'stage-windows.mjs'].map(name => `desktop/${name}`),
+  ...['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html', 'stage-windows.mjs'].map(name => `desktop/${name}`),
 ];
 
 // Read immutable blobs from a single commit without a second checkout. The

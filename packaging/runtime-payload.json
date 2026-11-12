@@ -8,7 +8,7 @@
         "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "README.md", "README.zh.md", "DESIGN.md", "PRODUCT.md",
         "memory/system.md", "memory/auto-system-memory.md",
         "accounts/turn-handoff-policy.mjs", "accounts/turn-lease-policy.mjs",
-        "desktop/package.json", "desktop/package-lock.json", "desktop/main.cjs", "desktop/preload.cjs", "desktop/update-check.cjs", "desktop/wait.html"
+        "desktop/package.json", "desktop/package-lock.json", "desktop/main.cjs", "desktop/preload.cjs", "desktop/update-check.cjs", "desktop/auto-update.cjs", "desktop/update-macos.sh", "desktop/update-linux.sh", "desktop/update-windows.ps1", "desktop/wait.html"
       ],
       "prefixes": [
         "lib/", "chat/", "shared/", "static/", "templates/", "automation/", "connectors/", "skills/",

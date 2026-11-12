@@ -318,7 +318,7 @@ MANAGER="$CONTENTS/Resources/Ragent.app"
 cp -R "$DESKTOP_BUILD/node_modules/electron/dist/Electron.app" "$MANAGER"
 MANAGER_APP="$MANAGER/Contents/Resources/app"
 mkdir -p "$MANAGER_APP/assets"
-for name in main.cjs preload.cjs update-check.cjs wait.html; do
+for name in main.cjs preload.cjs update-check.cjs auto-update.cjs update-linux.sh update-macos.sh update-windows.ps1 wait.html; do
   install -m 0644 "$ROOT/desktop/$name" "$MANAGER_APP/$name"
 done
 install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$MANAGER_APP/assets/agentoc-android-logo.png"

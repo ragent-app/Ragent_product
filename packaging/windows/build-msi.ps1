@@ -141,7 +141,7 @@ try {
     # the three desktop shell files, not npm or its build-only dependencies.
     $desktopBuildRoot = Join-Path $staging 'desktop-build'
     New-Item -ItemType Directory -Force $desktopBuildRoot | Out-Null
-    foreach ($desktopInput in @('package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html', 'stage-windows.mjs')) {
+    foreach ($desktopInput in @('package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html', 'stage-windows.mjs')) {
         Copy-Item -LiteralPath (Join-Path $buildInputRoot ('desktop\' + $desktopInput)) -Destination (Join-Path $desktopBuildRoot $desktopInput)
     }
     if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm.cmd is required to stage the pinned Electron desktop manager.' }
