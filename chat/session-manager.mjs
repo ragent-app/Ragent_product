@@ -1,6 +1,7 @@
 import { WORKBENCH_EXECUTION_POLICY, assertWorkbenchExecution } from '../lib/workbench-execution-policy.mjs';
 import { createHash, randomBytes } from 'crypto';
 import { equivalentPendingApprovals } from './approval-equivalence.mjs';
+import { resolveApprovedActionRunDirectories } from './approved-action-run-directories.mjs';
 import { findSessionCreationReplay, sessionCreationError } from './session-creation-contract.mjs';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
@@ -4035,8 +4036,7 @@ async function proposeApprovedActionsUnlocked({
 
   // cwd/projectRoot are run facts. The MCP payload may carry those fields for
   // context, but it cannot choose the resource scope used for approval.
-  const trustedCwd = trimString(manifest.folder) || trimString(session.folder);
-  const trustedProjectRoot = trimString(session.folder) || trustedCwd;
+  const { cwd: trustedCwd, projectRoot: trustedProjectRoot } = resolveApprovedActionRunDirectories({ run, manifest, session });
   const trustedHome = TRUSTED_SERVER_HOME;
   const trustedTurnId = trimString(turnId) || trimString(binding?.turnId) || trimString(manifest?.turnId) || `turn:${run.requestId || normalizedRunId}`;
   const serverActions = (Array.isArray(actions) ? actions : []).map((input) => {
