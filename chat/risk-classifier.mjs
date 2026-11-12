@@ -398,7 +398,7 @@ function analyzeDelete({ program, rest, tokens, cwd, projectRoot, home, riskCont
     }
     const targetScope = classifyRiskTargetScope(resolved, { riskContext });
     if (targetScope === RISK_TARGET_SCOPE.PROTECTED_CONTROL) {
-      markDanger('targets AgentoC control-plane path');
+      markDanger('targets Ragent control-plane path');
       signals.targetPaths.push(target);
       signals.fileCountEstimate = recursive || glob ? 'many' : 'few';
       return;
@@ -554,7 +554,7 @@ function classifyFileTool(toolName, toolInput, cwd, projectRoot, home, riskConte
     if (loc === RISK_TARGET_SCOPE.PROTECTED_CONTROL) {
       signals.reversible = false;
       signals.needsPrivilegedExecution = true;
-      signals.reasons = ['reads AgentoC control-plane path'];
+      signals.reasons = ['reads Ragent control-plane path'];
       return finalizeRisk(RISK_TIER.DANGER, signals, null, {
         facts: fileToolFacts(toolName, toolInput, cwd, projectRoot, home, riskContext),
         platform: RISK_PLATFORM.FILE_TOOL,
@@ -571,7 +571,7 @@ function classifyFileTool(toolName, toolInput, cwd, projectRoot, home, riskConte
     signals.reversible = false;
     signals.needsPrivilegedExecution = true;
     signals.reasons = [loc === RISK_TARGET_SCOPE.PROTECTED_CONTROL
-      ? 'targets AgentoC control-plane path'
+      ? 'targets Ragent control-plane path'
       : 'write to system path'];
     return finalizeRisk(RISK_TIER.DANGER, signals, null, {
       facts: fileToolFacts(toolName, toolInput, cwd, projectRoot, home, riskContext),
@@ -765,7 +765,7 @@ export function classifyRisk(input = {}) {
   if (dangerReasons.length === 0 && riskContext && mutatesPath) {
     if (targetPathScopes.includes(RISK_TARGET_SCOPE.PROTECTED_CONTROL)
       || (!systemPath && signals.targetScope === RISK_TARGET_SCOPE.PROTECTED_CONTROL)) {
-      markDanger('targets AgentoC control-plane path');
+      markDanger('targets Ragent control-plane path');
       signals.reversible = false;
     } else if (targetPathScopes.includes(RISK_TARGET_SCOPE.SYSTEM)
       || (!systemPath && signals.targetScope === RISK_TARGET_SCOPE.SYSTEM)) {
@@ -777,7 +777,7 @@ export function classifyRisk(input = {}) {
   }
   if (systemPath && systemPathScope !== RISK_TARGET_SCOPE.TRUSTED_WORKSPACE && dangerReasons.length === 0) {
     if (systemPathScope === RISK_TARGET_SCOPE.PROTECTED_CONTROL) {
-      markDanger('targets AgentoC control-plane path');
+      markDanger('targets Ragent control-plane path');
       signals.reversible = false;
       signals.targetPaths.push(systemPath);
     } else if (SHELL_CONTROL_PROGRAMS.has(program)) {
@@ -873,7 +873,7 @@ export function classifyRisk(input = {}) {
     if (innerFacts) {
       if (innerFacts.sudo) markDanger('sudo inside script interpreter');
       if (innerFacts.systemPathScope === RISK_TARGET_SCOPE.PROTECTED_CONTROL) {
-        markDanger('targets AgentoC control-plane path');
+        markDanger('targets Ragent control-plane path');
       }
       if (innerFacts.dangerDelete) markDanger('destructive command inside script interpreter');
       else if (innerFacts.category === CATEGORY_DELETE) markCaution('delete inside script interpreter');

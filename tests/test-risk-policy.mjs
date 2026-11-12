@@ -42,6 +42,10 @@ eq('force push', codeForReason('git push --force/--delete'), RISK_REASON_CODES.G
 eq('composite', codeForReason('composite command (partly analyzed)'), RISK_REASON_CODES.COMPOSITE_UNANALYZED);
 eq('sensitive read', codeForReason('read sensitive system file'), RISK_REASON_CODES.SENSITIVE_SYSTEM_READ);
 eq('ordinary', codeForReason('ordinary command'), RISK_REASON_CODES.ORDINARY_COMMAND);
+for (const brand of ['AgentoC', 'Ragent']) {
+  eq(`${brand} protected write`, codeForReason(`targets ${brand} control-plane path`), RISK_REASON_CODES.PROTECTED_CONTROL_PATH);
+  eq(`${brand} protected read`, codeForReason(`reads ${brand} control-plane path`), RISK_REASON_CODES.PROTECTED_CONTROL_READ);
+}
 eq('new text falls back to unclassified', codeForReason('brand new wording'), RISK_REASON_CODES.UNCLASSIFIED);
 eq('empty falls back to unclassified', codeForReason('   '), RISK_REASON_CODES.UNCLASSIFIED);
 
