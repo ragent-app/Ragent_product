@@ -96,6 +96,9 @@ let failed = false;
 try {
   const sessionManager = await import('../chat/session-manager.mjs');
   const { executePrivilegedPasskeyBatch } = sessionManager;
+  const { getPrivilegedExecutorRuntimeBlock } = sessionManager;
+  assert.match(getPrivilegedExecutorRuntimeBlock({ runtimeFamily: 'codex-app-server-json' }, 'execution', { allowCodex: true, platform: 'darwin' }), /macOS administrator execution is not available/);
+  assert.equal(getPrivilegedExecutorRuntimeBlock({ runtimeFamily: 'codex-app-server-json' }, 'execution', { allowCodex: true, platform: 'linux' }), '');
   const {
     buildPrivilegedBatch,
     computeBatchManifestHash,

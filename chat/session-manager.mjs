@@ -1455,7 +1455,7 @@ function clipScopedBody(value, maxBytes = MAX_SCOPED_BODY_BYTES) {
   if (!text || Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
   const headChars = Math.max(1, Math.floor(maxBytes * 0.6));
   const tailChars = Math.max(1, maxBytes - headChars);
-  return `${text.slice(0, headChars).trimEnd()}\n[... truncated by AgentoC ...]\n${text.slice(-tailChars).trimStart()}`;
+  return `${text.slice(0, headChars).trimEnd()}\n[... truncated by Ragent ...]\n${text.slice(-tailChars).trimStart()}`;
 }
 
 async function hydrateScopedHistoryBodies(sessionId, events = [], {
@@ -3557,7 +3557,11 @@ function isSuccessfulPrivilegedExecResult(event) {
 
 // Only runtimes with a live permission-response channel may receive an
 // interactive privileged batch. Classic Claude streams remain fail-closed.
-function getPrivilegedExecutorRuntimeBlock(run, label = 'privileged execution', { allowCodex = false } = {}) {
+export function getPrivilegedExecutorRuntimeBlock(run, label = 'privileged execution', { allowCodex = false, platform = process.platform } = {}) {
+  // macOS has neither a verified administrator helper nor an executor-side
+  // authorization and target-revalidation boundary. Report this before any
+  // signing key or Linux socket lookup instead of suggesting a broken setup.
+  if (platform === 'darwin') return 'macOS administrator execution is not available on this host';
   const runtimeFamily = trimString(run?.runtimeFamily);
   if (runtimeFamily === 'claude-stream-json-bidi'
     || (allowCodex && runtimeFamily === 'codex-app-server-json')) return '';
