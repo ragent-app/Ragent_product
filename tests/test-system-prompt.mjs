@@ -55,6 +55,8 @@ assert.match(context, /Prefer agent-side execution and the smallest necessary hu
 assert.match(context, /Store only durable memory that changes future judgment/);
 assert.doesNotMatch(contextWithoutSharedDefaults, /Shared Startup Defaults/);
 assert.match(context, /ragent agenda add --title "Title" --start "ISO8601" --duration 60/);
+assert.match(context, /existence does not establish that the current run can write/);
+assert.match(context, /If access or the command is unavailable, report the actual limitation/);
 assert.match(context, /node "\$AGENTOC_PROJECT_ROOT\/cli\.js" agenda add --title "Title" --start "ISO8601" --duration 60/);
 assert.match(context, /ragent agenda --help/);
 assert.match(context, /node "\$AGENTOC_PROJECT_ROOT\/cli\.js" agenda --help/);
