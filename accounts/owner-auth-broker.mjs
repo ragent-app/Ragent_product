@@ -3917,6 +3917,13 @@ export function createOwnerAuthBroker({
   }
 
   function resolveTurnConnectionDevice(draft, { accountId, instanceId, deviceId, deviceKind }) {
+    // Computer peers are account-bound instances, including private ones
+    // which do not have a legacy trusted-device row or a public endpoint.
+    if (deviceKind === 'computer' && deviceId !== instanceId) {
+      const peer = getInstanceBindings(draft).find((binding) => binding.instanceId === deviceId
+        && binding.accountId === accountId && !binding.revokedAt);
+      if (peer && hasRendezvousIdentity(peer)) return { quotaDeviceId: deviceId };
+    }
     // Android v2 account joins deliberately do not create target-coupled rows
     // in `devices`. The completed intent (or, for pre-015 state, its redeemed
     // grant) is the durable link between rdev_ and the account phone adev_.

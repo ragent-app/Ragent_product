@@ -103,4 +103,5 @@ export function stopProviderAccountSync() {
   schedulerTimer = null;
   schedulerStarted = false;
   consecutiveFailures = 0;
+  void import('../lib/provider-runtime/peer-transport.mjs').then(({ stopProviderPeerSessions }) => stopProviderPeerSessions());
 }

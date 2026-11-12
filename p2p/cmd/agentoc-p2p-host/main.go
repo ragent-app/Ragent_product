@@ -539,6 +539,13 @@ func proxyRequestBody(localBase string, request httpRequest, streamedBody io.Rea
 }
 
 func main() {
+	if os.Getenv("RAGENT_P2P_PROVIDER_SYNC") == "1" {
+		if err := runProviderSyncPeer(); err != nil {
+			fmt.Fprintln(os.Stderr, "provider sync peer failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	localBase := os.Getenv("AGENTOC_P2P_LOCAL_BASE_URL")
 	if localBase == "" {
 		localBase = "http://127.0.0.1:7690"
