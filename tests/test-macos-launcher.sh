@@ -16,8 +16,9 @@ cp "$root/packaging/macos/Info.plist" "$contents/Info.plist"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$contents/Info.plist")" = cloud.agenton.ragent ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = Ragent ]
 cp "$root/packaging/macos/AgentoC" "$contents/MacOS/Ragent"
-cp "$root/packaging/macos/"{agentoc-env.sh,agentoc-stop} "$contents/Resources/"
-chmod 0755 "$contents/MacOS/Ragent" "$contents/Resources/agentoc-stop"
+cp "$root/packaging/macos/agentoc-env.sh" "$contents/Resources/ragent-env.sh"
+cp "$root/packaging/macos/agentoc-stop" "$contents/Resources/ragent-stop"
+chmod 0755 "$contents/MacOS/Ragent" "$contents/Resources/ragent-stop"
 xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=13.0 "$root/native/macos-instance-check.c" -o "$contents/Resources/runtime/agentoc-macos-instance-check"
 ln -s "$(command -v node)" "$contents/Resources/runtime/node"
 printf '#!/bin/sh\nexit 0\n' > "$contents/Resources/runtime/codex"
@@ -58,13 +59,13 @@ curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
 # the first instance, even though both use the same installed executable.
 other_config="$test_dir/other-config"
 mkdir -p "$other_config"
-if AGENTOC_CONFIG_DIR="$other_config" "$contents/Resources/agentoc-stop" >"$test_dir/other-stop" 2>&1; then
+if AGENTOC_CONFIG_DIR="$other_config" "$contents/Resources/ragent-stop" >"$test_dir/other-stop" 2>&1; then
   echo 'stop accepted another instance on the configured port' >&2
   exit 1
 fi
 grep -Fq 'another instance or its identity could not be verified' "$test_dir/other-stop"
 kill -0 "$server_pid"
-if AGENTOC_INSTANCE_ROOT="$test_dir/other-instance" "$contents/Resources/agentoc-stop" >"$test_dir/other-root-stop" 2>&1; then
+if AGENTOC_INSTANCE_ROOT="$test_dir/other-instance" "$contents/Resources/ragent-stop" >"$test_dir/other-root-stop" 2>&1; then
   echo 'stop accepted another instance root' >&2
   exit 1
 fi
@@ -75,7 +76,7 @@ node -e 'const fs=require("fs");if((fs.statSync(process.argv[1]).mode & 0o777)!=
 # default settings, which could stop a different instance.
 cp "$AGENTOC_CONFIG_DIR/instance.env" "$test_dir/instance.env.before-stop"
 printf '\nfalse\n' >> "$AGENTOC_CONFIG_DIR/instance.env"
-if "$contents/Resources/agentoc-stop" >"$test_dir/stop-error" 2>&1; then
+if "$contents/Resources/ragent-stop" >"$test_dir/stop-error" 2>&1; then
   echo 'stop accepted a failing instance configuration' >&2
   exit 1
 fi
@@ -86,7 +87,7 @@ cp "$test_dir/instance.env.before-stop" "$AGENTOC_CONFIG_DIR/instance.env"
 mkdir -p "$HOME/Library/LaunchAgents"
 : > "$HOME/Library/LaunchAgents/cloud.agenton.agentoc.plist"
 export QA_MIGRATION_ARGS="$test_dir/migration-args"
-cat > "$contents/Resources/agentoc-login.cjs" <<'EOF'
+cat > "$contents/Resources/ragent-login.cjs" <<'EOF'
 require('node:fs').writeFileSync(process.env.QA_MIGRATION_ARGS, JSON.stringify(process.argv.slice(2)));
 EOF
 "$contents/MacOS/Ragent"
@@ -110,7 +111,7 @@ if "$contents/MacOS/Ragent" >/dev/null 2>&1; then
 fi
 kill -0 "$server_pid"
 printf '%s\n' 0.0.1 > "$contents/Resources/app/.agentoc-package-version"
-"$contents/Resources/agentoc-stop"
+"$contents/Resources/ragent-stop"
 server_pid=''
 
 # LaunchAgent-style starts need not have a PID file. The stop command must
@@ -118,7 +119,7 @@ server_pid=''
 "$contents/MacOS/Ragent"
 server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
 rm "$AGENTOC_CONFIG_DIR/agentoc.pid"
-"$contents/Resources/agentoc-stop"
+"$contents/Resources/ragent-stop"
 if kill -0 "$server_pid" 2>/dev/null; then
   echo 'stop returned while the service was still running' >&2
   exit 1
@@ -138,7 +139,7 @@ if "$contents/MacOS/Ragent"; then
   exit 1
 fi
 grep -Fq "端口 $port" "$QA_ALERT_ARGS"
-"$contents/Resources/agentoc-stop"
+"$contents/Resources/ragent-stop"
 kill -0 "$other_pid"
 
 export AGENTOC_CONFIG_DIR="$test_dir/incomplete-config"

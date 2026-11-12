@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/ragent-env.sh"
 
 agentoc_source_instance_env
 agentoc_ensure_runtime_shims

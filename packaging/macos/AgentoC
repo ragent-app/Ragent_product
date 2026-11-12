@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../Resources/agentoc-env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../Resources/ragent-env.sh"
 
 open_manager() {
   if [ -d "$AGENTOC_RESOURCES_DIR/Ragent.app" ]; then
@@ -46,8 +46,8 @@ fi
 
 # Preserve an explicitly enabled login service when upgrading the app name.
 # Never create a login item on a fresh installation.
-if [ -e "$HOME/Library/LaunchAgents/cloud.agenton.agentoc.plist" ]; then
-  if ! "$AGENTOC_NODE_BIN" "$AGENTOC_RESOURCES_DIR/agentoc-login.cjs" migrate \
+if [ -e "$HOME/Library/LaunchAgents/cloud.agenton.agentoc.plist" ] || [ -e "$HOME/Library/LaunchAgents/cloud.agenton.ragent.plist" ]; then
+  if ! "$AGENTOC_NODE_BIN" "$AGENTOC_RESOURCES_DIR/ragent-login.cjs" migrate \
     "$AGENTOC_RESOURCES_DIR" "$(agentoc_config_dir)" "${CHAT_PORT:-7690}"; then
     report_start_failure '无法安全迁移登录自启动服务。原配置已保留，请检查登录项。'
     exit 1

@@ -13,7 +13,7 @@ function xml(value) {
   if (/[\u0000-\u001f\u007f]/u.test(text)) throw new Error("Paths may not contain control characters");
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
 }
-function buildPlist({ home, resources, config, port = "7690", instanceRoot = "", legacyPort = false, label = LABEL }) {
+function buildPlist({ home, resources, config, port = "7690", instanceRoot = "", legacyPort = false, legacyService = false, label = LABEL }) {
   if (![LABEL, LEGACY_LABEL].includes(label)) throw new Error("Invalid login service label");
   for (const value of [home, resources, config]) {
     if (!path.isAbsolute(value)) throw new Error("Home, application and configuration paths must be absolute");
@@ -29,7 +29,7 @@ function buildPlist({ home, resources, config, port = "7690", instanceRoot = "",
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key>${string(label)}
-<key>ProgramArguments</key><array>${string(path.join(resources, "agentoc-service"))}</array>
+<key>ProgramArguments</key><array>${string(path.join(resources, legacyService ? "agentoc-service" : "ragent-service"))}</array>
 <key>EnvironmentVariables</key><dict><key>HOME</key>${string(home)}<key>AGENTOC_CONFIG_DIR</key>${string(config)}${portEntry}${instanceEntry}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>Umask</key><integer>63</integer>
 <key>WorkingDirectory</key>${string(home)}
@@ -75,6 +75,10 @@ function manage(action, { home, resources, config, port, instanceRoot = "", uid,
     buildPlist({ home, resources, config, port, instanceRoot, legacyPort: true }),
     buildPlist({ home, resources, config, port }),
     buildPlist({ home, resources, config, port, legacyPort: true }),
+    buildPlist({ home, resources, config, port, instanceRoot, legacyService: true }),
+    buildPlist({ home, resources, config, port, instanceRoot, legacyService: true, legacyPort: true }),
+    buildPlist({ home, resources, config, port, legacyService: true }),
+    buildPlist({ home, resources, config, port, legacyService: true, legacyPort: true }),
   ];
   const dir = path.join(home, "Library", "LaunchAgents");
   const file = path.join(dir, `${LABEL}.plist`);
@@ -88,13 +92,13 @@ function manage(action, { home, resources, config, port, instanceRoot = "", uid,
     ? resources.slice(0, -"Ragent.app/Contents/Resources".length) + "AgentoC.app/Contents/Resources"
     : resources;
   const oldDefinitions = [...new Set([resources, oldResources])].flatMap(old => [
-    buildPlist({ home, resources: old, config, port, instanceRoot, label: LEGACY_LABEL }),
-    buildPlist({ home, resources: old, config, port, instanceRoot, legacyPort: true, label: LEGACY_LABEL }),
-    buildPlist({ home, resources: old, config, port, label: LEGACY_LABEL }),
-    buildPlist({ home, resources: old, config, port, legacyPort: true, label: LEGACY_LABEL }),
+    buildPlist({ home, resources: old, config, port, instanceRoot, legacyService: true, label: LEGACY_LABEL }),
+    buildPlist({ home, resources: old, config, port, instanceRoot, legacyService: true, legacyPort: true, label: LEGACY_LABEL }),
+    buildPlist({ home, resources: old, config, port, legacyService: true, label: LEGACY_LABEL }),
+    buildPlist({ home, resources: old, config, port, legacyService: true, legacyPort: true, label: LEGACY_LABEL }),
   ]);
   const oldExact = [...new Set([resources, oldResources])].map(old =>
-    buildPlist({ home, resources: old, config, port, instanceRoot, label: LEGACY_LABEL }));
+    buildPlist({ home, resources: old, config, port, instanceRoot, legacyService: true, label: LEGACY_LABEL }));
   const legacyOwned = readOwnedFile(legacyFile, oldExact[0], uid, oldDefinitions);
   const oldProbe = run("/bin/launchctl", ["print", `${domain}/${LEGACY_LABEL}`]);
   const oldLoaded = oldProbe.ok;
@@ -113,7 +117,57 @@ function manage(action, { home, resources, config, port, instanceRoot = "", uid,
     throw new Error("Another login item uses the Ragent service label; it was left unchanged");
   }
   if (legacyOwned && owned) throw new Error("Both old and new login items exist; neither was changed");
-  if (action === "migrate" && !legacyOwned) return "no previous service to migrate";
+  if (action === "migrate" && !legacyOwned) {
+    if (owned === "legacy") {
+      const previous = buildPlist({ home, resources, config, port, instanceRoot, legacyService: true });
+      const before = fs.readFileSync(file, "utf8");
+      if (before !== previous) throw new Error("Existing login item has different settings; disable it before upgrading");
+      if (!fs.existsSync(path.join(resources, "ragent-service"))) throw new Error("Application service is missing");
+      if (loaded && !fs.existsSync(path.join(resources, "agentoc-service"))) {
+        throw new Error("The previous login service is running but its old helper is unavailable; stop it before upgrading");
+      }
+      fs.mkdirSync(config, { recursive: true, mode: 0o700 });
+      for (const name of ["launch-agent.stdout.log", "launch-agent.stderr.log"]) ensurePrivateLog(path.join(config, name), uid);
+      const suffix = require("node:crypto").randomBytes(12).toString("hex");
+      const tmp = path.join(dir, `.ragent-login-${process.pid}-${suffix}`);
+      const backup = `${tmp}.previous`;
+      let stopped = false, replaced = false, started = false;
+      try {
+        fs.writeFileSync(tmp, expected, { flag: "wx", mode: 0o600 });
+        fs.linkSync(file, backup);
+        if (readOwnedFile(file, expected, uid, legacyExpected) !== "legacy" || fs.readFileSync(file, "utf8") !== before) {
+          throw new Error("Existing login service changed during migration");
+        }
+        if (loaded) {
+          if (!run("/bin/launchctl", ["bootout", domain, file]).ok) throw new Error("Could not stop previous login service");
+          stopped = true;
+        }
+        fs.renameSync(tmp, file); replaced = true;
+        if (loaded) {
+          const result = run("/bin/launchctl", ["bootstrap", domain, file]);
+          if (!result.ok) throw new Error(`Could not start migrated login service: ${result.stderr.trim()}`);
+          started = true;
+        }
+        fs.unlinkSync(backup);
+        return started ? "enabled; previous helper migrated" : "previous helper migrated; not loaded";
+      } catch (error) {
+        if (started && !run("/bin/launchctl", ["bootout", domain, file]).ok)
+          throw new Error(`Migration failed and the new login service could not be stopped: ${error.message}`);
+        if (replaced) {
+          if (fs.readFileSync(backup, "utf8") !== before || readOwnedFile(file, expected, uid) !== "current")
+            throw new Error(`Migration failed; retained the previous login item at ${backup}: ${error.message}`);
+          fs.renameSync(backup, file);
+        }
+        if (stopped && !run("/bin/launchctl", ["bootstrap", domain, file]).ok)
+          throw new Error(`Migration failed and the previous login service could not be restarted: ${error.message}`);
+        throw error;
+      } finally {
+        try { fs.unlinkSync(tmp); } catch (error) { if (error.code !== "ENOENT") throw error; }
+        if (!replaced) { try { fs.unlinkSync(backup); } catch (error) { if (error.code !== "ENOENT") throw error; } }
+      }
+    }
+    return "no previous service to migrate";
+  }
   if (legacyOwned) {
     if (action === "status") return oldLoaded ? "enabled (previous service name)" : "installed but not loaded (previous service name)";
     if (action === "disable") {
@@ -123,7 +177,11 @@ function manage(action, { home, resources, config, port, instanceRoot = "", uid,
     }
     const oldContent = fs.readFileSync(legacyFile, "utf8");
     if (!oldExact.includes(oldContent)) throw new Error("Previous login item has different settings; disable it before enabling the new service");
-    if (!fs.existsSync(path.join(resources, "agentoc-service"))) throw new Error("Application service is missing");
+    if (!fs.existsSync(path.join(resources, "ragent-service"))) throw new Error("Application service is missing");
+    const previousResources = [...new Set([resources, oldResources])][oldExact.indexOf(oldContent)];
+    if (oldLoaded && !fs.existsSync(path.join(previousResources, "agentoc-service"))) {
+      throw new Error("The previous login service is running but its old helper is unavailable; stop it before upgrading");
+    }
     fs.mkdirSync(config, { recursive: true, mode: 0o700 });
     for (const name of ["launch-agent.stdout.log", "launch-agent.stderr.log"]) ensurePrivateLog(path.join(config, name), uid);
     const tmp = path.join(dir, `.ragent-login-${process.pid}-${require("node:crypto").randomBytes(12).toString("hex")}`);
@@ -173,7 +231,7 @@ function manage(action, { home, resources, config, port, instanceRoot = "", uid,
   }
   if (owned === "legacy") throw new Error("Existing login item does not retain the configured port or instance root; disable it and enable it again");
   if (loaded) return "already enabled";
-  if (!fs.existsSync(path.join(resources, "agentoc-service"))) throw new Error("Application service is missing");
+  if (!fs.existsSync(path.join(resources, "ragent-service"))) throw new Error("Application service is missing");
   const listener = run("/usr/sbin/lsof", ["-nP", "-ti", `TCP:${port}`, "-sTCP:LISTEN"]);
   if (listener.ok && listener.stdout.trim()) throw new Error(`Port ${port} is in use; stop the running service before enabling login startup`);
   if (!listener.ok && (listener.status !== 1 || listener.stderr.trim())) throw new Error(`Could not check the service port: ${listener.stderr.trim()}`);

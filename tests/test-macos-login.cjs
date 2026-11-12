@@ -17,6 +17,7 @@ let oldLoaded = false;
 let occupied = false;
 let foreign = false;
 let failBootstrap = false;
+let failNextBootstrap = false;
 const ok = (stdout = "") => ({ ok: true, status: 0, stdout, stderr: "" });
 const fail = (status, stderr = "") => ({ ok: false, status, stdout: "", stderr });
 const run = (command, argv) => {
@@ -25,7 +26,7 @@ const run = (command, argv) => {
   if (argv[0] === "print" && argv[1].endsWith("/cloud.agenton.agentoc")) return oldLoaded ? ok(`path = ${foreign ? "/somebody/else.plist" : oldPlist}\n`) : fail(113);
   if (argv[0] === "print") return loaded ? ok(`path = ${foreign ? "/somebody/else.plist" : plist}\n`) : fail(113);
   if (argv[0] === "bootstrap" && argv[2] === oldPlist) { oldLoaded = true; return ok(); }
-  if (argv[0] === "bootstrap") { if (failBootstrap) return fail(5, "fixture failure"); loaded = true; return ok(); }
+  if (argv[0] === "bootstrap") { if (failNextBootstrap) { failNextBootstrap = false; return fail(5, "fixture failure"); } if (failBootstrap) return fail(5, "fixture failure"); loaded = true; return ok(); }
   if (argv[0] === "bootout" && argv[2] === oldPlist) { oldLoaded = false; return ok(); }
   if (argv[0] === "bootout") { loaded = false; return ok(); }
   throw new Error(`unexpected command ${command} ${argv}`);
@@ -33,7 +34,8 @@ const run = (command, argv) => {
 const invoke = (action) => manage(action, { ...args, run });
 try {
   fs.mkdirSync(resources, { recursive: true });
-  fs.writeFileSync(path.join(resources, "agentoc-service"), "fixture");
+  fs.writeFileSync(path.join(resources, "ragent-service"), "fixture");
+  fs.writeFileSync(path.join(resources, "agentoc-service"), "legacy fixture");
   assert.match(buildPlist(args), /app &amp; test/);
   assert.match(buildPlist(args), /<key>CHAT_PORT<\/key><string>47681<\/string>/);
   assert.doesNotMatch(buildPlist({ ...args, port: "7690" }), /<key>CHAT_PORT<\/key>/);
@@ -82,7 +84,7 @@ try {
   assert.match(invokeInstance("status"), /disable and re-enable/);
   assert.throws(() => invokeInstance("enable"), /instance root/);
   assert.equal(invokeInstance("disable"), "disabled; configuration and logs retained");
-  fs.writeFileSync(oldPlist, buildPlist({ ...args, label: "cloud.agenton.agentoc" }));
+  fs.writeFileSync(oldPlist, buildPlist({ ...args, legacyService: true, label: "cloud.agenton.agentoc" }));
   oldLoaded = true;
   assert.match(invoke("status"), /previous service name/);
   foreign = true;
@@ -101,10 +103,30 @@ try {
   assert.equal(fs.existsSync(oldPlist), false);
   assert.match(fs.readFileSync(plist, "utf8"), /cloud\.agenton\.ragent/);
   assert.equal(invoke("disable"), "disabled; configuration and logs retained");
-  fs.writeFileSync(oldPlist, buildPlist({ ...args, label: "cloud.agenton.agentoc" }));
+  fs.writeFileSync(oldPlist, buildPlist({ ...args, legacyService: true, label: "cloud.agenton.agentoc" }));
   assert.equal(invoke("migrate"), "previous service migrated; not loaded");
   assert.equal(loaded, false, "unloaded legacy login item remains unloaded");
   assert.equal(fs.existsSync(oldPlist), false);
+  assert.equal(invoke("disable"), "disabled; configuration and logs retained");
+  const oldHelperDefinition = buildPlist({ ...args, legacyService: true });
+  fs.unlinkSync(path.join(resources, "agentoc-service"));
+  fs.writeFileSync(plist, oldHelperDefinition);
+  loaded = true;
+  assert.match(invoke("status"), /disable and re-enable/);
+  assert.throws(() => invoke("migrate"), /old helper is unavailable/);
+  assert.equal(fs.readFileSync(plist, "utf8"), oldHelperDefinition);
+  assert.equal(loaded, true);
+  fs.writeFileSync(path.join(resources, "agentoc-service"), "legacy fixture");
+  failNextBootstrap = true;
+  assert.throws(() => invoke("migrate"), /fixture failure/);
+  assert.equal(fs.readFileSync(plist, "utf8"), oldHelperDefinition);
+  assert.equal(loaded, true, "failed helper migration restores the prior service");
+  assert.equal(invoke("migrate"), "enabled; previous helper migrated");
+  assert.match(fs.readFileSync(plist, "utf8"), /ragent-service/);
+  assert.equal(invoke("disable"), "disabled; configuration and logs retained");
+  fs.writeFileSync(plist, oldHelperDefinition);
+  assert.equal(invoke("migrate"), "previous helper migrated; not loaded");
+  assert.equal(loaded, false);
   assert.equal(invoke("disable"), "disabled; configuration and logs retained");
   fs.writeFileSync(oldPlist, "foreign definition");
   assert.throws(() => invoke("enable"), /not the expected Ragent definition/);

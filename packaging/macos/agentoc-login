@@ -1,7 +1,7 @@
 #!/bin/bash
 # Opt-in login service management. Never runs on installation by itself.
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/ragent-env.sh"
 agentoc_source_instance_env
-exec "$AGENTOC_NODE_BIN" "$AGENTOC_RESOURCES_DIR/agentoc-login.cjs" \
+exec "$AGENTOC_NODE_BIN" "$AGENTOC_RESOURCES_DIR/ragent-login.cjs" \
   "${1:-status}" "$AGENTOC_RESOURCES_DIR" "$(agentoc_config_dir)" "${CHAT_PORT:-7690}"

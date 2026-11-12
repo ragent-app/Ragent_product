@@ -1,7 +1,7 @@
 #!/bin/bash
 # LaunchAgent entry point: use the same initialization and environment as the app.
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/ragent-env.sh"
 agentoc_first_run_bootstrap
 agentoc_source_instance_env
 agentoc_ensure_runtime_shims

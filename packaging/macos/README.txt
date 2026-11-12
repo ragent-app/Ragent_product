@@ -14,7 +14,7 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 - 双击 Ragent.app：启动服务并打开桌面管理器（服务已运行时仅打开管理器）。
 - 命令行：Ragent.app/Contents/Resources/ragent <command>
   （例如 ragent doctor、ragent set-password）
-- 停止服务：Ragent.app/Contents/Resources/agentoc-stop
+- 停止服务：Ragent.app/Contents/Resources/ragent-stop
 - 日志：~/.config/agentoc/chat-server.log
 - 实例配置（升级保留）：~/.config/agentoc/instance.env
 - 升级前先停止服务；如启用了登录自启动，先按下方步骤停用。替换 App 后
@@ -25,7 +25,7 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 - 更新之前，备份 ~/.config/agentoc/ 和自行选择的工作区；备份中包含凭据，
   请妥善保护。保留旧版安装镜像，以便需要时恢复。
 - 回滚时，先退出桌面管理器；若启用了登录自启动，先按下方步骤停用，
-  然后使用当前应用的 agentoc-stop 停止服务。用旧版应用替换现有应用，
+  然后使用当前应用的 ragent-stop 停止服务。用旧版应用替换现有应用，
   启动后检查配置和工作区。旧版本可能无法读取新版本迁移后的数据；
   遇到不兼容时停止使用并从备份恢复，不要反复覆盖唯一的数据副本。
 - 卸载时，先退出桌面管理器，停用已启用的登录自启动并停止服务，再将
@@ -36,9 +36,9 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 可选：登录时自动启动（手机随时可连的前提）
 ------------------------------------------
 先停止正在运行的 Ragent 服务，然后在终端中运行：
-"/Applications/Ragent.app/Contents/Resources/agentoc-login" enable
-查询状态："/Applications/Ragent.app/Contents/Resources/agentoc-login" status
-停用并停止登录服务："/Applications/Ragent.app/Contents/Resources/agentoc-login" disable
+"/Applications/Ragent.app/Contents/Resources/ragent-login" enable
+查询状态："/Applications/Ragent.app/Contents/Resources/ragent-login" status
+停用并停止登录服务："/Applications/Ragent.app/Contents/Resources/ragent-login" disable
 停用不会删除配置、凭据、工作区或日志。启用后服务在登录时启动并在异常
 退出后重启；正常退出服务前请先停用自启动。若已有同名的手工配置，本工具
 不会覆盖或卸载它，请先自行检查和移除旧配置。移动应用前请先停用，移动后

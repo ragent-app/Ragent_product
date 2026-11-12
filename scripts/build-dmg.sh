@@ -429,13 +429,12 @@ printf 'claude_sha256=%s\n' "$CLAUDE_BINARY_SHA" >> "$CONTENTS/Resources/runtime
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
 install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/Ragent"
-install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/agentoc-service"
-install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/agentoc-stop"
-install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/Resources/agentoc-cli"
+install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/ragent-service"
+install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/ragent-stop"
 install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/Resources/ragent"
-install -m 0755 "$ROOT/packaging/macos/agentoc-login" "$CONTENTS/Resources/agentoc-login"
-install -m 0644 "$ROOT/packaging/macos/agentoc-login.cjs" "$CONTENTS/Resources/agentoc-login.cjs"
-install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/Resources/agentoc-env.sh"
+install -m 0755 "$ROOT/packaging/macos/agentoc-login" "$CONTENTS/Resources/ragent-login"
+install -m 0644 "$ROOT/packaging/macos/agentoc-login.cjs" "$CONTENTS/Resources/ragent-login.cjs"
+install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/Resources/ragent-env.sh"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$CONTENTS/Resources/README.txt"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$STAGE/README.txt"
 ln -s /Applications "$STAGE/Applications"
@@ -527,7 +526,7 @@ BUNDLED_NODE_VERSION="$("$CONTENTS/Resources/runtime/node" --version)"
   echo "Bundled Node reports $BUNDLED_NODE_VERSION, expected $NODE_VERSION" >&2
   exit 1
 }
-for script in "$CONTENTS/MacOS/Ragent" "$CONTENTS/Resources/agentoc-service" "$CONTENTS/Resources/agentoc-stop" "$CONTENTS/Resources/agentoc-cli" "$CONTENTS/Resources/ragent" "$CONTENTS/Resources/agentoc-login" "$CONTENTS/Resources/agentoc-env.sh"; do
+for script in "$CONTENTS/MacOS/Ragent" "$CONTENTS/Resources/ragent-service" "$CONTENTS/Resources/ragent-stop" "$CONTENTS/Resources/ragent" "$CONTENTS/Resources/ragent-login" "$CONTENTS/Resources/ragent-env.sh"; do
   bash -n "$script" || { echo "Launcher syntax error: $script" >&2; exit 1; }
 done
 for required in \
