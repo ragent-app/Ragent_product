@@ -12,7 +12,7 @@ export async function notifyLinuxRunScopeFinished(run, manifest, {
       launchAttempt: run?.runnerLaunchAttempt ?? 0, token: manifest?.options?.approvedActionChannel?.token };
     const response = await fetch(new URL(LINUX_RUN_SCOPE_FINISH_PATH, url), { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      redirect: 'error', signal: AbortSignal.timeout(2000) });
+      redirect: 'error', signal: AbortSignal.timeout(12_000) });
     if (!response.ok) return false;
     // The response is bounded and contains no token or Run data.
     const length = response.headers.get('content-length');

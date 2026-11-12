@@ -15,12 +15,19 @@ test('runner terminal write invalidates only its protected control binding',
       process.env.AGENTOC_RUN_SPOOL_DIR = `${root}/spool`;
       process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+      process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
       const { createRun, runStatusPath } = await import('../chat/runs.mjs');
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
       const { notifyLinuxRunScopeFinished } = await import('../chat/linux-run-scope-finish-client.mjs');
       const { hasLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
       const { handleTemporaryControlRunCheck } = await import('../chat/router-temporary-control-run-check.mjs');
+      const { createRunnerLifecycleServer } = await import('../scripts/runner-lifecycle-broker.mjs');
+      const { withLinuxRunOperationLock } = await import('../scripts/linux-run-operation-lock.mjs');
+      await mkdir(`${root}/contexts`, { mode: 0o700 });
+      const broker = await createRunnerLifecycleServer({ socketPath: `${root}/broker.sock`, serviceUser: 'root', serviceGroup: 'root',
+        controlUser: 'root', controlGroup: 'root', chownImpl: async () => {},
+        runScopeRegistration: { directory: `${root}/contexts`, pinDirectory: `${root}/unused` } });
       const token = Buffer.alloc(32, 7).toString('base64url'), tokenHash = createHash('sha256').update(token).digest('hex');
       const runId = 'run_finishfixture1';
       const scope = { sessionId: 's1', cwd: { realPath: '/srv/work' }, scopeRoot: { realPath: '/srv/work' },
@@ -62,6 +69,13 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(await notifyLinuxRunScopeFinished({ ...run, runnerLaunchAttempt: 1 }, manifest, { base }), false);
         assert.equal(await hasLinuxRunCancelIntent(runId, 0), false);
         const moduleUrl = new URL('../chat/runs.mjs', import.meta.url).href;
+        let release, locked;
+        const acquired = new Promise((resolve) => { locked = resolve; });
+        const held = new Promise((resolve) => { release = resolve; });
+        const operation = withLinuxRunOperationLock({ directory: `${root}/contexts`, runId, launchAttempt: 0 }, async () => {
+          locked(); await held;
+        });
+        await acquired;
         const child = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
           process.execPath, '--input-type=module', '-e',
           `import {updateRun} from ${JSON.stringify(moduleUrl)}; await updateRun(${JSON.stringify(runId)}, {state:'completed'});`],
@@ -70,14 +84,32 @@ test('runner terminal write invalidates only its protected control binding',
           AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1',
           AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1', AGENTOC_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
         let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });
-        const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+        const completion = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+        try {
+          for (let i = 0; i < 100 && !await hasLinuxRunCancelIntent(runId, 0); i++)
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          assert.equal(await hasLinuxRunCancelIntent(runId, 0), true);
+          const pending = JSON.parse(await readFile(runStatusPath(runId), 'utf8'));
+          assert.equal(pending.state, 'running');
+          assert.equal(child.exitCode, null);
+        } finally { release(); await operation; }
+        const code = await completion;
         assert.equal(code, 0, stderr);
         assert.equal(await hasLinuxRunCancelIntent(runId, 0), true);
+        const rootMarker = `${root}/contexts/${createHash('sha256').update(runId).digest('hex')}-0.revoked`;
+        assert.equal(JSON.parse(await readFile(rootMarker, 'utf8')).version, 1);
         const saved = JSON.parse(await readFile(runStatusPath(runId), 'utf8'));
         assert.equal(saved.state, 'completed');
         // Invalidation survives a later forged status replacement.
         saved.state = 'running'; await writeFile(runStatusPath(runId), JSON.stringify(saved));
         assert.equal(await hasLinuxRunCancelIntent(runId, 0), true);
-      } finally { await new Promise((resolve) => server.close(resolve)); }
+        const offlineId = 'run_finishoffline1';
+        const offlineRun = await createRun({ status: { id: offlineId, sessionId: 's1', requestId: 't1',
+          state: 'running', runnerLaunchAttempt: 0 }, manifest });
+        await issueLinuxRunScopeGrant(offlineId, 0);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        assert.equal(await notifyLinuxRunScopeFinished(offlineRun, manifest, { base }), false);
+        assert.equal(await hasLinuxRunCancelIntent(offlineId, 0), true);
+      } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });
