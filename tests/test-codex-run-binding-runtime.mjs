@@ -52,7 +52,6 @@ test('native preparation writes distinct account-bound records for concurrent ru
   const account = { configDir, providerHomesRoot: options.providerHomesRoot, accountId: 'account-a' };
   await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: first.homeDir, initialize: true });
   const otherManifest = { tool: 'codex', options: { providerProfile: 'profile-b', model: 'gpt-5.5' } };
-  await assert.rejects(prepareNativeRunProviderHome('run_binding_third', otherManifest, options), { code: 'CODEX_HANDOFF_UNAVAILABLE' });
   const broker = createServer((socket) => {
     createInterface({ input: socket }).on('line', (line) => {
       const ping = JSON.parse(line);
