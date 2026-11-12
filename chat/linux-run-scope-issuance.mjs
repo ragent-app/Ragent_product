@@ -6,12 +6,13 @@ import { getActivePrivilegedSigningKey, loadOrCreatePrivilegedSigningKeys } from
 import { resolveApprovedActionRunDirectories } from './approved-action-run-directories.mjs';
 import { signLinuxRunScopeGrant } from './linux-run-scope-grant.mjs';
 import { ensureLinuxRunCancelIntentStore, hasLinuxRunCancelIntent } from './linux-run-cancel-intent.mjs';
+import { persistLinuxRunControlBinding } from './linux-run-control-binding.mjs';
 
 export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
   enabled = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1', platform = process.platform,
   readBoundary = assertRunLaunchBoundary, loadKeys = loadOrCreatePrivilegedSigningKeys,
   getKey = getActivePrivilegedSigningKey, ensureIntentStore = ensureLinuxRunCancelIntentStore,
-  hasIntent = hasLinuxRunCancelIntent,
+  hasIntent = hasLinuxRunCancelIntent, persistBinding = persistLinuxRunControlBinding,
 } = {}) {
   if (!enabled || platform !== 'linux') return null;
   const { run, manifest } = await readBoundary(runId);
@@ -27,5 +28,7 @@ export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
   await loadKeys();
   const key = getKey();
   if (!key?.privateKey) throw Object.assign(new Error('Linux Run scope signing key is unavailable'), { code: 'LINUX_RUN_SCOPE_KEY_UNAVAILABLE' });
-  return signLinuxRunScopeGrant({ run, manifest, launchAttempt, privateKey: key.privateKey });
+  const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt, privateKey: key.privateKey });
+  await persistBinding({ run, manifest, launchAttempt });
+  return grant;
 }

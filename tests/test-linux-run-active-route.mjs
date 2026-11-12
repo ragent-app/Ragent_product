@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 
 test('root challenge checks fresh persisted Run state through the real local route',
@@ -20,12 +20,20 @@ test('root challenge checks fresh persisted Run state through the real local rou
       const { handleTemporaryControlRunCheck } = await import('../chat/router-temporary-control-run-check.mjs');
       const { checkLinuxRunActive } = await import('../scripts/linux-run-active-client.mjs');
       const { ensureLinuxRunCancelIntentStore, hasLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
+      const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
+      const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
       await loadOrCreatePrivilegedSigningKeys(`${root}/keys.json`);
       await ensureLinuxRunCancelIntentStore();
       const runId = 'run_activefixture1';
+      const token = Buffer.alloc(32, 5).toString('base64url'), tokenHash = createHash('sha256').update(token).digest('hex');
+      const scope = { sessionId: 's1', cwd: { realPath: '/srv/work' }, scopeRoot: { realPath: '/srv/work' },
+        riskContext: { platform: 'linux', cwd: '/srv/work', trustedWorkspaceRoot: '/srv/work' } };
+      const inputManifest = { sessionId: 's1', requestId: 't1', executionScope: scope,
+        executionScopeDigest: computeExecutionScopeDigest(scope), options: { approvedActionChannel: { turnId: 't1', token, tokenHash } } };
       await createRun({ status: { id: runId, sessionId: 's1', requestId: 't1', state: 'running',
         runnerLaunchMode: 'runner-lifecycle', runnerLaunchAttempt: 2 },
-      manifest: { sessionId: 's1', requestId: 't1', options: { approvedActionChannel: { turnId: 't1' } } } });
+      manifest: inputManifest });
+      await issueLinuxRunScopeGrant(runId, 2);
       const server = createServer((req, res) => {
         void handleTemporaryControlRunCheck({ req, res, pathname: new URL(req.url, 'http://127.0.0.1').pathname,
           writeJson: (response, status, body) => response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body)) });
@@ -50,7 +58,8 @@ test('root challenge checks fresh persisted Run state through the real local rou
           const id = `run_active${suffix}1`;
           await createRun({ status: { id, sessionId: 's1', requestId: 't1', state: 'running',
             runnerLaunchMode: 'runner-lifecycle', runnerLaunchAttempt: 2 },
-          manifest: { sessionId: 's1', requestId: 't1', options: { approvedActionChannel: { turnId: 't1' } } } });
+          manifest: inputManifest });
+          await issueLinuxRunScopeGrant(id, 2);
           await updateRun(id, update);
           assert.equal(await hasLinuxRunCancelIntent(id, 2), true);
           const file = runStatusPath(id), forged = JSON.parse(await readFile(file, 'utf8'));

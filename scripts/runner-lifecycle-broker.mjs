@@ -813,6 +813,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
   // P0-C: the channel is env-configurable so it can be relocated out of the
   // control CONFIG_DIR; the default stays at the legacy config/chat-runs until
   // the migration step flips it (and removes the config traverse ACL).
+  const scopeRegistrationEligible = Boolean(scopeGrant && runScopeRegistration && manifest?.runPublication &&
+    isLinuxRunScopeRegistrationEligible({ runnerUid: runnerOwnership.uid, controlUid: controlOwnership?.uid, distinctIdentity,
+      guiEnvironment: { ...environment, ...guiEnvironment } }));
   const runEnvironment = {
     ...environment,
     ...pickRunnerGuiEnvironment({ ...environment, ...guiEnvironment }),
@@ -820,6 +823,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     HOME: resolvedServiceHome,
     ...(useGroupDrop ? { USER: resolvedServiceUser, LOGNAME: resolvedServiceUser } : {}),
     AGENTOC_RUNNER_DISTINCT_IDENTITY: distinctIdentity ? '1' : '0',
+    AGENTOC_LINUX_SCOPE_FINISH_ENABLED: scopeRegistrationEligible ? '1' : '0',
     AGENTOC_CODEX_HOME_DIR: runCodexHomeDir,
     AGENTOC_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
     AGENTOC_AGY_HOME_DIR: isAgy ? runAgyHomeDir : '',
@@ -884,10 +888,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   }
   const pid = await readSystemdMainPid(resolvedUnitName, { execFileImpl });
   let privilegedContextRegistered = false;
-  if (scopeGrant && runScopeRegistration && manifest?.runPublication && isLinuxRunScopeRegistrationEligible({
-    runnerUid: runnerOwnership.uid, controlUid: controlOwnership?.uid, distinctIdentity,
-    guiEnvironment: { ...environment, ...guiEnvironment },
-  })) {
+  if (scopeRegistrationEligible) {
     // This branch is reached only after this broker created the unit. Never
     // claim a reused pre-existing unit as a newly authenticated launch.
     const run = { id: normalized, sessionId: manifest.sessionId, requestId: manifest.requestId,

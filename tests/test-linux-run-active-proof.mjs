@@ -20,7 +20,8 @@ test('the control service refuses cancellation, old generation and terminal stat
   const run = { id: context.runId, sessionId: context.sessionId, requestId: context.turnId,
     runnerLaunchMode: 'runner-lifecycle', runnerLaunchAttempt: 2, state: 'running' };
   const manifest = { options: { approvedActionChannel: { turnId: context.turnId } } };
-  const options = { enabled: true, platform: 'linux', readBoundary: async () => ({ run, manifest }), getKey: () => keys, isCancelled: async () => false };
+  const options = { enabled: true, platform: 'linux', readBoundary: async () => ({ run, manifest }), getKey: () => keys,
+    isCancelled: async () => false, matchesBinding: async () => true };
   const proof = await issueLinuxRunActiveProof(context, options);
   assert.equal(verifyLinuxRunActiveProof(proof, { expectedContext: context, publicKey: keys.publicKey }), true);
   run.cancelRequested = true;

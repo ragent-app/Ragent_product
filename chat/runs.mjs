@@ -1847,6 +1847,17 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // Admission predicates run inside the exact Run mutation queue, after
     // all suspendable reads and immediately before durable publication.
     if (beforeWrite) beforeWrite(next);
+    if (!scopeTracking && process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY === '1' &&
+        process.env.AGENTOC_LINUX_SCOPE_FINISH_ENABLED === '1' && isTerminalRunState(next.state) && !isTerminalRunState(latest.state)) {
+      try {
+        const { notifyLinuxRunScopeFinished } = await import('./linux-run-scope-finish-client.mjs');
+        if (!await notifyLinuxRunScopeFinished(next, await getRunManifestUnlocked(runId))) {
+          console.warn(`[runs] control-plane Run finalization unavailable for ${runId}`);
+        }
+      } catch { console.warn(`[runs] control-plane Run finalization unavailable for ${runId}`); }
+      if (authorizeWrite) await authorizeWrite(latest);
+      if (beforeWrite) beforeWrite(next);
+    }
     await writeJsonAtomic(runStatusPath(runId), next, await runFileWriteOptions(runId, {
       ...COMPACT_JSON_OPTIONS,
       durable: Boolean(next.runPublication),
