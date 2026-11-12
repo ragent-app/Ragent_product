@@ -8,7 +8,7 @@ import { getToolDefinitionAsync } from '../lib/tools.mjs';
 import { CODEX_SERVICE_TIER_OPTIONS } from '../lib/codex-service-tier.mjs';
 import { AGY_EFFORT_LEVELS, listAgyModels } from '../lib/agy-manager.mjs';
 import { lookupModelContextWindowTokens } from './model-context-windows.mjs';
-import { mayCacheMergedCodexCatalog } from './codex-model-cache-policy.mjs';
+import { classifyOfficialCodexDiscoveryFailure, mayCacheMergedCodexCatalog } from './codex-model-cache-policy.mjs';
 import { normalizeModelCatalog, sourceFromModelOrigins } from '../lib/provider-runtime/model-catalog.mjs';
 import { getHarnessProviderProtocols } from '../lib/provider-runtime/harness-bridge.mjs';
 import { getHarnessDefinition, listHarnesses } from '../lib/harness-registry.mjs';
@@ -1079,7 +1079,8 @@ function refreshOfficialCodexCatalog(provider, cacheKey, staleEntry = null) {
       cacheSet(officialCodexModelListCache, cacheKey, { at: Date.now(), models });
       return models;
     })
-    .catch(() => {
+    .catch((error) => {
+      console.warn(`[models] Official Codex discovery failed (${classifyOfficialCodexDiscoveryFailure(error)})`);
       const failedAt = Date.now();
       cacheSet(officialCodexModelListCache, cacheKey, {
         ...(Array.isArray(staleModels) ? { models: staleModels } : {}),

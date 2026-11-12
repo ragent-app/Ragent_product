@@ -8,3 +8,18 @@ export function mayCacheMergedCodexCatalog(officialRows, readEntry, now, ttlMs) 
       && entry.models.every((model) => model.catalogSource === 'upstream'));
   });
 }
+
+// Never log a provider error verbatim: it may contain URLs or credentials.
+export function classifyOfficialCodexDiscoveryFailure(error) {
+  const allowedCodes = new Set([
+    'CODEX_ACCOUNT_UNVERIFIED', 'CODEX_APP_SERVER_BROKER_ACCESS_DENIED',
+    'CODEX_APP_SERVER_BROKER_UNAVAILABLE', 'CODEX_HANDOFF_UNAVAILABLE',
+    'HARNESS_RUNTIME_UNAVAILABLE', 'NATIVE_OAUTH_LOCK_TIMEOUT',
+    'CODEX_BROKER_PIPE_SECURITY_FAILED', 'CODEX_BROKER_PIPE_SECURITY_INVALID',
+  ]);
+  if (allowedCodes.has(error?.code)) return error.code;
+  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+  if (message.includes('timed out') || message.includes('timeout')) return 'MODEL_LIST_TIMEOUT';
+  if (message.includes('no picker-visible models')) return 'MODEL_LIST_EMPTY';
+  return 'MODEL_LIST_FAILED';
+}
