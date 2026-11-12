@@ -41,7 +41,8 @@ test('sweep renews a real live root registration and does not renew cancellation
       await enrollLinuxServiceKeyPin({ directory: `${root}/pin`, publicKey: key.publicKey, expectedKeyId: keyId });
       const { run, manifest } = await assertRunLaunchBoundary(runId);
       const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: attempt, privateKey: key.privateKey, ttlMs: 60000 });
-      await registerLinuxRunContext({ directory: `${root}/contexts`, pinDirectory: `${root}/pin`, run, manifest, grant, launchAttempt: attempt });
+      await registerLinuxRunContext({ directory: `${root}/contexts`, pinDirectory: `${root}/pin`, run, manifest, grant,
+        launchAttempt: attempt, runnerUid: Number(process.env.AGENTOC_TEST_SYSTEMD_UID) });
       const options = { socketPath: `${root}/broker.sock`, serviceUser: 'root', serviceGroup: 'root', controlUser: 'root',
         controlGroup: 'root', chownImpl: async () => {}, runScopeRegistration: { directory: `${root}/contexts`, pinDirectory: `${root}/pin` } };
       const sweep = createLinuxRunScopeRenewalSweep();

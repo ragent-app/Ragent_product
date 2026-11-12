@@ -26,8 +26,10 @@ test('root state binds a signed scope to the live unit and revokes durably',
       const manifest = bindRunPublication(run, { executionScope: scope, executionScopeDigest: computeExecutionScopeDigest(scope),
         options: { approvedActionChannel: { turnId: run.requestId, token: 'secret-must-not-be-persisted' } } });
       const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey, ttlMs: 60000 });
-      const args = { directory, pinDirectory, run, manifest, grant, launchAttempt: 2 };
+      const args = { directory, pinDirectory, run, manifest, grant, launchAttempt: 2,
+        runnerUid: Number(process.env.AGENTOC_TEST_SYSTEMD_UID) };
       await assert.rejects(registerLinuxRunContext({ ...args, launchAttempt: 1 }));
+      await assert.rejects(registerLinuxRunContext({ ...args, runnerUid: args.runnerUid + 1 }));
       const result = await registerLinuxRunContext(args);
       assert.equal(result.invocationId, process.env.AGENTOC_TEST_SYSTEMD_INVOCATION);
       await assert.rejects(registerLinuxRunContext(args));

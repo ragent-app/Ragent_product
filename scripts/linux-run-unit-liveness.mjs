@@ -2,6 +2,7 @@
 // operation request. A live systemd unit alone does not prove authorization,
 // absence of cancellation, or continued liveness after this check.
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
 const runSystemctl = promisify(execFile);
@@ -38,20 +39,45 @@ export function matchesLinuxRunUnitState(output, { runId, launchAttempt, invocat
 
 // Only the root lifecycle broker that just created the unit may capture this
 // identity. An existing unit of the same name is not evidence of a launch.
-export async function captureLinuxRunUnitIdentity({ runId, launchAttempt } = {}) {
+export function parseLinuxRunProcessIdentity(status, stat, expectedUid) {
   try {
-    if (process.platform !== 'linux' || process.geteuid?.() !== 0) return null;
+    if (!Number.isSafeInteger(expectedUid) || expectedUid <= 0 || expectedUid > 0xfffffffe ||
+        typeof status !== 'string' || status.length > 65536 || typeof stat !== 'string' || stat.length > 65536) return null;
+    const lines = status.split('\n').filter((line) => line.startsWith('Uid:'));
+    const fields = lines.length === 1 ? lines[0].slice(4).trim().split(/\s+/) : [];
+    if (fields.length !== 4 || fields.some((field) => !/^\d+$/.test(field) || Number(field) !== expectedUid)) return null;
+    // comm is parenthesized and can itself contain spaces and parentheses.
+    const close = stat.lastIndexOf(')');
+    const rest = close < 0 ? [] : stat.slice(close + 1).trim().split(/\s+/);
+    const startTime = rest[19]; // /proc/<pid>/stat field 22
+    return /^(0|[1-9][0-9]*)$/.test(startTime || '') ? { uid: expectedUid, startTime } : null;
+  } catch { return null; }
+}
+
+export async function captureLinuxRunUnitIdentity({ runId, launchAttempt, runnerUid } = {}) {
+  try {
+    if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !Number.isSafeInteger(runnerUid) || runnerUid <= 0) return null;
     const unit = linuxRunUnitName(runId, launchAttempt);
     const args = ['show', ...KEYS.map((key) => `--property=${key}`), '--', unit];
-    const { stdout } = await runSystemctl('/usr/bin/systemctl', args, { timeout: 2000, maxBuffer: 16384, env: { PATH: '/usr/bin:/bin', LANG: 'C' } });
+    const options = { timeout: 2000, maxBuffer: 16384, env: { PATH: '/usr/bin:/bin', LANG: 'C' } };
+    const { stdout } = await runSystemctl('/usr/bin/systemctl', args, options);
     const ids = stdout.split('\n').filter((line) => line.startsWith('InvocationID='));
-    if (ids.length !== 1) return null;
+    const pids = stdout.split('\n').filter((line) => line.startsWith('MainPID='));
+    if (ids.length !== 1 || pids.length !== 1) return null;
+    const pid = Number(pids[0].slice('MainPID='.length));
     const identity = { runId, launchAttempt, invocationId: ids[0].slice('InvocationID='.length) };
-    return matchesLinuxRunUnitState(stdout, identity) ? identity : null;
+    if (!matchesLinuxRunUnitState(stdout, identity)) return null;
+    const [status, stat] = await Promise.all([readFile(`/proc/${pid}/status`, 'utf8'), readFile(`/proc/${pid}/stat`, 'utf8')]);
+    const processIdentity = parseLinuxRunProcessIdentity(status, stat, runnerUid);
+    if (!processIdentity) return null;
+    const recheck = await runSystemctl('/usr/bin/systemctl', args, options);
+    if (recheck.stdout !== stdout) return null;
+    return { ...identity, runnerUid, mainPid: pid, startTime: processIdentity.startTime };
   } catch { return null; }
 }
 
 export async function isLinuxRunUnitLive(expected) {
-  const actual = await captureLinuxRunUnitIdentity({ runId: expected?.runId, launchAttempt: expected?.launchAttempt });
-  return actual !== null && actual.invocationId === expected?.invocationId;
+  const actual = await captureLinuxRunUnitIdentity(expected);
+  return actual !== null && actual.invocationId === expected?.invocationId && actual.mainPid === expected?.mainPid &&
+    actual.startTime === expected?.startTime;
 }

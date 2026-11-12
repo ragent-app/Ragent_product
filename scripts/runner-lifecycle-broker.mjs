@@ -895,7 +895,8 @@ async function launchLifecycleRunnerUnlocked(runId, {
       runPublication: manifest.runPublication };
     try {
       await registerLinuxRunContext({ directory: runScopeRegistration.directory,
-        pinDirectory: runScopeRegistration.pinDirectory, run, manifest, grant: scopeGrant, launchAttempt: normalizedAttempt });
+        pinDirectory: runScopeRegistration.pinDirectory, run, manifest, grant: scopeGrant, launchAttempt: normalizedAttempt,
+        runnerUid: runnerOwnership.uid });
       privilegedContextRegistered = true;
     } catch {
       // Scope registration is not needed for ordinary execution. Failure must

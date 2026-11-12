@@ -179,7 +179,8 @@ process.stdout.write(JSON.stringify(result.projection));`;
     const serviceKeyId = createHash('sha256').update(serviceKeys.publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
     await enrollLinuxServiceKeyPin({ directory: pinDirectory, publicKey: serviceKeys.publicKey, expectedKeyId: serviceKeyId });
     const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: attempt, privateKey: serviceKeys.privateKey });
-    await registerLinuxRunContext({ directory: contextDirectory, pinDirectory, run, manifest, grant, launchAttempt: attempt });
+    await registerLinuxRunContext({ directory: contextDirectory, pinDirectory, run, manifest, grant, launchAttempt: attempt,
+      runnerUid: Number(process.env.AGENTOC_TEST_SYSTEMD_UID) });
     const actualRequest = { ...request, runId };
     const actualChild = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(actualRequest), root],
       { uid: sourceStat.uid, gid: sourceStat.gid, encoding: 'utf8', maxBuffer: 1024 * 1024,

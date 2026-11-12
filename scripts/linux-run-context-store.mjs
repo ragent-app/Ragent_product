@@ -65,7 +65,7 @@ function minimalRunAndManifest(run, manifest) {
   return JSON.parse(JSON.stringify({ run: minimalRun, manifest: minimalManifest }));
 }
 
-export async function registerLinuxRunContext({ directory, pinDirectory, run, manifest, grant, launchAttempt } = {}) {
+export async function registerLinuxRunContext({ directory, pinDirectory, run, manifest, grant, launchAttempt, runnerUid } = {}) {
   await validateDirectory(directory);
   const saved = minimalRunAndManifest(run, manifest);
   const paths = recordPaths(directory, saved.run.id, launchAttempt);
@@ -73,7 +73,13 @@ export async function registerLinuxRunContext({ directory, pinDirectory, run, ma
   const { publicKey } = await loadLinuxServiceKeyPin(pinDirectory);
   if (!verifyLinuxRunScopeGrant(grant, { ...saved, launchAttempt, publicKey }).ok) unavailable();
   const directories = resolveApprovedActionRunDirectories({ ...saved, session: {}, platform: 'linux' });
-  const unit = await captureLinuxRunUnitIdentity({ runId: saved.run.id, launchAttempt });
+  let unit = null;
+  // A group-dropping launcher may still be transitioning from root immediately
+  // after systemd reports MainPID. Never register until it reaches the fixed UID.
+  for (let i = 0; i < 20 && !unit; i++) {
+    unit = await captureLinuxRunUnitIdentity({ runId: saved.run.id, launchAttempt, runnerUid });
+    if (!unit && i < 19) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   if (!unit) unavailable();
   const record = { version: 1, ...saved, grant, unit, directories };
   const text = `${JSON.stringify(record)}\n`;
