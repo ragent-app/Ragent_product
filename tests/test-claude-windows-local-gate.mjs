@@ -28,7 +28,7 @@ const taskFollowup = ['TaskGet', 'TaskUpdate'].includes(taskToolCase);
 const cliReadCase = process.env.AGENTOC_QA_CLAUDE_CLI_READ || '';
 const assetPrefix = process.env.AGENTOC_QA_ASSET_PREFIX || 'msys';
 if (cliReadCase === 'asset' && !['agentoc', 'ragent', 'node', 'msys'].includes(assetPrefix)) throw new Error('invalid asset CLI prefix');
-if (cliReadCase && (!askAll || !['list', 'session', 'source', 'help', 'asset'].includes(cliReadCase))) throw new Error('invalid CLI read fixture');
+if (cliReadCase && (!askAll || !['list', 'session', 'source', 'help', 'asset', 'create'].includes(cliReadCase))) throw new Error('invalid CLI read fixture');
 if (cliReadCase) process.env.CHAT_PORT = '18669';
 process.env.AGENTOC_INSTANCE_ROOT = instance;
 process.env.AGENTOC_CONFIG_DIR = path.join(instance, 'config');
@@ -193,6 +193,10 @@ const server = createServer((req, res) => {
   req.on('data', (chunk) => { body += chunk; if (body.length > 4_000_000) req.destroy(); });
   req.on('end', () => {
     let request; try { request = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
+    if (cliReadCase === 'create' && req.method === 'POST' && req.url === '/api/triggers') {
+      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture' || request.sessionId !== 'claude-local-fixture' || request.text !== 'isolated follow-up' || !request.scheduledAt) { res.writeHead(400).end(); return; }
+      cliReads++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ trigger: { id: 'fixture-trigger', ...request } })); return;
+    }
     if (cliReadCase === 'asset' && req.method === 'POST' && req.url === '/api/sessions/claude-local-fixture/assets') {
       if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture' || request.localPath !== artifact) { res.writeHead(403).end(); return; }
       cliReads++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ asset: { assetId: 'fixture-asset' } })); return;
@@ -215,7 +219,7 @@ const server = createServer((req, res) => {
       if (taskToolCase && requests > 1) process.stderr.write(`[fixture] task result: ${JSON.stringify((request.messages || []).flatMap(message => Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_result').map(block => block.content) : []))}\n`);
     }
     const tool = requests === 1 || ((cwdChangeCase || taskFollowup) && requests === 2);
-    const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset' ? 'Bash' : 'Write');
+    const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || ['asset', 'create'].includes(cliReadCase) ? 'Bash' : 'Write');
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
@@ -245,7 +249,7 @@ const server = createServer((req, res) => {
       const taskResult = taskFollowup && requests === 2 ? JSON.stringify(request.messages || []).match(/Task #(\d+) created successfully/) : null;
       if (taskFollowup && requests === 2 && !taskResult) { res.writeHead(400).end(); return; }
       const cliSuffix = cliReadCase === 'session' ? '--session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'source' ? '--source-session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'help' ? '--help' : '--json';
-      const input = JSON.stringify(cliReadCase === 'asset' ? { command: `${['agentoc', 'ragent'].includes(assetPrefix) ? assetPrefix : `${assetPrefix === 'msys' ? 'MSYS_NO_PATHCONV=1 ' : ''}node "$AGENTOC_PROJECT_ROOT/cli.js"`} api POST ${assetPrefix === 'ragent' ? '/api/sessions/$AGENTOC_SESSION_ID/assets' : '"/api/sessions/$AGENTOC_SESSION_ID/assets"'} --body ${bashQuote(JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }))}`, description: 'Publish isolated fixture' } : cliReadCase ? { command: `node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
+      const input = JSON.stringify(cliReadCase === 'asset' ? { command: `${['agentoc', 'ragent'].includes(assetPrefix) ? assetPrefix : `${assetPrefix === 'msys' ? 'MSYS_NO_PATHCONV=1 ' : ''}node "$AGENTOC_PROJECT_ROOT/cli.js"`} api POST ${assetPrefix === 'ragent' ? '/api/sessions/$AGENTOC_SESSION_ID/assets' : '"/api/sessions/$AGENTOC_SESSION_ID/assets"'} --body ${bashQuote(JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }))}`, description: 'Publish isolated fixture' } : cliReadCase === 'create' ? { command: "ragent trigger create --in 1h --text 'isolated follow-up' --json", description: 'Create isolated trigger fixture' } : cliReadCase ? { command: `node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
         : toolName === 'TaskGet' ? { taskId: taskResult[1] } : toolName === 'TaskUpdate' ? { taskId: taskResult[1], status: 'completed' } : installCase ? { command: installCommand, description: 'Fixture installation' } : uninstallCase
         ? { command: 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact', description: 'Fixture uninstall' } : deleteCase
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }

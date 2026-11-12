@@ -6,7 +6,7 @@ import { buildCodexWindowsSafeDeleteHookDecision } from '../chat/codex-windows-s
 import { buildCodexWindowsRipgrepHookDecision, buildCodexWindowsSelectStringGlobHookDecision } from '../chat/windows-ripgrep-bridge.mjs';
 import { buildCodexWindowsWildcardNameHookDecision } from '../chat/windows-wildcard-list-bridge.mjs';
 import { buildCodexWindowsElevationGuidance } from '../chat/windows-elevation-guidance.mjs';
-import { buildCodexWindowsCliAssetHookDecision } from '../chat/codex-windows-cli-asset-hook.mjs';
+import { buildCodexWindowsCliAssetHookDecision, buildCodexWindowsTriggerHookDecision } from '../chat/codex-windows-cli-asset-hook.mjs';
 
 // A malformed event or unavailable control plane leaves the original command
 // to the normal approval path. Never print credentials or diagnostics to stdout.
@@ -23,6 +23,9 @@ export async function evaluateCodexWindowsHook(event, env = process.env) {
     const asset = await buildCodexWindowsCliAssetHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
       helperPath: safeDeleteContext.assetHelperPath, port: safeDeleteContext.port });
     if (asset.hookSpecificOutput) return asset;
+    const trigger = await buildCodexWindowsTriggerHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
+      helperPath: safeDeleteContext.assetHelperPath, port: safeDeleteContext.port });
+    if (trigger.hookSpecificOutput) return trigger;
     const decision = await buildCodexWindowsSafeDeleteHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
       helperPath: safeDeleteContext.helperPath });
     if (decision.hookSpecificOutput) return decision;

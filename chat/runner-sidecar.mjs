@@ -130,7 +130,7 @@ import { verifyCodexWindowsInstallBridgeApproval } from './codex-windows-install
 import { createCodexManagedHookSetup } from './codex-managed-hook-setup.mjs';
 import { buildWindowsSafeDeleteBridge } from './windows-safe-delete-bridge.mjs';
 import { verifyCodexWindowsSafeDeleteApproval } from './codex-windows-safe-delete-hook.mjs';
-import { verifyCodexWindowsCliAssetApproval } from './codex-windows-cli-asset-hook.mjs';
+import { verifyCodexWindowsCliAssetApproval, verifyCodexWindowsTriggerApproval } from './codex-windows-cli-asset-hook.mjs';
 import { buildPrivilegedBatch } from './privileged-ops.mjs';
 import {
   appendRunSpoolRecord,
@@ -2795,11 +2795,15 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     && await verifyCodexWindowsSafeDeleteApproval({ approval, state, runId, helperPath: safeDeleteHelperPath });
   const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsCliAssetApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
+  const controlledTrigger = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+    && await verifyCodexWindowsTriggerApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
   const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsBoundSearchApproval({ approval, state, helperPath: searchHelperPath });
   const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsWildcardNameApproval({ approval, state, helperPath: searchHelperPath });
-  const gateDecision = controlledListing
+  const gateDecision = controlledTrigger
+    ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session trigger creation' }
+    : controlledListing
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'pinned local directory name listing' }
     : controlledSearch
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'handle-bound verified search' }
@@ -3087,7 +3091,8 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
       type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
-      autoApproved: true, reason: cliReadBridge.updatedCommand.includes(' asset-publish ') ? 'controlled current-session asset publication' : 'controlled read-only CLI operation',
+      autoApproved: true, reason: cliReadBridge.updatedCommand.includes(' asset-publish ') ? 'controlled current-session asset publication'
+        : cliReadBridge.updatedCommand.includes(' trigger-create ') ? 'controlled current-session trigger creation' : 'controlled read-only CLI operation',
     } });
     const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, gateDecision.risk));
     if (record) state.pendingApprovals.set(approval.approvalId, record);
@@ -3812,7 +3817,7 @@ async function main() {
     })
     : null;
   if (claudeBidiState) {
-    // The read-only CLI bridge must not replace a command unless this child
+    // The scoped CLI bridge must not replace a command unless this child
     // actually has a complete capability for its own run and session.
     claudeBidiState.sessionControlReadAvailable = Boolean(spawnEnv.AGENTOC_SESSION_CONTROL_TOKEN &&
       spawnEnv.AGENTOC_SESSION_CONTROL_RUN_ID === runId &&

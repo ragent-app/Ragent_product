@@ -34,6 +34,29 @@ func TestReadArguments(t *testing.T) {
 	}
 }
 
+func TestTriggerCreateArguments(t *testing.T) {
+	encode := func(v []string) string { b, _ := json.Marshal(v); return base64.RawURLEncoding.EncodeToString(b) }
+	for _, args := range [][]string{
+		{"--in", "1h", "--text", "fixture", "--json"},
+		{"--event", "run_terminal", "--filter", "status=done", "--repeat", "--text", "fixture"},
+	} {
+		if _, err := triggerCreateArguments(encode(args)); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"--in", "1h", "--text", "fixture", "--session", "other"},
+		{"--in", "1h", "--text", "fixture", "--base-url", "http://attacker"},
+		{"--in", "1h", "--text", "fixture", "--text", "other"},
+		{"--in", "1h", "--event", "run_terminal", "--text", "fixture"},
+		{"--in", "1h", "--text", "--json"},
+	} {
+		if _, err := triggerCreateArguments(encode(args)); err == nil {
+			t.Fatalf("unexpectedly accepted %v", args)
+		}
+	}
+}
+
 func TestExecutableUsesInstalledCliWithoutNodeStartupHooks(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("requires the Windows executable")
@@ -86,6 +109,19 @@ func TestExecutableUsesInstalledCliWithoutNodeStartupHooks(t *testing.T) {
 	}
 	if got.Hook != "" || got.Base != "http://127.0.0.1:7690" || strings.Join(got.Args, " ") != "trigger list --base-url http://127.0.0.1:7690 --json" {
 		t.Fatalf("unexpected child process: %+v", got)
+	}
+	createBody, _ := json.Marshal([]string{"--in", "1h", "--text", "fixture", "--json"})
+	create := exec.Command(helper, "trigger-create", "http://127.0.0.1:7690", base64.RawURLEncoding.EncodeToString(createBody))
+	create.Env = cmd.Env
+	text, err = create.CombinedOutput()
+	if err != nil {
+		t.Fatalf("trigger helper: %v: %s", err, text)
+	}
+	if err := json.Unmarshal(text, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Hook != "" || strings.Join(got.Args, " ") != "trigger create --in 1h --text fixture --json --session s --base-url http://127.0.0.1:7690" {
+		t.Fatalf("unexpected trigger arguments: %+v", got)
 	}
 	body, _ := json.Marshal(map[string]string{"localPath": filepath.Join(root, "fixture.txt"), "text": "fixture"})
 	asset := exec.Command(helper, "asset-publish", "http://127.0.0.1:7690", base64.RawURLEncoding.EncodeToString(body))

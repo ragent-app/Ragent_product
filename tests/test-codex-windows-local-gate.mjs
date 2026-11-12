@@ -11,7 +11,7 @@ import { buildClaudeWindowsInstallBridge } from '../chat/windows-auto-install-br
 import { createCodexManagedHookSetup } from '../chat/codex-managed-hook-setup.mjs';
 import { prepareManagedMcpOverlay } from '../chat/approved-action-mcp-overlay.mjs';
 import { buildWindowsSafeDeleteBridge } from '../chat/windows-safe-delete-bridge.mjs';
-import { buildWindowsCliAssetBridge } from '../chat/windows-cli-read-bridge.mjs';
+import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from '../chat/windows-cli-read-bridge.mjs';
 import { buildWindowsSelectStringGlobBridge } from '../chat/windows-ripgrep-bridge.mjs';
 import { buildWindowsWildcardNameBridge } from '../chat/windows-wildcard-list-bridge.mjs';
 import { buildCodexAppServerProjectTrustArgs } from '../chat/adapters/codex-app-server.mjs';
@@ -23,7 +23,8 @@ if (process.platform !== 'win32' || process.env.AGENTOC_RUN_CODEX_LOCAL_GATE !==
 if (!process.env.AGENTOC_TEST_CODEX_BINARY || !path.isAbsolute(process.env.AGENTOC_TEST_CODEX_BINARY)) throw new Error('absolute test Codex binary path required');
 const home = await mkdtemp(path.join(tmpdir(), process.env.AGENTOC_QA_CODEX_UNICODE === '1'
   ? 'agentoc-codex-local-gate-项目 空格-' : 'agentoc-codex-local-gate-'));
-const managedAsset = process.env.AGENTOC_QA_HOOK_MANAGED_ASSET === '1';
+const managedTrigger = process.env.AGENTOC_QA_HOOK_MANAGED_TRIGGER === '1';
+const managedAsset = process.env.AGENTOC_QA_HOOK_MANAGED_ASSET === '1' || managedTrigger;
 if (managedAsset) process.env.CHAT_PORT = '18669';
 const alternateCwd = path.join(home, 'alternate-workdir');
 if (process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || process.env.AGENTOC_QA_HOOK_MANAGED_DELETE === '1') await mkdir(alternateCwd);
@@ -169,6 +170,10 @@ const server = createServer((req, res) => {
   req.on('data', chunk => { body += chunk; if (body.length > 4_000_000) req.destroy(); });
   req.on('end', () => {
     let data; try { data = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
+    if (managedTrigger && req.method === 'POST' && req.url === '/api/triggers') {
+      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'fixture-session' || req.headers['x-agentoc-session-control-run-id'] !== run.id || req.headers['x-agentoc-session-control-turn-id'] !== 'fixture-turn' || data.sessionId !== 'fixture-session' || data.text !== 'isolated follow-up' || !data.scheduledAt) { res.writeHead(403).end(); return; }
+      submissions++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ trigger: { id: 'fixture-trigger', ...data } })); return;
+    }
     if (managedAsset && req.method === 'POST' && req.url === '/api/sessions/fixture-session/assets') {
       if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'fixture-session' || req.headers['x-agentoc-session-control-run-id'] !== run.id || req.headers['x-agentoc-session-control-turn-id'] !== 'fixture-turn' || data.localPath !== assetFile) { res.writeHead(403).end(); return; }
       submissions++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ asset: { assetId: 'fixture-asset' } })); return;
@@ -206,7 +211,7 @@ const server = createServer((req, res) => {
     const relativeTarget = dangerousRetry ? path.relative(alternateCwd, deleteTarget) : 'delete-target';
     const deleteCommand = managedDeleteRelative && providerRequests === 1 ? `Remove-Item -LiteralPath '${relativeTarget.replace(/'/g, "''")}' -Recurse -Force` : `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
     const adminCommand = process.env.AGENTOC_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.AGENTOC_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start agentoc-fixture' : process.env.AGENTOC_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name agentoc-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
-    const shellCommand = managedAsset ? `ragent api POST "/api/sessions/$env:AGENTOC_SESSION_ID/assets" --body '${JSON.stringify({ localPath: assetFile, originalName: 'fixture.txt' }).replaceAll("'", "''")}'` : managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand
+    const shellCommand = managedTrigger ? "ragent trigger create --in 1h --text 'isolated follow-up' --json" : managedAsset ? `ragent api POST "/api/sessions/$env:AGENTOC_SESSION_ID/assets" --body '${JSON.stringify({ localPath: assetFile, originalName: 'fixture.txt' }).replaceAll("'", "''")}'` : managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand
       : managedRipgrep ? `rg --files ${process.env.AGENTOC_QA_RG_GLOB === '1' ? "-g '*' " : ''}'${rgFixture.replace(/'/g, "''")}'` : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
     const argsObject = { [shellCommandField]: shellCommand };
     if (Object.hasOwn(shellToolProperties, 'yield_time_ms')) argsObject.yield_time_ms = 1000;
@@ -380,6 +385,8 @@ createInterface({ input: child.stdout }).on('line', async line => {
       const assetCommand = `ragent api POST "/api/sessions/$env:AGENTOC_SESSION_ID/assets" --body '${JSON.stringify({ localPath: assetFile, originalName: 'fixture.txt' }).replaceAll("'", "''")}'`;
       const expectedAsset = managedAsset ? await buildWindowsCliAssetBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: assetCommand } } },
         state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, sessionControlReadAvailable: true, sessionControlReadRunId: run.id }, runId: run.id, helperPath: assetHelper, port }) : null;
+      const expectedTrigger = managedTrigger ? await buildWindowsCliReadBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: "ragent trigger create --in 1h --text 'isolated follow-up' --json" } } },
+        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, sessionControlReadAvailable: true, sessionControlReadRunId: run.id }, runId: run.id, helperPath: assetHelper, port }) : null;
       const expectedGlob = managedGlob ? await buildWindowsSelectStringGlobBridge({ approval: { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: safeFileCommand } } },
         state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } }, helperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER }) : null;
       const expectedList = managedList ? await buildWindowsWildcardNameBridge({ approval: { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: safeFileCommand } } },
@@ -387,7 +394,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
       const decodedArgv = decodeCodexShlexArgv(msg.params.command);
       const invocation = readWindowsPowerShellInvocation({ params: { command: decodedArgv } });
       const rewrittenCommand = managedInstall ? decodedArgv?.at(-1) : '';
-      const rewriteMatches = managedList ? invocation?.command === expectedList?.updatedCommand && !!expectedList : managedGlob ? invocation?.command === expectedGlob?.updatedCommand && !!expectedGlob && !invocation.command.includes('*') : managedAsset ? invocation?.command === expectedAsset?.updatedCommand : managedDelete
+      const rewriteMatches = managedList ? invocation?.command === expectedList?.updatedCommand && !!expectedList : managedGlob ? invocation?.command === expectedGlob?.updatedCommand && !!expectedGlob && !invocation.command.includes('*') : managedTrigger ? invocation?.command === expectedTrigger?.updatedCommand && !!expectedTrigger : managedAsset ? invocation?.command === expectedAsset?.updatedCommand : managedDelete
         ? invocation?.command === expectedDelete?.updatedCommand && msg.params.cwd.toLowerCase() === alternateCwd.toLowerCase()
         : managedInstall
           ? rewrittenCommand === expectedBridge?.updatedCommand && preflights === 1 && submissions === 0
@@ -492,9 +499,9 @@ createInterface({ input: child.stdout }).on('line', async line => {
         : fileCommand === 'system-copy' ? (await readFile(fileFixture).catch(() => Buffer.alloc(0))).equals(await readFile(path.join(process.env.SystemRoot, 'win.ini')))
         : ['conditional-write', 'output-filters'].includes(fileCommand) ? (await readFile(fileFixture, 'utf8').catch(() => '')).replaceAll('\r\n', '\n') === 'changed fixture\n'
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
-    if (msg.params.item.exitCode !== 0 || !fileResult || (['read-null', 'select-string'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').replace(/\r?\n/g, '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedAsset ? 'fixture-asset' : managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || ((managedInstall || managedAsset) && submissions !== 1)) {
+    if (msg.params.item.exitCode !== 0 || !fileResult || (['read-null', 'select-string'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').replace(/\r?\n/g, '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedTrigger ? 'fixture-trigger' : managedAsset ? 'fixture-asset' : managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || ((managedInstall || managedAsset) && submissions !== 1)) {
       process.stderr.write(`approved harmless command failed: exit=${msg.params.item.exitCode} output=${String(msg.params.item.aggregatedOutput || '').slice(0, 1200)}\n`); process.exitCode = 1;
-    } else process.stdout.write(fileCommand ? `codex-windows-local-gate: ${fileCommand} executed on isolated fixture\n` : managedAsset ? 'codex-windows-local-gate: controlled asset publication reached isolated service\n' : managedDelete ? 'codex-windows-local-gate: bound deletion used the approved absolute target\n' : managedInstall ? 'codex-windows-local-gate: managed install bridge reached mock control plane\n' : hookShouldFail ? 'codex-windows-local-gate: failed hook; original passed gate\n' : hookExpectedRun ? 'codex-windows-local-gate: hook rewrote approved harmless command\n' : hookExperiment ? 'codex-windows-local-gate: untrusted hook skipped; original passed gate\n' : 'codex-windows-local-gate: auto-allow executed harmless command\n');
+    } else process.stdout.write(fileCommand ? `codex-windows-local-gate: ${fileCommand} executed on isolated fixture\n` : managedTrigger ? 'codex-windows-local-gate: controlled trigger creation reached isolated service\n' : managedAsset ? 'codex-windows-local-gate: controlled asset publication reached isolated service\n' : managedDelete ? 'codex-windows-local-gate: bound deletion used the approved absolute target\n' : managedInstall ? 'codex-windows-local-gate: managed install bridge reached mock control plane\n' : hookShouldFail ? 'codex-windows-local-gate: failed hook; original passed gate\n' : hookExpectedRun ? 'codex-windows-local-gate: hook rewrote approved harmless command\n' : hookExperiment ? 'codex-windows-local-gate: untrusted hook skipped; original passed gate\n' : 'codex-windows-local-gate: auto-allow executed harmless command\n');
     child.kill(); server.close();
   } else if (stage === 2 && msg.method === 'item/completed' && msg.params?.item?.type === 'commandExecution') {
     if (managedElevation) { fixtureError('direct elevation unexpectedly executed'); return; }

@@ -18,4 +18,4 @@ try {
         else{[Environment]::SetEnvironmentVariable($item[0],$item[1],'Process')}
     }
 }
-Write-Output 'Windows read-only CLI bridge built.'
+Write-Output 'Windows scoped CLI bridge built.'

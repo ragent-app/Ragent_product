@@ -12,6 +12,14 @@ const inspect = async () => ({ isFile: () => true, isSymbolicLink: () => false }
 const request = command => ({ providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command } } });
 const bridge = (command, overrides = {}) => buildWindowsCliReadBridge({ approval: request(command), state, helperPath, port: 7690, runId: 'fixture-run', ...overrides }, { inspect });
 for (const riskMode of ['recommended', 'full-auto']) {
+  const create = await bridge("ragent trigger create --in 1h --text 'ordinary follow-up' --json", { state: { ...state, riskMode } });
+  assert.ok(create?.updatedCommand.includes(' trigger-create '), `${riskMode}: same-session trigger creation`);
+  assert.deepEqual(JSON.parse(Buffer.from(create.updatedCommand.match(/'([A-Za-z0-9_-]+)'$/)[1], 'base64url').toString()),
+    ['--in', '1h', '--text', 'ordinary follow-up', '--json']);
+  const bashCreate = await buildWindowsCliReadBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command: "ragent trigger create --in 1h --text 'ordinary follow-up' --json" } } }, state: { ...state, riskMode }, helperPath, port: 7690, runId: 'fixture-run' }, { inspect });
+  assert.ok(bashCreate?.updatedCommand.includes(' trigger-create '), `${riskMode}: Bash trigger creation`);
+  assert.ok((await bridge("ragent trigger create --event run_terminal --filter status=done --repeat --text 'follow-up'", { state: { ...state, riskMode } }))?.updatedCommand.includes(' trigger-create '));
+  assert.equal(await buildWindowsCliReadBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command: "ragent trigger create --in 1h --text 'fixture' --session other" } } }, state: { ...state, riskMode }, helperPath, port: 7690, runId: 'fixture-run' }, { inspect }), null);
   const result = await bridge('agentoc trigger list --json 2>&1 | Out-String', { state: { ...state, riskMode } });
   assert.equal(result?.updatedCommand, "& 'C:\\Program Files\\AgentoC\\bin\\agentoc-cli-read-bridge.exe' trigger-list 'http://127.0.0.1:7690' --json");
   for (const suffix of ['--json', '--session $env:AGENTOC_SESSION_ID --json', '--source-session $env:AGENTOC_SESSION_ID --json']) {
@@ -26,6 +34,11 @@ for (const riskMode of ['recommended', 'full-auto']) {
 assert.ok(await bridge('agentoc trigger list'));
 assert.ok(await bridge('ragent trigger list --json'));
 for (const command of [
+  "ragent trigger create --in 1h --text 'fixture' --session other",
+  "ragent trigger create --in 1h --text 'fixture' --base-url http://attacker",
+  "ragent trigger create --in 1h --text 'fixture' --in 2h",
+  "ragent trigger create --in 1h --text 'fixture'; Remove-Item secret",
+  "ragent trigger create --in 1h --text $env:SECRET",
   'agentoc trigger delete x', 'agentoc trigger list --base-url http://attacker',
   'agentoc trigger list --json; Remove-Item secret', 'agentoc trigger list --json > output.txt',
   'agentoc trigger list --json | Out-String; Write-Output extra',

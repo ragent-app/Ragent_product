@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildCodexWindowsCliAssetHookDecision, verifyCodexWindowsCliAssetApproval } from '../chat/codex-windows-cli-asset-hook.mjs';
+import { buildCodexWindowsCliAssetHookDecision, verifyCodexWindowsCliAssetApproval, buildCodexWindowsTriggerHookDecision, verifyCodexWindowsTriggerApproval } from '../chat/codex-windows-cli-asset-hook.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
 
 const helperPath = process.env.AGENTOC_TEST_CLI_READ_BINARY;
@@ -33,6 +33,15 @@ try {
       { approval: { ...approval, params: { ...approval.params, command: wrapper + '; evil' } } },
       { state: { ...current, sessionControlReadAvailable: false } }, { runId: 'other' }, { port: 7691 },
     ]) assert.equal(await verifyCodexWindowsCliAssetApproval({ approval, state: current, runId, helperPath, port, ...changed }), false);
+    const triggerEvent = { ...event, tool_input: { command: "ragent trigger create --in 1h --text 'fixture follow-up' --json" } };
+    const trigger = await buildCodexWindowsTriggerHookDecision({ event: triggerEvent, state: current, runId, helperPath, port });
+    assert.equal(trigger.hookSpecificOutput?.permissionDecision, 'allow');
+    const triggerWrapper = [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', trigger.hookSpecificOutput.updatedInput.command].map(quote).join(' ');
+    const triggerApproval = { ...approval, params: { ...approval.params, command: triggerWrapper } };
+    assert.equal(await verifyCodexWindowsTriggerApproval({ approval: triggerApproval, state: current, runId, helperPath, port }), true);
+    assert.equal(await verifyCodexWindowsTriggerApproval({ approval: { ...triggerApproval, params: { ...triggerApproval.params, turnId: 'other' } }, state: current, runId, helperPath, port }), false);
+    assert.equal(await verifyCodexWindowsTriggerApproval({ approval: triggerApproval, state: { ...current, sessionControlReadAvailable: false }, runId, helperPath, port }), false);
+    assert.deepEqual(await buildCodexWindowsTriggerHookDecision({ event: { ...triggerEvent, tool_input: { command: triggerEvent.tool_input.command + ' --session other' } }, state: current, runId, helperPath, port }), {});
   }
   for (const changed of [
     command.replace('$env:AGENTOC_SESSION_ID', 'other'), command + '; Remove-Item file',

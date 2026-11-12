@@ -66,15 +66,65 @@ func childEnvironment(env []string, base string) ([]string, error) {
 		return nil, errors.New("session identity mismatch")
 	}
 	u, _ := url.Parse(base)
-	// This fixed read-only helper runs inside the managed Windows service
+	// This fixed scoped helper runs inside the managed Windows service
 	// environment, whose profile legitimately lives under ProgramData.
 	// Set the mode ourselves rather than trusting an inherited value.
 	result = append(result, "AGENTOC_WINDOWS_SERVICE_MODE=1", "AGENTOC_CHAT_BASE_URL="+base, "CHAT_PORT="+u.Port())
 	return result, nil
 }
 
+// Do not accept a target session or endpoint from the caller. The fixed
+// launcher appends both after validating the same-session capability.
+func triggerCreateArguments(encoded string) ([]string, error) {
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || len(data) == 0 || len(data) > 8192 {
+		return nil, errors.New("invalid trigger request")
+	}
+	var args []string
+	if json.Unmarshal(data, &args) != nil || len(args) < 4 || len(args) > 61 {
+		return nil, errors.New("invalid trigger request")
+	}
+	values := map[string]bool{"--text": true, "--in": true, "--at": true, "--every": true, "--max-occurrences": true, "--event": true, "--filter": true, "--title": true, "--tool": true, "--model": true, "--effort": true}
+	switches := map[string]bool{"--repeat": true, "--thinking": true, "--json": true}
+	seen := map[string]bool{}
+	schedule := 0
+	hasText := false
+	for i := 0; i < len(args); i++ {
+		flag := args[i]
+		if (!values[flag] && !switches[flag]) || (seen[flag] && flag != "--filter") {
+			return nil, errors.New("unsupported trigger option")
+		}
+		seen[flag] = true
+		if flag == "--in" || flag == "--at" || flag == "--event" {
+			schedule++
+		}
+		if values[flag] {
+			i++
+			if i >= len(args) || strings.TrimSpace(args[i]) == "" || len(args[i]) > 8192 || strings.ContainsAny(args[i], "\x00\r\n") || strings.HasPrefix(args[i], "--") {
+				return nil, errors.New("invalid trigger option")
+			}
+			if flag == "--text" {
+				hasText = true
+			}
+		}
+	}
+	if !hasText || schedule != 1 {
+		return nil, errors.New("invalid trigger schedule")
+	}
+	return args, nil
+}
+
 func run(args []string) error {
 	asset := len(args) == 3 && args[0] == "asset-publish"
+	create := len(args) == 3 && args[0] == "trigger-create"
+	var createArgs []string
+	if create {
+		var err error
+		createArgs, err = triggerCreateArguments(args[2])
+		if err != nil {
+			return err
+		}
+	}
 	var body string
 	if asset {
 		decoded, err := base64.RawURLEncoding.DecodeString(args[2])
@@ -106,7 +156,7 @@ func run(args []string) error {
 		body = string(decoded)
 	}
 	readArgs := args
-	if asset {
+	if asset || create {
 		readArgs = []string{"trigger-help", args[1]}
 	}
 	base, jsonOutput, err := readArguments(readArgs)
@@ -130,6 +180,14 @@ func run(args []string) error {
 		}
 	}
 	argv := []string{cli, "trigger", "list", "--base-url", base}
+	if create {
+		session := os.Getenv("AGENTOC_SESSION_ID")
+		if session == "" || len(session) > 128 || strings.Trim(session, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
+			return errors.New("invalid session identity")
+		}
+		argv = append([]string{cli, "trigger", "create"}, createArgs...)
+		argv = append(argv, "--session", session, "--base-url", base)
+	}
 	if asset {
 		session := os.Getenv("AGENTOC_SESSION_ID")
 		if session == "" || len(session) > 128 || strings.Trim(session, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
@@ -151,7 +209,7 @@ func run(args []string) error {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "AgentoC read operation failed:", err)
+		fmt.Fprintln(os.Stderr, "AgentoC scoped operation failed:", err)
 		if failure, ok := err.(*exec.ExitError); ok {
 			os.Exit(failure.ExitCode())
 		}
