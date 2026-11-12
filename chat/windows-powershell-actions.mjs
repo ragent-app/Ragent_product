@@ -495,6 +495,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
   try { ast = await parse(command, { executable }); } catch (error) {
     return { complete: false, actions: [], reason: 'PowerShell parser unavailable', error: error.message };
   }
+  if (ast.unsafeRequirements === true) return { complete: false, actions: [], reason: 'script requirements may load code or require elevation' };
   // PowerShell 7 added command-chain operators which the inbox Windows
   // PowerShell 5.1 parser tokenizes but reports as syntax errors. Split only
   // top-level literal `&&` operators reported by that native tokenizer, then
@@ -517,6 +518,13 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
         return { complete: true, actions: results.flatMap((result) => result.actions),
           parserVersion: ast.parserVersion, psVersion: ast.psVersion, chainOperator: 'AndAnd' };
       }
+    }
+  }
+  if (!ast.errors.length && ast.safeWebProbe && ['GET', 'HEAD'].includes(ast.safeWebProbe.method)) {
+    let url;
+    try { url = new URL(ast.safeWebProbe.url); } catch { url = null; }
+    if (url && ['http:', 'https:'].includes(url.protocol) && url.hostname && !url.username && !url.password) {
+      return { complete: true, actions: [{ kind: 'read', program: 'PowerShell web probe', target: null, caution: true, reason: 'verified read-only web probe' }], parserVersion: ast.parserVersion, psVersion: ast.psVersion };
     }
   }
   const expressions = Array.isArray(ast.expressions) ? ast.expressions : [];
@@ -632,6 +640,30 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     if (pureNode) { actions.push(pureNode); continue; }
     const purePython = entry.pipelineInput === false && analyzeWindowsPurePython(program, versionArgs);
     if (purePython) { actions.push(purePython); continue; }
+    if (program === 'invoke-webrequest') {
+      const args = parseArguments(entry.elements, new Set(['uri', 'method', 'usebasicparsing', 'timeoutsec', 'maximumredirection', 'erroraction', 'outfile', 'passthru']), new Set(['usebasicparsing', 'passthru']));
+      if (entry.pipelineInput !== false || !args || !args.named.has('usebasicparsing') || args.positional.length > 1 ||
+          (args.named.has('uri') && args.positional.length) || (!args.named.has('uri') && args.positional.length !== 1) ||
+          !['get', 'head'].includes(String(args.named.get('method') || 'get').toLowerCase()) ||
+          (args.named.has('erroraction') && !['stop', 'continue', 'silentlycontinue'].includes(args.named.get('erroraction').toLowerCase())) ||
+          (args.named.has('timeoutsec') && (!/^\d{1,3}$/.test(args.named.get('timeoutsec')) || Number(args.named.get('timeoutsec')) < 1 || Number(args.named.get('timeoutsec')) > 120)) ||
+          (args.named.has('maximumredirection') && (!/^\d{1,2}$/.test(args.named.get('maximumredirection')) || Number(args.named.get('maximumredirection')) > 20))) {
+        return { complete: false, actions, reason: 'web request options need review' };
+      }
+      let url;
+      try { url = new URL(args.named.get('uri') || args.positional[0]); } catch { url = null; }
+      if (!url || !['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) {
+        return { complete: false, actions, reason: 'web request target needs review' };
+      }
+      if (args.named.has('outfile')) {
+        const output = args.named.get('outfile');
+        if (!output) return { complete: false, actions, reason: 'web output target is unavailable' };
+        const checked = await analyzeWindowsFileChanges([{ path: output, kind: 'write' }], context, { fsApi });
+        if (!checked.complete) return { ...checked, actions: [...actions, ...(checked.actions || [])] };
+        actions.push(...checked.actions);
+      }
+      actions.push({ kind: 'read', program: 'PowerShell web request', target: null, caution: true, reason: 'verified web request' }); continue;
+    }
     if (entry.pipelineInput === false && isWindowsPingProbe(program, versionArgs)) {
       actions.push({ kind: 'read', program: 'ping', target: null, caution: true }); continue;
     }
@@ -887,6 +919,6 @@ export function decideWindowsPowerShellActions(result, { safeOnly = false, conse
     if (action.caution) cautionAction ||= action;
   }
   if (cautionAction && requireWorkspaceOnly) return { decision: 'review', reason: 'safe mode requires owner review for a workspace developer task', action: cautionAction, tier: 'caution' };
-  if (cautionAction) return { decision: 'allow', reason: 'verified workspace developer task', action: cautionAction, tier: 'caution' };
+  if (cautionAction) return { decision: 'allow', reason: cautionAction.reason || 'verified workspace developer task', action: cautionAction, tier: 'caution' };
   return { decision: 'allow', reason: 'verified ordinary PowerShell operations', tier: 'safe' };
 }

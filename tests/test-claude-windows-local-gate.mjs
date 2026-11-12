@@ -69,6 +69,7 @@ const outsideFileCase = process.env.AGENTOC_QA_CLAUDE_FILE_OUTSIDE === '1';
 const dotnetCase = process.env.AGENTOC_QA_CLAUDE_DOTNET === '1';
 const guidanceCase = process.env.AGENTOC_QA_CLAUDE_ELEVATION === '1';
 const readCase = process.env.AGENTOC_QA_CLAUDE_READ || '';
+const webDownload = process.env.AGENTOC_QA_WEB_DOWNLOAD === '1';
 if (readCase === 'rg-text' && !askAll) throw new Error('rg-text fixture requires the production command gate');
 const outsideCase = deleteCase && process.env.AGENTOC_QA_CLAUDE_DELETE_OUTSIDE === '1';
 const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === 'conservative-auto';
@@ -90,7 +91,7 @@ const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-
 const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-file-')) : '';
 const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-git-')) : '';
 if (outsideGitRoot) { execFileSync('git', ['init', '-q'], { cwd: outsideGitRoot, windowsHide: true }); await writeFile(path.join(outsideGitRoot, 'fixture.md'), 'outside git fixture\n'); }
-const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || (readCase === 'conditional' && (process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1' || process.env.AGENTOC_QA_BOUND_NAME_LIST === '1')) || cliReadCase === 'asset' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
+const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || (readCase === 'conditional' && (process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1' || process.env.AGENTOC_QA_BOUND_NAME_LIST === '1')) || cliReadCase === 'asset' || webDownload ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
 if (outsideReadRoot) await writeFile(path.join(outsideReadRoot, 'fixture.md'), 'local read fixture\n');
 const deleteTarget = path.join(outsideCase ? outsideRoot : protectedCase ? protectedRoot : root, unicodeFixture ? '构建 输出' : 'delete-fixture');
 const keepFile = path.join(root, 'keep-fixture.txt');
@@ -105,10 +106,10 @@ const bashTarget = deleteTarget.replace(/^([A-Za-z]):\\/, (_, drive) => `/${driv
 const deleteCommand = nativePowerShell
   ? `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`
   : `rm -rf '${bashTarget.replace(/'/g, "'\\''")}'`;
-const artifact = path.join(cliReadCase === 'asset' || readCase === 'select-string' ? outsideReadRoot : outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
+const artifact = path.join(cliReadCase === 'asset' || readCase === 'select-string' || webDownload ? outsideReadRoot : outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
 if (cliReadCase === 'asset') await writeFile(artifact, 'isolated asset fixture\n');
 const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
-if (readCase) await writeFile(artifact, readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
+if (readCase) await writeFile(artifact, webDownload ? 'before download\n' : readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
 if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); if (process.env.AGENTOC_QA_RG_HIDDEN === '1') await writeFile(path.join(root, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n'); }
 if (readCase === 'npm-task') await writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { 'qa-fixture': 'echo safe-task-fixture' } }));
 if (cwdChangeCase) { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
@@ -149,9 +150,11 @@ const guidanceAction = process.env.AGENTOC_QA_CLAUDE_ELEVATION_REGISTRY === '1'
 const guidanceScript = `${guidanceAction}; [System.IO.File]::WriteAllText('${guidanceMarker.replaceAll("'", "''")}', 'unexpected')`;
 const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(guidanceScript)}`;
 let requests = 0;
-let preflights = 0; let submissions = 0; let toolResultObserved = false; let contextOutputObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
+let preflights = 0; let submissions = 0; let webHits = 0; let webResultObserved = false; let toolResultObserved = false; let contextOutputObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
 let cliReads = 0;
 const server = createServer((req, res) => {
+  if (process.env.AGENTOC_QA_WEB_PROBE === '1' && req.method === 'HEAD' && req.url === '/fixture/probe') { webHits++; res.writeHead(204).end(); return; }
+  if (webDownload && req.method === 'GET' && req.url === '/fixture/download') { webHits++; res.writeHead(200, { 'content-type': 'text/plain' }).end('local read fixture\n'); return; }
   if (phoneQueueCase && req.url.startsWith('/api/')) {
     void (async () => {
       const url = new URL(req.url, 'http://127.0.0.1'); let status = 0; let body;
@@ -222,6 +225,7 @@ const server = createServer((req, res) => {
     const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || ['asset', 'create'].includes(cliReadCase) ? 'Bash' : 'Write');
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && ['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT)) contextOutputObserved ||= JSON.stringify(request.messages || []).includes('context=fixture-context');
+    if (!tool && process.env.AGENTOC_QA_WEB_PROBE === '1') webResultObserved ||= JSON.stringify(request.messages || []).includes('status=204');
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('ragent_request_actions');
@@ -270,6 +274,8 @@ const server = createServer((req, res) => {
 });
 await new Promise((resolve) => server.listen(phoneQueueCase ? 18667 : cliReadCase ? 18669 : 0, '127.0.0.1', resolve));
 if (readCase === 'curl') readCommand = `curl -fsS http://127.0.0.1:${server.address().port}/fixture/read`;
+if (webDownload) readCommand = `Invoke-WebRequest -Uri 'http://127.0.0.1:${server.address().port}/fixture/download' -UseBasicParsing -OutFile '${artifact.replaceAll("'", "''")}'; Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}'`;
+if (process.env.AGENTOC_QA_WEB_PROBE === '1') readCommand = `try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:${server.address().port}/fixture/probe' -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop; "local read fixture status=$($r.StatusCode)" } catch { "error=$($_.Exception.Message)" }`;
 const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
   XDG_CACHE_HOME: path.join(root, 'cache'), XDG_CONFIG_HOME: path.join(root, 'xdg-config'),
   CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.address().port}`,
@@ -440,6 +446,8 @@ try {
     if (readCase === 'git-c-outside' && askAll) assert.equal(approvals, 1, 'ask rule must route the outside Git query through Ragent');
     if (readCase === 'relative-file-tool') assert.equal(approvals, 1, 'fixture must exercise the file-tool approval callback');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
+    if (webDownload) { assert.equal(webHits, 1); assert.equal(approvals, 1); }
+    if (process.env.AGENTOC_QA_WEB_PROBE === '1') { assert.ok(webResultObserved, 'actual Claude receives the HEAD status'); assert.equal(webHits, 1); assert.equal(approvals, 1); }
     if (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT)) { assert.ok(contextOutputObserved, 'actual Claude receives the context output'); assert.equal(approvals, 1); }
     if (cwdChangeCase) assert.ok(process.platform === 'win32' ? cwdMarkerCount >= 1 && rootMarkerCount >= 1 : cwdMarkerCount >= 2,
       'both commands must succeed with the provider working-directory behavior');

@@ -83,6 +83,7 @@ if (managedRipgrep) {
   await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(path.join(rgFixture, '.ignore'), '!.env\n'); await writeFile(rgConfig, '--hidden\n');
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
+const webDownload = process.env.AGENTOC_QA_WEB_DOWNLOAD === '1';
 if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
 if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'output-filters', 'where-filter', 'system-copy', 'select-string', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || (process.env.AGENTOC_QA_HOOK_REWRITE === '1' && !managedGlob && !managedList) || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (managedGlob && (fileCommand !== 'select-string' || process.env.AGENTOC_QA_SEARCH_GLOB !== '1' || process.env.AGENTOC_QA_HOOK_REWRITE !== '1')) throw new Error('managed wildcard fixture requires a hooked wildcard search');
@@ -91,9 +92,9 @@ if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== '
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
 if (outsideWrite && fileCommand !== 'dotnet') throw new Error('outside-write fixture requires the fixed dotnet command');
-const outsideWriteRoot = outsideWrite || fileCommand === 'select-string' || managedList || (fileCommand === 'read-null' && process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1') ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
+const outsideWriteRoot = outsideWrite || fileCommand === 'select-string' || managedList || (fileCommand === 'read-null' && process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1') || webDownload ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
 const fileFixture = path.join(outsideWriteRoot || home, 'ordinary-fixture.txt');
-if (fileCommand) await writeFile(fileFixture, 'fixture content');
+if (fileCommand) await writeFile(fileFixture, webDownload ? 'before download' : 'fixture content');
 if (fileCommand === 'git-c') { await mkdir(alternateCwd); execFileSync('git', ['init', '-q'], { cwd: alternateCwd, windowsHide: true }); await writeFile(path.join(alternateCwd, 'ordinary-fixture.txt'), 'fixture content'); }
 if (['git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) execFileSync('git', ['init', '-q'], { cwd: home, windowsHide: true });
 if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
@@ -101,7 +102,7 @@ if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture'], { cwd: home, windowsHide: true });
   if (fileCommand === 'git-diff-file') await writeFile(fileFixture, 'changed fixture');
 }
-const safeFileCommand = fileCommand === 'rename'
+let safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
   : fileCommand === 'read-null' ? process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
     ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(fileFixture) + path.sep).replace(/'/g, "''")}' + '${path.basename(fileFixture).replace(/'/g, "''")}')` : `'${fileFixture.replace(/'/g, "''")}'`}; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`
@@ -136,7 +137,7 @@ if (managedDelete) {
 }
 const productionStartup = (managedInstall || managedDelete || managedElevation || managedRipgrep || managedAsset || managedGlob || managedList) && process.env.AGENTOC_QA_PRODUCTION_STARTUP === '1';
 const failSecondPreflight = managedInstall && process.env.AGENTOC_QA_PREFLIGHT_FAIL_SECOND === '1';
-let preflights = 0; let submissions = 0;
+let preflights = 0; let submissions = 0; let webHits = 0;
 let providerRequests = 0;
 const fixtureSessionId = phoneQueueCase ? phoneSessionId : 'fixture-session';
 if (phoneQueueCase) await withSessionsMetaMutation(async (rows, save) => { rows.push({ id: phoneSessionId, name: 'Samsung real Codex fixture', folder: home, tool: 'codex', sessionPlane: 'user', sessionClass: 'ROOT_LEADERSHIP', userAddressable: true }); await save(rows, { immediate: true, durable: true }); });
@@ -144,6 +145,8 @@ const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 
   manifest: { sessionId: fixtureSessionId, requestId: 'fixture-request', folder: home, tool: 'codex', runtimeFamily: 'codex-app-server-json', prompt: 'fixture', options: phoneQueueCase ? { riskMode: 'recommended' } : {} } });
 if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
 const server = createServer((req, res) => {
+  if (process.env.AGENTOC_QA_WEB_PROBE === '1' && req.method === 'HEAD' && req.url === '/fixture/probe') { webHits++; res.writeHead(204).end(); return; }
+  if (webDownload && req.method === 'GET' && req.url === '/fixture/download') { webHits++; res.writeHead(200, { 'content-type': 'text/plain' }).end('fixture content'); return; }
   if (phoneQueueCase && req.url.startsWith('/api/')) {
     void (async () => {
       const url = new URL(req.url, 'http://127.0.0.1'); let status = 0; let body;
@@ -236,6 +239,8 @@ const server = createServer((req, res) => {
 });
 await new Promise(resolve => server.listen(phoneQueueCase ? 18667 : managedAsset ? 18669 : 0, '127.0.0.1', resolve));
 const port = server.address().port;
+if (webDownload) safeFileCommand = `Invoke-WebRequest -Uri 'http://127.0.0.1:${port}/fixture/download' -UseBasicParsing -OutFile '${fileFixture.replace(/'/g, "''")}'; Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}'`;
+if (process.env.AGENTOC_QA_WEB_PROBE === '1') safeFileCommand = `try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:${port}/fixture/probe' -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop; "fixture content status=$($r.StatusCode)" } catch { "error=$($_.Exception.Message)" }`;
 const hookExperiment = process.env.AGENTOC_QA_HOOK_REWRITE === '1';
 const hookShouldRun = hookExperiment && process.env.AGENTOC_QA_HOOK_TRUST !== '0';
 const hookShouldFail = hookShouldRun && process.env.AGENTOC_QA_HOOK_FAIL === '1';
@@ -503,7 +508,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
         : fileCommand === 'system-copy' ? (await readFile(fileFixture).catch(() => Buffer.alloc(0))).equals(await readFile(path.join(process.env.SystemRoot, 'win.ini')))
         : ['conditional-write', 'output-filters'].includes(fileCommand) ? (await readFile(fileFixture, 'utf8').catch(() => '')).replaceAll('\r\n', '\n') === 'changed fixture\n'
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
-    if (msg.params.item.exitCode !== 0 || !fileResult || (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT) && !String(msg.params.item.aggregatedOutput || '').includes('context=fixture-context')) || (['read-null', 'select-string'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').replace(/\r?\n/g, '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(triggerHelp ? 'trigger <command>' : managedTrigger ? 'fixture-trigger' : managedAsset ? 'fixture-asset' : managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || ((managedInstall || managedAsset) && submissions !== (triggerHelp ? 0 : 1))) {
+    if (msg.params.item.exitCode !== 0 || !fileResult || (process.env.AGENTOC_QA_WEB_PROBE === '1' && (webHits !== 1 || !String(msg.params.item.aggregatedOutput || '').includes('status=204'))) || (webDownload && (webHits !== 1 || await readFile(fileFixture, 'utf8').catch(() => '') !== 'fixture content')) || (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT) && !String(msg.params.item.aggregatedOutput || '').includes('context=fixture-context')) || (['read-null', 'select-string'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').replace(/\r?\n/g, '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(triggerHelp ? 'trigger <command>' : managedTrigger ? 'fixture-trigger' : managedAsset ? 'fixture-asset' : managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || ((managedInstall || managedAsset) && submissions !== (triggerHelp ? 0 : 1))) {
       process.stderr.write(`approved harmless command failed: exit=${msg.params.item.exitCode} output=${String(msg.params.item.aggregatedOutput || '').slice(0, 1200)}\n`); process.exitCode = 1;
     } else process.stdout.write(fileCommand ? `codex-windows-local-gate: ${fileCommand} executed on isolated fixture\n` : triggerHelp ? 'codex-windows-local-gate: controlled trigger help returned\n' : managedTrigger ? 'codex-windows-local-gate: controlled trigger creation reached isolated service\n' : managedAsset ? 'codex-windows-local-gate: controlled asset publication reached isolated service\n' : managedDelete ? 'codex-windows-local-gate: bound deletion used the approved absolute target\n' : managedInstall ? 'codex-windows-local-gate: managed install bridge reached mock control plane\n' : hookShouldFail ? 'codex-windows-local-gate: failed hook; original passed gate\n' : hookExpectedRun ? 'codex-windows-local-gate: hook rewrote approved harmless command\n' : hookExperiment ? 'codex-windows-local-gate: untrusted hook skipped; original passed gate\n' : 'codex-windows-local-gate: auto-allow executed harmless command\n');
     child.kill(); server.close();

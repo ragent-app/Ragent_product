@@ -157,6 +157,99 @@ function Test-InSafeContextExpansion($node) {
 $boundPaths = @{}
 $boundAssignmentOffsets = @{}
 $reservedVariables = @('args','consolefilename','enabledexperimentalfeatures','error','errorview','event','executioncontext','false','foreach','formatenumerationlimit','home','host','input','iscoreclr','islinux','ismacos','iswindows','lastexitcode','matches','maximumaliascount','maximumdrivecount','maximumerrorcount','maximumfunctioncount','maximumhistorycount','maximumvariablecount','myinvocation','nestedpromptlevel','null','ofs','outputencoding','pid','profile','pwd','sender','shellid','stacktrace','switch','this','true','logcommandhealthevent','logcommandlifecycleevent','logenginehealthevent','logenginelifecycleevent','logproviderhealthevent','logproviderlifecycleevent')
+function Test-UnsafeScriptRequirements($root) {
+  $requirements = $root.ScriptRequirements
+  if ($null -eq $requirements) { return $false }
+  if ($requirements.IsElevationRequired) { return $true }
+  foreach ($name in @('RequiredModules','RequiredAssemblies','RequiresPSSnapIns')) {
+    $property = $requirements.PSObject.Properties[$name]
+    if ($null -ne $property -and $null -ne $property.Value -and @($property.Value).Count -gt 0) { return $true }
+  }
+  return $false
+}
+# Recognize a complete, bounded HEAD/GET probe with status-only output.
+# The inspected AST is never executed by this parser.
+function Get-OnlyOutputExpression($statement) {
+  if ($statement -isnot [System.Management.Automation.Language.PipelineAst] -or @($statement.PipelineElements).Count -ne 1) { return $null }
+  $element = $statement.PipelineElements[0]
+  if ($element -isnot [System.Management.Automation.Language.CommandExpressionAst] -or @($element.Redirections).Count -ne 0) { return $null }
+  return $element.Expression
+}
+function Test-WebProbeMember($expr, [string]$variable, [bool]$isCatch) {
+  if ($expr -isnot [System.Management.Automation.Language.MemberExpressionAst] -or
+      $expr -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -or $expr.Static -or
+      $expr.Member -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { return $false }
+  if ($isCatch) {
+    if ([string]$expr.Member.Value -ine 'Message') { return $false }
+    $inner = $expr.Expression
+    return $inner -is [System.Management.Automation.Language.MemberExpressionAst] -and
+      $inner -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] -and -not $inner.Static -and
+      $inner.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and [string]$inner.Member.Value -ieq 'Exception' -and
+      $inner.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and -not $inner.Expression.Splatted -and
+      [string]$inner.Expression.VariablePath.UserPath -iin @('_','PSItem')
+  }
+  return [string]$expr.Member.Value -iin @('StatusCode','StatusDescription') -and
+    $expr.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and -not $expr.Expression.Splatted -and
+    [string]$expr.Expression.VariablePath.UserPath -ieq $variable
+}
+function Test-WebProbeOutput($statement, [string]$variable, [bool]$isCatch) {
+  $expr = Get-OnlyOutputExpression $statement
+  if ($null -eq $expr) { return $false }
+  if ($expr -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return $true }
+  if ($expr -is [System.Management.Automation.Language.MemberExpressionAst]) { return (Test-WebProbeMember $expr $variable $isCatch) }
+  if ($expr -isnot [System.Management.Automation.Language.ExpandableStringExpressionAst]) { return $false }
+  foreach ($part in @($expr.NestedExpressions)) {
+    if ($part -isnot [System.Management.Automation.Language.SubExpressionAst] -or
+        @($part.SubExpression.Statements).Count -ne 1) { return $false }
+    $value = Get-OnlyOutputExpression $part.SubExpression.Statements[0]
+    if (-not (Test-WebProbeMember $value $variable $isCatch)) { return $false }
+  }
+  return $true
+}
+function Get-SafeWebProbe($root) {
+  if ($null -ne $root.ParamBlock -or $null -ne $root.BeginBlock -or $null -ne $root.ProcessBlock -or
+      $null -ne $root.DynamicParamBlock -or $null -ne $root.CleanBlock -or (Test-UnsafeScriptRequirements $root) -or
+      ($null -ne $root.UsingStatements -and @($root.UsingStatements).Count -ne 0) -or
+      ($null -ne $root.Attributes -and @($root.Attributes).Count -ne 0) -or $null -eq $root.EndBlock -or @($root.EndBlock.Statements).Count -ne 1 -or ($null -ne $root.EndBlock.Traps -and @($root.EndBlock.Traps).Count -ne 0)) { return $null }
+  $probe = $root.EndBlock.Statements[0]
+  if ($probe -isnot [System.Management.Automation.Language.TryStatementAst] -or $null -ne $probe.Finally -or
+      @($probe.CatchClauses).Count -ne 1 -or @($probe.CatchClauses[0].CatchTypes).Count -ne 0 -or
+      @($probe.Body.Statements).Count -ne 2 -or ($null -ne $probe.Body.Traps -and @($probe.Body.Traps).Count -ne 0) -or
+      @($probe.CatchClauses[0].Body.Statements).Count -ne 1 -or ($null -ne $probe.CatchClauses[0].Body.Traps -and @($probe.CatchClauses[0].Body.Traps).Count -ne 0)) { return $null }
+  $assign = $probe.Body.Statements[0]
+  if ($assign -isnot [System.Management.Automation.Language.AssignmentStatementAst] -or $assign.Operator.ToString() -ne 'Equals' -or
+      $assign.Left -isnot [System.Management.Automation.Language.VariableExpressionAst] -or $assign.Left.Splatted -or
+      $assign.Right -isnot [System.Management.Automation.Language.PipelineAst] -or @($assign.Right.PipelineElements).Count -ne 1) { return $null }
+  $variable = [string]$assign.Left.VariablePath.UserPath
+  if ($variable -notmatch '^[a-z_][a-z0-9_]*$' -or $variable -iin $reservedVariables -or
+      $variable -imatch '^ps' -or $variable -imatch 'preference$') { return $null }
+  $command = $assign.Right.PipelineElements[0]
+  if ($command -isnot [System.Management.Automation.Language.CommandAst] -or $command.GetCommandName() -ine 'Invoke-WebRequest' -or
+      $command.InvocationOperator.ToString() -ne 'Unknown' -or @($command.Redirections).Count -ne 0) { return $null }
+  $elements = @($command.CommandElements); $options = @{}
+  for ($i = 1; $i -lt $elements.Count; $i++) {
+    $option = $elements[$i]
+    if ($option -isnot [System.Management.Automation.Language.CommandParameterAst]) { return $null }
+    $key = ([string]$option.ParameterName).ToLowerInvariant()
+    if ($key -notin @('uri','method','usebasicparsing','timeoutsec','erroraction') -or $options.ContainsKey($key)) { return $null }
+    if ($key -eq 'usebasicparsing') { if ($null -ne $option.Argument) { return $null }; $options[$key] = $true; continue }
+    $value = $option.Argument
+    if ($null -eq $value) { $i++; if ($i -ge $elements.Count) { return $null }; $value = $elements[$i] }
+    if ($value -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -and
+        $value -isnot [System.Management.Automation.Language.ConstantExpressionAst]) { return $null }
+    $options[$key] = [string]$value.Value
+  }
+  if (-not $options.ContainsKey('uri') -or -not $options.ContainsKey('method') -or -not $options.ContainsKey('usebasicparsing') -or
+      $options['method'] -inotmatch '^(GET|HEAD)$' -or
+      ($options.ContainsKey('erroraction') -and $options['erroraction'] -inotmatch '^(Stop|Continue|SilentlyContinue)$') -or
+      ($options.ContainsKey('timeoutsec') -and ($options['timeoutsec'] -notmatch '^\d{1,3}$' -or [int]$options['timeoutsec'] -lt 1 -or [int]$options['timeoutsec'] -gt 120))) { return $null }
+  $uri = $null
+  if (-not [uri]::TryCreate($options['uri'], [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -notin @('http','https') -or
+      -not $uri.Host -or $uri.UserInfo) { return $null }
+  if (-not (Test-WebProbeOutput $probe.Body.Statements[1] $variable $false) -or
+      -not (Test-WebProbeOutput $probe.CatchClauses[0].Body.Statements[0] $variable $true)) { return $null }
+  return @{ url = [string]$uri.AbsoluteUri; method = ([string]$options['method']).ToUpperInvariant() }
+}
 function Get-LiteralPathText($node, [int]$depth) {
   if ($null -eq $node -or $depth -gt 8) { return $null }
   if ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return [string]$node.Value }
@@ -259,7 +352,7 @@ $dynamicNodes = @($ast.FindAll({ param($n)
   ($n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and @($n.NestedExpressions).Count -gt 0 -and -not (Test-SafeContextExpansion $n)))
 }, $true) | ForEach-Object { $_.GetType().Name })
 $errorMessages = @($errors | ForEach-Object { $_.Message })
-@{ commands = $commands; expressions = $expressions; dynamicNodes = $dynamicNodes; errors = $errorMessages; chainOperators = $chainOperators; assignmentCount = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)).Count; psVersion = $PSVersionTable.PSVersion.ToString() } | ConvertTo-Json -Depth 12 -Compress
+@{ commands = $commands; expressions = $expressions; dynamicNodes = $dynamicNodes; errors = $errorMessages; unsafeRequirements = (Test-UnsafeScriptRequirements $ast); safeWebProbe = (Get-SafeWebProbe $ast); chainOperators = $chainOperators; assignmentCount = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)).Count; psVersion = $PSVersionTable.PSVersion.ToString() } | ConvertTo-Json -Depth 12 -Compress
 `;
 
 export const WINDOWS_POWERSHELL_AST_VERSION = 'powershell-native-ast/v1';
