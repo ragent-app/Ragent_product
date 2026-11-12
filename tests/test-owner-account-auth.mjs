@@ -76,6 +76,7 @@ async function mockFetch(url, options = {}) {
         iss: 'https://accounts.example.test',
         aud: created.instance.instanceId,
         sub: 'acct_owner_1',
+        ...(created.purpose === 'bind' ? { provider: 'demo' } : {}),
         purpose: created.purpose,
         tx: created.transactionId,
         exp: Math.floor(now / 1000) + 60,
@@ -195,7 +196,7 @@ try {
     assert.deepEqual(bound, { purpose: 'bind', accountId: 'acct_owner_1' });
     assert.deepEqual(await getOwnerAccountBinding(), {
       accountId: 'acct_owner_1',
-      provider: 'google',
+      provider: 'demo',
       boundAt: new Date(now).toISOString(),
       deviceAlias: 'Pinggu',
       plan: 'free',

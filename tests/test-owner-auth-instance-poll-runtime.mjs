@@ -147,6 +147,7 @@ async function mockFetch(url, options = {}) {
         iss: 'https://accounts.example.test',
         aud: record.instance.instanceId,
         sub: 'acct_owner_1',
+        ...(record.purpose === 'bind' ? { provider: 'demo' } : {}),
         purpose: record.purpose,
         tx: record.transactionId,
         iat: Math.floor(now / 1000),
@@ -255,7 +256,7 @@ try {
   await check('重试后领取断言并完成本地绑定（收敛一次）', async () => {
     assert.equal(transactionFile().entries[bindStart.transactionId].pollState, 'completed');
     assert.deepEqual(await getOwnerAccountBinding(), {
-      accountId: 'acct_owner_1', provider: 'google', boundAt: new Date(now).toISOString(), deviceAlias: 'Pinggu',
+      accountId: 'acct_owner_1', provider: 'demo', boundAt: new Date(now).toISOString(), deviceAlias: 'Pinggu',
       plan: 'free', limits: { phones: 1, computers: 1 },
     });
   });
