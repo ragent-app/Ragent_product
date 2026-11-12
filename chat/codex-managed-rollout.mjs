@@ -103,11 +103,15 @@ export async function findAccountCodexRollout(homeRoots, accountId, threadId) {
         ? canonicalRoot.toLowerCase() === resolve(root).toLowerCase()
         : canonicalRoot === resolve(root);
       if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || !homeStat.isDirectory() || homeStat.isSymbolicLink() || !sameRoot) throw new Error('Invalid account home');
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw Object.assign(new Error('Could not verify an account rollout source'), { code: 'CODEX_ROLLOUT_SOURCE_INVALID', cause: error });
+    }
+    try {
       const stat = await lstat(authPath);
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Invalid auth file');
       auth = JSON.parse(await readFile(authPath, 'utf8'));
     } catch (error) {
-      if (error?.code === 'ENOENT') continue;
       throw Object.assign(new Error('Could not verify the account of a rollout source'), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED', cause: error });
     }
     const tokens = auth?.tokens || {};
