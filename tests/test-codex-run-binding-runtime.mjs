@@ -69,4 +69,10 @@ test('native preparation writes distinct account-bound records for concurrent ru
   assert.equal(verifyCodexRunBinding(otherBinding, { runId: 'run_binding_third', providerId: 'profile-b', accountId: 'account-a' }), true);
   const ownership = await resolveCanonicalCodexAccountHome({ ...account, candidateHomeRoot: candidate, includeSources: true });
   assert.deepEqual(ownership.aliases, [candidate]);
+  await secretStore.writeSecret('credential', { authType: 'oauth', tokens: { access_token: 'other-access', refresh_token: 'other-refresh', account_id: 'account-b' } });
+  const switched = await prepareNativeRunProviderHome('run_binding_other_account', manifest, options);
+  assert.equal(switched.ok, true);
+  assert.notEqual(switched.homeDir, first.homeDir);
+  assert.equal(JSON.parse(await readFile(join(switched.codexHomeDir, 'auth.json'), 'utf8')).tokens.account_id, 'account-b');
+  assert.equal(JSON.parse(await readFile(join(first.codexHomeDir, 'auth.json'), 'utf8')).tokens.account_id, 'account-a');
 });

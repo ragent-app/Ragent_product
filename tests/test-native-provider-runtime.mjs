@@ -704,16 +704,18 @@ try {
   }));
   await new Promise((resolve, reject) => fakeLiveBroker.once('error', reject).listen(brokerSocket, resolve));
   try {
-    const blocked = await prepareNativeRunProviderHome('run_active_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+    const switched = await prepareNativeRunProviderHome('run_active_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
       { configDir, providerHomesRoot:oauthHomeRoot });
-    assert.equal(blocked.reason, 'codex-broker-account-changed');
+    assert.equal(switched.ok, true, switched.error || switched.reason);
+    assert.notEqual(switched.codexHomeDir, oauthCodexHome);
     assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.account_id, 'account-a');
   } finally { await new Promise(resolve => fakeLiveBroker.close(resolve)); }
   const switchedAccount = await prepareNativeRunProviderHome('run_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
     { configDir, providerHomesRoot:oauthHomeRoot });
   assert.equal(switchedAccount.ok, true, switchedAccount.error || switchedAccount.reason);
   assert.equal((await secretStore.resolveSecret('cred-oauth')).tokens.access_token, 'at-new-account');
-  assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.account_id, 'account-other');
+  assert.equal(JSON.parse(readFileSync(join(switchedAccount.codexHomeDir, 'auth.json'), 'utf8')).tokens.account_id, 'account-other');
+  assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.account_id, 'account-a');
   await secretStore.writeSecret('cred-oauth', { authType: 'oauth',
     tokens: { access_token: 'at-3', refresh_token: 'rt-3', account_id: 'account-a', expiresAt: 3000 } });
   await prepareNativeRunProviderHome('run_account_restore', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
@@ -767,7 +769,7 @@ try {
   assert.equal(preparedNativeOnly.oauthOwner, 'agentoc');
   assert.equal(
     JSON.parse(readFileSync(join(preparedNativeOnly.homeDir, 'codex', 'auth.json'), 'utf8')).tokens.refresh_token,
-    'rt-3',
+    'rt-old-refresh',
   );
   // The old external-owner path must fail closed even when a caller explicitly
   // supplies ~/.codex/auth.json. Native Codex OAuth is machine-local and the
