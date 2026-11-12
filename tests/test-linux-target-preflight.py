@@ -8,8 +8,8 @@ import subprocess
 import sys
 import tempfile
 
-if os.geteuid() != 0 or len(sys.argv) != 2:
-    raise SystemExit('requires root and the preflight executable path')
+if os.geteuid() != 0 or len(sys.argv) not in (2, 3):
+    raise SystemExit('requires root, the preflight executable path and optional binding module')
 binary = os.path.abspath(sys.argv[1])
 root = pathlib.Path(tempfile.mkdtemp(prefix='ragent-target-preflight-', dir='/var/lib'))
 os.chmod(root, 0o700)
@@ -40,6 +40,17 @@ try:
     assert evidence['inode'] == str(stat.st_ino) and evidence['device'] == str(stat.st_dev)
     assert evidence['parentInode'] == str(root.stat().st_ino)
     assert evidence['size'] == str(len(b'unchanged')) and target.read_bytes() == b'unchanged'
+    if len(sys.argv) == 3:
+        script = '''import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+const { createLinuxTargetBinding, hashLinuxTargetBinding } = await import(pathToFileURL(process.argv[1]));
+const facts = JSON.parse(readFileSync(0, 'utf8'));
+const bound = createLinuxTargetBinding(process.argv[2], facts);
+process.stdout.write(JSON.stringify({ inode: bound.inode, hash: hashLinuxTargetBinding(process.argv[2], facts) }));'''
+        checked = subprocess.run(['node', '--input-type=module', '-e', script, os.path.abspath(sys.argv[2]), str(target)],
+                                 input=json.dumps(evidence), capture_output=True, text=True, timeout=10, check=True)
+        bound = json.loads(checked.stdout)
+        assert bound['inode'] == evidence['inode'] and len(bound['hash']) == 64
     run('relative/path', False, 'INVALID_PATH')
     run(str(root) + '/../etc/passwd', False, 'INVALID_PATH')
     run(root, False, 'UNTRUSTED_TARGET')
