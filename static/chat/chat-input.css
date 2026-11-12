@@ -570,7 +570,7 @@ body.composer-fullscreen-open .messages::-webkit-scrollbar {
 }
 
 
-/* WeChat-style expand affordance: floats over the textarea top-right once
+/* Expand affordance: floats over the textarea top-right once
    the input reaches its auto-grow cap. Hidden by default; the full-screen
    module reveals it on mobile only. It sits ON TOP of the typed text — the
    textarea does not yield its right edge — so the glass circle carries a
@@ -624,7 +624,7 @@ body.composer-fullscreen-open .messages::-webkit-scrollbar {
   height: 20px;
 }
 
-/* Full-screen composer (WeChat-style expanded input). Fixed overlay above
+/* Full-screen composer for expanded input. Fixed overlay above
    every sheet; follows the visual viewport so the software keyboard never
    covers the actions row. */
 .composer-fullscreen {

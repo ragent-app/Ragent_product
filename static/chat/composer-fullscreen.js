@@ -1,4 +1,4 @@
-// Full-screen composer: WeChat-style expanded input for long drafts on
+// Full-screen composer: expanded input for long drafts on
 // mobile. Self-contained module — it talks to the main composer only through
 // DOM state (msgInput / sendBtn) and dispatched input events, so compose.js
 // needs just one optional sync hook after auto-resize. Degrades to a silent
@@ -39,7 +39,7 @@
   let focusScopeDeactivate = null;
   let focusBeforeOpen = null;
   // Android back button / gesture: handled by the shared back-handler
-  // (first back collapses, second back leaves the page — WeChat-style).
+  // (first back collapses, second back leaves the page).
   let backEntryId = null;
 
   // Re-parenting bookkeeping for the plus/model controls. Each entry remembers

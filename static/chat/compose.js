@@ -1812,7 +1812,7 @@ const INPUT_MIN_LINES = 1;
 // Desktop/tablet cap from chat-responsive.css (min-width: 768px);
 // mobile uses INPUT_AUTO_MAX_LINES_MOBILE instead.
 const INPUT_AUTO_MAX_LINES = 8;
-// WeChat-style cap on mobile: auto-grow stops at 5 lines and the
+// On mobile, auto-grow stops at 5 lines and the
 // full-screen composer (composer-fullscreen.js) takes over. Must stay
 // aligned with chat-responsive.css `.input-row textarea` max-height.
 const INPUT_AUTO_MAX_LINES_MOBILE = 5;

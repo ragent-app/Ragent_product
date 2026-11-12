@@ -454,7 +454,7 @@
     box-shadow: 0 4px 12px rgba(16, 21, 39, 0.16);
   }
 
-  /* WeChat-style: cap auto-grow at 5 lines on mobile; the expand button
+  /* Cap auto-grow at 5 lines on mobile; the expand button
      (revealed by the full-screen module) takes over beyond that. The
      button floats over the text's top-right corner instead of pushing
      the text sideways (user decision 2026-08-05). */

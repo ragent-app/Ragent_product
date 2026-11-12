@@ -2,7 +2,7 @@
 // button/gesture through history, so every open overlay (menu, popover,
 // sheet, dialog) registers here: each active layer owns one history entry
 // tagged with its id, and popstate consumes the matching entry by invoking
-// its onBack (WeChat-style: first back closes the top layer, further
+// its onBack (first back closes the top layer, further
 // backs leave the page). Layers register on open and unregister on close;
 // unregistering a top layer unwinds its history entry. Falls back to a
 // silent no-op where history is unavailable (sandboxed WebViews); Esc
