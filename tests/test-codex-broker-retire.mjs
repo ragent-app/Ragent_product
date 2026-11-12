@@ -75,6 +75,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
   client.send({ id: 1, method: 'turn/start', params: { threadId: 'fixture-thread' } });
   assert.equal((await client.next()).id, 1);
+  const concurrent = await openSocket(socketPath);
+  concurrent.send({ type: 'agentoc-codex-broker-retire', expectedAccountDigest: codexBrokerAccountDigest('fixture-account') });
+  assert.equal((await concurrent.next()).accepted, false, 'cannot retire while another client is connected');
+  concurrent.socket.end();
   client.socket.end();
   await delay(100);
   const control = await openSocket(socketPath);
