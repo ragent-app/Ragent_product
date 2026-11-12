@@ -517,6 +517,7 @@ export async function handleOwnerAuthRoutes({
   const query = new URLSearchParams(qIndex >= 0 ? pathname.slice(qIndex + 1) : '');
   if (!path) return false;
   const isNativeApi = path.startsWith('/v1/owner-auth/native/');
+  const isDemoStatusApi = path === '/v1/owner-auth/demo-status';
   const isDiscoveryApi = path === '/v1/owner-auth/discovery';
   const isBindingAuthorityApi = path === '/v1/owner-auth/instances/authority';
   const isTurnConnectionApi = ['/v1/owner-auth/turn/connections/reserve', '/v1/owner-auth/turn/connections/release', '/v1/owner-auth/turn/connections/handoff/commit'].includes(path);
@@ -532,9 +533,13 @@ export async function handleOwnerAuthRoutes({
     '/v1/owner-auth/account/turn/connections/release'].includes(path)
     || /^\/v1\/owner-auth\/account\/devices\/[^/]+\/(rename|revoke)$/.test(path);
   const isAccountFileUploadQuotaApi = /^\/v1\/owner-auth\/instances\/uploads\/(reserve|complete|release)$/.test(path);
-  if (!trimString(googleWebClientId) && !isNativeApi && !isDiscoveryApi && !isBindingAuthorityApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi && !isAccountFileUploadQuotaApi) return false;
+  if (!trimString(googleWebClientId) && !isNativeApi && !isDemoStatusApi && !isDiscoveryApi && !isBindingAuthorityApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi && !isAccountFileUploadQuotaApi) return false;
 
   try {
+    if (isDemoStatusApi && req.method === 'GET') {
+      jsonResponse(res, 200, { status: broker.demoSignInStatus || 'unavailable' });
+      return true;
+    }
     if (isBindingAuthorityApi && req.method === 'POST') {
       const result = await broker.readBindingAuthority(await readJsonBody(req));
       jsonResponse(res, 200, result);

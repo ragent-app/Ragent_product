@@ -11,6 +11,7 @@ const broker=createOwnerAuthBroker({store:{mutate:async fn=>fn(state)},demoAccou
  verifyGoogleCredential:async()=>{throw new Error('Password login must not invoke Google');},
  resolveAccount:async()=>{throw new Error('Must not manufacture Google identity');},signAssertion:async claim=>{claims.push(claim);return 'fixture-signed-assertion';}});
 assert.equal(broker.canSignInDemoInstances,true);
+assert.equal(broker.demoSignInStatus,'configured');
 for(let i=0;i<2;i++){
  const key=generateKeyPairSync('ed25519');const publicKey=key.publicKey.export({type:'spki',format:'pem'}).toString();
  const instance={instanceId:'inst_password_fixture_'+i,algorithm:'ed25519',publicKey,keyFingerprint:createInstancePublicKeyFingerprint(publicKey)};

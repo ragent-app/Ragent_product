@@ -4193,6 +4193,9 @@ export function createOwnerAuthBroker({
 
   return {
     canSignInDemoInstances: demoAccountAuth?.instanceAccess === 'account',
+    // This reports policy availability, not the health of any target instance.
+    demoSignInStatus: !demoAccountAuth ? 'unconfigured'
+      : demoAccountAuth.instanceAccess === 'account' ? 'configured' : 'unavailable',
     start,
     readBindingAuthority,
     beginBrowser,

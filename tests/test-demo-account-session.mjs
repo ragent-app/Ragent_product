@@ -28,6 +28,7 @@ function fixture(enabled = true, accessMode = "restricted") {
   const createBroker = demoAccountAuth => createOwnerAuthBroker({ store, clock: () => now, demoAccountAuth,
     verifyGoogleCredential: async () => { googleCalls++; return { sub: 'google-owner' }; },
     resolveAccount: async () => ({ accountId: 'acct_google_personal' }), signAssertion: async () => '' });
+  assert.equal(createBroker(null).demoSignInStatus, 'unconfigured');
   return { broker: createBroker(enabled ? auth : null), disabledBroker: () => createBroker(null),
     state: () => state, googleCalls: () => googleCalls };
 }
