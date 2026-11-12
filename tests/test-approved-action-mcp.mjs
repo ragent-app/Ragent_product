@@ -103,16 +103,16 @@ const child = spawn(process.execPath, [scriptPath], {
 });
 const request = readResponses(child);
 const initialize = await request(1, 'initialize');
-assert.equal(initialize.result.serverInfo.name, 'agentoc-approved-actions');
+assert.equal(initialize.result.serverInfo.name, 'ragent-approved-actions');
 const tools = await request(2, 'tools/list');
 assert.equal(tools.result.tools.length, 2);
-assert.equal(tools.result.tools[0].name, 'agentoc_request_actions');
+assert.equal(tools.result.tools[0].name, 'ragent_request_actions');
 assert.match(tools.result.tools[0].description, /executing status is not completion/);
 assert.match(tools.result.tools[0].description, /statusOnly=true and the same requestKey and identical action/);
-assert.equal(tools.result.tools[1].name, 'agentoc_create_agent');
+assert.equal(tools.result.tools[1].name, 'ragent_create_agent');
 assert.doesNotMatch(JSON.stringify(tools), /run-secret-token/);
 const call = await request(3, 'tools/call', {
-  name: 'agentoc_request_actions',
+  name: 'ragent_request_actions',
   arguments: {
     requestKey: 'mcp-fixture-1',
     actions: [{ command: 'systemctl is-active nginx', cwd: '/tmp', description: 'Check nginx' }],
@@ -125,7 +125,7 @@ assert.equal(received[0].headers['x-agentoc-approved-action-token'], 'run-secret
 assert.equal(received[0].body.runId, 'r_fixture');
 assert.equal(received[0].body.actions[0].command, 'systemctl is-active nginx');
 const productCall = await request(4, 'tools/call', {
-  name: 'agentoc_create_agent',
+  name: 'ragent_create_agent',
   arguments: {
     requestKey: 'mcp-agent-create-1',
     reason: 'Owner requested a reusable report workflow',
@@ -146,7 +146,7 @@ assert.equal(received[1].body.actions[0].agent.name, 'Report Agent');
 assert.equal(received[1].body.sessionId, 's_fixture');
 assert.doesNotMatch(JSON.stringify(received[1].body), /run-secret-token/);
 const deniedCall = await request(6, 'tools/call', {
-  name: 'agentoc_request_actions',
+  name: 'ragent_request_actions',
   arguments: {
     requestKey: 'mcp-fixture-denied',
     actions: [{ command: 'systemctl restart nginx', cwd: '/tmp', description: 'Restart nginx' }],
@@ -155,20 +155,20 @@ const deniedCall = await request(6, 'tools/call', {
 assert.equal(deniedCall.result.isError, true);
 assert.match(deniedCall.result.content[0].text, /Unattended policy denied the action/);
 assert.match(deniedCall.result.content[0].text, /requestKey: mcp-fixture-denied/);
-const automatic = await request(7, 'tools/call', { name: 'agentoc_request_actions', arguments: {
+const automatic = await request(7, 'tools/call', { name: 'ragent_request_actions', arguments: {
   requestKey: 'mcp-fixture-install', actions: [{ command: 'winget install Git.Git' }],
 } });
 assert.deepEqual(JSON.parse(automatic.result.content[0].text), { kind: 'automatic_install', status: 'executing', code: '', requestId: 'auto-1', requestKey: 'mcp-fixture-install', duplicate: false });
-const automaticStatus = await request(8, 'tools/call', { name: 'agentoc_request_actions', arguments: {
+const automaticStatus = await request(8, 'tools/call', { name: 'ragent_request_actions', arguments: {
   requestKey: 'mcp-fixture-install', statusOnly: true, actions: [{ command: 'winget install Git.Git' }],
 } });
 assert.equal(automaticStatus.result.isError, false);
 assert.equal(received.at(-1).body.autoInstallStatusOnly, true);
-const missingKeyStatus = await request(9, 'tools/call', { name: 'agentoc_request_actions', arguments: {
+const missingKeyStatus = await request(9, 'tools/call', { name: 'ragent_request_actions', arguments: {
   statusOnly: true, actions: [{ command: 'winget install Git.Git' }],
 } });
 assert.equal(missingKeyStatus.result.isError, true);
-const service = await request(10, 'tools/call', { name: 'agentoc_request_actions', arguments: {
+const service = await request(10, 'tools/call', { name: 'ragent_request_actions', arguments: {
   requestKey: 'mcp-fixture-service', actions: [{ command: 'Restart-Service Example' }],
 } });
 assert.deepEqual(JSON.parse(service.result.content[0].text), { kind: 'windows_service_control', status: 'denied', code: 'DEVICE_DENIED',
@@ -195,7 +195,7 @@ const disabledChild = spawn(process.execPath, [scriptPath], {
 });
 const disabledRequest = readResponses(disabledChild);
 const disabledTools = await disabledRequest(5, 'tools/list');
-assert.deepEqual(disabledTools.result.tools.map((tool) => tool.name), ['agentoc_request_actions']);
+assert.deepEqual(disabledTools.result.tools.map((tool) => tool.name), ['ragent_request_actions']);
 disabledChild.stdin.end();
 await new Promise((resolve, reject) => {
   disabledChild.once('exit', resolve);

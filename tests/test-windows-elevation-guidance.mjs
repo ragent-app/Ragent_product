@@ -70,7 +70,7 @@ if (process.platform === 'win32') {
   const channel = { endpoint: 'endpoint', token: 'token', sessionId: 'session', runId: 'run', turnId: 'turn' };
   const managed = await buildCodexWindowsElevationGuidance({ event, channel });
   assert.equal(managed.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(managed.hookSpecificOutput.permissionDecisionReason, /agentoc_request_actions/);
+  assert.match(managed.hookSpecificOutput.permissionDecisionReason, /ragent_request_actions/);
   assert.match(managed.hookSpecificOutput.permissionDecisionReason, /Start-Service or Stop-Service/);
   assert.match((await buildCodexWindowsElevationGuidance({ event })).hookSpecificOutput.permissionDecisionReason, /unavailable/);
   assert.deepEqual(await buildCodexWindowsElevationGuidance({ event: { ...event, hook_event_name: 'PostToolUse' }, channel }), {});
@@ -79,7 +79,7 @@ if (process.platform === 'win32') {
       AGENTOC_APPROVED_ACTIONS_SESSION_ID: channel.sessionId, AGENTOC_APPROVED_ACTIONS_RUN_ID: channel.runId,
       AGENTOC_APPROVED_ACTIONS_TURN_ID: channel.turnId, AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT: '' } });
   assert.equal(hook.status, 0, hook.stderr);
-  assert.match(JSON.parse(hook.stdout).hookSpecificOutput.permissionDecisionReason, /agentoc_request_actions/);
+  assert.match(JSON.parse(hook.stdout).hookSpecificOutput.permissionDecisionReason, /ragent_request_actions/);
   const disabledEnv = { ...process.env, AGENTOC_WINDOWS_INSTALL_BRIDGE_DISABLED: '1', AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT: '',
     AGENTOC_APPROVED_ACTIONS_ENDPOINT: channel.endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: channel.token,
     AGENTOC_APPROVED_ACTIONS_SESSION_ID: channel.sessionId, AGENTOC_APPROVED_ACTIONS_RUN_ID: channel.runId,
@@ -90,7 +90,7 @@ if (process.platform === 'win32') {
   assert.deepEqual(JSON.parse(disabledInstall.stdout), {});
   const disabledElevation = spawnSync(process.execPath, ['scripts/agentoc-codex-windows-install-hook.mjs'],
     { input: JSON.stringify(event), encoding: 'utf8', env: disabledEnv });
-  assert.match(JSON.parse(disabledElevation.stdout).hookSpecificOutput.permissionDecisionReason, /agentoc_request_actions/);
+  assert.match(JSON.parse(disabledElevation.stdout).hookSpecificOutput.permissionDecisionReason, /ragent_request_actions/);
 
   const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-elevation-guidance-test-'));
   try {
@@ -110,12 +110,12 @@ if (process.platform === 'win32') {
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-elevation',
       request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'Start-Process notepad -Verb RunAs' } } }, proc);
     assert.equal(sent[0].response.response.behavior, 'deny');
-    assert.match(sent[0].response.response.message, /agentoc_request_actions/);
+    assert.match(sent[0].response.response.message, /ragent_request_actions/);
     assert.equal(state.pendingApprovals.size, 0);
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-admin',
       request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'New-LocalUser -Name agentoc-fixture -WhatIf' } } }, proc);
     assert.equal(sent[1].response.response.behavior, 'deny');
-    assert.match(sent[1].response.response.message, /agentoc_request_actions/);
+    assert.match(sent[1].response.response.message, /ragent_request_actions/);
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-service',
       request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'sc.exe start agentoc-fixture' } } }, proc);
     assert.equal(sent[2].response.response.behavior, 'deny');
@@ -123,12 +123,12 @@ if (process.platform === 'win32') {
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-firewall',
       request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'New-NetFirewallRule -DisplayName fixture -WhatIf' } } }, proc);
     assert.equal(sent[3].response.response.behavior, 'deny');
-    assert.match(sent[3].response.response.message, /agentoc_request_actions/);
+    assert.match(sent[3].response.response.message, /ragent_request_actions/);
     assert.equal(state.pendingApprovals.size, 0);
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-registry',
       request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: "reg.exe add 'HKLM\\Software\\Fixture' /v Value /d 1" } } }, proc);
     assert.equal(sent[4].response.response.behavior, 'deny');
-    assert.match(sent[4].response.response.message, /agentoc_request_actions/);
+    assert.match(sent[4].response.response.message, /ragent_request_actions/);
     assert.equal(state.pendingApprovals.size, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
 }

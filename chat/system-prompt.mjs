@@ -68,7 +68,7 @@ Files, workspace, and connected surfaces:
 - Assets: \`POST /api/assets/upload-intents\` -> \`PUT/POST /api/assets/:assetId/upload\` -> \`POST .../finalize\`; inspect/download with \`GET /api/assets/:assetId[/download]\`. Register generated files with \`POST /api/sessions/:id/assets\` when path parsing is unreliable.
 - Workspace/runtime: \`GET /api/workspace-files[/content]\`, \`GET /api/browse\`, \`POST /api/browse/mkdir\`, \`GET /api/autocomplete\`, \`GET /api/tools\`, \`GET /api/models\`, and \`GET/POST /api/runtime-selection\`; tool registration, harness installation, and workspace writes are owner-only.
 - Connected surfaces: inspect \`GET /api/connectors\`, \`GET /api/connectors/surfaces\`, and \`GET /api/connectors/:connectorId/surface\`; use only a declared \`/connectors/:connectorId/...\` proxy. Local bridge is \`GET /api/sessions/:id/local-bridge/status\`, \`POST .../{pairing-code,bootstrap,commands}\`, and \`GET .../commands/:commandId\`; MCP is \`GET/POST /api/codex/mcp-servers\` and \`GET/POST /api/claude/mcp-servers\`, plus their delete routes. Use \`POST /api/shortcut\` only for a declared shortcut surface. For deterministic external delivery such as reminders, notifications, or simple outbound pushes, prefer a direct connector action when one is available instead of waking a session just to restate the message; \`POST /api/notifications\` is the direct system notification route. Mailbox health is \`GET /api/mailbox/status\`; push subscription is \`GET /api/push/vapid-public-key\`, \`POST /api/push/subscribe\`, and owner Android token registration via \`POST /api/push/fcm/{register,unregister}\`.
-- Owner/runtime administration: \`GET /api/agents\` is inspection; Agent mutations use \`agentoc_create_agent\` when available. Provider configuration is \`GET/POST /api/native-providers\` plus quota/OAuth routes; harnesses use \`GET /api/harnesses\` and \`POST .../{install,upgrade,uninstall}\`/\`DELETE .../:id\`; owner WebAuthn routes are separate. Use these only when explicitly required and never expose credentials.
+- Owner/runtime administration: \`GET /api/agents\` is inspection; Agent mutations use \`ragent_create_agent\` when available. Provider configuration is \`GET/POST /api/native-providers\` plus quota/OAuth routes; harnesses use \`GET /api/harnesses\` and \`POST .../{install,upgrade,uninstall}\`/\`DELETE .../:id\`; owner WebAuthn routes are separate. Use these only when explicitly required and never expose credentials.
 - For generated files, verify existence and non-empty size before delivery, then include an explicit \`Artifacts:\` block in the final reply, with relative paths. Preferred format:
 
 Artifacts:
@@ -130,7 +130,7 @@ function buildManagedAgentCreationSection() {
   return `## Managed Agent Creation
 
 - This owner root session has a private managed Agent-creation channel for turning a repeatable workflow into a reusable Agent.
-- Use only the provided \`agentoc_create_agent\` tool when the user asks to create an Agent. The server performs the final owner, session, and signed approved-action checks.
+- Use only the provided \`ragent_create_agent\` tool when the user asks to create an Agent. The server performs the final owner, session, and signed approved-action checks.
 - Do not call \`/api/agents\`, write \`auth.json\`, use raw \`curl\`, or invent a credential/API fallback. If the private tool is not present, say that the managed creation channel is unavailable and do not pretend the Agent was created.`;
 }
 

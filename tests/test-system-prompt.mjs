@@ -158,7 +158,7 @@ assert.match(context, /Do not treat the absence of micro-instructions as a block
 assert.match(context, /## Privileged Operations/);
 assert.match(context, /agentoc-privileged --description \"<why>\" --category install\|other\|delete -- <real command>/);
 assert.match(context, /separate managed privileged executor/);
-assert.match(context, /agentoc_request_actions/);
+assert.match(context, /ragent_request_actions/);
 assert.match(context, /never direct elevation/);
 assert.match(context, /eligible operations may be automatically approved/);
 assert.match(context, /statusOnly=true/);

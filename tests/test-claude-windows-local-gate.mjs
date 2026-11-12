@@ -219,7 +219,7 @@ const server = createServer((req, res) => {
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
-    if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
+    if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('ragent_request_actions');
     if (!tool && phoneQueueCase) phoneToolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item => item.type === 'tool_result'));
     if (!tool && cliReadCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item =>
       item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && (cliReadCase === 'help' ? /(?:agentoc|ragent) trigger <command>/.test(JSON.stringify(item.content)) : JSON.stringify(item.content).includes(cliReadCase === 'asset' ? 'fixture-asset' : 'fixture-trigger'))));
@@ -446,7 +446,7 @@ try {
   if (phoneQueueCase) { assert.equal(phoneQueued, true); assert.equal(phoneToolResultObserved, true, 'real Claude must return the denied tool result to the local model'); }
   const spool = await readRunSpoolRecords(run.id);
   if (deleteCase && !reviewCase) assert.ok(spool.some((record) => record.json?.reason === 'handle-bound workspace deletion'), 'actual sidecar must use the handle-bound deletion helper');
-  else if (guidanceCase) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true && record.json?.reason?.includes('agentoc_request_actions')), 'actual sidecar must persist managed executor guidance');
+  else if (guidanceCase) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true && record.json?.reason?.includes('ragent_request_actions')), 'actual sidecar must persist managed executor guidance');
   else if (readCase === 'git-status' && approvals > 0) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'a surfaced read-only Git request must be automatically approved');
   else if (!reviewCase && (!readCase || approvals) && readCase !== 'git-status') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'actual sidecar must persist the automatic decision');
   else if (reviewCase && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true), 'unattended protected write must be denied');

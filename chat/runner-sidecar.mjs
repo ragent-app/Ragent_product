@@ -4070,8 +4070,8 @@ async function main() {
         );
         const requiredServers = [];
         if (managedActionMcpRequested) {
-          const requiredToolNames = ['agentoc_request_actions'];
-          if (approvedActionChannel.productAgentCreate === true) requiredToolNames.push('agentoc_create_agent');
+          const requiredToolNames = ['ragent_request_actions'];
+          if (approvedActionChannel.productAgentCreate === true) requiredToolNames.push('ragent_create_agent');
           requiredServers.push({
             name: serverNamesByKind.get('actions'),
             requiredToolNames,

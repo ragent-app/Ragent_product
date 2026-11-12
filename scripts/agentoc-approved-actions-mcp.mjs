@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_NAME = 'agentoc-approved-actions';
+const SERVER_NAME = 'ragent-approved-actions';
 const SERVER_VERSION = '1.0.0';
 const MAX_ACTIONS = 32;
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -40,7 +40,7 @@ function jsonRpcResult(id, result) {
 
 export function actionTool() {
   return {
-    name: 'agentoc_request_actions',
+    name: 'ragent_request_actions',
     description: 'Propose related host-administrator actions. For Windows winget installs and service control, use this tool rather than running them directly. Eligible installs may start automatically and dangerous actions go to owner review. An executing status is not completion: call this tool with statusOnly=true and the same requestKey and identical action until it reports succeeded, failed or unknown. Never repeat an operation when its outcome is unknown; check the original requestKey.',
     inputSchema: {
       type: 'object',
@@ -71,7 +71,7 @@ export function actionTool() {
 
 export function agentCreateTool() {
   return {
-    name: 'agentoc_create_agent',
+    name: 'ragent_create_agent',
     description: 'Propose one fully specified Ragent Agent for owner review. This tool never creates the Agent directly and never receives owner credentials.',
     inputSchema: {
       type: 'object',
@@ -279,12 +279,13 @@ export async function handleRequest(request, config = readConfig()) {
     });
   }
   if (request.method === 'tools/call') {
-    const name = trimString(request.params?.name);
+    // Preserve in-flight calls from clients that cached the former tool names.
+    const name = trimString(request.params?.name).replace(/^agentoc_/, 'ragent_');
     try {
-      if (name === 'agentoc_request_actions') {
+      if (name === 'ragent_request_actions') {
         return jsonRpcResult(id, toolResult(JSON.stringify(await requestActions(request.params?.arguments || {}, id, config))));
       }
-      if (name === 'agentoc_create_agent') {
+      if (name === 'ragent_create_agent') {
         return jsonRpcResult(id, toolResult(JSON.stringify(await requestAgentCreate(request.params?.arguments || {}, id, config))));
       }
       return jsonRpcResult(id, toolResult(`Unknown tool: ${name}`, true));

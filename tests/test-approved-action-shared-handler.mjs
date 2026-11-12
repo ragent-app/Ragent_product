@@ -22,7 +22,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 try {
   const endpoint = `http://127.0.0.1:${server.address().port}/propose`;
   const config = name => ({ enabled: true, agentCreateEnabled: true, endpoint, token: `token-${name}`, sessionId: `session-${name}`, runId: `run-${name}`, turnId: `turn-${name}`, cwd: '', projectRoot: '' });
-  const request = name => ({ id: name, method: 'tools/call', params: { name: 'agentoc_request_actions', arguments: { actions: [{ command: `operation-${name}` }] } } });
+  const request = name => ({ id: name, method: 'tools/call', params: { name: 'ragent_request_actions', arguments: { actions: [{ command: `operation-${name}` }] } } });
   const [a, b] = await Promise.all([handleRequest(request('a'), config('a')), handleRequest(request('b'), config('b'))]);
   assert.equal(JSON.parse(a.result.content[0].text).batchId, 'batch-run-a');
   assert.equal(JSON.parse(b.result.content[0].text).batchId, 'batch-run-b');
@@ -33,16 +33,20 @@ try {
     assert.equal(entry.payload.turnId, `turn-${name}`);
     assert.equal(entry.payload.actions[0].command, `operation-${name}`);
   }
-  assert.equal(actionTool().name, 'agentoc_request_actions');
-  assert.equal(agentCreateTool().name, 'agentoc_create_agent');
+  assert.equal(actionTool().name, 'ragent_request_actions');
+  assert.equal(agentCreateTool().name, 'ragent_create_agent');
   const denied = await handleRequest(request('a'), { ...config('a'), enabled: false });
   assert.equal(denied.result.isError, true);
-  assert.deepEqual(codexApprovedActionTools(config('a')).map(tool => tool.name), ['agentoc_request_actions', 'agentoc_create_agent']);
-  const call = { id: 'server-request', method: 'item/tool/call', params: { threadId: 'codex-thread-a', turnId: 'codex-turn-a', callId: 'call-a', tool: 'agentoc_request_actions', arguments: { actions: [{ command: 'operation-a' }] } } };
+  assert.deepEqual(codexApprovedActionTools(config('a')).map(tool => tool.name), ['ragent_request_actions', 'ragent_create_agent']);
+  const call = { id: 'server-request', method: 'item/tool/call', params: { threadId: 'codex-thread-a', turnId: 'codex-turn-a', callId: 'call-a', tool: 'ragent_request_actions', arguments: { actions: [{ command: 'operation-a' }] } } };
   const binding = { active: true, threadId: 'codex-thread-a', turnId: 'codex-turn-a', config: config('a') };
   const response = await handleCodexApprovedActionCall(call, binding);
   assert.equal(response.result.success, true);
   assert.equal(JSON.parse(response.result.contentItems[0].text).batchId, 'batch-run-a');
+  const legacy = await handleCodexApprovedActionCall({ ...call, params: { ...call.params, tool: 'agentoc_request_actions' } }, binding);
+  assert.equal(legacy.result.success, true);
+  const disabledLegacy = await handleCodexApprovedActionCall({ ...call, params: { ...call.params, tool: 'agentoc_create_agent' } }, { ...binding, config: { ...binding.config, agentCreateEnabled: false } });
+  assert.equal(disabledLegacy.error.code, -32003);
   for (const badBinding of [{ ...binding, threadId: 'other' }, { ...binding, turnId: 'other' }, { ...binding, active: false }]) {
     assert.equal((await handleCodexApprovedActionCall(call, badBinding)).error.code, -32003);
   }

@@ -58,10 +58,10 @@ function testProductAgentCreateConditional() {
   assert.ok(grantMatch.index < prepareIndex,
     'productAgentCreate env grant must be set before overlay preparation snapshots the env');
 
-  // Test 5: Check that agentoc_create_agent is only added when MCP is supported
-  const toolPattern = /if \(approvedActionChannel\.productAgentCreate === true\) requiredToolNames\.push\(['"]agentoc_create_agent['"]\)/;
+  // Test 5: Check that ragent_create_agent is only added when MCP is supported
+  const toolPattern = /if \(approvedActionChannel\.productAgentCreate === true\) requiredToolNames\.push\(['"]ragent_create_agent['"]\)/;
   assert.match(source, toolPattern,
-    'agentoc_create_agent tool must only be added when productAgentCreate is enabled');
+    'ragent_create_agent tool must only be added when productAgentCreate is enabled');
 
   console.log('✅ productAgentCreate conditional exposure: PASS');
 }

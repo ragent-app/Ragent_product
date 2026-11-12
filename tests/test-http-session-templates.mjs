@@ -308,7 +308,7 @@ try {
     assert.equal(createdFromStarterPreset.json.session?.templateId, undefined, 'starter presets should not depend on a built-in agent id');
     assert.match(
       createdFromStarterPreset.json.session?.systemPrompt || '',
-      /agentoc_create_agent/i,
+      /ragent_create_agent/i,
       'starter preset sessions should materialize their behavior instructions directly',
     );
     assert.doesNotMatch(

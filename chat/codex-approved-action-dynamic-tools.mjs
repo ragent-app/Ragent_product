@@ -12,9 +12,10 @@ export async function handleCodexApprovedActionCall(message, binding) {
   if (message?.method !== 'item/tool/call' || message.id == null) return null;
   const params = message.params || {};
   const allowed = new Set(codexApprovedActionTools(binding?.config).map(tool => tool.name));
+  const normalizedTool = typeof params.tool === 'string' ? params.tool.replace(/^agentoc_/, 'ragent_') : '';
   if (!binding?.active || !binding.threadId || !binding.turnId
       || params.threadId !== binding.threadId || params.turnId !== binding.turnId
-      || !params.callId || params.namespace != null || !allowed.has(params.tool)) {
+      || !params.callId || params.namespace != null || !allowed.has(normalizedTool)) {
     return { id: message.id, error: { code: -32003, message: 'Dynamic tool call is not bound to this active run' } };
   }
   const result = await handleRequest({ id: params.callId, method: 'tools/call', params: {

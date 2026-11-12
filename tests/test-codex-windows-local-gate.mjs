@@ -192,7 +192,7 @@ const server = createServer((req, res) => {
     if (!shellToolName || !shellCommandField) { process.stderr.write('Codex shell tool schema missing a supported command field\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
     providerRequests++;
     if ((managedElevation || phoneQueueCase) && providerRequests > 1) {
-      if (managedElevation && !JSON.stringify(data).includes('agentoc_request_actions')) { process.stderr.write('managed elevation instruction did not reach model\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
+      if (managedElevation && !JSON.stringify(data).includes('ragent_request_actions')) { process.stderr.write('managed elevation instruction did not reach model\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
       const item = { id: 'msg_fixture', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Managed elevation required', annotations: [] }] };
       const response = { id: 'resp_done', object: 'response', created_at: 1, status: 'completed', model: 'gpt-5.4', output: [item], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
       res.writeHead(200, { 'content-type': 'text/event-stream' });

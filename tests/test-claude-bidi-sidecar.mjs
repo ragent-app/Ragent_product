@@ -156,7 +156,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         request_id: pendingApproval.requestId,
         request: {
           subtype: 'can_use_tool',
-          tool_name: 'mcp__' + managedMcpServerName() + '__agentoc_create_agent',
+          tool_name: 'mcp__' + managedMcpServerName() + '__ragent_create_agent',
           input: { agent: { name: 'Managed helper' } },
           tool_use_id: 'tool-managed-mcp-1',
         },
@@ -170,7 +170,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         request_id: pendingApproval.requestId,
         request: {
           subtype: 'can_use_tool',
-          tool_name: 'mcp__foreign_server__agentoc_create_agent',
+          tool_name: 'mcp__foreign_server__ragent_create_agent',
           input: { agent: { name: 'Foreign helper' } },
           tool_use_id: 'tool-foreign-mcp-1',
         },

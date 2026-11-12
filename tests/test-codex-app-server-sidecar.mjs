@@ -327,12 +327,12 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           name: managedMcpServerName(),
           ...(missingSchema ? {} : {
             tools: {
-              agentoc_request_actions: {
-                name: 'agentoc_request_actions',
+              ragent_request_actions: {
+                name: 'ragent_request_actions',
                 inputSchema: { type: 'object', properties: {} },
               },
-              agentoc_create_agent: {
-                name: 'agentoc_create_agent',
+              ragent_create_agent: {
+                name: 'ragent_create_agent',
                 inputSchema: { type: 'object', properties: {} },
               },
             },
@@ -1058,11 +1058,11 @@ try {
     (event.codexMcpStatus === 'inventory'
       && event.codexMcpServers?.some((server) => (
         server.toolSchemaAvailable === true
-        && server.toolNames?.includes('agentoc_request_actions')
+        && server.toolNames?.includes('ragent_request_actions')
       )))
     || (event.codexMcpStatus === 'ready'
       && event.codexMcpReadiness === 'verified'
-      && event.codexMcpTools?.includes('agentoc_request_actions'))
+      && event.codexMcpTools?.includes('ragent_request_actions'))
   ));
   const mcpProviderActivityIndex = mcpEventsRes.json.events.findIndex((event) => (
     event.type === 'plan' || (event.type === 'message' && event.content === 'fake reply')

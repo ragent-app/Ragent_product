@@ -11,7 +11,7 @@ const [first, second] = await Promise.all([
   evaluateRunBoundCodexWindowsHook(event, binding),
   evaluateRunBoundCodexWindowsHook({ ...event, session_id: 'thread-b', turn_id: 'turn-b' }, other),
 ]);
-assert.match(first.hookSpecificOutput.permissionDecisionReason, /agentoc_request_actions/);
+assert.match(first.hookSpecificOutput.permissionDecisionReason, /ragent_request_actions/);
 assert.match(second.hookSpecificOutput.permissionDecisionReason, /unavailable/);
 assert.deepEqual(await evaluateRunBoundCodexWindowsHook(event, { ...binding, enabled: false }), {});
 assert.equal((await evaluateRunBoundCodexWindowsHook(event, { ...binding, enabled: false, active: false })).hookSpecificOutput.permissionDecision, 'deny');
