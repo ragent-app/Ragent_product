@@ -7,6 +7,8 @@ import {
   canonicalPrivilegedJson,
   classifyPrivilegedOperation,
   sha256Hex,
+  stripSudo,
+  tokenizeCommand,
 } from './privileged-classifier.mjs';
 import { explanationForApproval } from './risk-explanation.mjs';
 import { isOwnerHostPasskeyRequired } from './approved-action-policy.mjs';
@@ -252,13 +254,31 @@ export function computeBatchManifestHash(selectedOps, category) {
   return sha256Hex(canonicalPrivilegedJson({ category: trimString(category), ops: payload }));
 }
 
-// Default row selection per category, matching the locked UX (§5.5):
-//   other  → all rows checked (opt-out)
-//   delete → no rows checked (opt-in — deletion is irreversible)
+// Unknown shell/interpreter programs can hide deletion or other effects from
+// the simple privileged classifier. Do not preselect them just because they
+// fell into the "other" bucket. This changes only the review default, never
+// the authorization or executable allowlist.
+const OPAQUE_REVIEW_PROGRAMS = new Set([
+  'sh', 'bash', 'dash', 'ash', 'zsh', 'ksh', 'fish', 'csh', 'tcsh',
+  'powershell', 'pwsh', 'cmd', 'python', 'python2', 'python3', 'node',
+  'perl', 'ruby', 'php', 'env', 'command', 'exec', 'nohup', 'nice', 'timeout', 'xargs', 'find',
+]);
+
+function needsExplicitReviewSelection(op) {
+  const command = trimString(op?.command);
+  if (!command || /[\u0000-\u001f\u007f]/.test(command)) return true;
+  const { tokens, composite } = tokenizeCommand(command);
+  const { program } = stripSudo(tokens);
+  const base = String(program || '').replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
+  return composite || !base || OPAQUE_REVIEW_PROGRAMS.has(base);
+}
+
+// Known other actions default checked; opaque actions and deletions require
+// explicit selection.
 export function defaultSelectedOpIds(category, ops) {
   const list = Array.isArray(ops) ? ops : [];
   if (category === CATEGORY_DELETE) return [];
-  return list.map((op) => op.opId);
+  return list.filter((op) => !needsExplicitReviewSelection(op)).map((op) => op.opId);
 }
 
 // Resolve a batch given the user's per-category selections (P1 stand-in: no real

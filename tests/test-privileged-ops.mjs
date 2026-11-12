@@ -74,6 +74,13 @@ check('batch pending', batch.status === PRIVILEGED_BATCH_STATUS.PENDING);
 // --- default selection (other opt-out / delete opt-in) ---
 eq('other default all selected', defaultSelectedOpIds(CATEGORY_OTHER, batch.other), batch.other.map((o) => o.opId));
 eq('delete default none selected', defaultSelectedOpIds(CATEGORY_DELETE, batch.delete), []);
+const opaqueDefaults = [
+  { opId: 'wrapped', command: "/bin/bash -c 'rm /var/lib/qa/fixture'" },
+  { opId: 'composite', command: 'systemctl status one; rm /tmp/example' },
+  { opId: 'interpreter', command: 'python3 -c dangerous' },
+  { opId: 'normal', command: 'systemctl restart example' },
+];
+eq('opaque and composite operations require explicit review', defaultSelectedOpIds(CATEGORY_OTHER, opaqueDefaults), ['normal']);
 
 // --- resolvePrivilegedBatch ---
 // Approve the systemctl op from other; approve nothing from delete.
