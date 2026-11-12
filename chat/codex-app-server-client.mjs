@@ -21,6 +21,7 @@ import {
 import {
   codexAppServerBrokerLockPath,
   codexAppServerBrokerSocketPath,
+  codexBrokerAccountDigest,
   ensureCodexAppServerBroker,
 } from './codex-app-server-broker.mjs';
 import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
@@ -322,6 +323,7 @@ const CODEX_CAPABILITY_METHODS = Object.freeze({
 async function requestCodexCapabilityCatalogFromBroker(socketPath, method, params, {
   timeoutMs = 10_000,
   connectImpl = connect,
+  expectedAccountId = '',
 } = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -329,6 +331,8 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
     const initializeId = 0;
     const requestId = 101;
     const socket = connectImpl(socketPath);
+    const expectedDigest = codexBrokerAccountDigest(expectedAccountId);
+    let checkingAccount = Boolean(expectedDigest);
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
@@ -370,6 +374,15 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
         }
         let message;
         try { message = JSON.parse(line); } catch { continue; }
+        if (checkingAccount) {
+          if (message?.type !== 'agentoc-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
+            finish(new Error('The Codex broker could not verify the selected account'));
+            return;
+          }
+          checkingAccount = false;
+          writeMessage(buildCodexAppServerInitializeMessage());
+          continue;
+        }
         if (message?.id === initializeId) {
           if (message.error) {
             finish(new Error(readErrorMessage(message.error)));
@@ -390,7 +403,9 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
         finish(new Error(`Codex app-server response line exceeded ${MAX_APP_SERVER_JSON_LINE_BYTES} bytes`));
       }
     });
-    socket.once('connect', () => writeMessage(buildCodexAppServerInitializeMessage()));
+    socket.once('connect', () => writeMessage(checkingAccount
+      ? { type: 'agentoc-codex-broker-ping', expectedAccountDigest: expectedDigest }
+      : buildCodexAppServerInitializeMessage()));
   });
 }
 
@@ -459,8 +474,8 @@ function normalizeForkResult(message) {
   };
 }
 
-export async function forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {}) {
-  const result = await requestCodexCapabilityCatalogFromBroker(socketPath, 'thread/fork', forkMessage.params, { timeoutMs });
+export async function forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, expectedAccountId = '' } = {}) {
+  const result = await requestCodexCapabilityCatalogFromBroker(socketPath, 'thread/fork', forkMessage.params, { timeoutMs, expectedAccountId });
   const normalized = normalizeForkResult({ id: CODEX_APP_SERVER_REQUEST_IDS.fork, result });
   if (!normalized) throw new Error('Codex thread/fork response did not include a thread id');
   return normalized;
@@ -482,13 +497,17 @@ async function runCodexAppServerForkRequest({
   if (!sourceThreadId) return null;
   const agentocApprovalGate = isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode });
   let codexHomeDir = '';
+  let expectedAccountId = '';
   {
     const { prepareNativeRunProviderHome } = await import('../lib/provider-runtime/run-provider-prepare.mjs');
     const prepared = await prepareNativeRunProviderHome(`fork-${sourceThreadId}`, {
       tool: toolId, runtimeFamily: 'codex-app-server-json', options: { runtimeFamily: 'codex-app-server-json',
         ...(providerProfileId ? { providerProfile: providerProfileId } : {}), ...(model ? { model } : {}) },
     }, { configDir: CONFIG_DIR, providerHomesRoot: dirname(CODEX_MANAGED_HOME_DIR), externalOAuthOwnership: false, holdNativeOAuthLock: false });
-    if (prepared?.ok && prepared.codexHomeDir) codexHomeDir = prepared.codexHomeDir;
+    if (prepared?.ok && prepared.codexHomeDir) {
+      codexHomeDir = prepared.codexHomeDir;
+      expectedAccountId = trimString(prepared.oauthAccountId);
+    }
     else if (toolId === 'codex' || toolId === 'codex-cli' || providerProfileId) throw new Error(prepared?.error || prepared?.reason || 'Codex provider home is unavailable');
   }
   const { command, env } = await resolveCodexToolInvocation(toolId, { codexHomeDir });
@@ -513,7 +532,7 @@ async function runCodexAppServerForkRequest({
       upstreamFile: spawnSpec.file, upstreamArgs: spawnSpec.args,
       upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
       cwd: trimString(cwd) || process.cwd(), env, waitMs: timeoutMs });
-    return forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs });
+    return forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs, expectedAccountId });
   }
 
   const args = ['app-server', '--stdio', ...(agentocApprovalGate ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
