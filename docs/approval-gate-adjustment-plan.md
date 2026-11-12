@@ -253,6 +253,9 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - Windows CLI 授权增加有限重试：仅在本机发现端点不存在（`OBD_ENDPOINT_UNAVAILABLE`）或原生客户端连接前发现期限无效（`OBC_DEADLINE_INVALID`）时，重新激活并重新发现，最多三次；HTTP 请求尚未发送，不重放实际审批或写操作。身份、信任和回执不确定等其他错误不重试，取消信号可中断等待。12 项使用真实客户端代码和替身授权/HTTP 的阶段测试通过，覆盖单次写入、重试上限、错误传播与取消；尚未部署到正式实例，也未证明端点轮换的根因已修复。
 
+- 已构建并安装 Windows 提交 `1a24428d`，公开版本 `0.0.1`、内部 MSI 版本 `0.0.73`，EXE SHA-256 `bbbac0d6b3f4e55f91f5f19df8ed296541c8f642bc6266c29e954a59f020adf5`；安装返回 0、owner 激活 ready，安装的 CLI 授权文件与源码提交一致。使用安装目录中的真实 CLI 客户端代码、替身授权和 HTTP 的 12 项测试通过，覆盖连接前错误有限重试及写请求不重放；未在真实系统中强制复现这两种原生错误。正式服务搭配真实 Codex 和本地模拟模型的 full-auto 冒烟中，会话外普通文件登记返回资产 ID，隔离敏感目录删除自动拒绝、文件完整，临时会话及 provider 已清理。该结果不能证明通道错误根因修复或估计生产审批率。
+- 当前 Linux 与 macOS 已安装的风险分类、风险策略、Claude 工具策略以及 Claude/Codex 适配器五个文件，与 `a270ecf7` 的 Git 对象一致；两端 sidecar 相同但与该提交不同，差异包含 Windows 专用桥、Ragent 环境变量别名和其他运行时变更，因此不把文件部分一致视为完整版本一致。此前两台真实实例分别通过两种 harness 和两种模式的指定普通读取/危险删除验收。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
