@@ -20,16 +20,17 @@ export async function prepareReadOnlyCodexMcp({ servers, cwd, workspace, hidePat
   const directories = [];
   const cleanup = async () => { await Promise.all(directories.map(path => rmdir(path).catch(() => {}))); };
   try {
-    const mcpServers = {};
+    const mcpServers = Object.create(null);
     for (const [name, raw] of Object.entries(servers)) {
-      if (!/^[A-Za-z0-9_-]{1,128}$/.test(name) || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      if (!/^[A-Za-z0-9_.-]{1,128}$/.test(name) || ['__proto__', 'prototype', 'constructor'].includes(name)
+          || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
         throw new TypeError('Invalid Codex MCP server');
       }
       const command = raw.command;
       const url = raw.url;
       if (command !== undefined && command !== null) {
         if (typeof command !== 'string' || !command.trim() || /[\0\r\n]/.test(command)
-            || (url !== undefined && url !== null) || (raw.environment_id !== undefined && raw.environment_id !== null)
+            || (url !== undefined && url !== null) || (raw.environment_id !== undefined && raw.environment_id !== null && raw.environment_id !== 'local')
             || (raw.args !== undefined && raw.args !== null && (!Array.isArray(raw.args)
               || raw.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))))) {
           throw new TypeError('Invalid local Codex MCP server');
@@ -40,12 +41,15 @@ export async function prepareReadOnlyCodexMcp({ servers, cwd, workspace, hidePat
         const separator = sandbox.args.indexOf('--');
         if (separator < 0) throw new Error('Invalid Codex MCP sandbox');
         sandbox.args.splice(separator, 0, '--die-with-parent');
-        mcpServers[name] = { ...raw, command: sandbox.command, args: sandbox.args };
+        // config/read includes normalized defaults which cannot necessarily be
+        // written back as TOML values. Override only the launch fields; Codex
+        // merges the remaining account config (including environment) itself.
+        mcpServers[name] = { command: sandbox.command, args: sandbox.args };
       } else {
         if (typeof url !== 'string' || !/^https?:\/\//i.test(url) || /[\0\r\n]/.test(url)) {
           throw new TypeError('Invalid remote Codex MCP server');
         }
-        mcpServers[name] = { ...raw };
+        // The existing remote entry remains in the account configuration.
       }
     }
     return { config: { mcp_servers: mcpServers }, cleanup };

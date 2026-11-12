@@ -12,15 +12,17 @@ let wrapped;
 try {
   const fakeBuilder = ({ command, args }) => ({ command: '/usr/bin/bwrap', args: ['--', command, ...args], emptyDir: fakeEmpty });
   wrapped = await prepareReadOnlyCodexMcp({ cwd: workspace, workspace, hidePaths: [hidden], requireSandbox: () => true,
-    sandboxBuilder: fakeBuilder, servers: { local: { command: 'node', args: ['server.js'], env: { FIXTURE: 'yes' } },
+    sandboxBuilder: fakeBuilder, servers: { local: { command: 'node', args: ['server.js'], environment_id: 'local', env: { FIXTURE: 'yes' } },
       remote: { url: 'https://mcp.example.test', enabled: true } } });
   assert.deepEqual(wrapped.config.mcp_servers.local.args, ['--die-with-parent', '--', 'node', 'server.js']);
-  assert.deepEqual(wrapped.config.mcp_servers.local.env, { FIXTURE: 'yes' });
-  assert.equal(wrapped.config.mcp_servers.remote.url, 'https://mcp.example.test');
+  assert.equal(Object.hasOwn(wrapped.config.mcp_servers.local, 'env'), false);
+  assert.equal(Object.hasOwn(wrapped.config.mcp_servers, 'remote'), false);
   await wrapped.cleanup(); wrapped = null;
   await assert.rejects(prepareReadOnlyCodexMcp({ cwd: workspace, workspace, hidePaths: [workspace], servers: {} }), TypeError);
   await assert.rejects(prepareReadOnlyCodexMcp({ cwd: workspace, workspace, hidePaths: [hidden], requireSandbox: () => true,
     servers: { invalid: { command: 'node', url: 'https://mcp.example.test' } } }), TypeError);
+  await assert.rejects(prepareReadOnlyCodexMcp({ cwd: workspace, workspace, hidePaths: [hidden], requireSandbox: () => true,
+    servers: JSON.parse('{"__proto__":{"url":"https://mcp.example.test"}}') }), TypeError);
 
   if (process.platform === 'linux' && process.env.AGENTOC_TEST_CODEX_EXTERNAL_EXECUTOR === '1') {
     const protectedFile = join(workspace, 'protected.txt'), fixture = join(root, 'mcp.mjs');
