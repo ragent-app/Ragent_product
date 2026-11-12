@@ -46,19 +46,27 @@ function currentBinding(draft, instanceId, ownerAccountId) {
  * account session and the target instance's proof; IDs alone are not proof.
  * The grant records one exact owner binding and never rewrites that binding.
  */
-export function issueInstanceAccessGrant(draft, { instanceId, ownerAccountId, accountId, now = Date.now() }) {
-  instanceId = text(instanceId); ownerAccountId = text(ownerAccountId); accountId = text(accountId);
-  if (![instanceId, ownerAccountId, accountId].every(id) || ownerAccountId === accountId
+export function issueInstanceAccessGrant(draft, { instanceId, ownerAccountId, accountId, requestId, now = Date.now() }) {
+  instanceId = text(instanceId); ownerAccountId = text(ownerAccountId); accountId = text(accountId); requestId = text(requestId);
+  if (![instanceId, ownerAccountId, accountId].every(id) || !/^[A-Za-z0-9_-]{16,128}$/.test(requestId) || ownerAccountId === accountId
     || !Number.isSafeInteger(now) || now < 0 || now > 8640000000000000 || !activeAccount(draft, accountId)) throw deny();
   const binding = currentBinding(draft, instanceId, ownerAccountId);
+  const replay = grants(draft).find(item => item.requestId === requestId);
+  if (replay) {
+    if (replay.instanceId !== instanceId || replay.ownerAccountId !== ownerAccountId || replay.accountId !== accountId
+      || (!replay.revokedAt && !isInstanceAccessGrantActive(draft, replay, { instanceId, accountId }))) throw deny();
+    return { grant: replay, created: false };
+  }
   const prior = grants(draft).find(item => item.instanceId === instanceId && item.accountId === accountId && !item.revokedAt);
   if (prior) {
-    if (isInstanceAccessGrantActive(draft, prior, { instanceId, accountId })) return { grant: prior, created: false };
+    if (isInstanceAccessGrantActive(draft, prior, { instanceId, accountId })) {
+      throw Object.assign(new Error('Instance access is already granted.'), { code: 'instance_access_already_granted', statusCode: 409 });
+    }
     // Stale authorizations cannot follow a new owner binding. A fresh explicit
     // grant replaces the stale record, never revives it.
     prior.revokedAt = new Date(now).toISOString();
   }
-  const grant = { grantId: `iag_${randomBytes(24).toString('base64url')}`, instanceId,
+  const grant = { grantId: `iag_${randomBytes(24).toString('base64url')}`, requestId, instanceId,
     ownerAccountId, accountId, bindingKeyFingerprint: binding.instanceKeyFingerprint,
     bindingBoundAt: new Date(stamp(binding.boundAt)).toISOString(),
     bindingHistoryFingerprint: bindingHistoryFingerprint(draft, instanceId), scope: 'workspace',
@@ -72,7 +80,7 @@ export function isInstanceAccessGrantActive(draft, grant, { instanceId, accountI
   grant = grants(draft).find(item => item.grantId === grant?.grantId);
   if (!grant || grant.revokedAt || grant.scope !== 'workspace' || grant.instanceId !== instanceId
     || grant.accountId !== accountId || grant.ownerAccountId === accountId
-    || !id(grant.grantId) || !id(grant.ownerAccountId) || !id(accountId) || !id(instanceId)
+    || !id(grant.grantId) || !/^[A-Za-z0-9_-]{16,128}$/.test(grant.requestId || '') || !id(grant.ownerAccountId) || !id(accountId) || !id(instanceId)
     || !fingerprint(grant.bindingKeyFingerprint) || !fingerprint(grant.bindingHistoryFingerprint)
     || !Number.isFinite(stamp(grant.bindingBoundAt))
     || !activeAccount(draft, accountId)) return false;

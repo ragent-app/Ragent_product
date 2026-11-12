@@ -721,9 +721,11 @@ async function replaceRows(client, table, columns, rows, toRow) {
   await insertRowsInBatches(client, table, columns, rows, toRow);
 }
 
-async function hasInstanceAccessGrantsTable(client) {
-  const result = await client.query(`select to_regclass(format('%I.%I', current_schema(), 'instance_access_grants')) is not null as available`);
-  return result.rows[0]?.available === true;
+async function instanceAccessGrantStorageVersion(client) {
+  const result = await client.query(`select target is not null as available,
+    exists(select 1 from pg_catalog.pg_attribute where attrelid=target and attname='request_id' and not attisdropped) as replay_ready
+    from (select to_regclass(format('%I.%I', current_schema(), 'instance_access_grants')) as target) as storage`);
+  return result.rows[0]?.replay_ready ? 2 : result.rows[0]?.available ? 1 : 0;
 }
 
 async function readSnapshot(client) {
@@ -734,7 +736,7 @@ async function readSnapshot(client) {
     JSON.stringify([row.transaction_id, row.nonce, row.bootstrap_hash]), row.state_hash,
   ]));
   const bindings = await client.query('select * from instance_bindings order by bound_at, instance_id');
-  const instanceAccessGrants = await hasInstanceAccessGrantsTable(client)
+  const instanceAccessGrants = await instanceAccessGrantStorageVersion(client)
     ? await client.query('select * from instance_access_grants order by created_at, grant_id') : { rows: [] };
   const devices = await client.query('select * from devices order by created_at, device_id');
   const history = await client.query('select * from binding_history order by occurred_at, instance_id');
@@ -795,7 +797,7 @@ async function readSnapshot(client) {
       browserStateHash: browserStateBySource.get(JSON.stringify([row.transaction_id, row.nonce, row.bootstrap_hash])) || '',
     })),
     instanceBindings: bindings.rows.map(rowToBinding),
-    instanceAccessGrants: instanceAccessGrants.rows.map(row => ({ grantId: String(row.grant_id),
+    instanceAccessGrants: instanceAccessGrants.rows.map(row => ({ grantId: String(row.grant_id), requestId: String(row.request_id || `legacy_${row.grant_id}`),
       instanceId: String(row.instance_id), ownerAccountId: String(row.owner_account_id), accountId: String(row.account_id),
       bindingKeyFingerprint: String(row.binding_key_fingerprint), bindingBoundAt: toIso(row.binding_bound_at),
       bindingHistoryFingerprint: String(row.binding_history_fingerprint),
@@ -832,11 +834,11 @@ async function readSnapshot(client) {
 async function writeSnapshot(client, snapshot, previousSnapshot) {
   // Clear this FK subgraph before generic full-rewrite insertion.  The broker
   // is serialized, so a transient empty set is never externally observable.
-  const grantsTableAvailable = await hasInstanceAccessGrantsTable(client);
-  if (!grantsTableAvailable && (snapshot.instanceAccessGrants || []).length) {
+  const grantsStorageVersion = await instanceAccessGrantStorageVersion(client);
+  if (grantsStorageVersion < 2 && JSON.stringify(snapshot.instanceAccessGrants || []) !== JSON.stringify(previousSnapshot.instanceAccessGrants || [])) {
     throw new Error('Instance access grants migration is required');
   }
-  if (grantsTableAvailable) await client.query('delete from instance_access_grants');
+  if (grantsStorageVersion >= 2) await client.query('delete from instance_access_grants');
   await client.query('delete from account_join_grants');
   await client.query('delete from account_credential_refreshes');
   await client.query('delete from account_session_challenges');
@@ -890,11 +892,11 @@ async function writeSnapshot(client, snapshot, previousSnapshot) {
     bindingToRow,
   );
   const liveAccountIds = new Set(snapshot.accounts.map(account => account.accountId));
-  if (grantsTableAvailable) await replaceRows(client, 'instance_access_grants',
-    ['grant_id', 'instance_id', 'owner_account_id', 'account_id', 'binding_key_fingerprint', 'binding_bound_at', 'binding_history_fingerprint',
+  if (grantsStorageVersion >= 2) await replaceRows(client, 'instance_access_grants',
+    ['grant_id', 'request_id', 'instance_id', 'owner_account_id', 'account_id', 'binding_key_fingerprint', 'binding_bound_at', 'binding_history_fingerprint',
       'scope', 'created_at', 'revoked_at'],
     (snapshot.instanceAccessGrants || []).filter(grant => liveAccountIds.has(grant.ownerAccountId) && liveAccountIds.has(grant.accountId)),
-    grant => ({ grant_id: grant.grantId, instance_id: grant.instanceId, owner_account_id: grant.ownerAccountId,
+    grant => ({ grant_id: grant.grantId, request_id: grant.requestId, instance_id: grant.instanceId, owner_account_id: grant.ownerAccountId,
       account_id: grant.accountId, binding_key_fingerprint: grant.bindingKeyFingerprint,
       binding_bound_at: grant.bindingBoundAt, binding_history_fingerprint: grant.bindingHistoryFingerprint, scope: grant.scope, created_at: grant.createdAt, revoked_at: grant.revokedAt || null }));
   await replaceRows(
