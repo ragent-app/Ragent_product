@@ -4,7 +4,7 @@
     <string name="onboarding_enter_workspace">Ouvrir l’espace de travail</string>
     <string name="onboarding_close_guide">Fermer le guide</string>
     <string name="onboarding_opened">Ragent est ouvert</string>
-    <string name="onboarding_install_hint">Installez et ouvrez Ragent pour Windows sur l’ordinateur.</string>
+    <string name="onboarding_install_hint">Installez et ouvrez Ragent sur votre ordinateur Windows, macOS ou Linux.</string>
     <string name="onboarding_send_link">Envoyer à l’ordinateur</string>
     <string name="onboarding_no_desktop_login">Il n’est pas nécessaire de se connecter d’abord sur l’ordinateur.</string>
     <string name="onboarding_menu_path">Sur l’ordinateur, ouvrez « Association du téléphone », puis « Démarrer l’association ».</string>

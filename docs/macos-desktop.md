@@ -1,6 +1,6 @@
-# macOS desktop candidate
+# macOS desktop
 
-The macOS candidate targets Apple Silicon and macOS 13 or later. The app bundle
+The macOS package targets Apple Silicon and macOS 13 or later. The app bundle
 contains the local service, desktop manager, bundled Node runtime, P2P host and
 provider launchers. A candidate built from source is not a released or verified
 package; consult the corresponding release notes for actual support and tests.

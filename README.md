@@ -6,14 +6,14 @@ Ragent is an AI workbench that connects agent runtimes on a computer with a web
 interface and an Android app. It is designed for working with agent sessions
 across devices while the execution host remains under the user's control.
 
-> **Early access:** the source is public for review. Windows packages and
-> supported deployment configurations are still being verified.
+> **Early access:** the source is public for review. Check the release notes
+> for each package's verification scope and remaining limitations.
 
-Windows x64 early-access packages are available from [GitHub Releases](https://github.com/ragent-app/Ragent_product/releases/latest).
-The installer is unsigned and Windows may display a warning. Review the release
-notes for the package's exact source commit, validation results, and upgrade
-limitations before installing. Replacing an installer at the same public version
-does not trigger the version-based update notification.
+Desktop packages are available from the [download page](https://www.agentoncloud.com/download.html)
+and [GitHub Releases](https://github.com/ragent-app/Ragent_product/releases/latest):
+Windows 11 x86-64, macOS 13 or later on Apple Silicon, and Ubuntu 24.04 x86-64.
+Desktop updates compare the public version and internal build identity; versions
+installed before the in-app updater must first be updated manually.
 
 ## At a glance
 
@@ -65,8 +65,8 @@ and supported service configurations still need release verification.
 See the [architecture overview](docs/architecture.md) for code entry points.
 See [source and release boundaries](docs/source-and-release.md) for what is
 included and what remains to be verified.
-Linux candidate installation and build details are documented in
-[the Linux desktop guide](docs/linux-desktop.md); macOS candidate and signing
+Linux installation and build details are documented in
+[the Linux desktop guide](docs/linux-desktop.md); macOS packaging and signing
 details are in [the macOS desktop guide](docs/macos-desktop.md).
 
 The current Windows host defaults to the project's hosted account and TURN

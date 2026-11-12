@@ -4,7 +4,7 @@
     <string name="onboarding_enter_workspace">Open workspace</string>
     <string name="onboarding_close_guide">Close guide</string>
     <string name="onboarding_opened">Ragent is open</string>
-    <string name="onboarding_install_hint">Install and open Ragent for Windows on your computer.</string>
+    <string name="onboarding_install_hint">Install and open Ragent on your Windows, macOS, or Linux computer.</string>
     <string name="onboarding_send_link">Send to computer</string>
     <string name="onboarding_no_desktop_login">Your computer does not need to sign in first.</string>
     <string name="onboarding_menu_path">On your computer, open “Phone pairing”, then “Start phone pairing”.</string>

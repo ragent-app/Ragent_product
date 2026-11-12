@@ -10,7 +10,7 @@
     <string name="journey_code_ready">コード表示済み</string>
     <string name="journey_previous">前へ</string>
     <string name="journey_step_count">ステップ %1$d / %2$d</string>
-    <string name="journey_handoff_hint">リンクをパソコンに送り、Windows 版 Ragent をインストールして開いてください。</string>
+    <string name="journey_handoff_hint">リンクをパソコンに送り、OS に合った Ragent をインストールして開きます。</string>
     <string name="journey_share_link">ダウンロードリンクを共有</string>
     <string name="journey_link_copied">コピーしました</string>
     <string name="journey_link_failed">他のアプリを開けませんでした。アドレスをコピーしてコンピュータで開いてください。</string>

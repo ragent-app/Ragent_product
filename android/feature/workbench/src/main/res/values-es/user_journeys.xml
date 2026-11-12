@@ -10,7 +10,7 @@
     <string name="journey_code_ready">Ya veo el código</string>
     <string name="journey_previous">Anterior</string>
     <string name="journey_step_count">Paso %1$d de %2$d</string>
-    <string name="journey_handoff_hint">Envía este enlace al ordenador, instala y abre Ragent para Windows.</string>
+    <string name="journey_handoff_hint">Envía este enlace al ordenador, instala y abre Ragent para su sistema operativo.</string>
     <string name="journey_share_link">Compartir enlace de descarga</string>
     <string name="journey_link_copied">Enlace copiado</string>
     <string name="journey_link_failed">No se pudo abrir otra aplicación. Copia la dirección y ábrela en tu equipo.</string>

@@ -1,6 +1,6 @@
 <resources>
     <string name="pairing_setup_guide_title">Configura tu equipo</string>
-    <string name="pairing_setup_guide_install">Abre la página de descargas de Ragent en tu equipo e instala la aplicación para Windows.</string>
+    <string name="pairing_setup_guide_install">Abre la página de descargas de Ragent en tu equipo e instala el paquete para Windows, macOS o Linux.</string>
     <string name="pairing_setup_guide_open">Abrir descargas</string>
     <string name="pairing_setup_guide_copy">Copiar dirección</string>
     <string name="pairing_setup_guide_desktop">Abre Ragent en el equipo. Busca el código en Cuentas y permisos o crea uno en Vincular teléfono. Para acceder sin iniciar sesión, elige la vinculación temporal.</string>

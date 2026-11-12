@@ -1,6 +1,6 @@
 <resources>
     <string name="pairing_setup_guide_title">Configurer votre ordinateur</string>
-    <string name="pairing_setup_guide_install">Sur votre ordinateur, ouvrez la page de téléchargement Ragent et installez l’application Windows.</string>
+    <string name="pairing_setup_guide_install">Sur votre ordinateur, ouvrez la page de téléchargement de Ragent et installez le paquet pour Windows, macOS ou Linux.</string>
     <string name="pairing_setup_guide_open">Ouvrir les téléchargements</string>
     <string name="pairing_setup_guide_copy">Copier l’adresse</string>
     <string name="pairing_setup_guide_desktop">Ouvrez Ragent sur l’ordinateur. Trouvez le code dans Comptes et autorisations, ou créez-en un dans Association du téléphone. Sans connexion au compte, choisissez l’association temporaire.</string>

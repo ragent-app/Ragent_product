@@ -1,6 +1,6 @@
-# Linux desktop candidate
+# Linux desktop
 
-The Debian package is being prepared for Ubuntu 24.04 x86-64. It includes the
+The Debian package targets Ubuntu 24.04 x86-64. It includes the
 local service, desktop manager, Node runtime, P2P host and the pinned Codex and
 Claude runtimes. Availability and validation of a particular package are stated
 in its release notes; a source build alone is not a published release.
@@ -96,10 +96,11 @@ systemd cannot confirm that a component has stopped, package removal fails;
 inspect the relevant unit with `systemctl status` and its journal, resolve the
 failure, then retry the removal.
 
-An update should use a newer Debian package version. The desktop update check
-offers the matching Linux x86-64 release asset when one is published; it does
-not install the update automatically. Back up data before an upgrade and read
-the release notes for migration and rollback limits.
+An update must use a newer internal Debian package version. Builds containing
+the desktop updater can download and verify the matching release package and
+launch installation after administrator authorization; the installer waits for
+blocking tasks. Older builds without the updater require a manual upgrade first.
+Read the release notes for migration and rollback limits.
 
 ## Build a candidate
 

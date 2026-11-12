@@ -10,7 +10,7 @@
     <string name="journey_code_ready">已看到配对码</string>
     <string name="journey_previous">上一步</string>
     <string name="journey_step_count">第 %1$d 步，共 %2$d 步</string>
-    <string name="journey_handoff_hint">把下载地址发到电脑，安装并打开 Windows 版 Ragent。</string>
+    <string name="journey_handoff_hint">把下载地址发到电脑，选择适合电脑系统的 Ragent 安装包并打开。</string>
     <string name="journey_share_link">分享下载地址</string>
     <string name="journey_link_copied">地址已复制</string>
     <string name="journey_link_failed">无法打开其他应用。请复制地址，在电脑上打开。</string>

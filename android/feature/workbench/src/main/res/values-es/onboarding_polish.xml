@@ -4,7 +4,7 @@
     <string name="onboarding_enter_workspace">Abrir espacio de trabajo</string>
     <string name="onboarding_close_guide">Cerrar guía</string>
     <string name="onboarding_opened">Ragent está abierto</string>
-    <string name="onboarding_install_hint">Instala y abre Ragent para Windows en el ordenador.</string>
+    <string name="onboarding_install_hint">Instala y abre Ragent en tu equipo Windows, macOS o Linux.</string>
     <string name="onboarding_send_link">Enviar al ordenador</string>
     <string name="onboarding_no_desktop_login">No hace falta iniciar sesión antes en el ordenador.</string>
     <string name="onboarding_menu_path">En el ordenador, abre «Vincular teléfono» y pulsa «Iniciar vinculación».</string>

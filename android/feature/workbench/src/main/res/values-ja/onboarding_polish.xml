@@ -4,7 +4,7 @@
     <string name="onboarding_enter_workspace">ワークスペースへ</string>
     <string name="onboarding_close_guide">ガイドを閉じる</string>
     <string name="onboarding_opened">Ragent を開きました</string>
-    <string name="onboarding_install_hint">パソコンに Windows 版 Ragent をインストールして開きます。</string>
+    <string name="onboarding_install_hint">Windows、macOS、Linux のパソコンに Ragent をインストールして開きます。</string>
     <string name="onboarding_send_link">パソコンに送る</string>
     <string name="onboarding_no_desktop_login">パソコンで先にログインする必要はありません。</string>
     <string name="onboarding_menu_path">パソコンで「スマートフォンのペアリング」を開き、「ペアリングを開始」を押します。</string>

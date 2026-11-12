@@ -4,7 +4,7 @@
     <string name="onboarding_enter_workspace">進入工作台</string>
     <string name="onboarding_close_guide">關閉指引</string>
     <string name="onboarding_opened">已開啟 Ragent</string>
-    <string name="onboarding_install_hint">在電腦上安裝並開啟 Windows 版 Ragent。</string>
+    <string name="onboarding_install_hint">在 Windows、macOS 或 Linux 電腦上安裝並開啟 Ragent。</string>
     <string name="onboarding_send_link">傳送到電腦</string>
     <string name="onboarding_no_desktop_login">電腦無需預先登入帳號。</string>
     <string name="onboarding_menu_path">在電腦上開啟「手機配對」，點選「開始手機配對」。</string>

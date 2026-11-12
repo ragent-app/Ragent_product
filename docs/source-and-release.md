@@ -31,14 +31,13 @@ deployed service and a full cross-device connection have not yet been validated
 from the public source. Windows currently uses the project's hosted endpoints
 outside the isolated test configuration.
 
-Windows update checks compare the installed public version with the GitHub release
-tag. The current public version remains 0.0.1. Replacing an asset under the same
-version does not notify installed users through the version checker; they need
-the replacement package through another channel. The MSI product version is a
-separate Windows Installer upgrade number and must exceed the latest published
-MSI version, which is recorded in the release notes. The source update
-checker is included only in subsequently built installers; it does not retrofit
-an already installed package.
+Desktop update checks compare the public release version and, for matching
+versions, the verified internal build marker. The current public version is
+0.0.1. A newer internal build can therefore be detected when the public version
+does not change. Native package versions must increase for upgrades, including
+the MSI product version, Debian package version and macOS bundle build number.
+The in-app installer is present only in packages that include it; an older
+installation must first be upgraded manually.
 
 Linux x86-64 and macOS Apple Silicon candidate builds with a three-component
 numeric public version produce an asset-specific `<artifact>.BUILDINFO.txt`

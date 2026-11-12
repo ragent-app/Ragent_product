@@ -3,10 +3,10 @@
 Ragent 是一个 AI 工作台，将计算机上运行的智能体工具与 Web 和 Android
 客户端连接起来，帮助用户跨设备管理会话和工作。
 
-> 当前源码已公开供审阅；Windows 安装包及受支持的部署配置仍在验证。
+> 当前源码已公开供审阅；各安装包的验证范围和限制请查看发布说明。
 
-Windows x64 抢先体验安装包可在 [GitHub Releases](https://github.com/ragent-app/Ragent_product/releases/latest) 获取。
-安装包尚未签名，Windows 可能显示警告；安装前请查看发布说明中的准确源码提交、验证范围和升级限制。同一公开版本的安装包替换不会触发版本更新提示。
+电脑端安装包可在 [官网下载页](https://www.agentoncloud.com/download.html)和 [GitHub Releases](https://github.com/ragent-app/Ragent_product/releases/latest) 获取，支持 Windows 11 x86-64、macOS 13 及以上 Apple Silicon，以及 Ubuntu 24.04 x86-64。
+电脑端通过公开版本和内部构建标识检查更新；内置更新功能之前的旧版需要先手动更新一次。
 Android 应用目前处于封闭测试。
 
 ## 主要功能

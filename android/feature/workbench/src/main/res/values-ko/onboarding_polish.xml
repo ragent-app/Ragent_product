@@ -4,7 +4,7 @@
     <string name="onboarding_enter_workspace">작업 공간 열기</string>
     <string name="onboarding_close_guide">안내 닫기</string>
     <string name="onboarding_opened">Ragent를 열었어요</string>
-    <string name="onboarding_install_hint">컴퓨터에 Windows용 Ragent를 설치하고 여세요.</string>
+    <string name="onboarding_install_hint">Windows, macOS 또는 Linux 컴퓨터에 Ragent를 설치하고 여세요.</string>
     <string name="onboarding_send_link">컴퓨터로 보내기</string>
     <string name="onboarding_no_desktop_login">컴퓨터에서 미리 로그인할 필요는 없습니다.</string>
     <string name="onboarding_menu_path">컴퓨터에서 “휴대전화 페어링”을 열고 “페어링 시작”을 누르세요.</string>
