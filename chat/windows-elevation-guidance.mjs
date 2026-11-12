@@ -116,8 +116,8 @@ export async function needsWindowsElevationGuidance(command, shell = 'PowerShell
 
 export function windowsElevationGuidance(channelAvailable) {
   return channelAvailable
-    ? 'Use AgentoC’s separate managed privileged executor through the agentoc_request_actions tool for the underlying concrete command. For service start or stop, submit Start-Service or Stop-Service with the exact service name. Do not use direct elevation wrappers. The current approval policy still applies; if the operation is unsupported, report that limitation.'
-    : 'AgentoC’s managed privileged action channel is unavailable. Do not use direct elevation wrappers; report that the operation is blocked.';
+    ? 'Use Ragent’s separate managed privileged executor through the agentoc_request_actions tool for the underlying concrete command. For service start or stop, submit Start-Service or Stop-Service with the exact service name. Do not use direct elevation wrappers. The current approval policy still applies; if the operation is unsupported, report that limitation.'
+    : 'Ragent’s managed privileged action channel is unavailable. Do not use direct elevation wrappers; report that the operation is blocked.';
 }
 
 // Guidance is useful even in unattended modes or without an MCP binding. It
