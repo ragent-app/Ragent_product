@@ -47,6 +47,7 @@ import { access, lstat, open, readFile, realpath } from 'fs/promises';
 import { buildSandboxedSpawn, requireSandboxAvailability } from '../lib/runner-sandbox.mjs';
 import { readOnlyWorkspaceForRun } from './read-only-run-sandbox.mjs';
 import { openReadOnlyProviderSeeds, closeReadOnlyProviderSeeds, deliverReadOnlyProviderSeeds } from './read-only-provider-home.mjs';
+import { createCodexReadOnlyEnvironmentSetup } from './codex-readonly-environment-setup.mjs';
 import { createFileChangeStatsTracker } from './file-change-stats.mjs';
 import {
   FILE_ASSET_ID_PATTERN,
@@ -1934,6 +1935,47 @@ export function consumeCodexSharedHookRegistration(state, parsed) {
   return true;
 }
 
+function continueCodexAppServerStartup(proc, state) {
+  if (state.terminalSeen || state.hadError || state.startupCancelled) return;
+  if (state.needsAccountModelCatalog) {
+    state.providerStage = 'account_model_catalog';
+    if (state.accountModelCatalog) state.accountModelCatalog.start();
+    else {
+      markCodexAppServerFailure(state, { error: { code: 'CODEX_ACCOUNT_MODEL_CATALOG_UNAVAILABLE',
+        message: 'Run model negotiation was not configured' } });
+      state.terminalSeen = true;
+    }
+  } else writeCodexAppServerThreadStart(proc, state);
+}
+
+export function configureCodexReadOnlyEnvironment({ proc, state, executor, environmentId, workspace, hidePaths,
+  beforeReady = async () => {}, onFailure = () => {}, prepareMcp } = {}) {
+  if (!state || !executor) return null;
+  const fail = error => {
+    if (state.terminalSeen || state.startupCancelled) return;
+    state.hadError = true; state.terminalSeen = true;
+    state.failureReason = error?.message || 'Codex read-only execution environment is unavailable';
+    state.providerErrorCode = error?.code || 'CODEX_READONLY_ENVIRONMENT_UNAVAILABLE';
+    onFailure(error);
+  };
+  const setup = createCodexReadOnlyEnvironmentSetup({ environmentId, cwd: state.cwd, workspace, hidePaths, executor,
+    nextRequestId: () => state.nextControlRequestId++, send: message => writeCodexAppServerMessage(proc, message),
+    ...(prepareMcp ? { prepareMcp } : {}),
+    onReady: selected => {
+      void (async () => {
+        try {
+          await beforeReady();
+          if (state.terminalSeen || state.hadError || state.startupCancelled) { await setup.close(); return; }
+          state.executionEnvironment = selected.executionEnvironment;
+          state.threadMcpConfig = selected.threadMcpConfig;
+          continueCodexAppServerStartup(proc, state);
+        } catch { fail({ code: 'CODEX_READONLY_ENVIRONMENT_UNAVAILABLE', message: 'Codex read-only execution environment is unavailable' }); await setup.close(); }
+      })();
+    }, onFailure: fail });
+  state.readOnlyEnvironmentSetup = setup;
+  return setup;
+}
+
 export function handleCodexAppServerInitializeResponse(proc, state, parsed) {
   if (!state || state.initialized || state.terminalSeen || state.hadError
       || state.startupCancelled || parsed?.id !== state.initializeRequestId) return false;
@@ -1947,15 +1989,10 @@ export function handleCodexAppServerInitializeResponse(proc, state, parsed) {
   writeCodexAppServerMessage(proc, buildCodexAppServerInitializedNotification());
   const continueStartup = () => {
     if (state.terminalSeen || state.hadError || state.startupCancelled) return;
-    if (state.needsAccountModelCatalog) {
-    state.providerStage = 'account_model_catalog';
-    if (state.accountModelCatalog) state.accountModelCatalog.start();
-    else {
-      markCodexAppServerFailure(state, { error: { code: 'CODEX_ACCOUNT_MODEL_CATALOG_UNAVAILABLE',
-        message: 'Run model negotiation was not configured' } });
-      state.terminalSeen = true;
-    }
-    } else writeCodexAppServerThreadStart(proc, state);
+    if (state.readOnlyEnvironmentSetup) {
+      state.providerStage = 'readonly_environment';
+      state.readOnlyEnvironmentSetup.start();
+    } else continueCodexAppServerStartup(proc, state);
   };
   if (state.codexWindowsInstallHook) {
     state.providerStage = 'managed_hook_setup';
@@ -5034,6 +5071,11 @@ async function main() {
       return;
     }
     if (appServerState && parsed && consumeCodexSharedHookRegistration(appServerState, parsed)) {
+      if (appServerState.hadError) await terminateManagedProcess();
+      return;
+    }
+    if (appServerState?.readOnlyEnvironmentSetup && parsed
+        && await appServerState.readOnlyEnvironmentSetup.consume(parsed)) {
       if (appServerState.hadError) await terminateManagedProcess();
       return;
     }
