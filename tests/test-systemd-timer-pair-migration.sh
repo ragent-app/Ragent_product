@@ -14,6 +14,7 @@ cleanup() {
   rm -f -- "$unit_dir/$old.timer" "$unit_dir/$new.timer" "$unit_dir/$old.service" "$unit_dir/$new.service" "$unit_dir/timers.target.wants/$old.timer" "$unit_dir/timers.target.wants/$new.timer" "$unit_dir/$old.service.d/qa.conf"
   rmdir "$unit_dir/$old.service.d" 2>/dev/null || true
   systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user reset-failed "$new.service" "$old.service" "$new.timer" "$old.timer" >/dev/null 2>&1 || true
   rm -rf -- "$scratch"
 }
 trap cleanup EXIT
