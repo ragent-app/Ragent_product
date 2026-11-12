@@ -789,11 +789,11 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
       }));
     }
     entry = { at: now, catalogs };
-    // A fast request may be built from configured/stale fallback rows while
-    // the upstream refresh is still running. Do not pin that incomplete
-    // catalog for a full minute; the next request should observe the
-    // background result as soon as it is available.
-    if (!fast) {
+    // Codex discovery has its own per-account freshness, retry and single-flight
+    // policy. A second projection cache can pin either builtin fallback or a
+    // stale upstream result after that underlying catalog has recovered.
+    // Always project Codex from the underlying cache on each request.
+    if (!fast && tool !== 'codex' && tool !== 'codex-cli') {
       cacheSet(toolCatalogCache, cacheKey, entry);
     }
   }
