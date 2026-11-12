@@ -340,16 +340,16 @@ try {
     const starterPresetEvents = await request(port, 'GET', `/api/sessions/${createdFromStarterPreset.json.session.id}/events?filter=all`);
     const starterWelcomeEvent = (starterPresetEvents.json.events || []).find((event) => event.type === 'message' && event.role === 'assistant');
     assert.ok(starterWelcomeEvent, 'starter preset sessions should append their opening assistant message');
-    assert.match(starterWelcomeEvent.content || '', /SOP|工作流|AgentoC Agent/i);
+    assert.match(starterWelcomeEvent.content || '', /what you want this Agent to do/i);
     assert.match(
       starterWelcomeEvent.content || '',
-      /1\. 名字|先按下面这份清单/,
-      'create-agent welcome message should open with the structured section checklist',
+      /A sentence or an existing workflow is enough to start/i,
+      'create-agent welcome message should accept a concise description',
     );
     assert.match(
       starterWelcomeEvent.content || '',
-      /12\. 每条回复前的固定提示/,
-      'create-agent welcome checklist should include the optional per-message reminder section',
+      /prepare the Agent for your review/i,
+      'create-agent welcome message should describe the review step',
     );
 
     const ownerStarterRun = await submitMessage(
