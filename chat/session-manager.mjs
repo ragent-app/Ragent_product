@@ -101,6 +101,7 @@ import {
   buildPrivilegedShimPolicyDenialUpdate,
   buildPrivilegedShimInstallAutoUpdate,
   buildPrivilegedShimResolveUpdate,
+  buildPrivilegedShimCategoryUpdate,
   buildPrivilegedShimTerminalUpdate,
 } from './privileged-approval.mjs';
 import {
@@ -15234,7 +15235,9 @@ async function submitPrivilegedCategoryApprovalUnlocked(runId, batchId, category
       verifyOwnerWebAuthnAssertion,
     },
   );
-  const updatedRun = await getRun(normalizedRunId) || run;
+  let updatedRun = await getRun(normalizedRunId) || run;
+  const shimUpdate = buildPrivilegedShimCategoryUpdate(updatedRun, normalizedBatchId, executed.resolved, executed.execResults);
+  if (shimUpdate) updatedRun = await updateRun(normalizedRunId, shimUpdate) || updatedRun;
   await resumeHarnessRunBudget(updatedRun);
   observeDetachedRun(updatedRun.sessionId, updatedRun.id);
   broadcastSessionInvalidation(updatedRun.sessionId);

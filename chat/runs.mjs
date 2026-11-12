@@ -1155,6 +1155,14 @@ function pickRunState(currentState, nextState, proposed = {}) {
     && proposed?.actionPause?.state === 'waiting_user') {
     return 'waiting_user';
   }
+  // A provider may have already returned the asynchronous shim acknowledgement
+  // and exited. Keep its run addressable while the specific batch still needs
+  // an owner decision, rather than allowing an older running state to win.
+  if (nextState === 'waiting_user' && proposed?.cancelRequested !== true
+      && proposed?.privilegedShimPending?.batchId
+      && proposed?.privilegedShimResult?.batchId !== proposed.privilegedShimPending.batchId) {
+    return 'waiting_user';
+  }
   if (nextState === 'running' || currentState === 'running') return 'running';
   return nextState || currentState || 'accepted';
 }

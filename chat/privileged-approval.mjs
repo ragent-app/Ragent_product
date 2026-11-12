@@ -369,6 +369,44 @@ export function buildPrivilegedShimResolveUpdate(currentRun, finalBatch) {
   };
 }
 
+// The legacy privileged-category route has its own response and execution
+// events, separate from approved-action batches. A shim batch contains one
+// operation; only that exact operation may settle the pending shim request.
+export function buildPrivilegedShimCategoryUpdate(currentRun, batchId, resolved, execResults = []) {
+  const pending = currentRun?.privilegedShimPending;
+  const normalizedBatch = trimString(batchId);
+  const opId = trimString(pending?.opId);
+  if (!opId || !normalizedBatch || pending?.batchId !== normalizedBatch) return null;
+  const denied = (resolved?.denied || []).find((op) => trimString(op?.opId) === opId);
+  const approved = (resolved?.approved || []).find((op) => trimString(op?.opId) === opId);
+  if (Boolean(denied) === Boolean(approved)) return null;
+  const event = approved ? (Array.isArray(execResults) ? execResults : []).find((entry) => trimString(entry?.opId) === opId) : null;
+  if (approved && !event) return null;
+  const op = denied || approved;
+  const success = approved && event.exitCode === 0 && !trimString(event.error);
+  const result = {
+    manifestHash: trimString(op.manifestHash),
+    canonicalCommand: trimString(op.command),
+    state: denied ? 'denied' : success ? 'completed' : 'failed',
+    resultRef: event ? {
+      exitCode: Number.isInteger(event.exitCode) ? event.exitCode : null,
+      ...(trimString(event.error) ? { error: trimString(event.error) } : {}),
+      ...(trimString(event.stdoutRef) ? { stdoutRef: trimString(event.stdoutRef) } : {}),
+    } : {},
+  };
+  return (current) => {
+    if (current?.privilegedShimPending?.batchId !== normalizedBatch
+        || current.privilegedShimPending.opId !== opId) return current;
+    return {
+      ...current,
+      privilegedShimPending: undefined,
+      privilegedShimResult: privilegedShimResultPayload(normalizedBatch, current.privilegedShimPending.requestId, {
+        status: 'resolved', results: [result],
+      }),
+    };
+  };
+}
+
 /**
  * installAuto writeback: in-scope installs execute at surface time without an
  * owner resolve route, so their privileged_exec_result events are mapped into

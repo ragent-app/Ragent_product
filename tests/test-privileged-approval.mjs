@@ -8,6 +8,7 @@ import {
   resolvePrivilegedInstallAutoApproval,
   surfacePrivilegedBatchRequest,
   buildPrivilegedShimPolicyDenialUpdate,
+  buildPrivilegedShimCategoryUpdate,
 } from '../chat/privileged-approval.mjs';
 import { buildPrivilegedBatch } from '../chat/privileged-ops.mjs';
 import { CATEGORY_DELETE, CATEGORY_INSTALL, CATEGORY_OTHER } from '../chat/privileged-classifier.mjs';
@@ -16,6 +17,23 @@ let passed = 0;
 function check(label, condition) {
   assert.ok(condition, `failed: ${label}`);
   passed += 1;
+}
+
+// Legacy category responses must settle only the exact shim operation, and an
+// approved operation without an execution result must remain unresolved.
+{
+  const op = { opId: 'pop_qa', manifestHash: 'manifest_qa', command: 'rm /tmp/qa' };
+  const run = { privilegedShimPending: { batchId: 'pbatch_qa', requestId: 'pshim_qa', opId: op.opId } };
+  const deny = buildPrivilegedShimCategoryUpdate(run, 'pbatch_qa', { approved: [], denied: [op] });
+  check('category denial settles exact shim', deny(run).privilegedShimResult.results[0].state === 'denied');
+  check('category denial clears pending', deny(run).privilegedShimPending === undefined);
+  check('approved op without executor result stays pending', buildPrivilegedShimCategoryUpdate(run, 'pbatch_qa', { approved: [op], denied: [] }) === null);
+  const failed = buildPrivilegedShimCategoryUpdate(run, 'pbatch_qa', { approved: [op], denied: [] }, [{ opId: op.opId, exitCode: null, error: 'executor unavailable' }]);
+  check('executor failure is not reported as success', failed(run).privilegedShimResult.results[0].state === 'failed');
+  const success = buildPrivilegedShimCategoryUpdate(run, 'pbatch_qa', { approved: [op], denied: [] }, [{ opId: op.opId, exitCode: 0 }]);
+  check('successful execution settles shim', success(run).privilegedShimResult.results[0].state === 'completed');
+  check('other batch does not settle shim', buildPrivilegedShimCategoryUpdate(run, 'other', { approved: [], denied: [op] }) === null);
+  check('stale updater does not change another pending op', deny({ privilegedShimPending: { batchId: 'pbatch_qa', opId: 'other' } }).privilegedShimResult === undefined);
 }
 
 function createFakeStore() {

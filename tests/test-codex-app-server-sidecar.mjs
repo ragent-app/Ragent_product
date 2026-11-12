@@ -135,6 +135,7 @@ ${process.platform === 'win32' ? `Object.assign(process.env, JSON.parse(fs.readF
 const crypto = require('crypto');
 const path = require('path');
 const readline = require('readline');
+const { spawnSync } = require('child_process');
 const recordPath = process.env.FAKE_CODEX_APP_SERVER_RECORD;
 const messages = [];
 let threadId = '';
@@ -365,6 +366,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       return;
 	    }
 	    send({ method: 'turn/started', params: { threadId, turn: { id: turnId, items: [], itemsView: 'complete', status: 'inProgress', error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+	    if (message.params.clientUserMessageId === 'req-app-server-shim-pending') {
+	      const shim = spawnSync('agentoc-privileged', ['--description', 'isolated fixture', '--category', 'delete', '--', 'rm', '/tmp/ragent-shim-fixture'], { encoding: 'utf8', timeout: 5000 });
+	      record({ fixtureShimExit: shim.status, fixtureShimError: shim.error?.message || '' });
+	      if (shim.status !== 78) { send({ method: 'error', params: { error: { message: 'fixture shim did not create a pending request' }, turnId } }); process.exit(1); return; }
+	      finishTurn(turnId);
+	      return;
+	    }
 	    if (message.params.clientUserMessageId === 'req-app-server-auth-error') {
 	      send({
 	        method: 'error',
@@ -873,6 +881,42 @@ let server = await startServer({
 });
 
 try {
+  if (process.platform !== 'win32') {
+    // The fake provider invokes the real per-Run shim, receives its pending
+    // acknowledgement, then exits. The owner request must remain actionable
+    // until explicitly resolved instead of being closed by Run finalization.
+    const shimSession = await createSession(port, 'safe');
+    const shimRun = await submitMessage(port, shimSession.id, {
+      requestId: 'req-app-server-shim-pending', text: 'Create a privileged approval fixture.',
+      tool: 'fake-codex-app-server', model: 'fake-model',
+    });
+    const batch = await waitFor(async () => {
+      const response = await request(port, 'GET', `/api/sessions/${shimSession.id}/events`);
+      return response.json?.events?.find((event) => event.type === 'privileged_batch_request') || false;
+    }, 'shim approval request');
+    assert.equal(batch.delete?.length, 1);
+    let observedShimRun;
+    try {
+      await waitFor(async () => {
+        const response = await request(port, 'GET', `/api/runs/${shimRun.id}`);
+        observedShimRun = response.json?.run;
+        return observedShimRun?.state === 'waiting_user';
+      }, 'provider exit keeps shim Run waiting for owner');
+    } catch (error) {
+      error.message += `\nlast shim run: ${JSON.stringify({ state: observedShimRun?.state, failureReason: observedShimRun?.failureReason, pending: observedShimRun?.privilegedShimPending, result: observedShimRun?.privilegedShimResult })}`;
+      error.message += `\nfixture messages: ${JSON.stringify(readRecordedMessages(recordPath).filter((entry) => entry.fixtureShimExit !== undefined))}`;
+      const output = server.getOutput();
+      error.message += `\nserver stderr tail: ${(output.stderr || '').slice(-3000)}`;
+      try { error.message += `\nshim spool tail: ${readFileSync(join(home, '.agentoc', 'data', 'chat-runs', shimRun.id, 'spool.jsonl'), 'utf8').slice(-3000)}`; } catch {}
+      throw error;
+    }
+    const decision = await request(port, 'POST', `/api/runs/${shimRun.id}/privileged-batches/${batch.batchId}/categories/delete`, {
+      requestId: 'req-shim-denied', checkedOpIds: [],
+    });
+    assert.ok([200, 202].includes(decision.status), `shim denial failed: ${decision.text}`);
+    assert.equal((await waitForRunTerminal(port, shimRun.id)).state, 'completed');
+    writeFileSync(recordPath, '', 'utf8');
+  }
   // Exercise explicit approval under a gated product profile. Unattended
   // profiles correctly deny permission requests instead of opening a card.
   const session = await createSession(port, 'safe');
