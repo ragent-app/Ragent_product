@@ -101,8 +101,8 @@ function pushPromptLine(lines, line, { maxTotalChars = MAX_PROMPT_EVENT_CHARS } 
   const currentLength = lines.reduce((total, part) => total + part.length + 1, 0);
   const nextLength = currentLength + text.length + 1;
   if (nextLength > maxTotalChars) {
-    if (!lines.at(-1)?.includes('truncated by AgentoC')) {
-      lines.push('[... additional events truncated by AgentoC ...]');
+    if (!/truncated by (?:AgentoC|Ragent)/.test(lines.at(-1) || '')) {
+      lines.push('[... additional events truncated by Ragent ...]');
     }
     return false;
   }
@@ -126,7 +126,7 @@ export function formatEventsForPrompt(events, {
     ? events.length - selectedEvents.length
     : 0;
   if (omittedEvents > 0) {
-    lines.push(`[... ${omittedEvents} earlier events omitted by AgentoC ...]`);
+    lines.push(`[... ${omittedEvents} earlier events omitted by Ragent ...]`);
   }
   for (const evt of selectedEvents) {
     let line = '';

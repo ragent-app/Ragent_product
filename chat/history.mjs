@@ -446,7 +446,7 @@ function clipMiddle(text, maxChars) {
   if (text.length <= maxChars) return text;
   const head = Math.max(1, Math.floor(maxChars * 0.6));
   const tail = Math.max(1, maxChars - head);
-  return `${text.slice(0, head).trimEnd()}\n[... truncated by AgentoC ...]\n${text.slice(-tail).trimStart()}`;
+  return `${text.slice(0, head).trimEnd()}\n[... truncated by Ragent ...]\n${text.slice(-tail).trimStart()}`;
 }
 
 function eventCacheKey(sessionId, seq) {

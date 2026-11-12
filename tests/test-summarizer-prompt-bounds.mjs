@@ -33,7 +33,7 @@ assert.ok(
 );
 assert.match(
   text,
-  /earlier events omitted by AgentoC/,
+  /earlier events omitted by Ragent/,
   'summarizer prompt should make event omission explicit',
 );
 assert.match(
@@ -43,8 +43,17 @@ assert.match(
 );
 assert.match(
   text,
-  /truncated by AgentoC|ASSISTANT: final assistant preview/,
+  /truncated by Ragent|ASSISTANT: final assistant preview/,
   'summarizer prompt should either include the latest assistant preview or explicitly mark truncation',
 );
+
+for (const product of ['AgentoC', 'Ragent']) {
+  const compatible = formatEventsForPrompt([
+    { type: 'message', role: 'assistant', content: `already truncated by ${product}` },
+    { type: 'message', role: 'assistant', content: 'x'.repeat(100) },
+  ], { maxTotalChars: 80 });
+  assert.doesNotMatch(compatible, /additional events truncated by Ragent/,
+    `an existing ${product} truncation marker should not be duplicated`);
+}
 
 console.log('test-summarizer-prompt-bounds: ok');

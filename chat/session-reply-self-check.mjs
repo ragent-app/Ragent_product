@@ -11,7 +11,7 @@ function clipReplySelfCheckText(value, maxChars = 5000) {
   if (text.length <= maxChars) return text;
   const headChars = Math.max(1, Math.floor(maxChars * 0.6));
   const tailChars = Math.max(1, maxChars - headChars);
-  return `${text.slice(0, headChars).trimEnd()}\n[... truncated by AgentoC ...]\n${text.slice(-tailChars).trimStart()}`;
+  return `${text.slice(0, headChars).trimEnd()}\n[... truncated by Ragent ...]\n${text.slice(-tailChars).trimStart()}`;
 }
 
 function unwrapExactReplyText(value) {

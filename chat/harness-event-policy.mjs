@@ -51,7 +51,7 @@ function clipMiddle(value, maxBytes) {
   const input = typeof value === 'string' ? value : '';
   if (!input || !Number.isInteger(maxBytes) || maxBytes <= 0) return input;
   if (Buffer.byteLength(input, 'utf8') <= maxBytes) return input;
-  const marker = '\n… [AgentoC payload clipped; raw event remains in run spool] …\n';
+  const marker = '\n… [Ragent payload clipped; raw event remains in run spool] …\n';
   const markerBytes = Buffer.byteLength(marker, 'utf8');
   if (markerBytes >= maxBytes) return Buffer.from(input, 'utf8').subarray(0, maxBytes).toString('utf8');
   const available = maxBytes - markerBytes;

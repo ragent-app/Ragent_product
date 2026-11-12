@@ -175,7 +175,7 @@ function clipMiddle(text, maxChars) {
   if (!text || !Number.isInteger(maxChars) || maxChars <= 0 || text.length <= maxChars) {
     return { text: text || '', truncated: false };
   }
-  const marker = `\n[... truncated by AgentoC context budget: ${text.length - maxChars} chars omitted ...]\n`;
+  const marker = `\n[... truncated by Ragent context budget: ${text.length - maxChars} chars omitted ...]\n`;
   if (maxChars <= marker.length + 2) {
     return {
       text: `${text.slice(0, Math.max(0, maxChars - 1))}...`,

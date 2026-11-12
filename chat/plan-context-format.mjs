@@ -2,7 +2,7 @@ const DEFAULT_MAX_CHARS = 4000;
 const DEFAULT_MAX_BODY_CHARS = 2800;
 const DEFAULT_MAX_ITEM_CHARS = 500;
 const DEFAULT_MAX_ITEMS = 20;
-const TRUNCATED_MARKER = '\n[... truncated by AgentoC ...]\n';
+const TRUNCATED_MARKER = '\n[... truncated by Ragent ...]\n';
 
 function trimString(value) {
   return String(value ?? '').replace(/\r\n/g, '\n').trim();

@@ -30,7 +30,7 @@ function stringify(value) {
 
 function boundedJson(value, maxChars) {
   const rendered = stringify(value);
-  return rendered.length <= maxChars ? rendered : `${rendered.slice(0, maxChars)}\n... [truncated by AgentoC]`;
+  return rendered.length <= maxChars ? rendered : `${rendered.slice(0, maxChars)}\n... [truncated by Ragent]`;
 }
 
 function parseHiddenJson(content) {

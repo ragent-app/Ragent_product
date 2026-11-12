@@ -4,7 +4,7 @@ import { formatPlanContextEvent } from './plan-context-format.mjs';
 
 const MAX_EVENT_CHARS = 4000;
 const MAX_CONTEXT_CHARS = 24000;
-const TRUNCATED_MARKER = '\n[... truncated by AgentoC ...]\n';
+const TRUNCATED_MARKER = '\n[... truncated by Ragent ...]\n';
 
 // Mirrors AGENT_MESSAGE_PROMPT_KEY in session-manager.mjs. Defined locally to
 // avoid a reverse import cycle. Historical per-message prompt events must never
