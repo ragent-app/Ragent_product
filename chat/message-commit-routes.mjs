@@ -33,7 +33,7 @@ export async function handleMessageCommitRoutes({ req, res, pathname, parsedUrl,
     const result = req.method === 'GET'
       ? await readSessionApiMessageCommit(sessionId, scope, requestId)
       : await commitSessionApiMessage(sessionId, scope, requestId, await readPreparationBody(req, 4096),
-        authSession.principalKind || 'owner', { ownerDevice: process.platform === 'win32' ? authenticatedOwnerDeviceDescriptor(authSession) : null });
+        authSession.principalKind || 'owner', { authSession, ownerDevice: process.platform === 'win32' ? authenticatedOwnerDeviceDescriptor(authSession) : null });
     // Persistence precedes both continuation and reply. GET never resumes execution.
     if (req.method === 'POST' && result.accepted && result.runId) scheduleScopedMessageRun(sessionId, result.runId);
     writeJson(res, 200, result);

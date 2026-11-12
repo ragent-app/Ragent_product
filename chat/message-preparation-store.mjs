@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { findSessionMeta, readSessionMessagePreparations, mutateScopedSessionMetaDurably, withSessionApiScope } from './session-meta-store.mjs';
 import { sessionApiError, sessionApiIdentifier } from './session-api-mutation-contract.mjs';
 import { parseSessionApiScope } from './session-api-scope-contract.mjs';
-import { MESSAGE_PREPARATION_LIMIT, parseMessagePreparation, messagePreparations,
+import { MESSAGE_PREPARATION_LIMIT, messagePreparations,
   messagePreparationFingerprint, projectMessagePreparation } from './message-preparation-contract.mjs';
 import { withMessageRequestIdentity } from './message-request-identity.mjs';
 import { getFileAsset, findFileAssetUploadReceipt } from './file-assets.mjs';
 import { requireUploadScope } from './file-asset-scope.mjs';
 import { findRunByRequest } from './runs.mjs';
 import { withoutMessageExecution } from './message-execution-context.mjs';
+import { authorizeMessageAttachmentSizes } from './message-attachment-account-policy.mjs';
 
 export async function assertNoMessagePreparationReuse(sessionId, requestId) {
   if ((await readSessionMessagePreparations(sessionId)).some(row => row.requestId === requestId))
@@ -39,10 +40,10 @@ export async function validatePreparedMessageAttachments(sessionId, scope, attac
   });
 }
 
-export async function prepareSessionApiMessage(sessionId, scopeInput, payload, { authorize } = {}) {
+export async function prepareSessionApiMessage(sessionId, scopeInput, payload, { authorize, authSession } = {}) {
   sessionApiIdentifier(sessionId, 256);
   const scope = parseSessionApiScope(scopeInput, sessionId);
-  const request = parseMessagePreparation(payload);
+  const request = await authorizeMessageAttachmentSizes(payload, authSession);
   const fingerprint = messagePreparationFingerprint(sessionId, scope, request);
   return withMessageRequestIdentity(sessionId, request.requestId, async () => {
     const existingRun = await findRunByRequest(sessionId, request.requestId);

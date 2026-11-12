@@ -493,7 +493,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         val relay = contract["encryptedRelay"] as? JsonObject
         val supportsRelay = relay?.get("version")?.jsonPrimitive?.intOrNull == 1 &&
             relay["recordBytes"]?.jsonPrimitive?.intOrNull == 256 * 1024
-        return UploadContract(minOf(targetMaximumBytes, MAXIMUM_BYTES), supportsRelay,
+        return UploadContract(minOf(targetMaximumBytes, MAXIMUM_METADATA_BYTES), supportsRelay,
             supportsRelay && relay?.get("finalizeWaitsForRelay") == JsonPrimitive(true))
     }
 
@@ -541,7 +541,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
         require(input.originalName.isNotBlank() && input.originalName.length <= 255
             && input.originalName.none { it in "\\/\u0000\r\n" }) { "A bounded file name is required" }
         require(input.mimeType.length <= 256 && input.mimeType.none { it in "\u0000\r\n" })
-        require(input.sizeBytes in 1..MAXIMUM_BYTES && Regex("[a-fA-F0-9]{64}").matches(input.sha256))
+        require(input.sizeBytes in 1..MAXIMUM_METADATA_BYTES && Regex("[a-fA-F0-9]{64}").matches(input.sha256))
         return input.copy(requestId = input.requestId.trim(), originalName = input.originalName.trim().replace(Regex("\\s+"), " "),
             mimeType = input.mimeType.trim().lowercase(Locale.ROOT).ifBlank { "application/octet-stream" },
             sha256 = input.sha256.lowercase(Locale.ROOT), quotaBatchId = input.quotaBatchId?.trim())
@@ -566,6 +566,9 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
     }
     companion object {
         const val MAXIMUM_BYTES = 1024L * 1024 * 1024
+        // JSON numbers must remain exact on the JavaScript instance. The target's
+        // account-authorized upload contract supplies the actual allowance.
+        const val MAXIMUM_METADATA_BYTES = 9_007_199_254_740_991L
         const val MAX_IN_MEMORY_UPLOAD_BYTES = 25L * 1024 * 1024
         const val UPLOAD_CHUNK_BYTES = 256 * 1024
         const val UPLOAD_BATCH_BYTES = 1024 * 1024

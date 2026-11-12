@@ -26,6 +26,7 @@ class FileAssetUploadClientTest {
         var ready = false
         var lose = ""
         var unsupported = false
+        var maximumBytes = FileAssetUploadClient.MAXIMUM_BYTES
         var scoped = false
         var scopeMarker = true
         var unknown404 = false
@@ -59,7 +60,7 @@ class FileAssetUploadClientTest {
             val response = when {
                 request.path == "/api/session-scope-contract" -> ApiResponse(200, if (scoped) scopeContractFixture() else """{"version":0}""")
                 request.path == "/api/asset-upload-contract" -> if (unsupported) ApiResponse(200, """{"version":0}""")
-                    else ApiResponse(200, """{"version":1,"maximumBytes":${FileAssetUploadClient.MAXIMUM_BYTES},"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
+                    else ApiResponse(200, """{"version":1,"maximumBytes":$maximumBytes,"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
                 request.path.endsWith("/upload-checkpoint") -> ApiResponse(200, checkpoint().toString())
                 request.method == "PATCH" -> {
                     if (failChunksBeforePersist > 0) {
@@ -205,7 +206,10 @@ class FileAssetUploadClientTest {
         assertFailsWith<IllegalArgumentException> {
             FileAssetUploadClient("pc", fixture).findReceipt("s", maximum.copy(sizeBytes = maximum.sizeBytes + 1))
         }
-        assertTrue(fixture.requests.isEmpty())
+        assertEquals(listOf("/api/asset-upload-contract"), fixture.requests.map { it.path })
+        fixture.requests.clear()
+        fixture.maximumBytes = FileAssetUploadClient.MAXIMUM_METADATA_BYTES
+        assertNull(FileAssetUploadClient("pc", fixture).findReceipt("s", maximum.copy(sizeBytes = 2L * 1024 * 1024 * 1024)))
     }
 
     @Test fun oneGiBStreamingTransferOnlyRetainsOneBoundedChunkAtATime() = runTest {

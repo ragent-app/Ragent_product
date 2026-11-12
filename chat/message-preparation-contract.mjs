@@ -20,7 +20,8 @@ function keys(value, allowed) {
       Object.keys(value).some(key => !allowed.includes(key)))
     throw sessionApiError('INVALID_ARGUMENT', 400, 'Unsupported message preparation fields');
 }
-export function parseMessagePreparation(value) {
+export function parseMessagePreparation(value, { maximumFileBytes = MAX_STABLE_UPLOAD_BYTES,
+  maximumTotalBytes = 100 * 1024 * 1024 } = {}) {
   keys(value, ['version', 'requestId', 'text', 'attachments', 'runOptions', 'expiresAt']);
   if (value.version !== 1 || typeof value.text !== 'string' || !value.text.trim() ||
       Buffer.byteLength(value.text, 'utf8') > MESSAGE_PREPARATION_TEXT_BYTES || value.text.includes('\0') ||
@@ -57,21 +58,23 @@ export function parseMessagePreparation(value) {
     keys(input, ['assetId', 'sha256', 'sizeBytes', 'renderAs']);
     if (typeof input.assetId !== 'string' || !/^fasset_[a-f0-9]{24}$/.test(input.assetId) || ids.has(input.assetId) ||
         typeof input.sha256 !== 'string' || !HASH.test(input.sha256) || !Number.isSafeInteger(input.sizeBytes) ||
-        input.sizeBytes < 1 || input.sizeBytes > MAX_STABLE_UPLOAD_BYTES)
+        input.sizeBytes < 1 || input.sizeBytes > maximumFileBytes)
       throw sessionApiError('INVALID_ARGUMENT', 400, 'Invalid prepared attachment');
     if (Object.hasOwn(input, 'renderAs') && input.renderAs !== 'file')
       throw sessionApiError('INVALID_ARGUMENT', 400, 'Invalid prepared attachment rendering');
     ids.add(input.assetId); bytes += input.sizeBytes;
+    if (!Number.isSafeInteger(bytes)) throw sessionApiError('INVALID_ARGUMENT', 400, 'Prepared attachment total is too large');
     return { assetId: input.assetId, sha256: input.sha256, sizeBytes: input.sizeBytes,
       ...(Object.hasOwn(input, 'renderAs') ? { renderAs: input.renderAs } : {}) };
   });
-  if (bytes > 100 * 1024 * 1024) throw sessionApiError('INVALID_ARGUMENT', 400, 'Prepared attachment total is too large');
+  if (bytes > maximumTotalBytes) throw sessionApiError('INVALID_ARGUMENT', 400, 'Prepared attachment total is too large');
   return { version: 1, requestId: value.requestId, text: value.text,
     attachments, runOptions, expiresAt: value.expiresAt };
 }
 export function messagePreparationFingerprint(sessionId, scope, request) {
   return createHash('sha256').update(JSON.stringify([sessionId, parseSessionApiScope(scope, sessionId),
-    parseMessagePreparation(request)])).digest('hex');
+    parseMessagePreparation(request, { maximumFileBytes: Number.MAX_SAFE_INTEGER,
+      maximumTotalBytes: Number.MAX_SAFE_INTEGER })])).digest('hex');
 }
 
 /** Private records are validated, never normalized away or evicted for a new identity. */
@@ -84,7 +87,8 @@ export function messagePreparations(meta) {
     for (const row of rows) {
       keys(row, ['version', 'preparationId', 'sessionId', 'requestId', 'scope', 'request', 'fingerprint', 'createdAt']);
       const scope = parseSessionApiScope(row.scope, meta.id);
-      const request = parseMessagePreparation(row.request);
+      const request = parseMessagePreparation(row.request, { maximumFileBytes: Number.MAX_SAFE_INTEGER,
+        maximumTotalBytes: Number.MAX_SAFE_INTEGER });
       if (row.version !== 1 || row.sessionId !== meta.id || row.requestId !== request.requestId ||
           !PREPARATION_ID.test(row.preparationId) || requests.has(row.requestId) || preparations.has(row.preparationId) ||
           typeof row.fingerprint !== 'string' || !HASH.test(row.fingerprint) ||

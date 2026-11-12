@@ -65,7 +65,7 @@ export async function handleMessagePreparationRoutes({ req, res, pathname, parse
     if (!scope) throw sessionApiError('INVALID_ARGUMENT', 400, 'The original Session scope header is required');
     if (!await requireSessionAccess(res, authSession, sessionId, { metadataOnly: true })) return true;
     const result = requestId === null
-      ? await prepareSessionApiMessage(sessionId, scope, await readPreparationBody(req))
+      ? await prepareSessionApiMessage(sessionId, scope, await readPreparationBody(req), { authSession })
       : await readSessionApiMessagePreparation(sessionId, requestId, scope);
     writeJson(res, 200, result);
   } catch (error) {

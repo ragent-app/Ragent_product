@@ -3,6 +3,7 @@ import { createKeyedTaskQueue } from './fs-utils.mjs';
 import { withSessionApiScope, findSessionMeta, readSessionMessagePreparations } from './session-meta-store.mjs';
 import { withMessageRequestIdentity } from './message-request-identity.mjs';
 import { validatePreparedMessageAttachments } from './message-preparation-store.mjs';
+import { authorizeMessageAttachmentSizes } from './message-attachment-account-policy.mjs';
 import { parseSessionApiScope } from './session-api-scope-contract.mjs';
 import { sessionApiError, sessionApiIdentifier } from './session-api-mutation-contract.mjs';
 import { createMessageRunBinding, messageRunId, assertMessageRunBinding } from './message-run-contract.mjs';
@@ -59,7 +60,7 @@ function receipt(record, run, duplicate = false) {
     dispatched: Boolean(run?.runnerStartedAt || run?.runnerLifecycleAcceptedAt),
     failureCode: run?.messageFailureCode || null };
 }
-export async function commitSessionApiMessage(sessionId, scopeInput, requestId, payload, principalKind, { authorize, temporaryAuthority, ownerDevice } = {}) {
+export async function commitSessionApiMessage(sessionId, scopeInput, requestId, payload, principalKind, { authorize, temporaryAuthority, ownerDevice, authSession } = {}) {
   sessionApiIdentifier(sessionId, 256); sessionApiIdentifier(requestId);
   const scope = parseSessionApiScope(scopeInput, sessionId);
   const input = parseMessageCommit(payload);
@@ -80,6 +81,7 @@ export async function commitSessionApiMessage(sessionId, scopeInput, requestId, 
       return receipt(record, replay.run, true);
     });
     deadline(record);
+    await authorizeMessageAttachmentSizes(record.request, temporary ? null : authSession);
     await validatePreparedMessageAttachments(sessionId, scope, record.request.attachments);
     const initialMeta = await findSessionMeta(sessionId);
     const templateId = record.request.runOptions.templateId || initialMeta?.templateId;

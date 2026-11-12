@@ -198,7 +198,7 @@ class RoomSessionRepository(
     override val runtimeTargetId: String? get() = targetId
     private companion object {
         const val LIVE_TIMELINE_UI_INTERVAL_MS = 16L
-        const val MAX_ATTACHMENT_BYTES = 1024L * 1024L * 1024L
+        const val MAX_ATTACHMENT_BYTES = FileAssetUploadClient.MAXIMUM_METADATA_BYTES
         const val DEFAULT_ATTACHMENT_BUFFER_BYTES = 64 * 1024
     }
 
@@ -2213,7 +2213,7 @@ class RoomSessionRepository(
                     if (read < 0) break
                     total += read
                     require(total <= MAX_ATTACHMENT_BYTES) {
-                        "Attachment is larger than 1 GiB"
+                        "Attachment exceeds the maximum supported size"
                     }
                     digest.update(buffer, 0, read)
                 }
@@ -2222,7 +2222,7 @@ class RoomSessionRepository(
         }
         val sizeBytes = attachment.sizeBytes.takeIf { it > 0 } ?: descriptor.first
         require(sizeBytes == descriptor.first) { "Attachment changed after it was selected" }
-        require(sizeBytes in 1..MAX_ATTACHMENT_BYTES) { "Attachment must be between 1 byte and 1 GiB" }
+        require(sizeBytes in 1..MAX_ATTACHMENT_BYTES) { "Attachment size is unsupported" }
         val mimeType = attachment.mimeType.ifBlank { "application/octet-stream" }
         val source = ApiRequestBodySource(sizeBytes, descriptor.second) {
             resolver.openInputStream(uri) ?: error("Attachment file could not be reopened")
