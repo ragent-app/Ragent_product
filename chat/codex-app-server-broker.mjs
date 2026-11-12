@@ -24,7 +24,7 @@ import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-run
 import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
 import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.mjs';
 import { createCodexWindowsHookRouter } from './codex-windows-hook-router.mjs';
-import { MAC_CLEANUP_NOTIFICATION } from './macos-codex-cancellation.mjs';
+import { MAC_CLEANUP_NOTIFICATION, MAC_CLEANUP_SPOOL_TYPE } from './macos-codex-cancellation.mjs';
 
 const BROKER_PING = 'agentoc-codex-broker-ping';
 const BROKER_PONG = 'agentoc-codex-broker-pong';
@@ -427,7 +427,7 @@ function runBroker() {
   const handleUpstreamMessage = (message) => {
     if (!message || typeof message !== 'object') return;
     const serverRequest = typeof message.method === 'string' && isRequest(message);
-    if (message.method === MAC_CLEANUP_NOTIFICATION) {
+    if (message.method === MAC_CLEANUP_NOTIFICATION || message.type === MAC_CLEANUP_SPOOL_TYPE) {
       if (serverRequest) {
         try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32601, message: 'Reserved broker method' } })}\n`); } catch {}
       }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { MAC_CLEANUP_NOTIFICATION, macCancellationCleanupStatus, readMacCleanupNotification } from '../chat/macos-codex-cancellation.mjs';
+import { MAC_CLEANUP_NOTIFICATION, MAC_CLEANUP_SPOOL_TYPE, MAC_CLEANUP_WARNING, macCancellationCleanupStatus, readMacCleanupNotification } from '../chat/macos-codex-cancellation.mjs';
 import { projectApiRun } from '../chat/run-api-contract.mjs';
+import { createCodexAppServerAdapter } from '../chat/adapters/codex-app-server.mjs';
 
 const identity = { threadId: 'thread-1', runId: 'run-1' };
 const event = (status, runId = 'run-1', threadId = 'thread-1') => ({
@@ -30,4 +31,10 @@ assert.equal(projected.cancellationCleanupStatus, 'unconfirmed');
 assert.notEqual(projected.revision, projectApiRun({ ...run, cancellationCleanupStatus: 'attempted' }).revision);
 assert.equal(projectApiRun({ ...run, cancellationCleanupStatus: 'arbitrary' }).cancellationCleanupStatus, undefined);
 assert.equal(projectApiRun({ ...run, cancelRequested: false }).cancellationCleanupStatus, undefined);
+const adapter = createCodexAppServerAdapter();
+const warning = adapter.parseLine(JSON.stringify({ type: MAC_CLEANUP_SPOOL_TYPE, status: 'unconfirmed', content: 'untrusted content' }));
+assert.equal(warning.length, 1);
+assert.equal(warning[0].type, 'status');
+assert.equal(warning[0].content, MAC_CLEANUP_WARNING);
+assert.deepEqual(adapter.parseLine(JSON.stringify({ type: MAC_CLEANUP_SPOOL_TYPE, status: 'attempted' })), []);
 console.log('macOS cancellation result checks passed');

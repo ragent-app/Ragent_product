@@ -20,6 +20,7 @@ import {
 import { explanationForApproval } from '../risk-explanation.mjs';
 import { annotateProviderError, getProviderCapabilities } from '../provider-contract.mjs';
 import { getHarnessAdapterCompatibility } from '../harness-compatibility.mjs';
+import { MAC_CLEANUP_SPOOL_TYPE, MAC_CLEANUP_WARNING } from '../macos-codex-cancellation.mjs';
 import { isAbsolute, win32 } from 'node:path';
 
 export const CODEX_APP_SERVER_RUNTIME_FAMILY = 'codex-app-server-json';
@@ -110,6 +111,9 @@ function parseAppServerMessage(message, state = {}) {
   // Run. In particular, a child `turn/completed` must not synthesize parent
   // Run completion while the parent turn is still active.
   if (message.agentoc_intermediate === true) return [];
+  if (message.type === MAC_CLEANUP_SPOOL_TYPE && message.status === 'unconfirmed') {
+    return [statusEvent(MAC_CLEANUP_WARNING, { code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED' })];
+  }
   if (message.type === 'agentoc.approval_response') {
     if ((message.autoApproved === true || message.autoDenied === true)
       && typeof message.approvalId === 'string' && message.approvalId) {

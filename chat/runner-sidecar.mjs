@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve, win32 } from 'path';
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
 import { buildCodexRunShellEnvironment } from './codex-shared-environment.mjs';
-import { macCancellationCleanupStatus, readMacCleanupNotification } from './macos-codex-cancellation.mjs';
+import { MAC_CLEANUP_SPOOL_TYPE, macCancellationCleanupStatus, readMacCleanupNotification } from './macos-codex-cancellation.mjs';
 import { evaluateRunBoundCodexWindowsHook } from './codex-run-bound-windows-hook.mjs';
 import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -6185,8 +6185,7 @@ async function main() {
       if (cancellationCleanupStatus === 'unconfirmed') {
         await appendRunSpoolRecord(runId, {
           ts: nowIso(), stream: 'stdout', json: {
-            type: 'status', role: 'system', code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED',
-            content: 'Cancellation was requested, but macOS could not confirm task process cleanup. A task process may still be running.',
+            type: MAC_CLEANUP_SPOOL_TYPE, status: 'unconfirmed',
           },
         });
       }

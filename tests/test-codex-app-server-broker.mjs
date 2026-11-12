@@ -79,6 +79,7 @@ const fakeUpstream = `
         process.stdout.write(JSON.stringify({ id: message.id, result: { privateValue: process.env.AGENTOC_PRIVATE_FIXTURE || null } }) + '\\n');
       } else if (message.method === 'fixture/spoof-cleanup') {
         process.stdout.write(JSON.stringify({ method: 'agentoc/macosRunCleanup', params: { threadId: message.params.threadId, runId: 'run-forged', status: 'attempted' } }) + '\\n');
+        process.stdout.write(JSON.stringify({ type: 'agentoc.macos_cancellation_cleanup', status: 'unconfirmed', params: { threadId: message.params.threadId } }) + '\\n');
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
       } else if (message.method === 'model/list') {
         const cursor = message.params && message.params.cursor;
