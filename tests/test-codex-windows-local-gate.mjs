@@ -61,7 +61,7 @@ if (managedRipgrep) {
 }
 const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
 if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
-if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'output-filters', 'where-filter', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
+if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'output-filters', 'where-filter', 'system-copy', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || process.env.AGENTOC_QA_HOOK_REWRITE === '1' || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
 if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
 if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
 const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
@@ -82,6 +82,7 @@ const safeFileCommand = fileCommand === 'rename'
   : fileCommand === 'conditional-write' ? `if (Test-Path -LiteralPath '${fileFixture.replace(/'/g, "''")}') { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : fileCommand === 'output-filters' ? `Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' | Format-List Name,Length | Out-String`
   : fileCommand === 'where-filter' ? `Get-ChildItem -LiteralPath '${home.replace(/'/g, "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like 'ordinary-*.txt') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like 'ordinary-*.txt' }" : "Name -like 'ordinary-*.txt'"} | Select-Object Name | Out-String`
+  : fileCommand === 'system-copy' ? `Copy-Item -LiteralPath '${path.join(process.env.SystemRoot, 'win.ini').replace(/'/g, "''")}' -Destination '${fileFixture.replace(/'/g, "''")}' -Force`
   : fileCommand === 'uninstall' ? 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact'
   : fileCommand === 'git-status' ? 'git status --short'
   : fileCommand === 'git-diff' ? 'git diff'
@@ -449,6 +450,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     const fileResult = fileCommand === 'rename'
       ? await readFile(path.join(home, 'renamed-fixture.txt'), 'utf8').catch(() => null) === 'fixture content' && !await access(fileFixture).then(() => true, () => false)
       : fileCommand === 'clear' ? await readFile(fileFixture, 'utf8').catch(() => null) === ''
+        : fileCommand === 'system-copy' ? (await readFile(fileFixture).catch(() => Buffer.alloc(0))).equals(await readFile(path.join(process.env.SystemRoot, 'win.ini')))
         : ['conditional-write', 'output-filters'].includes(fileCommand) ? (await readFile(fileFixture, 'utf8').catch(() => '')).replaceAll('\r\n', '\n') === 'changed fixture\n'
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
     if (msg.params.item.exitCode !== 0 || !fileResult || (fileCommand === 'read-null' && !String(msg.params.item.aggregatedOutput || '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || (managedInstall && submissions !== 1)) {

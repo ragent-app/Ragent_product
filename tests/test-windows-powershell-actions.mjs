@@ -92,6 +92,12 @@ assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ p
   const systemContext = { ...context, systemPathRoots: [windows] };
   assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ path: path.join(windows, 'win.ini'), kind: 'read' }], systemContext)).decision, 'allow');
   assert.equal(decideWindowsPowerShellActions(await analyzeWindowsFileChanges([{ path: path.join(windows, 'System32', 'config', 'SAM'), kind: 'read' }], systemContext)).decision, 'review');
+  const copy = (source, destination) => `Copy-Item -LiteralPath '${source.replaceAll("'", "''")}' -Destination '${destination.replaceAll("'", "''")}'`;
+  const outsideDestination = path.join(root, 'outside-copy.ini');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsPowerShell(copy(path.join(windows, 'win.ini'), outsideDestination), systemContext)).decision, 'allow');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsPowerShell(copy(path.join(windows, 'System32', 'config', 'SAM'), outsideDestination), systemContext)).decision, 'review');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsPowerShell(copy(path.join(windows, 'win.ini'), path.join(windows, 'target.ini')), systemContext)).decision, 'review');
+  assert.equal(decideWindowsPowerShellActions(await analyzeWindowsPowerShell(copy(path.join(windows, 'win.ini'), outsideDestination), { ...systemContext, protectedRoots: [windows] })).decision, 'review');
   assert.equal(decideWindowsPowerShellActions(await analyzeWindowsRipgrep(['--no-config', 'fixture', path.join(windows, 'win.ini')], systemContext)).decision, 'allow');
   assert.equal(decideWindowsPowerShellActions(await analyzeWindowsRipgrep(['--no-config', 'fixture', path.join(windows, 'System32', 'config', 'SAM')], systemContext)).decision, 'review');
 }

@@ -679,7 +679,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       // Get-ChildItem emits directory-entry metadata only. Allow one-level
       // enumeration even under protected roots; file contents, recursion,
       // writes, and deletes keep their regular path checks.
-      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: kind === 'read', allowShallowDirectoryListing, allowOrdinarySystemRead: kind === 'read' && target.file }),
+      protected: isProtected(target, context, { allowProgramDataWorkspaceRead: action === 'read', allowShallowDirectoryListing, allowOrdinarySystemRead: action === 'read' && target.file }),
       directory: sourceTarget.directory === true,
       workspace: inside(target.lexical, context.trustedWorkspaceRoot) && inside(target.actual, context.trustedWorkspaceRoot),
       workspaceRoot: Boolean(context.trustedWorkspaceRoot) && win.resolve(target.actual).toLowerCase() === win.resolve(context.trustedWorkspaceRoot).toLowerCase(),
