@@ -17,8 +17,8 @@ export function classifyOfficialCodexDiscoveryFailure(error) {
     'HARNESS_RUNTIME_UNAVAILABLE', 'NATIVE_OAUTH_LOCK_TIMEOUT',
     'CODEX_BROKER_PIPE_SECURITY_FAILED', 'CODEX_BROKER_PIPE_SECURITY_INVALID',
   ]);
-  const safePrepareReasons = new Set(['credential-missing', 'resolution-failed', 'oauth-persist-unavailable', 'oauth-persist-failed', 'oauth-persist-readback-failed', 'codex-broker-account-changed']);
-  if (error?.discoveryStage === 'PREPARE' && safePrepareReasons.has(error?.code)) {
+  const safePrepareReasons = new Set(['credential-missing', 'resolution-failed', 'oauth-persist-unavailable', 'oauth-persist-failed', 'oauth-persist-readback-failed', 'codex-broker-account-changed', 'native-provider-not-selected', 'provider-disabled', 'provider-not-ready', 'not-a-provider-runtime', 'external-oauth-fallback-sync-failed', 'external-oauth-fallback-sync-readback-failed']);
+  if (['PREPARE', 'PREPARE_RETURN'].includes(error?.discoveryStage) && safePrepareReasons.has(error?.code)) {
     return `MODEL_LIST_PREPARE_${error.code.toUpperCase().replaceAll('-', '_')}`;
   }
   const classified = error?.cause || error;
@@ -27,7 +27,12 @@ export function classifyOfficialCodexDiscoveryFailure(error) {
   const message = typeof classified?.message === 'string' ? classified.message.toLowerCase() : '';
   if (message.includes('timed out') || message.includes('timeout')) return 'MODEL_LIST_TIMEOUT';
   if (message.includes('no picker-visible models')) return 'MODEL_LIST_EMPTY';
-  if (error?.discoveryStage === 'PREPARE') return 'MODEL_LIST_PREPARE_FAILED';
+  if (error?.discoveryStage === 'PREPARE_RETURN') return 'MODEL_LIST_PREPARE_RETURN_FAILED';
+  if (error?.discoveryStage === 'PREPARE') {
+    const safeNames = { TypeError: 'TYPE_ERROR', ReferenceError: 'REFERENCE_ERROR', SyntaxError: 'SYNTAX_ERROR', RangeError: 'RANGE_ERROR' };
+    return Object.hasOwn(safeNames, classified?.name)
+      ? `MODEL_LIST_PREPARE_${safeNames[classified.name]}` : 'MODEL_LIST_PREPARE_FAILED';
+  }
   if (error?.discoveryStage === 'REQUEST') return 'MODEL_LIST_REQUEST_FAILED';
   return 'MODEL_LIST_FAILED';
 }

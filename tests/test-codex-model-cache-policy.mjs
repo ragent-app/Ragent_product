@@ -24,7 +24,11 @@ test('discovery failure diagnostics use safe categories', () => {
 
 test('discovery diagnostics identify the stage without leaking provider errors', () => {
   assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE',cause:new Error('secret')}),'MODEL_LIST_PREPARE_FAILED');
-  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE',code:'credential-missing'}),'MODEL_LIST_PREPARE_CREDENTIAL_MISSING');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE_RETURN',code:'credential-missing'}),'MODEL_LIST_PREPARE_CREDENTIAL_MISSING');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE_RETURN',code:'provider-not-ready'}),'MODEL_LIST_PREPARE_PROVIDER_NOT_READY');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE_RETURN',code:'secret'}),'MODEL_LIST_PREPARE_RETURN_FAILED');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE',cause:new TypeError('secret')}),'MODEL_LIST_PREPARE_TYPE_ERROR');
+  assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'PREPARE',cause:{name:'constructor',message:'secret'}}),'MODEL_LIST_PREPARE_FAILED');
   assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'REQUEST',cause:{code:'EPERM',message:'secret'}}),'MODEL_LIST_EPERM');
   assert.equal(classifyOfficialCodexDiscoveryFailure({discoveryStage:'REQUEST',cause:{code:'secret',message:'secret'}}),'MODEL_LIST_REQUEST_FAILED');
 });

@@ -1059,7 +1059,7 @@ async function discoverOfficialCodexCatalog(provider) {
     throw Object.assign(new Error('Official Codex provider preparation failed', { cause }), { discoveryStage: 'PREPARE' });
   }
   if (!prepared?.ok || !prepared.codexHomeDir) {
-    throw Object.assign(new Error('Official Codex provider home is unavailable'), { discoveryStage: 'PREPARE', code: prepared?.reason });
+    throw Object.assign(new Error('Official Codex provider home is unavailable'), { discoveryStage: 'PREPARE_RETURN', code: prepared?.reason });
   }
   const { listCodexAppServerModels } = await import('./codex-app-server-client.mjs');
   let models;
