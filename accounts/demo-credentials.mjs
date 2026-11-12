@@ -57,9 +57,11 @@ export function createDemoAccountAuth(policy, { clock = Date.now } = {}) {
   }
   // Copy the policy: caller mutation cannot change authority after startup.
   const { accountId, username } = policy;
-  const accessMode = policy.accessMode ?? 'restricted';
+  // Old review-only flags are retained on disk for compatibility; login is now
+  // an ordinary account and access is determined by actual instance authority.
+  const accessMode = 'full';
   const targetId = policy.allowedInstanceIds[0];
-  const instanceAccess = policy.instanceAccess ?? 'allowlist';
+  const instanceAccess = 'account';
   const salt = Buffer.from(policy.passwordHash.salt, 'hex');
   const expected = Buffer.from(policy.passwordHash.key, 'hex');
   let active = 0, windowStart = clock(), attempts = 0;
@@ -89,9 +91,7 @@ export function createDemoAccountAuth(policy, { clock = Date.now } = {}) {
     assertAccount(draft, id, instanceId = '') {
       if (id !== accountId) throw unavailable();
       const account = (draft.accounts || []).find(entry => entry.accountId === id);
-      if (!account || account.provider !== 'demo' || account.disabledAt || account.deletedAt
-        || (instanceAccess === 'allowlist' && instanceId && instanceId !== targetId)
-        || (instanceAccess === 'allowlist' && (draft.instanceBindings || []).some(binding => binding.accountId === id && !binding.revokedAt && binding.instanceId !== targetId))) {
+      if (!account || account.provider !== 'demo' || account.disabledAt || account.deletedAt) {
         throw unavailable();
       }
       return account;

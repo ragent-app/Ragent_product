@@ -52,7 +52,7 @@ async function run(store) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const statusResponse = await fetch(`http://127.0.0.1:${server.address().port}/v1/owner-auth/demo-status`);
   assert.equal(statusResponse.status, 200);
-  assert.deepEqual(await statusResponse.json(), { status: 'unavailable' }, 'allowlist-only policy must not promise desktop demo sign-in');
+  assert.deepEqual(await statusResponse.json(), { status: 'configured' }, 'legacy policy is interpreted as a normal account');
   const key = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const publicKey = key.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   try {

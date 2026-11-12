@@ -93,7 +93,7 @@ async function challenge(f, suffix) {
   await assert.rejects(f.broker.completeDemoAccountSession({ ...c.body, signature: 'wrong' }), { code: 'owner_auth_account_session_signature_invalid' });
   assert.equal(f.state().accountCredentials, undefined);
   const session = await f.broker.completeDemoAccountSession(c.body);
-  assert.equal(session.demoAccessMode, 'restricted');
+  assert.equal(session.demoAccessMode, 'full', 'legacy policy cannot restrict the account provider');
   assert.equal(session.accountId, policy.accountId); assert.match(session.credential.token, /^rac_/);
   assert.deepEqual(await f.broker.completeDemoAccountSession(c.body), session, 'lost reply recovers the same session');
   assert.equal(f.state().accountCredentials.length, 1); assert.equal(f.googleCalls(), 0);
@@ -103,7 +103,8 @@ async function challenge(f, suffix) {
   assert.deepEqual((await f.broker.discoverInstances({}, { credential: session.credential.token })).instances.map(i => i.instanceId), [instanceId]);
   await assert.rejects(f.disabledBroker().discoverInstances({}, { credential: session.credential.token }), { code: 'owner_auth_demo_unavailable' });
   f.state().instanceBindings.push(binding('inst_wrong_target', policy.accountId));
-  await assert.rejects(f.broker.discoverInstances({}, { credential: session.credential.token }), { code: 'owner_auth_demo_unavailable' });
+  assert.equal((await f.broker.discoverInstances({}, { credential: session.credential.token })).instances.length, 2,
+    'legacy allowlist does not hide instances actually owned by this account');
   f.state().instanceBindings.pop();
   const pc = generateKeyPairSync('ed25519');
   const pcPublicKey = pc.publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -122,7 +123,7 @@ async function challenge(f, suffix) {
   assert.equal(grant.instanceId, instanceId); assert.match(grant.accountJoinGrant, /^rajg_/);
   await assert.rejects(f.broker.createAccountRendezvous({ requestId: 'request_demo_wrong_target', targetInstanceId: 'inst_personal',
     device: { deviceId: 'rdev_fixture', publicKey: c.publicKey, devicePublicKeyFingerprint: createDevicePublicKeyFingerprint(c.publicKey) } },
-  { credential: session.credential.token }), { code: 'owner_auth_demo_unavailable' });
+  { credential: session.credential.token }), { code: 'owner_auth_binding_mismatch' });
   const refresh = { credentialId: session.credential.credentialId, deviceId: c.deviceId,
     requestId: 'request_demo_refresh_fixture', issuedAt: new Date(now).toISOString(), nonce: 'nonce_demo_refresh_fixture' };
   refresh.signature = sign('sha256', Buffer.from(buildAccountCredentialRefreshMessage(refresh)), c.key.privateKey).toString('base64url');
