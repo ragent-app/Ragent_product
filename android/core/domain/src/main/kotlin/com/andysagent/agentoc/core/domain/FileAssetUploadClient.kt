@@ -247,9 +247,20 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
                     "X-Agentoc-Upload-Sha256" to chunkHash,
                 )
                 val expectedOffset = offset + length
-                uploadChunkWithRetry(assetId, input, path, checkpointPath, offset, expectedOffset,
+                val confirmedOffset = uploadChunkWithRetry(assetId, input, path, checkpointPath, offset, expectedOffset,
                     headers, bytes, scope, checkAccess)
-                offset = expectedOffset
+                // Another execution may already have durably written later
+                // chunks. Hash every skipped source byte before finalizing so
+                // the original whole-file integrity check remains effective.
+                while (totalRead < confirmedOffset) {
+                    val wanted = minOf(skipBuffer.size.toLong(), confirmedOffset - totalRead).toInt()
+                    val read = stream.read(skipBuffer, 0, wanted)
+                    if (read < 0) error("Streaming source ended before the advanced checkpoint")
+                    if (read == 0) continue
+                    wholeDigest.update(skipBuffer, 0, read)
+                    totalRead += read
+                }
+                offset = confirmedOffset
                 report(FileUploadPhase.TRANSFERRING, offset)
             }
             check(stream.read() == -1 && totalRead == input.sizeBytes) { "Streaming source exceeds its frozen size" }
@@ -263,7 +274,7 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
      */
     private suspend fun uploadChunkWithRetry(assetId: String, input: FileUploadInput, path: String,
         checkpointPath: String, offset: Long, expectedOffset: Long, headers: Map<String, String>, bytes: ByteArray,
-        scope: SessionScopeCondition?, checkAccess: suspend () -> Unit) {
+        scope: SessionScopeCondition?, checkAccess: suspend () -> Unit): Long {
         var attempt = 0
         var lastFailure: Exception? = null
         while (attempt < MAX_CHUNK_ATTEMPTS) {
@@ -272,12 +283,14 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
             try {
                 val response = json(execute(ApiRequest("PATCH", path, headers = headers, bodyBytes = bytes,
                     contentType = "application/octet-stream")))
-                check(response["uploadCheckpointVersion"]?.jsonPrimitive?.intOrNull == 1
-                    && response["assetId"]?.jsonPrimitive?.contentOrNull == assetId
-                    && response["offset"]?.jsonPrimitive?.longOrNull == expectedOffset) {
-                    "Target did not confirm the expected upload offset"
+                validateCheckpoint(response, assetId, input)
+                val confirmedOffset = response["offset"]?.jsonPrimitive?.longOrNull
+                    ?: error("Target did not confirm the upload offset")
+                check(confirmedOffset in expectedOffset..input.sizeBytes &&
+                    (confirmedOffset == input.sizeBytes || confirmedOffset % UPLOAD_CHUNK_BYTES == 0L)) {
+                    "Target returned an invalid upload offset"
                 }
-                return
+                return confirmedOffset
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -293,7 +306,12 @@ class FileAssetUploadClient(private val instanceId: String, private val transpor
                     val serverOffset = state["offset"]?.jsonPrimitive?.longOrNull
                         ?: error("Missing upload offset")
                     when (serverOffset) {
-                        expectedOffset -> return
+                        in expectedOffset..input.sizeBytes -> {
+                            check(serverOffset == input.sizeBytes || serverOffset % UPLOAD_CHUNK_BYTES == 0L) {
+                                "Target returned an invalid upload offset"
+                            }
+                            return serverOffset
+                        }
                         offset -> Unit // The server did not commit it; safely resend these same bytes.
                         else -> error("Target checkpoint moved to an unexpected upload offset")
                     }
