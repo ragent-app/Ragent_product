@@ -9,12 +9,19 @@ export function buildSharedCodexWindowsHook({ socketPath, nodePath = process.exe
     throw new Error('Shared Codex Windows hook launch specification is invalid');
   }
   const quote = value => `'${String(value).replace(/'/g, "''")}'`;
-  const command = `& ${quote(nodePath)} ${quote(scriptPath)} --socket ${quote(socketPath)}`;
+  const invocation = `& ${quote(nodePath)} ${quote(scriptPath)} --socket ${quote(socketPath)}`;
+  // The npm codex.cmd wrapper forwards this argument through cmd.exe. Encode
+  // the fixed PowerShell invocation so cmd cannot reinterpret its metacharacters
+  // or corrupt quotes. The decoded string contains only validated local paths.
+  const encoded = Buffer.from(invocation, 'utf16le').toString('base64');
+  const command = `Invoke-Expression ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}')))`;
+  const matcher = '\\ABash\\z';
   return {
     command,
+    matcher,
     sourcePath: `${systemDrive}\\<session-flags>\\config.toml`,
     source: 'sessionFlags',
     shared: true,
-    args: ['-c', `hooks.PreToolUse=[{matcher="^Bash$",hooks=[{type="command",command=${JSON.stringify(command)}}]}]`],
+    args: ['-c', `hooks.PreToolUse=[{matcher='${matcher}',hooks=[{type='command',command='''${command}'''}]}]`],
   };
 }

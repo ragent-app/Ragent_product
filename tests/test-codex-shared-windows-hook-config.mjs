@@ -6,9 +6,11 @@ const hook = buildSharedCodexWindowsHook({ socketPath, nodePath: "G:\\Apps O'Bri
 assert.equal(hook.sourcePath, 'C:\\<session-flags>\\config.toml');
 assert.equal(hook.source, 'sessionFlags');
 assert.equal(hook.shared, true);
-assert.match(hook.command, /O''Brien/);
+assert.equal(hook.matcher, '\\ABash\\z');
+const encoded = /FromBase64String\('([^']+)'\)/.exec(hook.command)[1];
+assert.match(Buffer.from(encoded, 'base64').toString('utf16le'), /O''Brien/);
 assert.equal(hook.args[0], '-c');
-assert.ok(hook.args[1].includes(JSON.stringify(hook.command)));
+assert.ok(hook.args[1].includes(hook.command));
 for (const invalid of ['', 'bad-pipe', `${socketPath}\nother`]) {
   assert.throws(() => buildSharedCodexWindowsHook({ socketPath: invalid, nodePath: 'G:\\node.exe', scriptPath: 'G:\\hook.mjs' }));
 }

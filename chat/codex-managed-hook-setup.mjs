@@ -2,7 +2,7 @@ import { win32 } from 'node:path';
 
 // Trust only the exact AgentoC-owned definition reported by the app-server.
 // Writes target the private run overlay, never the owner's provider config.
-export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = configPath, source = 'user', command, nextRequestId, send, onDone, timeoutMs = 10000 } = {}) {
+export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = configPath, source = 'user', matcher = '^Bash$', command, nextRequestId, send, onDone, timeoutMs = 10000 } = {}) {
   let pending = null; let phase = 'idle'; let timer = null; let selected = null;
   const pathKey = value => win32.resolve(String(value || '')).toLowerCase();
   const finish = ready => {
@@ -19,7 +19,7 @@ export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = conf
     if (!Array.isArray(groups)) return null;
     const hooks = groups.flatMap(group => Array.isArray(group?.hooks) ? group.hooks : []);
     const matches = hooks.filter(hook => hook?.source === source && hook.isManaged === false && hook.enabled === true &&
-      hook.eventName === 'preToolUse' && hook.handlerType === 'command' && hook.matcher === '^Bash$' && hook.command === command &&
+      hook.eventName === 'preToolUse' && hook.handlerType === 'command' && hook.matcher === matcher && hook.command === command &&
       typeof hook.sourcePath === 'string' && pathKey(hook.sourcePath) === pathKey(sourcePath) &&
       typeof hook.key === 'string' && hook.key.toLowerCase().startsWith(`${sourcePath.toLowerCase()}:pre_tool_use:`) &&
       /^sha256:[a-f0-9]{64}$/.test(hook.currentHash || ''));
@@ -28,7 +28,7 @@ export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = conf
   return {
     start() {
       if (phase !== 'idle') return;
-      if (!['user', 'sessionFlags'].includes(source) || !win32.isAbsolute(configPath || '') || !win32.isAbsolute(sourcePath || '') || !win32.isAbsolute(cwd || '') || !command ||
+      if (!['user', 'sessionFlags'].includes(source) || !['^Bash$', '\\ABash\\z'].includes(matcher) || !win32.isAbsolute(configPath || '') || !win32.isAbsolute(sourcePath || '') || !win32.isAbsolute(cwd || '') || !command ||
           typeof nextRequestId !== 'function' || typeof send !== 'function') { finish(false); return; }
       timer = setTimeout(() => finish(false), timeoutMs); timer.unref?.();
       request('hooks/list', { cwds: [cwd] }, 'list');
