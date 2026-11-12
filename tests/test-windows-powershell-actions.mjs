@@ -6,7 +6,7 @@ import os from 'node:os';
 import { analyzeWindowsFileChanges, analyzeWindowsPowerShell, analyzeWindowsRipgrep, decideWindowsPowerShellActions } from '../chat/windows-powershell-actions.mjs';
 import { decideWindowsApproval } from '../chat/windows-approval-gate.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
-import { buildWindowsSelectStringGlobBridge } from '../chat/windows-ripgrep-bridge.mjs';
+import { buildWindowsSelectStringGlobBridge, verifyCodexWindowsBoundSearchApproval } from '../chat/windows-ripgrep-bridge.mjs';
 
 if (process.platform !== 'win32') {
   console.log('windows-powershell-actions: skipped (requires Windows)');
@@ -147,6 +147,37 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.doesNotMatch(bridge.updatedCommand, /\*/);
   assert.doesNotMatch(bridge.updatedCommand, /hidden\.md/i, 'wildcard search does not add hidden files that Select-String would omit');
   assert.equal((await inspect(bridge.updatedCommand)).decision, 'allow');
+  if (process.env.AGENTOC_QA_SAFE_SEARCH_HELPER) {
+    const helperPath = process.env.AGENTOC_QA_SAFE_SEARCH_HELPER;
+    const pinned = await buildWindowsSelectStringGlobBridge({ approval, state, helperPath });
+    assert.ok(pinned, `${riskMode}: wildcard search gets a handle-bound executor`);
+    const rawApproval = { ...approval, params: { ...approval.params, input: { command: `${approval.params.input.command} -Raw -NoEmphasis` } } };
+    const rawSearch = await buildWindowsSelectStringGlobBridge({ approval: rawApproval, state, helperPath });
+    assert.ok(rawSearch, `${riskMode}: raw wildcard search is still automatic`);
+    const rawResult = execFileSync(resolveWindowsSystemPaths().powershell, ['-NoProfile', '-NonInteractive', '-Command', rawSearch.updatedCommand], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.equal(rawResult.trim(), 'fixture');
+    const shellQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
+    const commandForCodex = cmd => [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', cmd].map(shellQuote).join(' ');
+    const current = { ...state, startedTurn: true, threadId: 'thread', turnId: 'turn' };
+    const codex = { kind: 'command', providerMethod: 'item/commandExecution/requestApproval', params: {
+      threadId: 'thread', turnId: 'turn', itemId: 'item', cwd: workspace, command: commandForCodex(pinned.updatedCommand),
+    } };
+    assert.equal(await verifyCodexWindowsBoundSearchApproval({ approval: codex, state: current, helperPath }), true);
+    assert.equal(await verifyCodexWindowsBoundSearchApproval({ approval: { ...codex, params: { ...codex.params, turnId: 'other' } }, state: current, helperPath }), false);
+    assert.equal(await verifyCodexWindowsBoundSearchApproval({ approval: { ...codex, params: { ...codex.params, additionalPermissions: { network: true } } }, state: current, helperPath }), false);
+    const encoded = /--request '([A-Za-z0-9_-]+)'$/.exec(pinned.updatedCommand)[1];
+    const forged = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    forged.targets[0].path = path.join(workspace, 'sensitive-folder', '.ssh', 'fixture-key');
+    const forgedCommand = pinned.updatedCommand.replace(encoded, Buffer.from(JSON.stringify(forged)).toString('base64url'));
+    assert.equal(await verifyCodexWindowsBoundSearchApproval({ approval: { ...codex, params: { ...codex.params, command: commandForCodex(forgedCommand) } }, state: current, helperPath }), false, 'forged hook request cannot read sensitive file');
+    const actual = execFileSync(resolveWindowsSystemPaths().powershell, ['-NoProfile', '-NonInteractive', '-Command', pinned.updatedCommand], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.match(actual, /fixture/);
+    const target = path.join(workspace, 'glob-read', 'public.md');
+    await writeFile(target, 'changed after approval');
+    try {
+      assert.throws(() => execFileSync(resolveWindowsSystemPaths().powershell, ['-NoProfile', '-NonInteractive', '-Command', `${pinned.updatedCommand}; exit $LASTEXITCODE`], { cwd: workspace, encoding: 'utf8', windowsHide: true, stdio: 'pipe' }), 'changed target cannot be searched');
+    } finally { await writeFile(target, 'fixture'); }
+  }
   const lateSecret = path.join(workspace, 'glob-read', '.env.late.md');
   await writeFile(lateSecret, 'late-sensitive-fixture');
   try {

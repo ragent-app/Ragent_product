@@ -344,12 +344,13 @@ output.on('line', (line) => {
         else {
           const result = response?.response?.response;
           assert.equal(result?.behavior, 'allow', 'ordinary wildcard search must be approved');
-          assert.match(result?.updatedInput?.command || '', /Select-String -LiteralPath/i);
+          assert.match(result?.updatedInput?.command || '', /agentoc-safe-search\.exe.*--request/i);
           assert.doesNotMatch(result?.updatedInput?.command || '', /\*/);
         }
         return child.stdin.write(value);
       } } } : child;
-      await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : cliReadCase ? { cliReadHelperPath } : {});
+      await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : cliReadCase ? { cliReadHelperPath } :
+        process.env.AGENTOC_QA_SAFE_SEARCH_HELPER ? { searchHelperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER } : {});
       if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
         const current = await getRun(run.id);
         const pending = current.appServerPendingApprovals?.find((item) => item.approvalId === approval.approvalId);

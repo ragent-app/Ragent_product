@@ -129,6 +129,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Windows approval payload inputs are incomplete.' }
     & (Join-Path $payloadRoot 'packaging\windows\build-safe-delete.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\agentoc-safe-delete.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows safe deletion helper could not be built.' }
+    & (Join-Path $payloadRoot 'packaging\windows\build-safe-search.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\agentoc-safe-search.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows safe search helper could not be built.' }
     & (Join-Path $payloadRoot 'packaging\windows\build-cli-read-bridge.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\agentoc-cli-read-bridge.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows read-only CLI bridge could not be built.' }
     Assert-BuildFreeSpace 'after runtime staging'

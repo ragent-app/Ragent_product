@@ -39,6 +39,15 @@ func TestBoundSearchExecutesOnlyVerifiedLiteralFile(t *testing.T) {
 	if !strings.Contains(out.String(), "visible-fixture") {
 		t.Fatal("verified file result missing")
 	}
+	input.Switches = []string{"raw", "noemphasis"}
+	input.Encoding = "utf8NoBOM"
+	out.Reset()
+	stderr.Reset()
+	if err := run(requestArgs(t, input), &out, &stderr); err != nil || strings.TrimSpace(out.String()) != "visible-fixture" {
+		t.Fatalf("raw search did not return the matched line: %q %v %s", out.String(), err, stderr.String())
+	}
+	input.Switches = nil
+	input.Encoding = ""
 	if err := os.WriteFile(file, []byte("replaced"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -82,5 +91,33 @@ func TestSearchPatternIsDataAndEnvelopeIsStrict(t *testing.T) {
 	}
 	if _, err := decodeRequest(requestArgs(t, map[string]any{"schemaVersion": 1, "unknown": true})); err == nil {
 		t.Fatal("unknown field accepted")
+	}
+}
+
+func TestDigestUsesPinnedRegularFiles(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "fixture.txt")
+	if err := os.WriteFile(file, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	input := digestRequest{SchemaVersion: 1, Paths: []string{file}}
+	args := requestArgs(t, input)
+	args[0] = "--digest"
+	var out, stderr bytes.Buffer
+	if err := run(args, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	var targets []target
+	digest := sha256.Sum256([]byte("fixture"))
+	if err := json.Unmarshal(out.Bytes(), &targets); err != nil || len(targets) != 1 || targets[0].Path != file || targets[0].SHA256 != hex.EncodeToString(digest[:]) {
+		t.Fatalf("incorrect pinned digest: %s %v", out.String(), err)
+	}
+	other := filepath.Join(root, "hard-link.txt")
+	if err := os.Link(file, other); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := run(args, &out, &stderr); err == nil || out.Len() != 0 {
+		t.Fatal("hard-linked target produced a digest")
 	}
 }

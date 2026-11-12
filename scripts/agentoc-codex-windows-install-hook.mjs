@@ -13,7 +13,8 @@ export async function evaluateCodexWindowsHook(event, env = process.env) {
   let safeDeleteContext;
   try { safeDeleteContext = JSON.parse(env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT || 'null'); } catch { safeDeleteContext = null; }
   if (safeDeleteContext) {
-    const search = await buildCodexWindowsSelectStringGlobHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId });
+    const search = await buildCodexWindowsSelectStringGlobHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
+      helperPath: safeDeleteContext.searchHelperPath });
     if (search.hookSpecificOutput) return search;
     const asset = await buildCodexWindowsCliAssetHookDecision({ event, state: safeDeleteContext.state, runId: safeDeleteContext.runId,
       helperPath: safeDeleteContext.assetHelperPath, port: safeDeleteContext.port });

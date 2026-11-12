@@ -260,7 +260,7 @@ delete env.OPENAI_API_KEY;
 if (pinnedIdentity) env.AGENTOC_WINDOWS_USER_INSTALL_IDENTITY = JSON.stringify(pinnedIdentity);
 if (managedRipgrep) env.RIPGREP_CONFIG_PATH = rgConfig;
 if (managedAsset) Object.assign(env, { AGENTOC_SESSION_ID: 'fixture-session', AGENTOC_SESSION_CONTROL_TOKEN: 'fixture-token', AGENTOC_SESSION_CONTROL_SESSION_ID: 'fixture-session', AGENTOC_SESSION_CONTROL_RUN_ID: run.id, AGENTOC_SESSION_CONTROL_TURN_ID: 'fixture-turn' });
-if (managedDelete || managedRipgrep || managedAsset || managedGlob) env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId: run.id, helperPath: safeDeleteBinary || '', assetHelperPath: assetHelper, port: managedAsset ? port : undefined,
+if (managedDelete || managedRipgrep || managedAsset || managedGlob) env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId: run.id, helperPath: safeDeleteBinary || '', assetHelperPath: assetHelper, searchHelperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER, port: managedAsset ? port : undefined,
   state: { riskMode, riskContextValid: boundContext?.valid ?? true, sessionControlReadAvailable: managedAsset, sessionControlReadRunId: managedAsset ? run.id : '', riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } } });
 let productionOverlay = null;
 if (productionStartup) {
@@ -374,7 +374,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
       const expectedAsset = managedAsset ? await buildWindowsCliAssetBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: assetCommand } } },
         state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, sessionControlReadAvailable: true, sessionControlReadRunId: run.id }, runId: run.id, helperPath: assetHelper, port }) : null;
       const expectedGlob = managedGlob ? await buildWindowsSelectStringGlobBridge({ approval: { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: safeFileCommand } } },
-        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } } }) : null;
+        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } }, helperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER }) : null;
       const decodedArgv = decodeCodexShlexArgv(msg.params.command);
       const invocation = readWindowsPowerShellInvocation({ params: { command: decodedArgv } });
       const rewrittenCommand = managedInstall ? decodedArgv?.at(-1) : '';
@@ -410,7 +410,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
           windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.AGENTOC_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
           threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set() };
         const sent = [];
-        await trackCodexAppServerApprovalRequest(run.id, state, msg, { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } }, managedDelete ? { safeDeleteHelperPath: safeDeleteBinary } : managedAsset ? { cliReadHelperPath: assetHelper } : undefined);
+        await trackCodexAppServerApprovalRequest(run.id, state, msg, { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } }, managedDelete ? { safeDeleteHelperPath: safeDeleteBinary } : managedAsset ? { cliReadHelperPath: assetHelper } : managedGlob && process.env.AGENTOC_QA_SAFE_SEARCH_HELPER ? { searchHelperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER } : undefined);
         if (failSecondPreflight) {
           const pending = (await getRun(run.id)).appServerPendingApprovals || [];
           const stopped = preflights === 2 && submissions === 0 && (riskMode !== 'recommended' ? sent[0]?.result?.decision === 'decline' : sent.length === 0 && pending.length === 1);

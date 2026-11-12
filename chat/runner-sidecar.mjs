@@ -120,7 +120,7 @@ import {
   isUserFacingGateKind,
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
-import { buildClaudeWindowsRipgrepBridge, buildWindowsSelectStringGlobBridge } from './windows-ripgrep-bridge.mjs';
+import { buildClaudeWindowsRipgrepBridge, buildWindowsSelectStringGlobBridge, verifyCodexWindowsBoundSearchApproval } from './windows-ripgrep-bridge.mjs';
 import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
@@ -2726,7 +2726,7 @@ function withCurrentCodexFileChanges(approval, state) {
   return { ...approval, params: { ...params, changes: item.changes } };
 }
 
-export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe') } = {}) {
+export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), searchHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-search.exe') } = {}) {
   if (!state || !parsed) return null;
   const approval = readCodexAppServerApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
@@ -2790,7 +2790,11 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     && await verifyCodexWindowsSafeDeleteApproval({ approval, state, runId, helperPath: safeDeleteHelperPath });
   const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsCliAssetApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
-  const gateDecision = controlledAsset
+  const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+    && await verifyCodexWindowsBoundSearchApproval({ approval, state, helperPath: searchHelperPath });
+  const gateDecision = controlledSearch
+    ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'handle-bound verified search' }
+    : controlledAsset
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session asset publication' }
     : controlledDelete
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'handle-bound workspace deletion' }
@@ -2874,7 +2878,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   return record;
 }
 
-export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe') } = {}) {
+export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), searchHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-search.exe') } = {}) {
   if (!state || !parsed) return null;
   const approval = readClaudeBidiApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
@@ -2981,14 +2985,14 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
   const searchGlobBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.reason === 'wildcard search requires bound targets'
-    ? await buildWindowsSelectStringGlobBridge({ approval, state }) : null;
+    ? await buildWindowsSelectStringGlobBridge({ approval, state, helperPath: searchHelperPath }) : null;
   if (searchGlobBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: searchGlobBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound wildcard search response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
       type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
-      autoApproved: true, reason: 'wildcard search bound to verified file paths', ...riskAuditFields(searchGlobBridge.risk),
+      autoApproved: true, reason: 'wildcard search bound to verified file handles', ...riskAuditFields(searchGlobBridge.risk),
     } });
     const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, searchGlobBridge.risk));
     if (record) state.pendingApprovals.set(approval.approvalId, record);
@@ -3894,7 +3898,7 @@ async function main() {
   if (process.platform === 'win32' && appServerState && !WORKBENCH_EXECUTION_POLICY && appServerState.riskContextValid === true &&
       ['recommended', 'full-auto'].includes(appServerState.riskMode) && appServerState.interactionMode !== 'plan' && appServerState.permissionMode !== 'plan') {
     spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId, helperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'),
-      assetHelperPath: join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), port: Number(CHAT_PORT), state: { riskMode: appServerState.riskMode, riskContextValid: true,
+      assetHelperPath: join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), searchHelperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-search.exe'), port: Number(CHAT_PORT), state: { riskMode: appServerState.riskMode, riskContextValid: true,
       sessionControlReadAvailable: appServerState.sessionControlReadAvailable, sessionControlReadRunId: appServerState.sessionControlReadRunId,
       interactionMode: appServerState.interactionMode, permissionMode: appServerState.permissionMode,
       riskContext: { platform: 'win32', trustedWorkspaceRoot: appServerState.riskContext.trustedWorkspaceRoot,

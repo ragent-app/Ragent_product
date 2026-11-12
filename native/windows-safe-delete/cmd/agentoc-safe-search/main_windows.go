@@ -38,6 +38,11 @@ type request struct {
 	Switches      []string `json:"switches,omitempty"`
 }
 
+type digestRequest struct {
+	SchemaVersion int      `json:"schemaVersion"`
+	Paths         []string `json:"paths"`
+}
+
 var allowedSwitches = map[string]bool{
 	"simplematch": true, "casesensitive": true, "quiet": true, "notmatch": true,
 	"allmatches": true, "list": true, "raw": true, "noemphasis": true,
@@ -50,9 +55,17 @@ const searchScript = `$ErrorActionPreference='Stop'
 [Console]::InputEncoding=New-Object System.Text.UTF8Encoding $false
 $r=ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
 $p=@{LiteralPath=[string[]]@($r.paths);Pattern=[string]$r.pattern}
-if ($r.encoding) {$p.Encoding=[string]$r.encoding}
-foreach($s in @($r.switches)) {if ($s) {$p[[string]$s]=$true}}
-Microsoft.PowerShell.Utility\Select-String @p
+if ($r.encoding) {
+  $encoding=[string]$r.encoding
+  if ($encoding -iin @('utf8nobom','utf8bom')) {$encoding='utf8'}
+  $p.Encoding=$encoding
+}
+foreach($s in @($r.switches)) {if ($s -and $s -notin @('raw','noemphasis')) {$p[[string]$s]=$true}}
+if (@($r.switches) -contains 'raw') {
+  Microsoft.PowerShell.Utility\Select-String @p | Microsoft.PowerShell.Core\ForEach-Object {$_.Line}
+} else {
+  Microsoft.PowerShell.Utility\Select-String @p
+}
 `
 
 func decodeRequest(args []string) (request, error) {
@@ -77,6 +90,9 @@ func decodeRequest(args []string) (request, error) {
 			return request{}, errors.New("invalid search switch")
 		}
 		seen[value] = true
+	}
+	if seen["raw"] && seen["quiet"] {
+		return request{}, errors.New("incompatible search switches")
 	}
 	return input, nil
 }
@@ -128,6 +144,9 @@ func runSearch(input request, paths []string, handles *safedelete.ChildReadHandl
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 2 && args[0] == "--digest" {
+		return runDigest(args[1], stdout)
+	}
 	input, err := decodeRequest(args)
 	if err != nil {
 		return err
@@ -147,6 +166,39 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer handles.Close()
 	return runSearch(input, set.Paths(), handles, stdout, stderr)
+}
+
+// This operation establishes identity only. Its caller must authorize each
+// requested path before invoking it; digest output is not an approval.
+func runDigest(encoded string, stdout io.Writer) error {
+	if len(encoded) > 256*1024 {
+		return errors.New("invalid digest envelope")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || base64.RawURLEncoding.EncodeToString(data) != encoded {
+		return errors.New("invalid digest encoding")
+	}
+	var input digestRequest
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || input.SchemaVersion != 1 || len(input.Paths) == 0 || len(input.Paths) > 128 {
+		return errors.New("invalid digest request")
+	}
+	targets := make([]target, 0, len(input.Paths))
+	seen := make(map[string]bool, len(input.Paths))
+	for _, name := range input.Paths {
+		key := strings.ToLower(filepath.Clean(name))
+		if len(name) > 32767 || seen[key] {
+			return errors.New("invalid digest target")
+		}
+		seen[key] = true
+		digest, err := safedelete.DigestPinnedReadPath(name)
+		if err != nil {
+			return errors.New("digest target cannot be verified")
+		}
+		targets = append(targets, target{Path: name, SHA256: hex.EncodeToString(digest[:])})
+	}
+	return json.NewEncoder(stdout).Encode(targets)
 }
 
 func main() {
