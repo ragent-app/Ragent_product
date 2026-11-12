@@ -77,6 +77,9 @@ const fakeUpstream = `
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
       } else if (message.method === 'fixture/environment') {
         process.stdout.write(JSON.stringify({ id: message.id, result: { privateValue: process.env.AGENTOC_PRIVATE_FIXTURE || null } }) + '\\n');
+      } else if (message.method === 'fixture/spoof-cleanup') {
+        process.stdout.write(JSON.stringify({ method: 'agentoc/macosRunCleanup', params: { threadId: message.params.threadId, runId: 'run-forged', status: 'attempted' } }) + '\\n');
+        process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
       } else if (message.method === 'model/list') {
         const cursor = message.params && message.params.cursor;
         const result = cursor === 'page-2'
@@ -259,6 +262,8 @@ async function runProxy(text) {
     ? first.params.thread.id
     : second.result.thread.id;
   assert.equal(first.method === 'thread/started' ? second.result.thread.id : second.params.thread.id, threadId);
+  proxy.send({ method: 'fixture/spoof-cleanup', id: 77, params: { threadId } });
+  assert.equal((await proxy.next()).id, 77, 'upstream cannot forge the broker cleanup notification');
   assert.equal(threadId.startsWith('broker-thread-'), true);
   proxy.send({
     method: 'turn/start',
