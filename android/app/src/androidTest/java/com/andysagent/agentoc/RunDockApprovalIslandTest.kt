@@ -28,6 +28,7 @@ import com.andysagent.agentoc.core.agentui.AgentRunStatus
 import com.andysagent.agentoc.core.agentui.PermissionRequestUiState
 import com.andysagent.agentoc.core.designsystem.AgentocTheme
 import com.andysagent.agentoc.feature.workbench.RunDock
+import com.andysagent.agentoc.feature.workbench.R as WorkbenchR
 import org.junit.Rule
 import org.junit.Test
 
@@ -78,6 +79,8 @@ class RunDockApprovalIslandTest {
 
     @Test
     fun freshRequestStartsExpandedAndOutsideTapCollapsesToPill() {
+        val approveLabel = composeRule.activity.getString(WorkbenchR.string.attention_approve)
+        val denyLabel = composeRule.activity.getString(WorkbenchR.string.attention_deny)
         var expanded by mutableStateOf(true)
         var collapseCount by mutableStateOf(0)
         composeRule.setContent {
@@ -116,26 +119,27 @@ class RunDockApprovalIslandTest {
         }
 
         // A fresh request opens expanded: decision buttons are on screen.
-        composeRule.onNodeWithText("Approve").assertIsDisplayed()
-        composeRule.onNodeWithText("Deny").assertIsDisplayed()
+        composeRule.onNodeWithText(approveLabel).assertIsDisplayed()
+        composeRule.onNodeWithText(denyLabel).assertIsDisplayed()
         composeRule.onAllNodesWithText("Expand approval request").assertCountEquals(0)
 
         // Derive a point below the top-anchored card and away from system
         // navigation. API 35's edge-to-edge root can include the bottom bar.
         val rootBounds = composeRule.onRoot().fetchSemanticsNode().boundsInRoot
-        val actionsBottom = composeRule.onNodeWithText("Approve").fetchSemanticsNode().boundsInRoot.bottom
+        val actionsBottom = composeRule.onNodeWithText(approveLabel).fetchSemanticsNode().boundsInRoot.bottom
         val outsideY = (actionsBottom + rootBounds.bottom) / 2f - rootBounds.top
         composeRule.onRoot().performTouchInput {
             click(Offset(x = centerX, y = outsideY))
         }
         composeRule.waitForIdle()
-        composeRule.onAllNodesWithText("Approve").assertCountEquals(0)
+        composeRule.onAllNodesWithText(approveLabel).assertCountEquals(0)
         composeRule.onNodeWithContentDescription("Expand approval request").assertIsDisplayed()
         composeRule.runOnIdle { check(collapseCount == 1) { "barrier should collapse exactly once" } }
     }
 
     @Test
     fun tapsInsideTheExpandedCardDoNotCollapseIt() {
+        val approveLabel = composeRule.activity.getString(WorkbenchR.string.attention_approve)
         var expanded by mutableStateOf(true)
         var collapseCount by mutableStateOf(0)
         composeRule.setContent {
@@ -176,15 +180,16 @@ class RunDockApprovalIslandTest {
         // Taps on inert regions inside the card (title, description, glass
         // padding) are shielded: the card must stay expanded and the
         // barrier must never fire.
-        composeRule.onNodeWithText("Run shell command").performClick()
+        composeRule.onNodeWithText(approval.reason).performTouchInput { click() }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Approve").assertIsDisplayed()
+        composeRule.onNodeWithText(approveLabel).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Expand approval request").assertDoesNotExist()
         composeRule.runOnIdle { check(collapseCount == 0) { "card interior taps must not reach the barrier" } }
     }
 
     @Test
     fun collapsedPillTapReexpandsCardWhileAwaitingAction() {
+        val approveLabel = composeRule.activity.getString(WorkbenchR.string.attention_approve)
         var expanded by mutableStateOf(false)
         composeRule.setContent {
             AgentocTheme {
@@ -207,12 +212,12 @@ class RunDockApprovalIslandTest {
 
         // Resting state is the compact pill; decision buttons stay hidden.
         composeRule.onNodeWithContentDescription("Expand approval request").assertIsDisplayed()
-        composeRule.onAllNodesWithText("Approve").assertCountEquals(0)
+        composeRule.onAllNodesWithText(approveLabel).assertCountEquals(0)
 
         // Tapping the pill re-expands the untouched request card.
         composeRule.onNodeWithContentDescription("Expand approval request").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Approve").assertIsDisplayed()
-        composeRule.onNodeWithText("Run shell command").assertIsDisplayed()
+        composeRule.onNodeWithText(approveLabel).assertIsDisplayed()
+        composeRule.onNodeWithText(approval.reason).assertIsDisplayed()
     }
 }

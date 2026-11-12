@@ -187,7 +187,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 本机真实 CLI fixture：推荐档 `git status --short` 无 owner prompt 自动执行；推荐档危险 `winget uninstall` 进入一个 owner 审批后拒绝；full-auto 对同一危险动作自动拒绝且无 owner prompt。
 - 本机真实 managed Hook：Ragent hook 通过 App Server 注册和信任校验，执行 preToolUse 并改写安装命令；改写后的安装命令仍需 owner 审批。当前源码调整已允许 Codex App Server 的规范 PowerShell argv 缺少 `-NoProfile` 时进入静态分析，但本轮未重放该 Hook，也未测量审批频率变化。
 - 2026-11-10 荣耀 MTN-AN80（`MTN-AN80` / `ADNQ6R5716008635`）离线真机验收：`ApprovalAttentionDeviceTest` 16/16 通过；`ApprovalReplayDeviceTest` 使用本地合成 approval event、fake transport 和 in-memory Room 重放，1/1 通过，验证事件字段持久化以及真机卡片中的危险操作目标、条件状态和 approve/deny 控件。两组均未调用 OAuth、Codex 官方 provider 或模型额度。
-- 同日尝试 app 模块 `RunDockApprovalIslandTest`：4 个用例中 1 个通过、3 个在卡片首次显示断言处失败；因测试未等待首帧稳定，初步怀疑与 `RunDock` 入场动画/断言时序有关，尚未证实产品卡片通过或失败。本地尝试在首次断言前等待 Compose 动画空闲后，复跑被当前共享工作区 `voice_cloud_upload_disclosure` 字符串中的非法 Unicode 转义阻断；临时测试改动未保留，该字符串属于未提交的 ASR 工作，本次未修改。该 app 模块用例尚未复验。
+- 荣耀上的 app 模块 `RunDockApprovalIslandTest` 曾为 1/4 通过。2026-11-12 在三星 SM-S9060（Android 16）用当前代码复跑，仍为 1/4：两个用例在英文按钮显示断言失败，一个寻找展开卡片内已不再显示的旧标题。现有实现会按设备语言本地化默认按钮，展开卡片显示操作说明；测试已调整为读取本地化资源和当前说明，并使用实际触摸测试卡片内部。调整后的复跑因 G 盘空闲空间一度降至约 150 MiB 而主动停止，尚未取得结果，不能据此认定卡片通过或失败；此前对动画时序的猜测没有得到证实。
 - Codex 0.149 的退役行为及当前 `granular` 能力依据官方文档与合并记录；0.167.0 已验证策略字段，但受管策略环境及真实 provider 账号尚未验证。
 - 最近荣耀手机 Codex Official OAuth 运行在审批事件产生前因 refresh token 已使用而失败。用户说明 Codex 账号目前无法登录，免费档额度很少且要求不要消耗；因此本轮只做本地假传输/合成事件验收，没有重试 OAuth 或请求官方模型。手机端完整 OAuth → Ragent UI → 真实审批事件验收仍未完成；没有把 provider 的“可用”状态当作授权成功。
 - 不同 provider request id 的语义重复合并、手机端 OAuth、已部署 Windows 服务与 Linux/macOS 原生环境验收仍未完成；当前不把它们记为通过。
