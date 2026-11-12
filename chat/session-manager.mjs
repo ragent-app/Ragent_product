@@ -3630,22 +3630,26 @@ async function enqueuePrivilegedCategoryApprovalResponses(
   const entries = [];
   for (const op of Array.isArray(resolved?.categoryOps) ? resolved.categoryOps : []) {
     const resultEvent = byOpId.get(trimString(op?.opId)) || null;
-    // A passkey is an explicit owner decision. The provider gate response must
-    // mirror that decision; privileged_exec_result records execution outcome
-    // separately and must never be translated into a false user denial. The
-    // install-auto path intentionally keeps the older execution-gated behavior
-    // because it has no interactive owner decision to preserve.
-    const approved = decisionSource === 'owner' || decisionSource === 'policy'
-      ? resolved?.decisions?.[op?.opId] === 'approved'
-      : isSuccessfulPrivilegedExecResult(resultEvent);
+    // The managed executor has already handled (or refused) this operation.
+    // Allowing the original provider command would execute it again, possibly
+    // outside the privileged boundary. Preserve the actual decision and result
+    // separately from the provider gate's required denial.
+    const privilegedDecision = resolved?.decisions?.[op?.opId] || 'unknown';
     const entry = buildPrivilegedApprovalQueueEntry({
       batchId,
       category,
       op,
-      approved,
+      approved: false,
       requestId,
     });
-    if (entry) entries.push(entry);
+    if (entry) entries.push({
+      ...entry,
+      privilegedDecision,
+      privilegedDecisionSource: decisionSource,
+      privilegedExecutionState: resultEvent
+        ? (isSuccessfulPrivilegedExecResult(resultEvent) ? 'completed' : 'failed')
+        : 'unknown',
+    });
   }
   if (entries.length === 0) return [];
 

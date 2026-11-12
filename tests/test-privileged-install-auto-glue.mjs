@@ -112,8 +112,9 @@ try {
   const successUpdatedRun = await getRun(successRun.id);
   assert.equal(successUpdatedRun.appServerApprovalResponseQueue.length, 1);
   assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].approvalId, 'gate-install-1');
-  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].decision, 'approve');
-  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].updatedInput.command, 'apt-get install -y nginx');
+  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].decision, 'deny');
+  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].privilegedExecutionState, 'completed');
+  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].updatedInput, undefined);
   assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].privilegedCategory, CATEGORY_INSTALL);
 
   const successAgain = await executePrivilegedInstallAutoBatch(

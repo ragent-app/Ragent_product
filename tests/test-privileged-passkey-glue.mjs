@@ -216,12 +216,14 @@ try {
   const successUpdatedRun = await getRun(successRun.id);
   assert.equal(successUpdatedRun.appServerApprovalResponseQueue.length, 1);
   assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].approvalId, 'gate-delete-1');
-  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].decision, 'approve');
+  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].decision, 'deny');
+  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].privilegedDecision, 'approved');
+  assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].privilegedExecutionState, 'completed');
   assert.equal(successUpdatedRun.appServerApprovalResponseQueue[0].privilegedCategory, CATEGORY_DELETE);
 
-  // An owner approval must remain an allow even when the privileged executor
+  // An owner approval remains recorded when the privileged executor
   // reports a command/runtime failure. The execution result is a separate
-  // event and must not be converted into a false user-denied response.
+  // event, distinct from the provider gate response preventing a rerun.
   const executionFailureRun = await createTestRun(createRun, 'session_passkey_execution_failure', 'req_passkey_execution_failure');
   const executionFailureBatch = deleteBatch(buildPrivilegedBatch, executionFailureRun.id, 'gate-delete-execution-failure');
   const executionFailureStore = createFakeStore();
@@ -260,9 +262,11 @@ try {
   );
   assert.equal(executionFailure.execResults[0].error, 'privileged executor unavailable');
   const executionFailureUpdatedRun = await getRun(executionFailureRun.id);
-  assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].decision, 'approve',
-    'owner approval must not become provider denial when execution fails');
-  assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].updatedInput.command, 'rm -rf /var/cache/agentoc-stale');
+  assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].decision, 'deny',
+    'provider must not rerun the original command when managed execution fails');
+  assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].privilegedDecision, 'approved');
+  assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].privilegedExecutionState, 'failed');
+  assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].updatedInput, undefined);
 
   // --- duplicate submission reuses the stored result (no re-execution) ---
   const successAgain = await executePrivilegedPasskeyBatch(
