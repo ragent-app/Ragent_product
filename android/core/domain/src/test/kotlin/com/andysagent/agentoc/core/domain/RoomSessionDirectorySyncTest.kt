@@ -32,8 +32,11 @@ class RoomSessionDirectorySyncTest {
             override val connectionState = MutableStateFlow(RuntimeConnectionState.Connected)
             override val invalidations: Flow<InvalidationHint> = emptyFlow()
             override suspend fun execute(request: ApiRequest): ApiResponse {
-                check(request.path == "/api/sessions/accepted")
-                return ApiResponse(200, """{"session":{"id":"accepted","projectId":"project","status":"idle","latestSeq":0}}""")
+                return when (request.path) {
+                    "/api/sessions/accepted" -> ApiResponse(200, """{"session":{"id":"accepted","projectId":"project","status":"idle","latestSeq":0}}""")
+                    "/api/sessions?view=summary" -> ApiResponse(200, """{"sessions":[]}""")
+                    else -> error("Unexpected request: ${request.path}")
+                }
             }
             override fun connectInvalidationSocket() = Unit
             override suspend fun close() = Unit
@@ -42,6 +45,15 @@ class RoomSessionDirectorySyncTest {
         try {
             assertEquals(SessionStatus.WaitingApproval, repository.refreshSessionDetail("accepted")?.status)
             assertEquals("pending", database.dao().getPendingApprovals("accepted").single().status)
+            assertEquals(ACCEPTED_FIRST_TURN_WAITING_STATUS, database.dao().getSession("accepted")?.status)
+            repository.close()
+            val restarted = RoomSessionRepository(database, carrier)
+            try {
+                restarted.refreshSessions()
+                val session = restarted.observeSessions().first().single()
+                assertEquals(SessionStatus.WaitingApproval, session.status)
+                assertEquals("project", session.projectId)
+            } finally { restarted.close() }
         } finally { repository.close(); database.close() }
     }
 

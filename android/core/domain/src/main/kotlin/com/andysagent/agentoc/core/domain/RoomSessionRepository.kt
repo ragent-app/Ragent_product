@@ -1077,7 +1077,7 @@ class RoomSessionRepository(
         val payload = codec.decode(serializer<SessionListResponseDto>(), response.body)
         val now = System.currentTimeMillis()
         val persistedSnapshots = dao.observeSessions().first()
-            .filter { it.status == ACCEPTED_FIRST_TURN_STATUS }.associateBy { it.id }
+            .filter { isAcceptedFirstTurnStatus(it.status) }.associateBy { it.id }
         val canonical = payload.sessions.map { item ->
             val existing = item.string("id")?.let { dao.getSession(it) }
             val activity = item["activity"]?.jsonObject
@@ -1124,7 +1124,7 @@ class RoomSessionRepository(
                 completedFirstTurns += session.id
                 return@map session
             }
-            val retainedStatus = if (sessionStatusFromRaw(session.status) == SessionStatus.WaitingApproval) session.status else ACCEPTED_FIRST_TURN_STATUS
+            val retainedStatus = acceptedFirstTurnStatus(sessionStatusFromRaw(session.status) == SessionStatus.WaitingApproval)
             session.copy(status = retainedStatus).also { acceptedFirstTurnSnapshots[session.id] = it }
         }.toMutableList()
         for (sessionId in acceptedIds - canonicalById.keys) {
@@ -1249,7 +1249,7 @@ class RoomSessionRepository(
         val initial = sessionEntityFromClientJson(item, dao.getSession(sessionId), authoritative = true)
         val runId = sessionRunId(item)
         val terminalSession = hasTerminalSessionDetail(item) ||
-            (initial.status != ACCEPTED_FIRST_TURN_STATUS && isAuthoritativelyIdleSession(item))
+            (!isAcceptedFirstTurnStatus(initial.status) && isAuthoritativelyIdleSession(item))
         val activity = item["activity"] as? JsonObject
         val activityRun = activity?.get("run") as? JsonObject
         val activityRunState = (activityRun?.get("state") ?: activityRun?.get("status"))
@@ -1289,7 +1289,7 @@ class RoomSessionRepository(
         if (sessionId.isBlank() || sessionStatusFromRaw(status) != SessionStatus.Working) return status
         return if (dao.getPendingApprovals(sessionId).any { approval ->
                 runId == null || approval.runId.isNullOrBlank() || approval.runId == runId
-            }) "waiting_approval" else status
+            }) if (isAcceptedFirstTurnStatus(status)) ACCEPTED_FIRST_TURN_WAITING_STATUS else "waiting_approval" else status
     }
 
     private suspend fun verifyTerminalApprovalRuns(
@@ -1888,8 +1888,7 @@ class RoomSessionRepository(
         val candidate = firstTurnCandidates.remove(sessionId)
         val current = dao.getSession(sessionId) ?: candidate ?: return@withLock
         if (current.latestSeq > 0L) return@withLock
-        val retained = if (sessionStatusFromRaw(current.status) == SessionStatus.WaitingApproval) current
-            else current.copy(status = ACCEPTED_FIRST_TURN_STATUS)
+        val retained = current.copy(status = acceptedFirstTurnStatus(sessionStatusFromRaw(current.status) == SessionStatus.WaitingApproval))
         acceptedFirstTurnSnapshots[sessionId] = retained
         acceptedFirstTurnSessionIds.update { it + sessionId }
         dao.upsertSessions(listOf(retained))
@@ -2891,9 +2890,9 @@ class RoomSessionRepository(
         val workflowState = item.string("workflowState")
         val summaryStatus = chooseSessionSummaryStatus(item.string("status"), workflowState, run?.string("state"), existing?.status ?: "idle")
         val latestSeq = item["latestSeq"]?.toString()?.trim('"')?.toLongOrNull() ?: existing?.latestSeq ?: 0L
-        val rawStatus = if (existing?.status == ACCEPTED_FIRST_TURN_STATUS && latestSeq == 0L &&
-            sessionStatusFromRaw(summaryStatus) !in setOf(SessionStatus.WaitingApproval, SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled))
-            ACCEPTED_FIRST_TURN_STATUS else summaryStatus
+        val rawStatus = if (isAcceptedFirstTurnStatus(existing?.status) && latestSeq == 0L &&
+            sessionStatusFromRaw(summaryStatus) !in setOf(SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled))
+            acceptedFirstTurnStatus(sessionStatusFromRaw(summaryStatus) == SessionStatus.WaitingApproval) else summaryStatus
         val waitingAction = item.string("waitingAction")
             ?: item.string("attentionKind")
             ?: run?.string("kind")?.takeIf { it.equals("approval", ignoreCase = true) }
@@ -3218,7 +3217,10 @@ private class RoomEventSink(
                     (event.runId.isNullOrBlank() || approval.runId.isNullOrBlank() || approval.runId == event.runId)
             }
             if (waiting) dao.getSession(scope)?.let {
-                if (sessionStatusFromRaw(it.status) == SessionStatus.Working) dao.upsertSessions(listOf(it.copy(status = "waiting_approval", updatedAt = System.currentTimeMillis())))
+                if (sessionStatusFromRaw(it.status) == SessionStatus.Working) dao.upsertSessions(listOf(it.copy(
+                    status = if (isAcceptedFirstTurnStatus(it.status)) ACCEPTED_FIRST_TURN_WAITING_STATUS else "waiting_approval",
+                    updatedAt = System.currentTimeMillis(),
+                )))
             }
         }
     }
