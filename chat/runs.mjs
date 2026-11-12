@@ -1,6 +1,6 @@
 import { applyWorkbenchRunPolicy } from '../lib/workbench-execution-policy.mjs';
 import { createHash, randomBytes } from 'crypto';
-import { appendFile, chmod, open, readFile, readdir } from 'fs/promises';
+import { appendFile, chmod, lstat, open, readFile, readdir } from 'fs/promises';
 import { dirname, join } from 'path';
 import { StringDecoder } from 'string_decoder';
 import { isDeepStrictEqual } from 'node:util';
@@ -2049,7 +2049,15 @@ export async function renewRunSessionControlCapability({
 }
 
 export async function getRunResult(runId) {
-  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1') {
+  let recoverPending = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
+  if (process.platform === 'linux' && !recoverPending && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
+      !process.env.AGENTOC_RUNNER_LAUNCH_MODE) {
+    // A disabled feature must not strand results staged by the previous
+    // control-service process. Recovery only revokes; it cannot grant scope.
+    try { await lstat(runPendingResultPath(runId)); recoverPending = true; }
+    catch (error) { if (error.code !== 'ENOENT') return null; }
+  }
+  if (recoverPending) {
     return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
       let handle;
       try {
@@ -2077,7 +2085,7 @@ export async function getRunResult(runId) {
         const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
         await persistLinuxRunCancelIntent(runId, attempt);
         const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
-        if ((await revokeLinuxRunScope(run, { timeoutMs: 10_000 })).state !== 'revoked') return null;
+        if ((await revokeLinuxRunScope(run, { enabled: true, timeoutMs: 10_000 })).state !== 'revoked') return null;
         await writeJsonAtomic(runResultPath(runId), pending.result, { ...COMPACT_JSON_OPTIONS, durable: true });
         runResultCache.set(runId, pending.result);
         await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
