@@ -45,6 +45,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     out({ method: 'turn/started', params: { threadId: m.params.threadId } });
     setTimeout(() => out({ method: 'turn/completed', params: { threadId: m.params.threadId } }), 800);
   }
+  if (m.method === 'mcpServer/oauth/login') {
+    out({ id: m.id, result: { authorizationUrl: 'https://example.invalid/' } });
+    setTimeout(() => out({ method: 'mcpServer/oauthLogin/completed', params: { name: m.params.name, success: true } }), 800);
+  }
 });`);
   const socketPath = codexAppServerBrokerSocketPath(home);
   const brokerEntry = process.env.RAGENT_TEST_BROKER_ENTRY || fileURLToPath(new URL('../chat/codex-app-server-broker.mjs', import.meta.url));
@@ -79,7 +83,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   assert.equal((await control.next()).accepted, false);
   retire(codexBrokerAccountDigest('fixture-account'));
   assert.equal((await control.next()).accepted, false);
+  await delay(1000);
+  control.send({ id: 2, method: 'mcpServer/oauth/login', params: { name: 'fixture-mcp' } });
+  assert.equal((await control.next()).id, 2);
   control.socket.end();
+  await delay(100);
+  const oauthProbe = await openSocket(socketPath);
+  oauthProbe.send({ type: 'agentoc-codex-broker-retire', expectedAccountDigest: codexBrokerAccountDigest('fixture-account') });
+  assert.equal((await oauthProbe.next()).accepted, false);
+  oauthProbe.socket.end();
   await delay(1000);
   const creationLock = await acquireNativeOAuthLock(codexAppServerBrokerLockPath(home), { waitMs: 5000 });
   let oauthLock;
