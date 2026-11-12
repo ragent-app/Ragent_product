@@ -181,6 +181,8 @@ const broker = await ensureCodexAppServerBroker({
   lockPath: join(home, '.agentoc-codex-app-server.lock'),
 });
 assert.equal(broker.ok, true);
+let ownedBrokerPid = broker.pid;
+process.once('exit', () => { if (ownedBrokerPid) { try { process.kill(ownedBrokerPid, 'SIGTERM'); } catch {} } });
 
 const catalog = await listCodexAppServerModels({
   codexHomeDir: home,
@@ -360,5 +362,6 @@ right.proxy.child.kill('SIGTERM');
 // The broker is intentionally persistent across Runs; this test owns it and
 // removes it explicitly so the detached child cannot outlive the test.
 process.kill(broker.pid, 'SIGTERM');
+ownedBrokerPid = null;
 await removeEventually(root);
 console.log('test-codex-app-server-broker: same-provider concurrent threads share one upstream process');
