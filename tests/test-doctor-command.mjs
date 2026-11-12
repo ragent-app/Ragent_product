@@ -29,7 +29,7 @@ const report = {
 };
 
 const text = formatDoctorText(report);
-assert.match(text, /AgentoC doctor: ready \(win32\)/);
+assert.match(text, /Ragent doctor: ready \(win32\)/);
 assert.match(text, /endpoint: derived/);
 assert.match(text, /services: ready/);
 assert.match(text, /service\.AgentoC-ControlPlane: Running/);

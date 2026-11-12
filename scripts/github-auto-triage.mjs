@@ -45,9 +45,9 @@ function usage(exitCode = 0) {
 Options:
   --repo <owner/repo>         GitHub repository to watch
   --post                      Actually post replies instead of dry-run
-  --chat-base-url <url>       AgentoC base URL (default: ${DEFAULT_CHAT_BASE_URL})
-  --session-folder <path>     Folder used for AgentoC sessions (default: ${PROJECT_ROOT})
-  --session-tool <tool>       Tool used for AgentoC sessions (default: ${DEFAULT_SESSION_TOOL})
+  --chat-base-url <url>       Ragent base URL (default: ${DEFAULT_CHAT_BASE_URL})
+  --session-folder <path>     Folder used for Ragent sessions (default: ${PROJECT_ROOT})
+  --session-tool <tool>       Tool used for Ragent sessions (default: ${DEFAULT_SESSION_TOOL})
   --model <id>                Optional model override for submitted messages
   --effort <level>            Optional effort override for submitted messages
   --thinking                  Enable thinking for submitted messages
@@ -66,8 +66,8 @@ Options:
 Behavior:
   - Polls GitHub issues + PRs by updated time through gh api
   - Writes local intake snapshots for each changed thread
-  - Normalizes each inbound update into a AgentoC session message
-  - Reads the resulting assistant message back from AgentoC and publishes it to GitHub
+  - Normalizes each inbound update into a Ragent session message
+  - Reads the resulting assistant message back from Ragent and publishes it to GitHub
   - Scheduled runs remain conservative by default and do not auto-reply to maintainer-authored threads
 `;
   console.log(message);
@@ -304,7 +304,7 @@ async function loginWithToken(baseUrl, token) {
   });
   const setCookie = response.headers.get('set-cookie');
   if (response.status !== 302 || !setCookie) {
-    throw new Error(`Failed to authenticate to AgentoC at ${baseUrl} (status ${response.status})`);
+    throw new Error(`Failed to authenticate to Ragent at ${baseUrl} (status ${response.status})`);
   }
   return setCookie.split(';')[0];
 }

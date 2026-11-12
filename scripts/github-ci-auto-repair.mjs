@@ -35,9 +35,9 @@ Options:
   --events <a,b>              Comma-separated events to watch
   --workflow <name>           Workflow filter by name/path/id (repeatable)
   --workflows <a,b>           Comma-separated workflow filters
-  --chat-base-url <url>       AgentoC base URL (default: ${DEFAULT_CHAT_BASE_URL})
-  --session-folder <path>     Local repo path used for AgentoC sessions (default: ${PROJECT_ROOT})
-  --session-tool <tool>       Tool used for AgentoC sessions (default: ${DEFAULT_SESSION_TOOL})
+  --chat-base-url <url>       Ragent base URL (default: ${DEFAULT_CHAT_BASE_URL})
+  --session-folder <path>     Local repo path used for Ragent sessions (default: ${PROJECT_ROOT})
+  --session-tool <tool>       Tool used for Ragent sessions (default: ${DEFAULT_SESSION_TOOL})
   --model <id>                Optional model override for submitted messages
   --effort <level>            Optional effort override for submitted messages
   --thinking                  Enable thinking for submitted messages
@@ -48,7 +48,7 @@ Options:
   --max-log-chars <count>     Max failed log characters included in the prompt (default: ${DEFAULT_MAX_LOG_CHARS})
   --state-file <path>         Override state file path
   --snapshot-dir <path>       Override snapshot directory
-  --dry-run                   Print candidates without creating AgentoC sessions
+  --dry-run                   Print candidates without creating Ragent sessions
   --json                      Print machine-readable JSON summary
   --verbose                   Print extra details
   -h, --help                  Show this help
@@ -57,7 +57,7 @@ Behavior:
   - Polls GitHub Actions runs through gh CLI
   - Looks at the latest matching run for each branch/workflow group
   - Skips runs that are still in progress, already handled, or still within the settle window
-  - Creates a AgentoC session with failure context and a repair task when a latest branch CI run is red
+  - Creates a Ragent session with failure context and a repair task when a latest branch CI run is red
 `;
   console.log(message);
   process.exit(exitCode);
@@ -619,7 +619,7 @@ function buildRequestId(repo, run) {
 
 function buildSessionSystemPrompt() {
   return [
-    'You were triggered automatically by the AgentoC GitHub CI repair monitor.',
+    'You were triggered automatically by the Ragent GitHub CI repair monitor.',
     'Treat this as an autonomous repair session for a failed branch CI run.',
     'Work directly in the local repo path provided in the user message.',
     'First inspect the workflow and reproduce the failure locally with the closest commands.',
@@ -684,7 +684,7 @@ async function loginWithToken(baseUrl, token) {
   });
   const setCookie = response.headers.get('set-cookie');
   if (response.status !== 302 || !setCookie) {
-    throw new Error(`Failed to authenticate to AgentoC at ${baseUrl} (status ${response.status})`);
+    throw new Error(`Failed to authenticate to Ragent at ${baseUrl} (status ${response.status})`);
   }
   return setCookie.split(';')[0];
 }

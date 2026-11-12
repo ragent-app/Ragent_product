@@ -115,7 +115,7 @@ function main() {
     fail(
       PRIVILEGED_SHIM_EXIT.CHANNEL_UNAVAILABLE,
       'no privileged callback channel: AGENTOC_PRIVILEGED_SHIM_SOCKET is not set. '
-      + 'This process was not started by an AgentoC Run sidecar, so the privileged-approval '
+      + 'This process was not started by a Ragent Run sidecar, so the privileged-approval '
       + 'flow cannot be reached from here. Report that managed approval is unavailable; '
       + 'do not bypass the approval channel.',
     );
