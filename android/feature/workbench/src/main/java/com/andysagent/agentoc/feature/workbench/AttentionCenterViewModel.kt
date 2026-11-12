@@ -278,6 +278,9 @@ class AttentionCenterViewModel(
                 val pending = fixed.findPendingApproval(item.sessionId, original.id)
                     ?.takeIf { it.status == "pending" && it.kind == "privileged_batch_request" }
                     ?: error("This approval is no longer pending")
+                require(event.selectedIds.isEmpty() || pending.executorUnavailableReasonCode != "macos_administrator_unavailable") {
+                    "Managed administrator execution is not available on this Mac"
+                }
                 val runId = pending.runId ?: error("Approval run is unavailable")
                 val batchId = pending.batchId ?: error("Approval batch is unavailable")
                 val available = pending.actions.filter { it.category == event.category && it.state in setOf("proposed", "classified", "waiting_user") }

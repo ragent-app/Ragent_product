@@ -326,12 +326,14 @@ class ProtocolCodecTest {
             "batchId": "pbatch-1",
             "runId": "run-1",
             "passkeyRequired": false,
+            "executorUnavailableReasonCode": "macos_administrator_unavailable",
             "other": [],
             "delete": []
         }"""
         val event = codec.decode(serializer<SessionEventDto>(), json)
         assertEquals("privileged_batch_request", event.type)
         assertEquals(false, event.passkeyRequired)
+        assertEquals("macos_administrator_unavailable", event.executorUnavailableReasonCode)
 
         val legacyJson = """{
             "seq": 13,
@@ -341,6 +343,7 @@ class ProtocolCodecTest {
         }"""
         val legacyEvent = codec.decode(serializer<SessionEventDto>(), legacyJson)
         assertEquals(null, legacyEvent.passkeyRequired)
+        assertEquals(null, legacyEvent.executorUnavailableReasonCode)
     }
 
     @Test

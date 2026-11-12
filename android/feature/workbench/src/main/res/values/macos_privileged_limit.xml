@@ -1,0 +1,3 @@
+<resources>
+    <string name="approval_macos_executor_unavailable">Managed administrator execution is not available on this Mac. You can decline this request.</string>
+</resources>

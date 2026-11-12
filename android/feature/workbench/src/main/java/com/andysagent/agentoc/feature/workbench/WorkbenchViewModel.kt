@@ -3059,6 +3059,9 @@ class ChatViewModel(
                         requestId = resolutionRequestId,
                     )
                 } else if (runId != null && batchId != null) {
+                    require(!approve || pending.executorUnavailableReasonCode != "macos_administrator_unavailable") {
+                        "Managed administrator execution is not available on this Mac"
+                    }
                     val visibleApproval = mutableState.value.approval
                     val categoryActions = pending.actions.groupBy { action ->
                         action.category?.takeIf { it.isNotBlank() } ?: "privileged_other"

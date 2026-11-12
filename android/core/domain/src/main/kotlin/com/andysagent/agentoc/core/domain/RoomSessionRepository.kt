@@ -3531,6 +3531,7 @@ private fun ApprovalEntity.toDomainApproval(): Approval {
         filePaths = details?.get("filePaths")?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull },
         grantRoot = details?.get("grantRoot")?.jsonPrimitive?.contentOrNull,
         permissionsJson = details?.get("permissions")?.toString(),
+        executorUnavailableReasonCode = details?.get("executorUnavailableReasonCode")?.jsonPrimitive?.contentOrNull,
         defaultSelectedByCategory = buildMap {
             val defaults = details?.get("defaultSelected") as? JsonObject
             fun selected(vararg keys: String): Set<String>? = keys.firstNotNullOfOrNull { key ->
@@ -3578,6 +3579,7 @@ private fun buildApprovalDetails(event: SessionEventDto): String? {
         (event.riskLevel ?: (event.risk as? JsonPrimitive)?.contentOrNull
             ?: (event.risk as? JsonObject)?.get("tier")?.jsonPrimitive?.contentOrNull)?.let { put("riskLevel", JsonPrimitive(it)) }
         event.passkeyRequired?.let { put("passkeyRequired", JsonPrimitive(it)) }
+        event.executorUnavailableReasonCode?.let { put("executorUnavailableReasonCode", JsonPrimitive(it)) }
         event.question?.takeIf { it.isNotBlank() }?.let { put("question", JsonPrimitive(it)) }
         event.schemaVersion?.let { put("schemaVersion", JsonPrimitive(it)) }
         event.channel?.let { put("channel", JsonPrimitive(it)) }

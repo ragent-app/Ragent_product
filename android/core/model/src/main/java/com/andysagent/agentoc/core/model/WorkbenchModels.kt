@@ -347,6 +347,7 @@ data class Approval(
     val grantRoot: String? = null,
     val permissionsJson: String? = null,
     val defaultSelectedByCategory: Map<String, Set<String>> = emptyMap(),
+    val executorUnavailableReasonCode: String? = null,
     val identityAliases: Set<String> = emptySet(),
     val explanation: ApprovalExplanation? = null,
 )

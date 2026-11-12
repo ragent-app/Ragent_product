@@ -417,6 +417,24 @@ class AttentionCenterViewModelTest {
     }
 
     @Test
+    fun `macOS unavailable executor prevents approval but permits denial`() = runTest(dispatcher.scheduler) {
+        val repository = FakeRepository(sessions = listOf(Session(id = "s1", title = "One")), approvals = listOf(
+            Approval(id = "b", sessionId = "s1", title = "Batch", kind = "privileged_batch_request", runId = "r", batchId = "b",
+                passkeyRequired = false, executorUnavailableReasonCode = "macos_administrator_unavailable",
+                actions = listOf(ApprovalAction(id = "o", description = "Restart", category = "privileged_other"))),
+        ))
+        val viewModel = AttentionCenterViewModel(repository)
+        advanceUntilIdle()
+        val id = AttentionReducer.approvalItemId("s1", "b")
+        viewModel.onEvent(AttentionEvent.ResolvePrivilegedCategory(id, "privileged_other", setOf("o")))
+        advanceUntilIdle()
+        assertTrue(repository.privilegedCalls.isEmpty())
+        viewModel.onEvent(AttentionEvent.ResolvePrivilegedCategory(id, "privileged_other", emptySet()))
+        advanceUntilIdle()
+        assertEquals(listOf("privileged_other" to emptyList()), repository.privilegedCalls)
+    }
+
+    @Test
     fun `uncertain privileged submission stays locked until category is confirmed`() = runTest(dispatcher.scheduler) {
         val repository = FakeRepository(sessions = listOf(Session(id = "s1", title = "One")), approvals = listOf(
             Approval(id = "b", sessionId = "s1", title = "Batch", kind = "privileged_batch_request", runId = "r", batchId = "b",

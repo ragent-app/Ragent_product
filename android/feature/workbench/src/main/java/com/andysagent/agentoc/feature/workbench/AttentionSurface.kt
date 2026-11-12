@@ -632,11 +632,14 @@ private fun AttentionCard(
                             ApprovalExplanationContent(explanation.toExplanationUiState(), skipSummary = (localized?.operation == null && localized?.riskCode != null) || (localized?.summary == headline && !headlineOverflows), skipReason = localized?.reason != null && localized.reason == presentation.consequence && !consequenceOverflows)
                         }
                         if (isPrivilegedCategoryBatch) {
+                            if (item.approval?.executorUnavailableReasonCode == "macos_administrator_unavailable") {
+                                Text(stringResource(R.string.approval_macos_executor_unavailable), color = colors.secondaryContent, style = MaterialTheme.typography.bodySmall)
+                            }
                             listOf("privileged_other" to R.string.approval_category_privileged,
                                 "destructive_delete" to R.string.approval_category_delete).forEach { (category, title) ->
                                 val actions = item.approval?.actions.orEmpty().filter { it.category == category }
                                 if (actions.isNotEmpty()) ActionBatchDetails(actions, selectedActionIds,
-                                    !resolving && expanded && disclosureProgress >= 0.999f,
+                                    !resolving && expanded && disclosureProgress >= 0.999f && item.approval?.executorUnavailableReasonCode != "macos_administrator_unavailable",
                                     onToggle = { actionId -> selectedActionIds = if (actionId in selectedActionIds) selectedActionIds - actionId else selectedActionIds + actionId },
                                     heading = title)
                             }
@@ -1197,9 +1200,11 @@ private fun PrivilegedCategoryActions(
                 val checked = pending.map { it.id }.filterTo(mutableSetOf()) { it in selected }
                 Text(stringResource(label), color = colors.secondaryContent, style = MaterialTheme.typography.labelSmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AgentoButton(text = stringResource(R.string.attention_approve_selected),
-                        onClick = { onEvent(AttentionEvent.ResolvePrivilegedCategory(item.id, category, checked)) },
-                        enabled = !resolving && checked.isNotEmpty(), decision = true, modifier = Modifier.weight(1f))
+                    if (item.approval?.executorUnavailableReasonCode != "macos_administrator_unavailable") {
+                        AgentoButton(text = stringResource(R.string.attention_approve_selected),
+                            onClick = { onEvent(AttentionEvent.ResolvePrivilegedCategory(item.id, category, checked)) },
+                            enabled = !resolving && checked.isNotEmpty(), decision = true, modifier = Modifier.weight(1f))
+                    }
                     AgentoButton(text = stringResource(R.string.attention_deny),
                         onClick = { onEvent(AttentionEvent.ResolvePrivilegedCategory(item.id, category, emptySet())) },
                         enabled = !resolving, secondary = true, decision = true, modifier = Modifier.weight(1f))

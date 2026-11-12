@@ -1,0 +1,3 @@
+<resources>
+    <string name="approval_macos_executor_unavailable">此 Mac 暂不支持托管管理员执行，无法批准执行；你可以拒绝该请求。</string>
+</resources>
