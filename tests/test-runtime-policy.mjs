@@ -14,7 +14,6 @@ process.env.HOME = home;
 const {
   DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
   MANAGER_RUNTIME_BOUNDARY_SECTION,
-  MANAGER_TURN_POLICY_REMINDER,
   applyManagedRuntimeEnv,
   ensureManagedCodexHome,
 } = await import('../chat/runtime-policy.mjs');
@@ -318,67 +317,6 @@ try {
     /do not volunteer implementation details about memory files, prompts, repos, remotes, branches, checkpoints, or local tooling/,
     'manager runtime boundary should keep host-side implementation details out of normal user-facing replies',
   );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /Judge pauses branch-first: do not ask whether to continue until you have first decided whether a real logical fork or forced human checkpoint exists/,
-    'turn-level policy reminder should require branch-first pause decisions',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /If the work is still on a single obvious track, treat the current request as standing authorization and keep going/,
-    'turn-level policy reminder should keep single-track work moving without extra permission checks',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /Prefer soft-control habits over brittle scripts: check for reusable local capabilities before inventing a new path, shape noisy work deliberately, and do a quick self-review before replying/,
-    'turn-level policy reminder should reinforce reusable capabilities and self-review rather than rigid scripts',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /Do not mirror the manager prompt structure or provider-native report formatting back to the user by default/,
-    'turn-level policy reminder should explicitly block prompt-structure mirroring',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /reinforce invariants and current state, not verbose step-by-step scripts/,
-    'turn-level policy reminder should stay principle-first rather than script every action',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /lead with the current execution state, then whether the user is needed now or the work can stay parked for later/,
-    'turn-level policy reminder should enforce state-first reorientation',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /Do not hand work back by telling the user to inspect a local path on the host machine/,
-    'turn-level policy reminder should block host-path handoff language',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /Do not turn a nontechnical user into the fallback operator with a multi-step manual recipe when AgentoC can do the work itself/,
-    'turn-level policy reminder should block multi-step manual user recipes',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /prefer bound connectors\/APIs over ambient host app state/,
-    'turn-level policy reminder should prefer bound connectors over ambient host app state for external side effects',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /instead of silently using the host owner's local accounts or app sessions/,
-    'turn-level policy reminder should block silent fallback to owner-local accounts for external side effects',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /If login, authorization, or external access is needed, prefer a AgentoC-side checkpoint on this machine or another explicitly exposed surface/,
-    'turn-level policy reminder should prefer AgentoC-side login and authorization checkpoints',
-  );
-  assert.match(
-    MANAGER_TURN_POLICY_REMINDER,
-    /Keep operator mechanics hidden by default: summarize in user-facing outcome language, and avoid volunteering memory-file, repo, remote, branch, checkpoint, or other host-side workflow details/,
-    'turn-level policy reminder should keep operator-side mechanics out of default user-facing summaries',
-  );
-
   console.log('test-runtime-policy: ok');
 } finally {
   rmSync(home, { recursive: true, force: true });

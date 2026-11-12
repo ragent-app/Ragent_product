@@ -75,7 +75,7 @@ if(!process.argv.includes('--live')){
       }}
     for(const path of crossServiceCredentialChannel?['tests/fixtures/windows-service-credential-channel-probe.mjs']:['lib/auth.mjs',ownerActivation?'tests/fixtures/windows-service-owner-activation-probe.mjs':ownerDiscoverySet?'tests/fixtures/windows-service-owner-set-probe.mjs':ownerPurposeV2?'tests/fixtures/windows-service-owner-purpose-probe.mjs':'tests/fixtures/windows-service-owner-bootstrap-probe.mjs'])await collect(path);seen.add('package.json');
     if(crossServiceCredentialProvider)seen.add('tests/fixtures/windows-service-provider-provision.mjs');
-    if(crossServiceCredentialChannel)for(const path of ['runtime/manager-boundary.md','runtime/manager-turn-reminder.txt','runtime/codex-developer-instructions.txt','system/startup-context.md','turn/context-hook.md'])seen.add('chat/prompt-assets/'+path);
+    if(crossServiceCredentialChannel)for(const path of ['runtime/manager-boundary.md','runtime/codex-developer-instructions.txt','system/startup-context.md','turn/context-hook.md'])seen.add('chat/prompt-assets/'+path);
     if(crossServiceCredentialChannel){
       const packages=new Set();
       async function dependency(name,from=join(source,'package.json')){

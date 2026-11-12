@@ -20,7 +20,6 @@ async function readInlinePromptAsset(relativePath) {
 }
 
 export const MANAGER_RUNTIME_BOUNDARY_SECTION = (await readPromptAsset('runtime/manager-boundary.md')).trim();
-export const MANAGER_TURN_POLICY_REMINDER = await readInlinePromptAsset('runtime/manager-turn-reminder.txt');
 export const DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS = await readInlinePromptAsset('runtime/codex-developer-instructions.txt');
 
 const DEFAULT_CODEX_HOME_MODE = 'managed';
