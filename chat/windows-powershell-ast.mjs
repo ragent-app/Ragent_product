@@ -76,6 +76,40 @@ function Test-ConfirmFalseArgument($node) {
     $node.Parent -is [System.Management.Automation.Language.CommandParameterAst] -and
     $node.Parent.ParameterName -ieq 'Confirm' -and $node.Parent.Argument -eq $node
 }
+function Test-SafeWhereBlock($block) {
+  if ($block -isnot [System.Management.Automation.Language.ScriptBlockExpressionAst] -or
+      $block.Parent -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
+  $command = $block.Parent
+  if ($command.GetCommandName() -inotmatch '^(where-object|where|\?)$' -or
+      @($command.CommandElements).Count -ne 2 -or $command.CommandElements[1] -ne $block -or
+      $command.Parent -isnot [System.Management.Automation.Language.PipelineAst] -or
+      $command.Parent.PipelineElements[0] -eq $command) { return $false }
+  $body = $block.ScriptBlock
+  if ($null -ne $body.ParamBlock -or $null -ne $body.BeginBlock -or $null -ne $body.ProcessBlock -or
+      $null -ne $body.DynamicParamBlock -or $null -eq $body.EndBlock -or
+      @($body.EndBlock.Statements).Count -ne 1 -or @($body.EndBlock.Traps | Where-Object { $null -ne $_ }).Count -ne 0) { return $false }
+  $pipeline = $body.EndBlock.Statements[0]
+  if ($pipeline -isnot [System.Management.Automation.Language.PipelineAst] -or @($pipeline.PipelineElements).Count -ne 1) { return $false }
+  $element = $pipeline.PipelineElements[0]
+  if ($element -isnot [System.Management.Automation.Language.CommandExpressionAst] -or @($element.Redirections).Count -ne 0) { return $false }
+  $expr = $element.Expression
+  if ($expr -isnot [System.Management.Automation.Language.BinaryExpressionAst] -or
+      [string]$expr.Operator -inotmatch '^(i|c)?(eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin)$') { return $false }
+  $left = $expr.Left; $right = $expr.Right
+  return $left -is [System.Management.Automation.Language.MemberExpressionAst] -and
+    $left -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] -and -not $left.Static -and
+    $left.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $left.Expression.VariablePath.UserPath -iin @('_','PSItem') -and
+    $left.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+    [string]$left.Member.Value -match '^\w+$' -and
+    ($right -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $right -is [System.Management.Automation.Language.ConstantExpressionAst])
+}
+function Test-InSafeWhereBlock($node) {
+  for ($item = $node; $null -ne $item; $item = $item.Parent) {
+    if ($item -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) { return (Test-SafeWhereBlock $item) }
+  }
+  return $false
+}
 $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object {
   $command = $_
   $elements = @($command.CommandElements | ForEach-Object {
@@ -92,6 +126,8 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
           $_ -isnot [System.Management.Automation.Language.ConstantExpressionAst]
         }).Count -eq 0) {
       @{ kind = 'literal_list'; values = @($_.Elements | ForEach-Object { [string]$_.Value }) }
+    } elseif (Test-SafeWhereBlock $_) {
+      @{ kind = 'safe_where_predicate' }
     } else {
       @{ kind = 'dynamic'; node = $_.GetType().Name }
     }
@@ -100,10 +136,11 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
   $hasPipelineInput = $command.Parent -is [System.Management.Automation.Language.PipelineAst] -and $command.Parent.PipelineElements[0] -ne $command
   @{ name = $command.GetCommandName(); elements = $elements; invocation = [string]$command.InvocationOperator; redirections = @($command.Redirections).Count; redirectFacts = $redirectFacts; pipelineInput = $hasPipelineInput }
 })
-$expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandExpressionAst] }, $true) | ForEach-Object {
+$expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandExpressionAst] -and -not (Test-InSafeWhereBlock $n) }, $true) | ForEach-Object {
   @{ expressionType = $_.Expression.GetType().Name; staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
 })
 $dynamicNodes = @($ast.FindAll({ param($n)
+  -not (Test-InSafeWhereBlock $n) -and (
   (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n) -and -not (Test-NullRedirection $n)) -or
   ($n -is [System.Management.Automation.Language.SubExpressionAst]) -or
   ($n -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) -or
@@ -114,7 +151,7 @@ $dynamicNodes = @($ast.FindAll({ param($n)
   (($n.GetType().Name -eq 'MemberExpressionAst') -and
     -not ((Get-SafeStaticEncoding $n) -and $null -ne (Get-SafeStaticFileCall $n.Parent))) -or
   ($n.GetType().Name -in @('FunctionDefinitionAst','TypeDefinitionAst','IfStatementAst','ForStatementAst','ForEachStatementAst','WhileStatementAst','DoWhileStatementAst','DoUntilStatementAst','TryStatementAst','TrapStatementAst','UsingStatementAst','ExitStatementAst','ThrowStatementAst','DataStatementAst')) -or
-  ($n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and @($n.NestedExpressions).Count -gt 0)
+  ($n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and @($n.NestedExpressions).Count -gt 0))
 }, $true) | ForEach-Object { $_.GetType().Name })
 $errorMessages = @($errors | ForEach-Object { $_.Message })
 @{ commands = $commands; expressions = $expressions; dynamicNodes = $dynamicNodes; errors = $errorMessages; chainOperators = $chainOperators; psVersion = $PSVersionTable.PSVersion.ToString() } | ConvertTo-Json -Depth 12 -Compress

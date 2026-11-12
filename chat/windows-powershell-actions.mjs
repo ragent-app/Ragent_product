@@ -570,10 +570,13 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       continue;
     }
     if (program === 'where-object') {
-      // The comparison form only examines pipeline objects. Do not accept a
-      // script block, dynamic value, or abbreviated/unknown operator here.
+      // Accept the native parser's narrowly validated script predicate or the
+      // comparison form. Other script blocks and dynamic values remain gated.
       const [, property, operator, value] = entry.elements;
       const comparisons = /^(?:i|c)?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin)$/i;
+      if (entry.pipelineInput === true && entry.elements.length === 2 && property?.kind === 'safe_where_predicate') {
+        actions.push({ kind: 'read', program, target: null }); continue;
+      }
       if (entry.pipelineInput !== true || entry.elements.length !== 4 || property?.kind !== 'literal' ||
           !/^[\w]+$/.test(property.value) || operator?.kind !== 'parameter' || operator.argumentType ||
           !comparisons.test(operator.name || '') || value?.kind !== 'literal') {
