@@ -16,7 +16,7 @@ test('runner terminal write invalidates only its protected control binding',
       process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
-      const { createRun, getRunResult, runPendingResultPath, runResultPath, runStatusPath, updateRun, writeRunResult } = await import('../chat/runs.mjs');
+      const { clearRunResult, createRun, getRunResult, removeRunsForSession, runPendingResultPath, runResultPath, runStatusPath, updateRun, writeRunResult } = await import('../chat/runs.mjs');
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
       const { notifyLinuxRunScopeFinished } = await import('../chat/linux-run-scope-finish-client.mjs');
@@ -142,6 +142,29 @@ test('runner terminal write invalidates only its protected control binding',
         await new Promise((resolve) => setTimeout(resolve, 1100));
         assert.deepEqual(await getRunResult(offlineId), outcome);
         await assert.rejects(readFile(runPendingResultPath(offlineId), 'utf8'), { code: 'ENOENT' });
+        const snapshot = `${root}/config/linux-run-cancel-intents/${createHash('sha256').update(offlineId).digest('hex')}-0.result.json`;
+        const snapshotRecord = JSON.parse(await readFile(snapshot, 'utf8'));
+        await writeFile(snapshot, JSON.stringify({ ...snapshotRecord, publicationId: 'invalid' }));
+        await assert.rejects(getRunResult(offlineId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await writeFile(snapshot, JSON.stringify(snapshotRecord));
+        assert.deepEqual(await getRunResult(offlineId), outcome);
+        await writeFile(runResultPath(offlineId), JSON.stringify({ ...outcome, error: 'forged-after-recovery' }));
+        assert.deepEqual(await getRunResult(offlineId), outcome);
+        await writeFile(runResultPath(offlineId), JSON.stringify(['forged-shape']));
+        assert.deepEqual(await getRunResult(offlineId), outcome);
+        const originalStatus = JSON.parse(await readFile(runStatusPath(offlineId), 'utf8'));
+        await writeFile(runStatusPath(offlineId), JSON.stringify({ ...originalStatus, state: 'waiting_user',
+          approvedActionPending: { batchId: 'forged' }, actionPause: { kind: 'approved_action', state: 'waiting_user' } }));
+        await writeFile(runResultPath(offlineId), JSON.stringify({ ...outcome, error: 'forged-pause' }));
+        assert.deepEqual(await getRunResult(offlineId), outcome);
+        await writeFile(runStatusPath(offlineId), JSON.stringify(originalStatus));
+        await rm(runResultPath(offlineId));
+        assert.deepEqual(await getRunResult(offlineId), outcome);
+        const corrected = { ...outcome, exitCode: 1, error: 'control-correction' };
+        await writeRunResult(offlineId, corrected);
+        assert.deepEqual(await getRunResult(offlineId), corrected);
+        await writeFile(runResultPath(offlineId), JSON.stringify(outcome));
+        assert.deepEqual(await getRunResult(offlineId), corrected);
         const offlineMarker = `${root}/contexts/${createHash('sha256').update(offlineId).digest('hex')}-0.revoked`;
         assert.equal(JSON.parse(await readFile(offlineMarker, 'utf8')).version, 1);
         const pausedId = 'run_finishpaused1';
@@ -200,6 +223,13 @@ test('runner terminal write invalidates only its protected control binding',
         await new Promise((resolve) => setTimeout(resolve, 1100));
         await writeRunResult(syntheticId, outcome);
         assert.deepEqual(await getRunResult(syntheticId), outcome);
+        await clearRunResult(syntheticId);
+        assert.equal(await getRunResult(syntheticId), null);
+        const abandonedTemporary = `${snapshot}.${'a'.repeat(32)}.tmp`;
+        await writeFile(abandonedTemporary, 'abandoned test result', { mode: 0o600 });
+        await removeRunsForSession('s1');
+        await assert.rejects(readFile(snapshot, 'utf8'), { code: 'ENOENT' });
+        await assert.rejects(readFile(abandonedTemporary, 'utf8'), { code: 'ENOENT' });
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });

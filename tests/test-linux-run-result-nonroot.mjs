@@ -82,6 +82,23 @@ test('non-root control recovers a distinct runner result after root broker retur
       await assert.rejects(lstat(pending), { code: 'ENOENT' });
       const marker = `${root}/contexts/${createHash('sha256').update(ready.runId).digest('hex')}-0.revoked`;
       assert.equal(JSON.parse(await readFile(marker, 'utf8')).version, 1);
+      const snapshot = `${root}/config/linux-run-cancel-intents/${createHash('sha256').update(ready.runId).digest('hex')}-0.result.json`;
+      const snapshotStat = await lstat(snapshot);
+      assert.equal(snapshotStat.uid, owner.uid);
+      assert.equal(snapshotStat.mode & 0o777, 0o600);
+      assert.throws(() => execFileSync('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid),
+        '--clear-groups', '--', '/usr/bin/cat', snapshot], { stdio: 'ignore' }));
+      const sharedResult = `${root}/spool/${ready.runId}/result.json`;
+      execFileSync('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
+        process.execPath, '--input-type=module', '-e',
+        `import {writeFileSync,renameSync} from 'node:fs'; writeFileSync(process.argv[1]+'.replacement',process.argv[2]); renameSync(process.argv[1]+'.replacement',process.argv[1]);`,
+        sharedResult, JSON.stringify({ ...outcome, error: 'tampered-by-runner' })]);
+      control.stdin.write('read\n');
+      assert.deepEqual((await next()).result, outcome);
+      execFileSync('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
+        '/usr/bin/rm', '--', sharedResult]);
+      control.stdin.write('read\n');
+      assert.deepEqual((await next()).result, outcome);
       closed = new Promise((resolve) => control.once('close', resolve));
       control.stdin.end('exit\n');
       const exit = await closed;

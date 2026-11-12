@@ -2107,15 +2107,24 @@ export async function getRunResult(runId) {
       } catch (error) {
         if (error.code === 'ENOENT') {
           const result = await getRunResultUnlocked(runId);
-          if (!result) return result;
           const run = await getRunUnlocked(runId);
-          if (!run || hasUnresolvedResultApproval(run, result)) return result;
+          if (!run) return result;
           try {
             const attempt = linuxScopeAttempt(run);
             const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
             if (!await hasLinuxRunControlBinding(runId, attempt)) return result;
+            const { hasLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+            if (await hasLinuxRunCompletionReceipt(runId, attempt)) {
+              const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+              if (!await matchesLinuxRunControlBinding({ run, manifest: await getRunManifestUnlocked(runId), launchAttempt: attempt })) throw linuxScopeResultUnavailable();
+              const { readLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+              const snapshot = await readLinuxRunResultSnapshot(runId, attempt);
+              if (snapshot) return snapshot;
+            }
+            if (!result || hasUnresolvedResultApproval(run, result)) return result;
             if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
-            return result;
+            const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+            return await saveLinuxRunResultSnapshot(runId, attempt, result);
           } catch { throw linuxScopeResultUnavailable(); }
         }
         throw linuxScopeResultUnavailable();
@@ -2136,11 +2145,13 @@ export async function getRunResult(runId) {
           typeof pending.result !== 'object' || Array.isArray(pending.result) || hasUnresolvedResultApproval(run, pending.result)) throw linuxScopeResultUnavailable();
       try {
         if (!await confirmLinuxScopeCompletion(runId, run, manifest, attempt)) throw linuxScopeResultUnavailable();
-        await writeJsonAtomic(runResultPath(runId), pending.result, { ...COMPACT_JSON_OPTIONS, durable: true });
-        runResultCache.set(runId, pending.result);
+        const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+        const protectedResult = await saveLinuxRunResultSnapshot(runId, attempt, pending.result);
+        await writeJsonAtomic(runResultPath(runId), protectedResult, { ...COMPACT_JSON_OPTIONS, durable: true });
+        runResultCache.set(runId, protectedResult);
         await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
         await removePath(runPendingResultPath(runId));
-        return clone(pending.result);
+        return clone(protectedResult);
       } catch { throw linuxScopeResultUnavailable(); }
     }));
   }
@@ -2170,9 +2181,10 @@ export async function writeRunResult(runId, result) {
         try {
           const attempt = linuxScopeAttempt(run);
           const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
-          if (await hasLinuxRunControlBinding(runId, attempt) &&
-              !await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) {
-            throw linuxScopeResultUnavailable();
+          if (await hasLinuxRunControlBinding(runId, attempt)) {
+            if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
+            const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+            await saveLinuxRunResultSnapshot(runId, attempt, result || {}, { replace: true });
           }
         } catch { throw linuxScopeResultUnavailable(); }
       }
@@ -2187,8 +2199,24 @@ export async function writeRunResult(runId, result) {
 
 export async function clearRunResult(runId) {
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
+    let protectedAttempt = null;
+    if (process.platform === 'linux' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
+        process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1') {
+      const run = await getRunUnlocked(runId);
+      if (run) {
+        const attempt = linuxScopeAttempt(run);
+        const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+        if (await hasLinuxRunControlBinding(runId, attempt)) protectedAttempt = attempt;
+      }
+    }
     await removePath(runResultPath(runId));
     await removePath(runPendingResultPath(runId));
+    // If interrupted, retain the protected copy until both shared paths have
+    // gone; a later recovery can safely retry the clear.
+    if (protectedAttempt !== null) {
+      const { removeLinuxRunResultSnapshots } = await import('./linux-run-result-snapshot.mjs');
+      await removeLinuxRunResultSnapshots(runId, protectedAttempt);
+    }
     runResultCache.delete(runId);
     runResultCacheMeta.delete(runId);
   }));
@@ -2840,6 +2868,10 @@ export async function removeRunsForSession(sessionId) {
     const run = await getRun(runId);
     if (run?.sessionId !== normalizedSessionId) continue;
     await runMutationQueue(runId, async () => {
+      if (process.platform === 'linux' && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+        const { removeLinuxRunResultSnapshots } = await import('./linux-run-result-snapshot.mjs');
+        await removeLinuxRunResultSnapshots(runId);
+      }
       await removePath(runDir(runId));
       await appendRequestIndexRecord(run, 'delete');
       await appendRunIndexRecord(run, 'delete');
