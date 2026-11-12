@@ -137,7 +137,7 @@ export const PERMISSION_REASON_MESSAGES = Object.freeze({
   [C.CAPABILITY_MATCHED]: 'operation matches the exact capability constraint set',
   [C.RISK_CONTEXT_REVIEW_REQUIRED]: 'server-computed risk context requires owner review',
   [C.POLICY_GATE_REQUIRED]: 'a Phase 2A permission policy gate is required for host-capable execution',
-  [C.SELF_PROTECTION_BOUNDARY]: 'write-like operation targets the AgentoC service self-protection boundary',
+  [C.SELF_PROTECTION_BOUNDARY]: 'write-like operation targets the Ragent service self-protection boundary',
   [C.SELF_PROTECTION_UNAVAILABLE]: 'self-protection facts are unavailable for a write-like operation',
 });
 
