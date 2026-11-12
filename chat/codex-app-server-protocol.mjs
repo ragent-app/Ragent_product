@@ -202,6 +202,7 @@ export function buildCodexAppServerMcpServerStatusListMessage({
 export function buildCodexAppServerThreadMessage({
   threadId,
   useResume,
+  rolloutPath,
   id = CODEX_APP_SERVER_REQUEST_IDS.thread,
   ...options
 } = {}) {
@@ -212,6 +213,7 @@ export function buildCodexAppServerThreadMessage({
       id,
       params: {
         threadId: threadId.trim(),
+        ...(rolloutPath ? { path: validatedRolloutPath(rolloutPath) } : {}),
         ...threadOptions,
       },
     };
@@ -227,6 +229,7 @@ export function buildCodexAppServerThreadMessage({
 export function buildCodexAppServerThreadForkMessage({
   id,
   threadId,
+  rolloutPath,
   ...options
 } = {}) {
   const sourceThreadId = String(threadId || '').trim();
@@ -236,11 +239,23 @@ export function buildCodexAppServerThreadForkMessage({
     id,
     params: {
       threadId: sourceThreadId,
+      ...(rolloutPath ? { path: validatedRolloutPath(rolloutPath) } : {}),
       excludeTurns: true,
       threadSource: 'agentoc',
       ...buildCodexAppServerThreadOptions(options),
     },
   };
+}
+
+// The caller must establish that this path is inside a trusted managed home.
+// The protocol boundary also rejects relative and malformed paths so they
+// cannot be resolved against the shared broker's working directory.
+function validatedRolloutPath(value) {
+  if (typeof value !== 'string' || !value.trim() || /[\0\r\n]/.test(value)
+      || !(isAbsolute(value.trim()) || win32.isAbsolute(value.trim()))) {
+    throw new TypeError('Codex rollout path must be an absolute path');
+  }
+  return value.trim();
 }
 
 export function buildCodexAppServerInput(text) {

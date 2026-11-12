@@ -235,6 +235,12 @@ const executeThreadResume = buildCodexAppServerThreadMessage({
   useResume: true,
   interactionMode: 'agent',
 });
+const oldRollout = 'G:\\Agentoc\\legacy\\sessions\\rollout.jsonl';
+assert.equal(buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume: true, rolloutPath: oldRollout }).params.path, oldRollout);
+assert.equal(buildCodexAppServerThreadForkMessage({ threadId: 'thread-123', rolloutPath: oldRollout }).params.path, oldRollout);
+assert.equal(Object.hasOwn(buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume: false, rolloutPath: oldRollout }).params, 'path'), false);
+assert.throws(() => buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume: true, rolloutPath: '../rollout.jsonl' }), /absolute path/);
+assert.throws(() => buildCodexAppServerThreadForkMessage({ threadId: 'thread-123', rolloutPath: '/tmp/rollout\n.jsonl' }), /absolute path/);
 const scopedMcp = { mcp_servers: { fixture: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'fixture' } } } };
 for (const useResume of [false, true]) {
   const scopedThread = buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume, interactionMode: 'plan', threadMcpConfig: scopedMcp,
