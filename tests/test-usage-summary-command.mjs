@@ -19,6 +19,7 @@ function writeSessionFile(rootDir, threadId, lines) {
 }
 
 process.env.HOME = tempHome;
+process.env.USERPROFILE = tempHome;
 
 const personalRoot = join(tempHome, '.codex', 'sessions');
 const managedRoot = join(tempHome, '.config', 'agentoc', 'provider-runtime-homes', 'codex', 'sessions');
@@ -93,6 +94,16 @@ writeSessionFile(personalRoot, 'thread-personal', [
     timestamp: '2026-03-19T01:00:00.500Z',
     type: 'event_msg',
     payload: { type: 'user_message', message: 'Warning: apply_patch was requested via shell. Use the apply_patch tool instead of exec_command.' },
+  },
+  {
+    timestamp: '2026-03-19T01:00:00.600Z',
+    type: 'event_msg',
+    payload: { type: 'user_message', message: 'You are an AI agent operating through Ragent. Work within the access granted for this run.' },
+  },
+  {
+    timestamp: '2026-03-19T01:00:00.700Z',
+    type: 'event_msg',
+    payload: { type: 'user_message', message: 'You are an AI agent operating on this computer via AgentoC. Follow the system instructions.' },
   },
   {
     timestamp: '2026-03-19T01:00:01.000Z',
@@ -184,7 +195,7 @@ writeSessionFile(managedRoot, 'thread-managed', [
   },
 ]);
 
-const { collectCodexUsageSummary, renderCodexUsageSummary } = await import(
+const { collectCodexUsageSummary, renderCodexUsageSummary, normalizeUserMessageText } = await import(
   pathToFileURL(join(repoRoot, 'lib', 'codex-usage-summary.mjs')).href
 );
 const { runUsageSummaryCommand } = await import(
@@ -192,6 +203,9 @@ const { runUsageSummaryCommand } = await import(
 );
 
 try {
+  assert.equal(normalizeUserMessageText('Please quote this: User message: keep the entire sentence.'), 'Please quote this: User message: keep the entire sentence.');
+  assert.equal(normalizeUserMessageText('You are an AI agent operating through Ragent.\n\nUser message:\nActual question'), 'Actual question');
+  assert.equal(normalizeUserMessageText('You are an AI agent operating on this computer via AgentoC.\n\nUser message:\nLegacy question'), 'Legacy question');
   const summary = await collectCodexUsageSummary({
     days: 2,
     top: 5,
