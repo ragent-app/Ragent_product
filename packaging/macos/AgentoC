@@ -44,6 +44,16 @@ if ! agentoc_ensure_runtime_shims; then
   exit 1
 fi
 
+# Preserve an explicitly enabled login service when upgrading the app name.
+# Never create a login item on a fresh installation.
+if [ -e "$HOME/Library/LaunchAgents/cloud.agenton.agentoc.plist" ]; then
+  if ! "$AGENTOC_NODE_BIN" "$AGENTOC_RESOURCES_DIR/agentoc-login.cjs" migrate \
+    "$AGENTOC_RESOURCES_DIR" "$(agentoc_config_dir)" "${CHAT_PORT:-7690}"; then
+    report_start_failure '无法安全迁移登录自启动服务。原配置已保留，请检查登录项。'
+    exit 1
+  fi
+fi
+
 PORT="${CHAT_PORT:-7690}"
 BASE_URL="http://127.0.0.1:${PORT}"
 

@@ -82,7 +82,16 @@ fi
 grep -Fq 'no service was stopped' "$test_dir/stop-error"
 kill -0 "$server_pid"
 cp "$test_dir/instance.env.before-stop" "$AGENTOC_CONFIG_DIR/instance.env"
+# On upgrade, the launcher invokes migration before attaching to the service.
+mkdir -p "$HOME/Library/LaunchAgents"
+: > "$HOME/Library/LaunchAgents/cloud.agenton.agentoc.plist"
+export QA_MIGRATION_ARGS="$test_dir/migration-args"
+cat > "$contents/Resources/agentoc-login.cjs" <<'EOF'
+require('node:fs').writeFileSync(process.env.QA_MIGRATION_ARGS, JSON.stringify(process.argv.slice(2)));
+EOF
 "$contents/MacOS/Ragent"
+node -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1]));if(a[0]!=="migrate" || a[3]!==process.env.CHAT_PORT)process.exit(1)' "$QA_MIGRATION_ARGS"
+rm "$HOME/Library/LaunchAgents/cloud.agenton.agentoc.plist"
 [ "$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")" = "$server_pid" ]
 # Replacing the bundle while a service retains the same command path must not
 # silently open the old service, even if only the source revision changed.
