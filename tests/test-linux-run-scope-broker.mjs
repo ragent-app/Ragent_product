@@ -7,7 +7,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { createRunnerLifecycleServer, isLinuxRunScopeRegistrationEligible } from '../scripts/runner-lifecycle-broker.mjs';
 import { launchDetachedRunnerViaLifecycleBroker } from '../chat/run-launcher.mjs';
-import { revokeLinuxRunScope } from '../chat/linux-run-scope-lifecycle.mjs';
+import { renewLinuxRunScope, revokeLinuxRunScope } from '../chat/linux-run-scope-lifecycle.mjs';
 
 async function request(socketPath, payload) {
   return new Promise((resolve, reject) => {
@@ -30,11 +30,12 @@ test('privileged registration requires different numeric users and no forwarded 
 });
 test('broker only accepts its own root-configured store paths', { skip: process.platform !== 'linux' }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentoc-scope-broker-'));
-  const calls = [], revocations = [], configuration = { directory: '/root/trusted-context', pinDirectory: '/root/trusted-pin' };
+  const calls = [], revocations = [], renewals = [], configuration = { directory: '/root/trusted-context', pinDirectory: '/root/trusted-pin' };
   const base = { serviceUser: userInfo().username, serviceGroup: userInfo().username, controlUser: userInfo().username,
     chownImpl: async () => {}, launchRunner: async (runId, options) => { calls.push({ runId, options }); return { pid: 10, privilegedContextRegistered: true }; } };
   const enabled = await createRunnerLifecycleServer({ ...base, socketPath: join(root, 'enabled.sock'), runScopeRegistration: configuration,
-    revokeRunContextImpl: async (options) => { revocations.push(options); } });
+    revokeRunContextImpl: async (options) => { revocations.push(options); },
+    renewRunContextImpl: async (options) => { renewals.push(options); } });
   const disabled = await createRunnerLifecycleServer({ ...base, socketPath: join(root, 'disabled.sock') });
   try {
     const grant = { version: 1, signature: 'untrusted-wire-data' };
@@ -47,6 +48,14 @@ test('broker only accepts its own root-configured store paths', { skip: process.
     assert.deepEqual(await revokeLinuxRunScope({ id: 'run_12345678', runnerLaunchAttempt: 2 },
       { enabled: true, socketPath: enabled.socketPath }), { state: 'revoked' });
     assert.deepEqual(revocations, [{ directory: configuration.directory, runId: 'run_12345678', launchAttempt: 2 }]);
+    assert.deepEqual(await renewLinuxRunScope({ id: 'run_12345678', runnerLaunchAttempt: 2 }, grant,
+      { enabled: true, socketPath: enabled.socketPath }), { state: 'renewed' });
+    assert.deepEqual(renewals, [{ ...configuration, runId: 'run_12345678', launchAttempt: 2, grant }]);
+    assert.deepEqual(await renewLinuxRunScope({ id: 'run_12345678', runnerLaunchAttempt: 2 }, grant,
+      { enabled: true, socketPath: disabled.socketPath }), { state: 'unavailable' });
+    assert.equal((await request(enabled.socketPath, { type: 'renew-scope', runId: 'run_12345678',
+      scopeGrant: grant, runScopeRegistration: { directory: '/tmp/attacker', pinDirectory: '/tmp/attacker' } })).ok, true);
+    assert.deepEqual(renewals[1], { ...configuration, runId: 'run_12345678', launchAttempt: 0, grant });
     assert.deepEqual(await revokeLinuxRunScope({ id: 'run_12345678', runnerLaunchAttempt: 2 },
       { enabled: true, socketPath: disabled.socketPath }), { state: 'unavailable' });
     assert.deepEqual(await revokeLinuxRunScope({ id: 'bad', runnerLaunchAttempt: 2 },

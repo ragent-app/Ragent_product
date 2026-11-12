@@ -31,7 +31,7 @@ function recordPaths(directory, runId, launchAttempt) {
   validateId(runId, launchAttempt);
   const hash = createHash('sha256').update(runId, 'utf8').digest('hex');
   const base = path.join(directory, `${hash}-${launchAttempt}`);
-  return { record: `${base}.json`, revoked: `${base}.revoked`, renewalLock: `${base}.renew.lock` };
+  return { record: `${base}.json`, revoked: `${base}.revoked` };
 }
 async function createRecord(filePath, text, directory) {
   const file = await open(filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -105,44 +105,40 @@ export async function revokeLinuxRunContext({ directory, runId, launchAttempt } 
 }
 
 // Extend a still-live, non-revoked record without changing its signed scope or
-// systemd invocation. A crash can leave the exclusive lock in place; recovery
-// must explicitly investigate it rather than silently allow concurrent writes.
+// systemd invocation. Use the same crash-released lock as execution and
+// revocation: a dead broker must not leave a permanent renewal lock behind.
 export async function renewLinuxRunContext({ directory, pinDirectory, runId, launchAttempt, grant } = {}) {
   await validateDirectory(directory);
   const paths = recordPaths(directory, runId, launchAttempt);
-  const lock = await open(paths.renewalLock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  let temporary = '';
-  try {
-    await lock.chown(0, 0); await lock.chmod(0o600); await lock.sync();
-    await assertNotRevoked(paths.revoked);
-    const current = await readRecord(paths.record);
-    const { publicKey } = await loadLinuxServiceKeyPin(pinDirectory);
-    if (current?.version !== 1 || current.run?.id !== runId || current.unit?.runId !== runId ||
-        current.unit?.launchAttempt !== launchAttempt ||
-        !verifyLinuxRunScopeGrant(current.grant, { run: current.run, manifest: current.manifest, launchAttempt, publicKey }).ok ||
-        !verifyLinuxRunScopeGrant(grant, { run: current.run, manifest: current.manifest, launchAttempt, publicKey }).ok ||
-        Date.parse(grant.issuedAt) < Date.parse(current.grant.issuedAt) ||
-        Date.parse(grant.expiresAt) <= Date.parse(current.grant.expiresAt) ||
-        !await isLinuxRunUnitLive(current.unit)) unavailable();
-    const directories = resolveApprovedActionRunDirectories({ run: current.run, manifest: current.manifest, session: {}, platform: 'linux' });
-    if (directories.cwd !== current.directories?.cwd || directories.projectRoot !== current.directories?.projectRoot) unavailable();
-    const text = `${JSON.stringify({ ...current, grant })}\n`;
-    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) unavailable();
-    temporary = `${paths.record}.${randomBytes(16).toString('hex')}.tmp`;
-    await createRecord(temporary, text, directory);
-    await assertNotRevoked(paths.revoked);
-    await rename(temporary, paths.record);
-    temporary = '';
-    const dir = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try { await dir.sync(); } finally { await dir.close(); }
-    await assertNotRevoked(paths.revoked);
-  } finally {
-    await lock.close();
-    if (temporary) await unlink(temporary).catch(() => {});
-    await unlink(paths.renewalLock);
-    const dir = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try { await dir.sync(); } finally { await dir.close(); }
-  }
+  return withLinuxRunOperationLock({ directory, runId, launchAttempt }, async () => {
+    let temporary = '';
+    try {
+      await assertNotRevoked(paths.revoked);
+      const current = await readRecord(paths.record);
+      const { publicKey } = await loadLinuxServiceKeyPin(pinDirectory);
+      if (current?.version !== 1 || current.run?.id !== runId || current.unit?.runId !== runId ||
+          current.unit?.launchAttempt !== launchAttempt ||
+          !verifyLinuxRunScopeGrant(current.grant, { run: current.run, manifest: current.manifest, launchAttempt, publicKey }).ok ||
+          !verifyLinuxRunScopeGrant(grant, { run: current.run, manifest: current.manifest, launchAttempt, publicKey }).ok ||
+          Date.parse(grant.issuedAt) < Date.parse(current.grant.issuedAt) ||
+          Date.parse(grant.expiresAt) <= Date.parse(current.grant.expiresAt) ||
+          !await isLinuxRunUnitLive(current.unit)) unavailable();
+      const directories = resolveApprovedActionRunDirectories({ run: current.run, manifest: current.manifest, session: {}, platform: 'linux' });
+      if (directories.cwd !== current.directories?.cwd || directories.projectRoot !== current.directories?.projectRoot) unavailable();
+      const text = `${JSON.stringify({ ...current, grant })}\n`;
+      if (Buffer.byteLength(text) > MAX_RECORD_BYTES) unavailable();
+      temporary = `${paths.record}.${randomBytes(16).toString('hex')}.tmp`;
+      await createRecord(temporary, text, directory);
+      await assertNotRevoked(paths.revoked);
+      await rename(temporary, paths.record);
+      temporary = '';
+      const dir = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try { await dir.sync(); } finally { await dir.close(); }
+      await assertNotRevoked(paths.revoked);
+      } finally {
+      if (temporary) await unlink(temporary).catch(() => {});
+    }
+  });
 }
 
 export async function readLinuxRunContext({ directory, pinDirectory, runId, launchAttempt } = {}) {

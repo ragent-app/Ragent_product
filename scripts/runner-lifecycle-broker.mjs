@@ -47,7 +47,7 @@ import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGrou
   resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 import { grantExistingRunnerFiles } from '../lib/linux-runner-file-access.mjs';
-import { registerLinuxRunContext, revokeLinuxRunContext } from './linux-run-context-store.mjs';
+import { registerLinuxRunContext, renewLinuxRunContext, revokeLinuxRunContext } from './linux-run-context-store.mjs';
 
 const execFileAsync = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -961,6 +961,7 @@ export async function createRunnerLifecycleServer({
   inheritedSocketFdImpl = inheritedSocketFd,
   runScopeRegistration = null,
   revokeRunContextImpl = revokeLinuxRunContext,
+  renewRunContextImpl = renewLinuxRunContext,
 } = {}) {
   const normalizedSocketPath = trimString(socketPath);
   if (!normalizedSocketPath) throw new Error('Runner lifecycle socket path is required');
@@ -1010,7 +1011,7 @@ export async function createRunnerLifecycleServer({
       }
       const runId = normalizeRunId(request?.runId);
       const requestedLaunchAttempt = Number(request?.launchAttempt ?? 0);
-      if (!['launch', 'revoke-scope'].includes(request?.type) || !runId
+      if (!['launch', 'revoke-scope', 'renew-scope'].includes(request?.type) || !runId
           || !Number.isSafeInteger(requestedLaunchAttempt)
           || requestedLaunchAttempt < 0
           || requestedLaunchAttempt > 10_000) {
@@ -1025,6 +1026,17 @@ export async function createRunnerLifecycleServer({
         void revokeRunContextImpl({ directory: runScopeRegistration.directory, runId, launchAttempt: requestedLaunchAttempt })
           .then(() => sendResponse(socket, { ok: true }))
           .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_REVOCATION_FAILED', error: 'Run scope revocation failed' }));
+        return;
+      }
+      if (request.type === 'renew-scope') {
+        if (!runScopeRegistration || !request.scopeGrant || typeof request.scopeGrant !== 'object' || Array.isArray(request.scopeGrant)) {
+          sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_UNAVAILABLE', error: 'Run scope renewal is unavailable' });
+          return;
+        }
+        void renewRunContextImpl({ directory: runScopeRegistration.directory, pinDirectory: runScopeRegistration.pinDirectory,
+          runId, launchAttempt: requestedLaunchAttempt, grant: request.scopeGrant })
+          .then(() => sendResponse(socket, { ok: true }))
+          .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_RENEWAL_FAILED', error: 'Run scope renewal failed' }));
         return;
       }
       const requestedGuiEnvironment = pickRunnerGuiEnvironment(request?.guiEnvironment);

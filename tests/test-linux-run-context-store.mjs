@@ -7,11 +7,14 @@ import { computeExecutionScopeDigest } from '../chat/execution-scope.mjs';
 import { signLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
 import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext, readLinuxRunContext, renewLinuxRunContext, revokeLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
+import { createRunnerLifecycleServer } from '../scripts/runner-lifecycle-broker.mjs';
+import { renewLinuxRunScope } from '../chat/linux-run-scope-lifecycle.mjs';
 
 test('root state binds a signed scope to the live unit and revokes durably',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.env.AGENTOC_TEST_SYSTEMD_INVOCATION }, async () => {
     const root = await mkdtemp('/srv/agentoc-run-state-test-');
     const directory = `${root}/runs`, pinDirectory = `${root}/pin`;
+    let server;
     try {
       await mkdir(directory, { mode: 0o700 }); await mkdir(pinDirectory, { mode: 0o700 });
       const keys = generateKeyPairSync('ed25519');
@@ -33,7 +36,10 @@ test('root state binds a signed scope to the live unit and revokes durably',
       assert.equal(loaded.sessionId, run.sessionId);
       assert.equal(await readLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 1 }), null);
       const renewed = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey, ttlMs: 300000 });
-      await renewLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2, grant: renewed });
+      server = await createRunnerLifecycleServer({ socketPath: `${root}/broker.sock`, serviceUser: 'root', serviceGroup: 'root',
+        controlUser: 'root', controlGroup: 'root', chownImpl: async () => {}, runScopeRegistration: { directory, pinDirectory } });
+      assert.deepEqual(await renewLinuxRunScope({ id: run.id, runnerLaunchAttempt: 2 }, renewed,
+        { enabled: true, socketPath: server.socketPath }), { state: 'renewed' });
       assert.equal((await readLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2 })).invocationId, result.invocationId);
       await assert.rejects(renewLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2, grant }));
       const otherKeys = generateKeyPairSync('ed25519');
@@ -43,13 +49,17 @@ test('root state binds a signed scope to the live unit and revokes durably',
       assert.equal((await readFile(`${directory}/${recordName}`, 'utf8')).includes('secret-must-not-be-persisted'), false);
       const lockPath = `${directory}/${createHash('sha256').update(run.id).digest('hex')}-2.renew.lock`;
       await writeFile(lockPath, '', { mode: 0o600, flag: 'wx' });
-      const later = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey });
-      await assert.rejects(renewLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2, grant: later }));
+      const later = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey, ttlMs: 600000 });
+      // A marker left by an older broker crash is no longer a permanent lock.
+      await renewLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2, grant: later });
       await rm(lockPath);
       await revokeLinuxRunContext({ directory, runId: run.id, launchAttempt: 2 });
       await revokeLinuxRunContext({ directory, runId: run.id, launchAttempt: 2 });
       assert.equal(await readLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2 }), null);
       await assert.rejects(renewLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2, grant: renewed }));
+      const afterRevocation = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey, ttlMs: 700000 });
+      assert.deepEqual(await renewLinuxRunScope({ id: run.id, runnerLaunchAttempt: 2 }, afterRevocation,
+        { enabled: true, socketPath: server.socketPath }), { state: 'unavailable' });
       await assert.rejects(registerLinuxRunContext(args));
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally { if (server) await server.close(); await rm(root, { recursive: true, force: true }); }
   });
