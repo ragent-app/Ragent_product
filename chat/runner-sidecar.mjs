@@ -1108,7 +1108,7 @@ function readStructuredProviderFailureReason(parsed, fallback = 'Provider report
 function describeStructuredRuntimeExit(runtimeFamily, preview = '') {
   const detail = clipDiagnosticMessage(preview, 800);
   if (detail && /(请登录|登录超时|auth|authentication|sso|sign in|login)/i.test(detail)) {
-    return `Provider requires interactive login before AgentoC can use it: ${detail}`;
+    return `Provider requires interactive login before Ragent can use it: ${detail}`;
   }
   if (detail) return `Provider exited without emitting structured events: ${detail}`;
   return `${runtimeFamily || 'Provider'} exited before an accepted terminal event`;
@@ -5711,7 +5711,7 @@ async function main() {
       json: {
         type: 'status',
           content: freshRecovery
-            ? 'Claude resume target was unavailable; restarted this turn from the AgentoC continuity checkpoint.'
+            ? 'Claude resume target was unavailable; restarted this turn from the Ragent continuity checkpoint.'
             : 'Claude Code switched to compatibility mode after bidirectional initialization failed.',
       },
     });
