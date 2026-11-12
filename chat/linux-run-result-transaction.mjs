@@ -56,6 +56,23 @@ export async function hasLinuxRunResultTransaction(runId, attempt) {
   try { await lstat(filename(runId, attempt)); return true; }
   catch (error) { if (error.code === 'ENOENT') return false; throw error; }
 }
+// Do not derive the only possible journal name from runner-writable status:
+// a missing status or changed launch attempt must not hide an older intent.
+export async function findLinuxRunResultTransactionAttempts(runId) {
+  const prefix = `${createHash('sha256').update(runId).digest('hex')}-`;
+  filename(runId, 0); // validate the identity before inspecting the store
+  try { await lstat(directory); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  await ensureLinuxRunCancelIntentStore();
+  const names = await readdir(directory);
+  const attempts = [];
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith('.status-result.json')) continue;
+    const number = name.slice(prefix.length, -'.status-result.json'.length);
+    if (!/^(0|[1-9][0-9]{0,4})$/.test(number) || Number(number) > 10000) throw new Error('Invalid result transaction name');
+    attempts.push(Number(number));
+  }
+  return attempts;
+}
 export async function writeLinuxRunResultTransaction(runId, attempt, before, after) {
   const binding = await bindingFor(runId, attempt), path = filename(runId, attempt);
   const record = { version: 1, runId, launchAttempt: attempt, publicationId: binding.publicationId,

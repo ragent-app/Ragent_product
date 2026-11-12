@@ -1886,6 +1886,22 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
         throw sessionApiError('MESSAGE_IDEMPOTENCY_CONFLICT', 409, 'Message Run protocol cannot change');
       next.appApiMessageVersion = latest.appApiMessageVersion;
     }
+    // A runner-writable launch attempt must not hide an unfinished protected
+    // transaction from a later explicit cancellation. Persist the cancellation
+    // and revocation outbox for each protected attempt before changing status.
+    if (next.cancelRequested === true && process.platform === 'linux' && !isolatedScopeRunner() &&
+        process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
+        /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+      const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+      const pendingAttempts = await findLinuxRunResultTransactionAttempts(runId);
+      if (pendingAttempts.length) {
+        if (beforeWrite) beforeWrite(next);
+        if (authorizeWrite) await authorizeWrite(latest);
+        const { persistLinuxRunCancelIntent, persistLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
+        await persistLinuxRunExplicitCancellation(runId);
+        for (const attempt of pendingAttempts) await persistLinuxRunCancelIntent(runId, attempt);
+      }
+    }
     let protectsScope = scopeTracking && (next.cancelRequested === true || isTerminalRunState(next.state));
     if (!scopeTracking && process.platform === 'linux' && !isolatedScopeRunner() &&
         process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
@@ -1927,10 +1943,12 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
         (!isTerminalRunState(latest.state) || !runFieldEqual(next.result, latest.result))) {
       try {
         const attempt = linuxScopeAttempt(next);
+        if (/^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+          const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+          if ((await findLinuxRunResultTransactionAttempts(runId)).length) throw linuxScopeResultUnavailable();
+        }
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
         if (await hasLinuxRunControlBinding(runId, attempt)) {
-          const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
-          if (await hasLinuxRunResultTransaction(runId, attempt)) throw linuxScopeResultUnavailable();
           if (Buffer.byteLength(JSON.stringify(next.result), 'utf8') > 4 * 1024 * 1024 - 4096 ||
               !await confirmLinuxScopeCompletion(runId, next, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
           protectedResultAttempt = attempt;
@@ -2127,6 +2145,14 @@ export async function renewRunSessionControlCapability({
 
 export async function getRunResult(runId) {
   let recoverPending = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
+  const checkTransactions = process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
+    !process.env.AGENTOC_RUNNER_LAUNCH_MODE && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId);
+  if (checkTransactions) {
+    try {
+      const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+      if ((await findLinuxRunResultTransactionAttempts(runId)).length) recoverPending = true;
+    } catch { throw linuxScopeResultUnavailable(); }
+  }
   if (process.platform === 'linux' && !recoverPending && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
       !process.env.AGENTOC_RUNNER_LAUNCH_MODE) {
     // A disabled feature must not strand results staged by the previous
@@ -2151,6 +2177,14 @@ export async function getRunResult(runId) {
   if (recoverPending) {
     return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
       const current = await getRunAcceptanceEvidence(runId);
+      if (checkTransactions) {
+        try {
+          const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+          const attempts = await findLinuxRunResultTransactionAttempts(runId);
+          if (attempts.length && (!current || attempts.length !== 1 || attempts[0] !== linuxScopeAttempt(current)))
+            throw linuxScopeResultUnavailable();
+        } catch { throw linuxScopeResultUnavailable(); }
+      }
       if (current) {
         try {
           const attempt = linuxScopeAttempt(current);
@@ -2250,6 +2284,13 @@ export async function writeRunResult(runId, result) {
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     await ensureRunDirectory(runId);
     let staged = false;
+    if (process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
+        !process.env.AGENTOC_RUNNER_LAUNCH_MODE && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+      try {
+        const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+        if ((await findLinuxRunResultTransactionAttempts(runId)).length) throw linuxScopeResultUnavailable();
+      } catch { throw linuxScopeResultUnavailable(); }
+    }
     if (isolatedScopeRunner()) {
       const run = await getRunUnlocked(runId);
       if (!run) throw new Error('Run unavailable');
@@ -2292,6 +2333,12 @@ export async function clearRunResult(runId) {
     let protectedAttempt = null;
     if (process.platform === 'linux' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
         process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1') {
+      if (/^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+        try {
+          const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+          if ((await findLinuxRunResultTransactionAttempts(runId)).length) throw linuxScopeResultUnavailable();
+        } catch { throw linuxScopeResultUnavailable(); }
+      }
       const run = await getRunUnlocked(runId);
       if (run) {
         const attempt = linuxScopeAttempt(run);

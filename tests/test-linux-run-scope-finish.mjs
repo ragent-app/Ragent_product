@@ -20,7 +20,7 @@ test('runner terminal write invalidates only its protected control binding',
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
       const { notifyLinuxRunScopeFinished } = await import('../chat/linux-run-scope-finish-client.mjs');
-      const { hasLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
+      const { hasLinuxRunCancelIntent, hasLinuxRunExplicitCancellation } = await import('../chat/linux-run-cancel-intent.mjs');
       const { handleTemporaryControlRunCheck } = await import('../chat/router-temporary-control-run-check.mjs');
       const { hasLinuxRunResultTransaction, writeLinuxRunResultTransaction } = await import('../chat/linux-run-result-transaction.mjs');
       const { createLinuxRunResultTransactionRecovery } = await import('../chat/linux-run-result-transaction-recovery.mjs');
@@ -261,6 +261,21 @@ test('runner terminal write invalidates only its protected control binding',
         const afterRecovery = { ...beforeRecovery, result: recoveredResult, updatedAt: '2026-11-12T01:02:03.000Z' };
         await writeLinuxRunResultTransaction(statusId, 0, beforeRecovery, afterRecovery);
         await assert.rejects(clearRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        // The status file is writable by the runner. It cannot hide the
+        // control-owned journal by changing attempts or deleting the status.
+        for (const enabled of ['1', '0']) {
+          process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = enabled;
+          await writeFile(runStatusPath(statusId), JSON.stringify({ ...beforeRecovery, runnerLaunchAttempt: 1 }));
+          await assert.rejects(getRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          await assert.rejects(clearRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          await assert.rejects(writeRunResult(statusId, outcome), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          await assert.rejects(updateRun(statusId, { result: outcome }), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          await rm(runStatusPath(statusId));
+          await assert.rejects(getRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          await assert.rejects(clearRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          await assert.rejects(writeRunResult(statusId, outcome), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        }
+        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
         await writeFile(runStatusPath(statusId), JSON.stringify({ ...beforeRecovery, updatedAt: '2026-11-12T02:00:00.000Z' }));
         await assert.rejects(getRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         const recoverTransactions = createLinuxRunResultTransactionRecovery();
@@ -291,7 +306,11 @@ test('runner terminal write invalidates only its protected control binding',
         const pendingCompletion = { ...beforeCancel, state: 'completed', result: outcome, updatedAt: '2026-11-12T01:04:05.000Z' };
         await writeLinuxRunResultTransaction(cancelId, 0, beforeCancel, pendingCompletion);
         process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '0';
+        await assert.rejects(updateRun(cancelId, { cancelRequested: true }, { beforeWrite: () => { throw new Error('cancel denied'); } }), /cancel denied/);
+        assert.equal(await hasLinuxRunExplicitCancellation(cancelId), false);
+        await writeFile(runStatusPath(cancelId), JSON.stringify({ ...beforeCancel, runnerLaunchAttempt: 1 }));
         assert.equal((await requestRunCancel(cancelId)).cancelRequested, true);
+        assert.equal(await hasLinuxRunCancelIntent(cancelId, 0), true);
         await writeFile(runStatusPath(cancelId), JSON.stringify(beforeCancel));
         await assert.rejects(getRunResult(cancelId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
