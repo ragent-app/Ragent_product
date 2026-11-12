@@ -42,7 +42,8 @@ import {
   revokeRunnerWorkspaceAccess,
 } from './runner-workspace-access.mjs';
 import { normalizeRunnerInheritedGroups, RUNNER_DENIED_GROUPS } from '../lib/runner-user-groups.mjs';
-import { resolveRestrictedRunnerGroupIds } from '../lib/linux-runner-group-drop.mjs';
+import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGroupIds,
+  resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 
 const execFileAsync = promisify(execFileCallback);
@@ -320,6 +321,7 @@ export function buildLifecycleSystemdArgs(runId, {
   inheritedGroups = [],
   workspaceAccessScript = join(projectRoot, 'scripts', 'runner-workspace-access.mjs'),
   resourceProfile = RESOURCE_PROFILES.default,
+  groupDrop = null,
   environment = process.env,
 } = {}) {
   const args = [
@@ -328,8 +330,8 @@ export function buildLifecycleSystemdArgs(runId, {
     '--slice', 'agentoc-runners.slice',
     '--working-directory', projectRoot,
     '--description', `AgentoC Run ${runId}`,
-    '--property', `User=${serviceUser}`,
-    '--property', `Group=${serviceGroup}`,
+    '--property', `User=${groupDrop ? 'root' : serviceUser}`,
+    '--property', `Group=${groupDrop ? 'root' : serviceGroup}`,
     '--property', 'KillMode=control-group',
     // The provider Run must be able to reach the AgentoC approval path for
     // approved privileged work.  Root execution is still isolated behind the
@@ -407,7 +409,7 @@ export function buildLifecycleSystemdArgs(runId, {
     ...inheritedGroups,
     workspaceAccessGroup,
   ]);
-  if (supplementaryGroups.length > 0) {
+  if (!groupDrop && supplementaryGroups.length > 0) {
     args.push('--property', `SupplementaryGroups=${supplementaryGroups.join(' ')}`);
   }
   if (workspaceAccessGroup) {
@@ -443,7 +445,8 @@ export function buildLifecycleSystemdArgs(runId, {
   args.push('--setenv', `AGENTOC_RUNNER_UNIT_NAME=${unitName}`);
   args.push('--setenv', 'AGENTOC_RUNNER_UNIT_SCOPE=system');
   args.push('--setenv', `AGENTOC_RUNNER_LAUNCH_ATTEMPT=${normalizeLaunchAttempt(launchAttempt)}`);
-  args.push(processExecPath, runnerEntry, runId);
+  if (groupDrop) args.push(groupDrop.command, ...groupDrop.args);
+  else args.push(processExecPath, runnerEntry, runId);
   return args;
 }
 
@@ -517,6 +520,10 @@ async function launchLifecycleRunnerUnlocked(runId, {
   controlUser = null,
   resolveRunnerOwnershipImpl = resolveRunnerOwnership,
   verifyRunnerSystemGroupsImpl = verifyRunnerSystemGroups,
+  resolveRestrictedGroupsImpl = resolveRestrictedRunnerGroupIds,
+  resolveAllowedGroupsImpl = resolveAllowedRunnerGroupIds,
+  verifyDroppedRunnerProcessImpl = verifyDroppedRunnerProcess,
+  isTrustedSetprivImpl = isTrustedSetpriv,
   resolveInheritedGroupsImpl = resolveRunnerInheritedGroups,
   readManifestImpl = readRunManifest,
   grantWorkspaceAccessImpl = grantRunnerWorkspaceAccess,
@@ -542,7 +549,15 @@ async function launchLifecycleRunnerUnlocked(runId, {
     error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
   }
-  await verifyRunnerSystemGroupsImpl(resolvedServiceUser, resolvedServiceGroup, { runnerGid: runnerOwnership.gid });
+  const useGroupDrop = environment.AGENTOC_RUNNER_DROP_GROUPS === '1';
+  let restrictedIds = null;
+  if (useGroupDrop) {
+    if (!isTrustedSetprivImpl()) throw Object.assign(new Error('Trusted group-drop executable unavailable'), { code: 'RUNNER_IDENTITY_INVALID' });
+    restrictedIds = await resolveRestrictedGroupsImpl();
+    if (restrictedIds.has(runnerOwnership.gid)) throw Object.assign(new Error('Runner primary group is restricted'), { code: 'RUNNER_IDENTITY_INVALID' });
+  } else {
+    await verifyRunnerSystemGroupsImpl(resolvedServiceUser, resolvedServiceGroup, { runnerGid: runnerOwnership.gid });
+  }
   const existingUnit = await readUnitStateImpl(resolvedUnitName, { execFileImpl });
   if (!['loaded', 'not-found'].includes(existingUnit?.loadState)
       || !['active', 'activating', 'reloading', 'deactivating', 'inactive', 'failed'].includes(existingUnit?.activeState)
@@ -552,7 +567,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
     throw error;
   }
   if (['active', 'activating', 'reloading'].includes(existingUnit.activeState)) {
-    if (trimString(existingUnit.user) !== resolvedServiceUser) {
+    if (useGroupDrop && trimString(existingUnit.user) === 'root') {
+      await verifyDroppedRunnerProcessImpl(existingUnit.pid, { uid: runnerOwnership.uid, gid: runnerOwnership.gid, restrictedIds });
+    } else if (trimString(existingUnit.user) !== resolvedServiceUser || useGroupDrop) {
       const error = new Error('Cannot reuse a Run owned by a different or unknown systemd user');
       error.code = 'RUNNER_IDENTITY_INVALID';
       throw error;
@@ -758,6 +775,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     ...pickRunnerGuiEnvironment({ ...environment, ...guiEnvironment }),
     ...(await resolveRunnerProxyEnvironment(environment)),
     HOME: resolvedServiceHome,
+    ...(useGroupDrop ? { USER: resolvedServiceUser, LOGNAME: resolvedServiceUser } : {}),
     AGENTOC_CODEX_HOME_DIR: runCodexHomeDir,
     AGENTOC_AGY_HOME_DIR: isAgy ? runAgyHomeDir : '',
     AGENTOC_RUN_SPOOL_DIR: environment.AGENTOC_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs'),
@@ -770,6 +788,18 @@ async function launchLifecycleRunnerUnlocked(runId, {
       : {}),
     ...(effectiveCodexServiceTier ? { AGENTOC_CODEX_SERVICE_TIER: effectiveCodexServiceTier } : {}),
   };
+  let groupDrop = null;
+  if (useGroupDrop) {
+    try {
+      const allowedGroups = normalizeRunnerInheritedGroups([...inheritedGroups, workspaceAccess?.group || '']);
+      const groupIds = await resolveAllowedGroupsImpl(allowedGroups, { restrictedIds });
+      groupDrop = buildRunnerGroupDropCommand({ uid: runnerOwnership.uid, gid: runnerOwnership.gid,
+        supplementaryGids: groupIds, command: NODE_RUNTIME, args: [RUNNER_ENTRY, normalized] });
+    } catch (error) {
+      if (workspaceAccess) await revokeWorkspaceAccessImpl({ runId: workspaceAccessRunId }).catch(() => {});
+      throw error;
+    }
+  }
   const args = buildLifecycleSystemdArgs(normalized, {
     serviceUser: resolvedServiceUser,
     serviceGroup: resolvedServiceGroup,
@@ -781,6 +811,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     isCodexRun: isCodex,
     inheritedGroups,
     resourceProfile,
+    groupDrop,
     environment: runEnvironment,
   });
   try {

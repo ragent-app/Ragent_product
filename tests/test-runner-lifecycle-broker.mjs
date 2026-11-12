@@ -250,6 +250,33 @@ try {
   );
   assert.deepEqual(ownershipCalls.map(({ args }) => args[0]), ['passwd', 'group']);
 
+  const dropCalls = [];
+  const dropOptions = {
+    serviceUser: 'svc', serviceGroup: 'svc', serviceHome: '/home/svc', controlUser: 'svc',
+    environment: { AGENTOC_RUNNER_DROP_GROUPS: '1' },
+    resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
+    isTrustedSetprivImpl: () => true,
+    resolveRestrictedGroupsImpl: async () => new Set([0, 27]),
+    resolveInheritedGroupsImpl: async () => ['svc'],
+    resolveAllowedGroupsImpl: async () => [1234],
+    readManifestImpl: async () => ({}),
+    readUnitStateImpl: async () => ({ loadState:'not-found', activeState:'inactive', pid:null }),
+    execFileImpl: async (command, args) => { dropCalls.push({command,args}); return {stdout:'4321'}; },
+  };
+  await launchLifecycleRunner('run_dropfixture', dropOptions);
+  const dropArgs = dropCalls.find(item => item.command === '/usr/bin/systemd-run').args;
+  assert.ok(dropArgs.includes('User=root'));
+  assert.ok(dropArgs.includes('/usr/bin/setpriv'));
+  assert.ok(dropArgs.includes('--reuid'));
+  assert.ok(!dropArgs.some(arg => arg.startsWith('SupplementaryGroups=')));
+  let checkedProcess = false;
+  const reusedDrop = await launchLifecycleRunner('run_dropfixture', { ...dropOptions,
+    readUnitStateImpl: async () => ({loadState:'loaded', activeState:'active', pid:4321, user:'root'}),
+    verifyDroppedRunnerProcessImpl: async (pid, binding) => { checkedProcess = pid === 4321 && binding.uid === 1234 && binding.gid === 1234; },
+  });
+  assert.equal(reusedDrop.reused, true);
+  assert.equal(checkedProcess, true);
+
   const groupsFixture = (ids) => async (command, args) => {
     if (command === '/usr/bin/id') return { stdout: ids };
     const known = { root: 0, sudo: 27, docker: 998, 'agentoc-privileged': 997 };

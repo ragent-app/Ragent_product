@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGroupIds,
-  resolveRestrictedRunnerGroupIds, TRUSTED_SETPRIV_PATH } from '../lib/linux-runner-group-drop.mjs';
+  resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess, TRUSTED_SETPRIV_PATH } from '../lib/linux-runner-group-drop.mjs';
 
 const built = buildRunnerGroupDropCommand({ uid: 1001, gid: 1002, supplementaryGids: [2002, 1002, 2002],
   command: '/opt/agentoc/runtime/node', args: ['/opt/agentoc/app/chat/runner-sidecar.mjs', 'run_fixture'] });
@@ -31,4 +31,11 @@ for (const groups of [['admin_alias'], ['root'], ['unknown'], ['bad/name']]) {
 }
 await assert.rejects(() => resolveRestrictedRunnerGroupIds({execFileImpl:async () => { throw Object.assign(new Error('NSS failed'),{code:1}); }}),
   error => error.code === 'RUNNER_IDENTITY_INVALID');
+const procStatus = 'Name:\tnode\nUid:\t1001\t1001\t1001\t1001\nGid:\t1002\t1002\t1002\t1002\nGroups:\t1002 1100\n';
+await verifyDroppedRunnerProcess(4321, {uid:1001,gid:1002,restrictedIds:restricted,readFileImpl:async () => procStatus});
+for (const status of [procStatus.replace('1001\t1001\t1001\t1001','0\t1001\t1001\t1001'),
+  procStatus.replace('1002 1100','1002 27'), procStatus.replace('Gid:', 'Missing:')]) {
+  await assert.rejects(() => verifyDroppedRunnerProcess(4321, {uid:1001,gid:1002,restrictedIds:restricted,readFileImpl:async () => status}),
+    error => error.code === 'RUNNER_IDENTITY_INVALID');
+}
 console.log('Linux runner group-drop construction checks passed');

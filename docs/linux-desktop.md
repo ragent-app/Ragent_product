@@ -39,9 +39,13 @@ Configure an unprivileged runner account under the administrator's control;
 set `AGENTOC_RUNNER_SAME_USER=0`, `AGENTOC_RUNNER_USER` and
 `AGENTOC_RUNNER_GROUP` in `/etc/agentoc/agentoc.env`, then restart the lifecycle
 broker and service. Its workspace access must be set up separately.
-Transparent safe group removal for same-user runs remains to be implemented
-and validated. The numeric group-drop command builder is a development
-building block only; it is not yet wired into the runner or a release boundary.
+An experimental launcher can be enabled with `AGENTOC_RUNNER_DROP_GROUPS=1`
+in the lifecycle broker's root-controlled environment. It uses the trusted
+`/usr/bin/setpriv` to drop to the configured non-root identity and explicit
+permitted numeric groups before starting the runner. It fails closed if group
+identities or the executable cannot be verified. This mode has had isolated
+systemd testing but has not yet passed physical-host or release acceptance;
+the separate unprivileged runner account remains the documented configuration.
 
 ## Optional runner sandbox
 
