@@ -1912,6 +1912,23 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
       if (authorizeWrite) await authorizeWrite(latest);
       if (beforeWrite) beforeWrite(next);
     }
+    let protectedResultAttempt = null;
+    if (process.platform === 'linux' && !isolatedScopeRunner() &&
+        (scopeTracking || (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE)) &&
+        isTerminalRunState(next.state) && next.result && typeof next.result === 'object' && !Array.isArray(next.result) &&
+        (!isTerminalRunState(latest.state) || !runFieldEqual(next.result, latest.result))) {
+      try {
+        const attempt = linuxScopeAttempt(next);
+        const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+        if (await hasLinuxRunControlBinding(runId, attempt)) {
+          if (Buffer.byteLength(JSON.stringify(next.result), 'utf8') > 4 * 1024 * 1024 - 4096 ||
+              !await confirmLinuxScopeCompletion(runId, next, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
+          protectedResultAttempt = attempt;
+          if (authorizeWrite) await authorizeWrite(latest);
+          if (beforeWrite) beforeWrite(next);
+        }
+      } catch { throw linuxScopeResultUnavailable(); }
+    }
     await writeJsonAtomic(runStatusPath(runId), next, await runFileWriteOptions(runId, {
       ...COMPACT_JSON_OPTIONS,
       durable: Boolean(next.runPublication),
@@ -1920,6 +1937,12 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     }));
     runStatusCache.set(runId, next);
     await recordCacheMeta(runId, runStatusPath(runId), runStatusCacheMeta);
+    if (protectedResultAttempt !== null) {
+      try {
+        const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+        await saveLinuxRunResultSnapshot(runId, protectedResultAttempt, next.result, { replace: true });
+      } catch { throw linuxScopeResultUnavailable(); }
+    }
     // Heartbeats and observer ticks update status.json frequently.  The index
     // is only appended when an indexed field changed, so liveness writes do
     // not turn into an unbounded second event log.
@@ -2119,12 +2142,18 @@ export async function getRunResult(runId) {
               if (!await matchesLinuxRunControlBinding({ run, manifest: await getRunManifestUnlocked(runId), launchAttempt: attempt })) throw linuxScopeResultUnavailable();
               const { readLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
               const snapshot = await readLinuxRunResultSnapshot(runId, attempt);
-              if (snapshot) return snapshot;
+              if (snapshot) {
+                if (isTerminalRunState(run.state) && run.result && !runFieldEqual(run.result, snapshot)) throw linuxScopeResultUnavailable();
+                return snapshot;
+              }
             }
             if (!result || hasUnresolvedResultApproval(run, result)) return result;
+            if (isTerminalRunState(run.state) && run.result && !runFieldEqual(run.result, result)) throw linuxScopeResultUnavailable();
             if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
             const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
-            return await saveLinuxRunResultSnapshot(runId, attempt, result);
+            const saved = await saveLinuxRunResultSnapshot(runId, attempt, result);
+            if (isTerminalRunState(run.state) && run.result && !runFieldEqual(run.result, saved)) throw linuxScopeResultUnavailable();
+            return saved;
           } catch { throw linuxScopeResultUnavailable(); }
         }
         throw linuxScopeResultUnavailable();
@@ -2145,8 +2174,11 @@ export async function getRunResult(runId) {
           typeof pending.result !== 'object' || Array.isArray(pending.result) || hasUnresolvedResultApproval(run, pending.result)) throw linuxScopeResultUnavailable();
       try {
         if (!await confirmLinuxScopeCompletion(runId, run, manifest, attempt)) throw linuxScopeResultUnavailable();
-        const { saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
-        const protectedResult = await saveLinuxRunResultSnapshot(runId, attempt, pending.result);
+        const { readLinuxRunResultSnapshot, saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+        const existing = await readLinuxRunResultSnapshot(runId, attempt);
+        if (!existing && isTerminalRunState(run.state) && run.result && !runFieldEqual(run.result, pending.result)) throw linuxScopeResultUnavailable();
+        const protectedResult = existing || await saveLinuxRunResultSnapshot(runId, attempt, pending.result);
+        if (isTerminalRunState(run.state) && run.result && !runFieldEqual(run.result, protectedResult)) throw linuxScopeResultUnavailable();
         await writeJsonAtomic(runResultPath(runId), protectedResult, { ...COMPACT_JSON_OPTIONS, durable: true });
         runResultCache.set(runId, protectedResult);
         await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
