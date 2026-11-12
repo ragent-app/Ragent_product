@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFileStore, startAccountsServer } from '../accounts/server.mjs';
@@ -7,6 +7,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { buildAccountSessionMessage, createDevicePublicKeyFingerprint } from '../lib/device-auth-protocol.mjs';
 import { createDemoAccountAuth } from '../accounts/demo-credentials.mjs';
+import { createPostgresStoreFromUrl } from '../accounts/store/postgres.mjs';
 import { ensureDefaultRagentAccount } from '../accounts/default-ragent-account.mjs';
 
 const dir = await mkdtemp(join(tmpdir(), 'ragent-account-init-'));
@@ -104,6 +105,34 @@ try {
       transactionId: googleChallenge.transactionId, idToken: 'fixture', signature: googleSignature });
     assert.match(googleSession.accountId, /^acct_google_/);
   } finally { await app?.close(); }
+  if (process.env.RAGENT_DEFAULT_TEST_DATABASE_URL) {
+    const databaseUrl = process.env.RAGENT_DEFAULT_TEST_DATABASE_URL;
+    const parsed = new URL(databaseUrl);
+    assert.equal(parsed.hostname, '127.0.0.1');
+    assert.equal(parsed.port, '18422');
+    assert.equal(parsed.pathname, '/ragent_default_fixture');
+    const pgDir = join(dir, 'postgres'); await mkdir(pgDir);
+    let pg = createPostgresStoreFromUrl(databaseUrl);
+    for (const name of (await readdir(new URL('../accounts/migrations/', import.meta.url))).filter(name => name.endsWith('.up.sql')).sort()) {
+      await pg.pool.query(await readFile(new URL(`../accounts/migrations/${name}`, import.meta.url), 'utf8'));
+    }
+    const pgOptions = { ...liveOptions, dataFile: join(pgDir, 'accounts.json'), signingKeyFile: join(pgDir, 'signing-key.json'), store: pg };
+    let pgApp;
+    try {
+      pgApp = await startAccountsServer(pgOptions);
+      const firstPolicy = await readFile(join(pgDir, 'ragent-account', 'account.json'), 'utf8');
+      const firstAccount = JSON.parse(firstPolicy);
+      assert.equal((await (await fetch(`http://127.0.0.1:${pgApp.server.address().port}/v1/owner-auth/demo-status`)).json()).status, 'configured');
+      const row = await pg.pool.query('select provider, provider_subject from accounts where account_id=$1', [firstAccount.accountId]);
+      assert.equal(row.rows.length, 1); assert.equal(row.rows[0].provider, 'demo');
+      await pgApp.close(); pgApp = null;
+      pg = createPostgresStoreFromUrl(databaseUrl);
+      pgApp = await startAccountsServer({ ...pgOptions, store: pg });
+      assert.equal(await readFile(join(pgDir, 'ragent-account', 'account.json'), 'utf8'), firstPolicy);
+      assert.equal((await (await fetch(`http://127.0.0.1:${pgApp.server.address().port}/v1/owner-auth/demo-status`)).json()).status, 'configured');
+      console.log('PASS default account PostgreSQL: initialization, persistent identity and restart');
+    } finally { if (pgApp) await pgApp.close(); else await pg?.close(); }
+  }
   console.log('PASS default account: persistent identity, random private credentials, concurrent startup, HTTP login and restart');
 } finally {
   await rm(dir, { recursive: true, force: true });
