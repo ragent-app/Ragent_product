@@ -12721,7 +12721,7 @@ async function executeScopedPreparingRun({ run, record, binding }) {
     authenticatedOwnerDevice: binding.ownerDevice,
     preSavedAttachments: record.request.attachments, preparationRunId: run.id,
     preparationSnapshot: snapshot, userMessageAlreadyRecorded: true, backgroundPreparation: true,
-    skipDispatch: true, queueIfBusy: false, deferIfBusy: false,
+    queueIfBusy: false, deferIfBusy: false,
   });
 }
 
