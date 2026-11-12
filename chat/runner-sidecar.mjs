@@ -211,6 +211,7 @@ import {
 } from './runner-idle-policy.mjs';
 import { providerRequiresTerminalEvidence } from './run-terminal-signals.mjs';
 import { waitForApprovedActionResolution } from './approved-action-wait.mjs';
+import { waitForPrivilegedShimResolution } from './privileged-shim-wait.mjs';
 import { shouldFallbackClaudeBidi } from './claude-bidi-fallback.mjs';
 import { resolveClaudeResumeCwd } from './claude-resume-cwd.mjs';
 import { runOpenHandsServiceSidecar } from './openhands-service-sidecar.mjs';
@@ -6040,7 +6041,6 @@ async function main() {
       clearTimeout(appServerState?.turnRetryTimer);
       clearTimeout(acpState?.startupTimer);
       clearTimeout(acpState?.modeSwitchTimer);
-      stopRunnerHeartbeat();
       stopProviderHeartbeat();
       // P1c-4: release the privileged-batch debounce timer alongside the run
       // timers so a late quiescence fire cannot drain into a dead/exiting run.
@@ -6061,7 +6061,7 @@ async function main() {
       if (claudeBidiState?.sentSteerIds?.size) {
         await markClaudeBidiSteerSent(runId, [...claudeBidiState.sentSteerIds]);
       }
-      const current = await getRun(runId) || run;
+      let current = await getRun(runId) || run;
       if (appServerState && !appServerState.terminalSeen) {
         // Preserve the protocol phase and the last observable provider output
         // when app-server exits without a correlated terminal frame. The old
@@ -6190,6 +6190,10 @@ async function main() {
           return;
         }
       }
+      if (effectiveExitCode === 0 && !providerFailureReason && current.cancelRequested !== true) {
+        current = await waitForPrivilegedShimResolution(runId) || current;
+      }
+      stopRunnerHeartbeat();
       const cancellationCleanupStatus = macCancellationCleanupStatus({
         platform: process.platform,
         brokered: codexAppServerBrokered,
