@@ -221,6 +221,7 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 已为后续执行时绑定实现非提权的普通文件和多文件句柄原语，适用于工作区内外的本地路径；由调用方独立执行敏感路径策略并提供可信摘要。Windows 原生测试验证了锁定期间读取、文件写删与父目录改名阻止、摘要不符回滚、硬链接及目录联接拒绝。普通文件符号链接在该测试账户下因缺少创建权限未能实测；目录联接测试通过。该原语**尚未接入审批或搜索执行链**，不能据此认为前述竞态已消除。
 - 2026-11-12 跨平台验收准备：三星 `RFCT5155C1P` 在线；指定 Linux 机器上的现有 `agentoc.service` 和指定 macOS 机器上的 `/Applications/Ragent.app` 均运行中，两端 `/healthz` 返回 ready。Linux 已安装的 `risk-classifier.mjs`、`risk-policy.mjs`、`claude-tool-policy.mjs` 和 `claude-bidi.mjs` 经 Git 对象哈希对照与当时源码一致；macOS 上述四个文件的 SHA-256 与 Linux 安装件一致。这些只是运行状态和文件一致性检查，尚未证明两台实例的真实审批链路。Windows 现有实例的 owner activation 仍报告 `OSV_INSTALL_TRUST_FAILED`；通过现有管理员通道只读查看服务日志，最近一次该错误发生在 2026-11-12 06:09:55 UTC，日志未记录具体失败字段，不能据此确定根因。未重启现有服务或中断并行会话。
 - 两台指定 POSIX 实例随后通过真实 Ragent 服务、其已安装 Claude CLI 和本机模拟模型执行隔离验收：recommended 与 full-auto 均自动读取工作区外普通文件；隔离 `.ssh` 的递归删除在 recommended 产生审批并经 API 拒绝，在 full-auto 由 Ragent 自动拒绝，CLI 均收到拒绝结果且文件未受影响。两端临时 provider 和会话已通过 API 删除；没有消耗真实模型额度。该阶段覆盖 Claude 的两个指定场景，尚未覆盖 Codex、手机连接真实实例或实际生产审批率。最初 Linux 夹具创建在 SSH 的 `/tmp`，服务使用私有 `/tmp` 因此无法看到，测试会话未创建；改用实例可见的隔离目录后完成验收。
+- 两台实例的 Codex 也使用各自现有 Ragent 服务、安装的 Codex 与本机模拟 Responses 服务完成相同隔离场景：recommended/full-auto 自动通过工作区外普通读取；递归删除隔离 `.ssh` 在 recommended 产生审批并通过 API 拒绝，在 full-auto 自动拒绝，两种模式的真实 Codex 均收到拒绝，文件保持完整。未调用官方 Codex 模型，临时 provider 和会话通过 API 删除。这四个场景不等同于全部命令覆盖率或生产审批率；手机连接真实实例的审批操作和 Windows 正式实例验收仍待完成。
 
 ## 外部依据
 
