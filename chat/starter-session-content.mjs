@@ -9,18 +9,24 @@ export const PRODUCT_DEFAULT_STARTER_TOOL_ID = 'codex';
 export const FALLBACK_STARTER_TOOL_ID = 'codex';
 export const DEFAULT_STARTER_TOOL_DESCRIPTION = 'CodeX';
 
-export async function resolveDefaultStarterToolId(tools = null) {
+export async function resolveStarterToolSelection(tools = null) {
   tools ??= await getAvailableToolsAsync();
   const availableTools = Array.isArray(tools)
     ? tools.filter((tool) => tool?.available)
     : [];
   if (availableTools.some((tool) => tool.id === PRODUCT_DEFAULT_STARTER_TOOL_ID)) {
-    return PRODUCT_DEFAULT_STARTER_TOOL_ID;
+    return { toolId: PRODUCT_DEFAULT_STARTER_TOOL_ID, available: true };
   }
   if (availableTools.length > 0) {
-    return availableTools[0].id;
+    return { toolId: availableTools[0].id, available: true };
   }
-  return FALLBACK_STARTER_TOOL_ID;
+  // Keep a stable placeholder for read-only starter sessions, but do not
+  // present it as an installed or usable harness.
+  return { toolId: FALLBACK_STARTER_TOOL_ID, available: false };
+}
+
+export async function resolveDefaultStarterToolId(tools = null) {
+  return (await resolveStarterToolSelection(tools)).toolId;
 }
 
 export const WELCOME_STARTER_SYSTEM_PROMPT = [

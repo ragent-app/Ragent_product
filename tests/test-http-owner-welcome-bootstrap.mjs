@@ -64,7 +64,7 @@ async function resolveEventContent(port, sessionId, event, extraHeaders = {}) {
   return bodyResponse.json?.body?.value || '';
 }
 
-function setupTempHome({ preseedArchivedBasicChat = false, cloudflaredPort = 0, publicHostname = '' } = {}) {
+function setupTempHome({ preseedArchivedBasicChat = false, cloudflaredPort = 0, publicHostname = '', noHarness = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-welcome-'));
   const configDir = join(home, '.config', 'agentoc');
   const memoryDir = join(home, '.agentoc', 'memory');
@@ -111,8 +111,10 @@ function setupTempHome({ preseedArchivedBasicChat = false, cloudflaredPort = 0, 
     ], null, 2),
     'utf8',
   );
-  writeFileSync(join(localBin, 'fake-codex'), '#!/usr/bin/env bash\nexit 0\n', 'utf8');
-  chmodSync(join(localBin, 'fake-codex'), 0o755);
+  if (!noHarness) {
+    writeFileSync(join(localBin, 'fake-codex'), '#!/usr/bin/env bash\nexit 0\n', 'utf8');
+    chmodSync(join(localBin, 'fake-codex'), 0o755);
+  }
 
   if (preseedArchivedBasicChat) {
     writeFileSync(
@@ -149,7 +151,7 @@ function setupTempHome({ preseedArchivedBasicChat = false, cloudflaredPort = 0, 
   return { home, configDir, memoryDir, workRoot };
 }
 
-async function startServer({ home, configDir, memoryDir, workRoot, port }) {
+async function startServer({ home, configDir, memoryDir, workRoot, port, noHarness = false }) {
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
@@ -158,6 +160,10 @@ async function startServer({ home, configDir, memoryDir, workRoot, port }) {
       AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
       AGENTOC_AUTH_SESSION_SECRET: 'test-owner-welcome-secret',
       HOME: home,
+      ...(noHarness ? {
+        PATH: `${join(home, '.local', 'bin')}:/usr/bin:/bin`,
+        AGENTOC_PACKAGED_HARNESS_ROOT: join(home, 'empty-harness-root'),
+      } : {}),
       AGENTOC_INSTANCE_ROOT: home,
       AGENTOC_CONFIG_DIR: configDir,
       AGENTOC_MEMORY_DIR: memoryDir,
@@ -371,8 +377,20 @@ async function runScenario(options) {
     ...options,
     cloudflaredPort: port,
   });
-  let server = await startServer({ home, configDir, memoryDir, workRoot, port });
+  let server = await startServer({ home, configDir, memoryDir, workRoot, port, noHarness: options?.noHarness });
   try {
+    if (options?.noHarness) {
+      const restored = await restoreStarterSessions(port);
+      const events = await request(port, 'GET', `/api/sessions/${restored.welcomeSessionId}/events?filter=all`, null, { Cookie: ownerCookie });
+      const messages = await Promise.all((events.json?.events || [])
+        .filter((event) => event.type === 'message' && event.role === 'assistant')
+        .map((event) => resolveEventContent(port, restored.welcomeSessionId, event, { Cookie: ownerCookie })));
+      assert.ok(messages.some((content) => /没有检测到可用的 Harness/.test(content)),
+        'welcome should explain that a harness must be installed or configured');
+      const repeated = await restoreStarterSessions(port);
+      assert.equal(repeated.welcomeSessionId, restored.welcomeSessionId, 'no-harness restore remains idempotent');
+      return;
+    }
     const legacy = options?.preseedArchivedBasicChat === true;
     await assertSessionListEmpty(port, { legacy });
 
@@ -402,3 +420,4 @@ async function runScenario(options) {
 await runScenario();
 await runScenario({ preseedArchivedBasicChat: true });
 await runScenario({ publicHostname: 'owner.example.com' });
+await runScenario({ noHarness: true });

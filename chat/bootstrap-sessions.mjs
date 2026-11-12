@@ -12,7 +12,7 @@ import { loadMailboxRuntimeRegistry } from '../lib/mailbox-runtime-registry.mjs'
 import {
   WELCOME_STARTER_MESSAGE,
   WELCOME_STARTER_SYSTEM_PROMPT,
-  resolveDefaultStarterToolId,
+  resolveStarterToolSelection,
 } from './starter-session-content.mjs';
 import { WELCOME_STARTER_PRESET } from './session-starter-preset.mjs';
 
@@ -205,11 +205,12 @@ function buildCalendarGuideMessages() {
 }
 
 async function getOwnerBootstrapSessionDefinitions() {
-  const [mailboxAddress, calendarGuideEnabled, defaultToolId] = await Promise.all([
+  const [mailboxAddress, calendarGuideEnabled, starterTool] = await Promise.all([
     resolveCurrentMailboxAddress(),
     hasCalendarSubscriptionGuide(),
-    resolveDefaultStarterToolId(),
+    resolveStarterToolSelection(),
   ]);
+  const defaultToolId = starterTool.toolId;
   const definitions = [];
   let sidebarOrder = 1;
   const pushDefinition = (definition) => {
@@ -235,6 +236,10 @@ async function getOwnerBootstrapSessionDefinitions() {
         },
       ],
       extraMessages: [
+        ...(!starterTool.available ? [{
+          role: 'assistant',
+          content: '初始化或恢复引导时没有检测到可用的 Harness。要开始执行任务，请先在 Harness 管理中安装或配置一个可用的运行工具；之后以当前工具状态为准。',
+        }] : []),
         {
           role: 'assistant',
           content: buildInboundEmailSetupHint(mailboxAddress),
