@@ -22,6 +22,7 @@ test('a shared device requires current owner and member authority and closes on 
   const runtime = await import('../lib/binding-authority-runtime.mjs');
   const trusted = await import('../chat/trusted-devices.mjs');
   const handshake = await import('../lib/device-handshake.mjs');
+  const { getOwnerAccountFileUploadPolicy } = await import('../lib/owner-account-auth.mjs');
   const nativeFetch = globalThis.fetch, events = [];
   let memberActive = true, workspaceRequests = 0;
   function jwt(claims) {
@@ -32,6 +33,13 @@ test('a shared device requires current owner and member authority and closes on 
   globalThis.fetch = async (url, options = {}) => {
     if (new URL(url).pathname.endsWith('/.well-known/jwks.json')) return { ok: true, json: async () => ({ keys: [jwk] }) };
     const body = JSON.parse(options.body), now = Math.floor(Date.now() / 1000);
+    if (new URL(url).pathname.endsWith('/uploads/policy')) {
+      assert.equal(body.accountId, member);
+      assert.equal(body.grantId, grantId);
+      assert.equal(protocol.verifyInstanceProofSignature({ publicKey: body.instance.publicKey,
+        message: protocol.buildAccountFileUploadQuotaMessage({ ...body, instanceId: body.instance.instanceId }), signature: body.signature }), true);
+      return { ok: true, json: async () => ({ contractVersion: 2, limits: { unlimited: true, maxFileBytes: Number.MAX_SAFE_INTEGER } }) };
+    }
     const base = { iss: 'https://accounts.example.test', aud: identity.instanceId, tx: body.requestId,
       nonce: body.nonce, instanceKeyFingerprint: identity.keyFingerprint, bindingAuthorityRevision: revision,
       authorityProtocol: 1, iat: now, exp: now + 30 };
@@ -60,6 +68,8 @@ test('a shared device requires current owner and member authority and closes on 
     assert.equal(completed.device.accountId, member); assert.deepEqual(completed.device.workspaceAccess, workspaceAccess);
     const session = await trusted.authenticateTrustedDeviceToken(completed.credential.token);
     assert.equal(session.accountId, member); assert.deepEqual(session.workspaceAccess, workspaceAccess);
+    assert.equal((await getOwnerAccountFileUploadPolicy({ expectedAccountId: member, workspacePrincipal: session })).limits.unlimited, true);
+    assert.equal(await getOwnerAccountFileUploadPolicy({ expectedAccountId: owner, workspacePrincipal: session }), null);
     assert.equal(runtime.allowsRemoteBinding(session), true);
     assert.equal(runtime.allowsRemoteBinding({ role: 'owner', principalKind: 'trusted_device', accountId: owner,
       bindingAuthorityRevision: revision, expiry: Date.now() + 60_000 }), true);
@@ -68,6 +78,7 @@ test('a shared device requires current owner and member authority and closes on 
     await assert.rejects(runtime.refreshWorkspaceBindingAuthority({ ownerAccountId: owner, accountId: member, grantId, revision }),
       { code: 'workspace_authority_superseded' });
     assert.equal(runtime.allowsRemoteBinding(session), false);
+    await assert.rejects(getOwnerAccountFileUploadPolicy({ expectedAccountId: member, workspacePrincipal: session }));
     assert.equal(await trusted.authenticateTrustedDeviceToken(completed.credential.token), null);
     assert.ok(events.some(event => event.type === 'device-invalidated' && event.deviceId === deviceId));
     assert.ok(workspaceRequests >= 2);
