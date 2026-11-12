@@ -6,6 +6,10 @@ const SAFE_TOOLS = new Map([
   ['EnterPlanMode', 'enter plan mode'],
   ['Skill', 'load a skill definition'],
   ['TaskOutput', 'read a background task result'],
+  ['TaskCreate', 'create a Claude task-list item'],
+  ['TaskGet', 'read a Claude task-list item'],
+  ['TaskList', 'read the Claude task list'],
+  ['TaskUpdate', 'update a Claude task-list item'],
   ['TodoWrite', 'update the run-local task list'],
   ['ToolSearch', 'search the available tool catalog'],
 ]);
@@ -55,6 +59,20 @@ function validateKnownInput(toolName, input) {
   if (toolName === 'TaskOutput') return typeof (input.task_id || input.taskId) === 'string'
     && String(input.task_id || input.taskId).trim().length > 0
     && Object.keys(input).every((key) => ['task_id', 'taskId', 'block', 'timeout'].includes(key));
+  const taskText = value => typeof value === 'string' && value.length <= 32768;
+  const taskId = value => taskText(value) && value.trim().length > 0 && value.length <= 1024;
+  const taskMetadata = value => value === undefined || (value !== null && typeof value === 'object' && !Array.isArray(value));
+  if (toolName === 'TaskList') return Object.keys(input).length === 0;
+  if (toolName === 'TaskGet') return taskId(input.taskId) && Object.keys(input).every(key => key === 'taskId');
+  if (toolName === 'TaskCreate') return taskText(input.subject) && input.subject.trim().length > 0
+    && taskText(input.description) && (input.activeForm === undefined || taskText(input.activeForm))
+    && taskMetadata(input.metadata) && Object.keys(input).every(key => ['subject', 'description', 'activeForm', 'metadata'].includes(key));
+  if (toolName === 'TaskUpdate') return taskId(input.taskId)
+    && Object.keys(input).every(key => ['taskId', 'subject', 'description', 'activeForm', 'status', 'addBlocks', 'addBlockedBy', 'owner', 'metadata'].includes(key))
+    && ['subject', 'description', 'activeForm', 'owner'].every(key => input[key] === undefined || taskText(input[key]))
+    && (input.status === undefined || ['pending', 'in_progress', 'completed', 'deleted'].includes(input.status))
+    && ['addBlocks', 'addBlockedBy'].every(key => input[key] === undefined || (Array.isArray(input[key]) && input[key].length <= 200 && input[key].every(taskId)))
+    && taskMetadata(input.metadata);
   if (toolName === 'TodoWrite') return Array.isArray(input.todos) && input.todos.length <= 200
     && input.todos.every((todo) => todo && typeof todo === 'object' && !Array.isArray(todo));
   if (toolName === 'EnterPlanMode') return Object.keys(input).length === 0;

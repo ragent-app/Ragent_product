@@ -49,6 +49,12 @@ const write = { approvalId: 'file-1', kind: 'permissions', params: { tool_name: 
 assert.equal((await decideWindowsApproval(write, { ...state, riskMode: 'full-auto' }, { analyzeFiles: safe })).decision, 'auto-allow');
 const safeTool = { approvalId: 'tool-1', providerMethod: 'can_use_tool', requestClass: 'tool_invocation', kind: 'permissions',
   params: { tool_name: 'TodoWrite', input: { todos: [] } } };
+for (const riskMode of ['recommended', 'full-auto']) {
+  for (const [tool_name, input] of [['TaskList', {}], ['TaskCreate', { subject: 'Inspect', description: 'Inspect the project' }],
+    ['TaskGet', { taskId: '1' }], ['TaskUpdate', { taskId: '1', status: 'completed' }]]) {
+    assert.equal((await decideWindowsApproval({ ...safeTool, params: { tool_name, input } }, { ...state, riskMode })).decision, 'auto-allow', `${tool_name}: ${riskMode}`);
+  }
+}
 assert.equal((await decideWindowsApproval(safeTool, { ...state, riskMode: 'recommended', riskContextValid: false })).decision, 'auto-allow');
 const webSearch = { ...safeTool, approvalId: 'tool-2', params: { tool_name: 'WebSearch', input: { query: 'PowerShell docs' } } };
 assert.equal((await decideWindowsApproval(webSearch, { ...state, riskMode: 'recommended' })).decision, 'auto-allow');
