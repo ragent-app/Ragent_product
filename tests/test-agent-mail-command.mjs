@@ -199,7 +199,7 @@ try {
     encoding: 'utf8',
   });
   assert.equal(cliHelpResult.status, 0, cliHelpResult.stderr);
-  assert.match(cliHelpResult.stdout, /agentoc mail send/);
+  assert.match(cliHelpResult.stdout, /ragent mail send/);
 } finally {
   for (const socket of sockets) {
     socket.destroy();
