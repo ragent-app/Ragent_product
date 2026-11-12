@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createCodexManagedHookSetup } from '../chat/codex-managed-hook-setup.mjs';
-import { handleCodexAppServerInitializeResponse } from '../chat/runner-sidecar.mjs';
+import { consumeCodexSharedHookRegistration, handleCodexAppServerInitializeResponse } from '../chat/runner-sidecar.mjs';
 
 const configPath = 'D:\\agentoc\\run\\config.toml', cwd = 'E:\\project';
 const command = "& 'D:\\node.exe' 'D:\\agentoc\\hook.mjs'";
@@ -60,6 +60,23 @@ for (const bad of [{ ...hook, sourcePath: 'D:\\other\\config.toml' }, { ...hook,
   state.codexManagedHookSetup.consume({ id: 1001, result: {} });
   state.codexManagedHookSetup.consume({ id: 1002, result: result({ ...hook, trustStatus: 'trusted' }) });
   assert.equal(state.codexManagedHookReady, true);
+  assert.equal(messages.at(-1).method, 'thread/start');
+}
+{
+  const messages = [];
+  const proc = { stdin: { writable: true, write: text => { messages.push(JSON.parse(text)); return true; } } };
+  const sourcePath = 'C:\\<session-flags>\\config.toml';
+  const sharedHook = { ...hook, source: 'sessionFlags', sourcePath, key: `${sourcePath}:pre_tool_use:0:0`, displayOrder: 2 };
+  const state = { initialized: false, initializeRequestId: 0, threadRequestId: 1, nextControlRequestId: 1000, cwd,
+    codexWindowsInstallHook: { command, configPath, sourcePath, source: 'sessionFlags', shared: true }, riskMode: 'recommended', model: 'fixture' };
+  handleCodexAppServerInitializeResponse(proc, state, { id: 0, result: {} });
+  state.codexManagedHookSetup.consume({ id: 1000, result: result(sharedHook) });
+  state.codexManagedHookSetup.consume({ id: 1001, result: {} });
+  state.codexManagedHookSetup.consume({ id: 1002, result: result({ ...sharedHook, trustStatus: 'trusted' }) });
+  assert.equal(messages.at(-1).method, 'agentoc/registerWindowsHook');
+  assert.deepEqual(messages.at(-1).params, { sourcePath, displayOrder: 2 });
+  assert.ok(!messages.some(message => message.method === 'thread/start'));
+  assert.equal(consumeCodexSharedHookRegistration(state, { id: 1003, result: {} }), true);
   assert.equal(messages.at(-1).method, 'thread/start');
 }
 {

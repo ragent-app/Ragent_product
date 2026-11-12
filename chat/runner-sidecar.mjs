@@ -1889,6 +1889,18 @@ export function configureCodexAccountModelCatalog({ proc, state, beforeReady, on
   return state.accountModelCatalog;
 }
 
+export function consumeCodexSharedHookRegistration(state, parsed) {
+  const registration = state?.sharedHookRegistration;
+  if (!registration || parsed?.id !== registration.id || parsed?.method) return false;
+  state.sharedHookRegistration = null;
+  if (parsed.error) {
+    state.hadError = true;
+    state.terminalSeen = true;
+    state.failureReason = 'Shared Codex Windows hook could not be registered';
+  } else registration.onReady();
+  return true;
+}
+
 export function handleCodexAppServerInitializeResponse(proc, state, parsed) {
   if (!state || state.initialized || state.terminalSeen || state.hadError
       || state.startupCancelled || parsed?.id !== state.initializeRequestId) return false;
@@ -1916,7 +1928,23 @@ export function handleCodexAppServerInitializeResponse(proc, state, parsed) {
     state.providerStage = 'managed_hook_setup';
     state.codexManagedHookSetup = createCodexManagedHookSetup({ ...state.codexWindowsInstallHook, cwd: state.cwd,
       nextRequestId: () => state.nextControlRequestId++, send: message => writeCodexAppServerMessage(proc, message),
-      onDone: ready => { state.codexManagedHookReady = ready; continueStartup(); } });
+      onDone: (ready, selected) => {
+        state.codexManagedHookReady = ready;
+        if (!state.codexWindowsInstallHook.shared) { continueStartup(); return; }
+        if (!ready || !selected || !Number.isSafeInteger(selected.displayOrder)) {
+          state.hadError = true; state.terminalSeen = true;
+          state.failureReason = 'Shared Codex Windows hook trust could not be verified';
+          return;
+        }
+        const id = state.nextControlRequestId++;
+        state.sharedHookRegistration = { id, onReady: continueStartup };
+        if (!writeCodexAppServerMessage(proc, { id, method: 'agentoc/registerWindowsHook', params: {
+          sourcePath: selected.sourcePath, displayOrder: selected.displayOrder,
+        } })) {
+          state.sharedHookRegistration = null; state.hadError = true; state.terminalSeen = true;
+          state.failureReason = 'Shared Codex Windows hook registration could not be sent';
+        }
+      } });
     state.codexManagedHookSetup.start();
   } else continueStartup();
   return true;
@@ -3112,7 +3140,7 @@ async function markCodexAppServerApprovalResponseSent(runId, responseEntry, sent
   }));
 }
 
-async function flushCodexAppServerApprovalResponses(proc, state, run) {
+export async function flushCodexAppServerApprovalResponses(proc, state, run) {
   if (!state || state.terminalSeen) return;
   const queue = Array.isArray(run?.appServerApprovalResponseQueue)
     ? run.appServerApprovalResponseQueue
@@ -4838,7 +4866,14 @@ async function main() {
     if (appServerState && parsed && await maybeConsumeCodexAppServerGoalResponse(runId, appServerState, parsed)) {
       return;
     }
-    if (appServerState?.codexManagedHookSetup && parsed && appServerState.codexManagedHookSetup.consume(parsed)) return;
+    if (appServerState?.codexManagedHookSetup && parsed && appServerState.codexManagedHookSetup.consume(parsed)) {
+      if (appServerState.hadError) await terminateManagedProcess();
+      return;
+    }
+    if (appServerState && parsed && consumeCodexSharedHookRegistration(appServerState, parsed)) {
+      if (appServerState.hadError) await terminateManagedProcess();
+      return;
+    }
     if (appServerState?.accountModelCatalog && parsed
         && await appServerState.accountModelCatalog.consume(parsed)) return;
     if (appServerState && parsed && handleCodexAppServerInitializeResponse(proc, appServerState, parsed)) {
