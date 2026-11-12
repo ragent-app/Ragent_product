@@ -321,8 +321,8 @@ async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
   const emailUserContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[1], { Cookie: ownerCookie });
   const emailAssistantContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[2], { Cookie: ownerCookie });
   assert.match(emailIntroContent, /收件地址|允许发件人|自动多出一个新会话/u, 'email showcase should explain the inbound-email entry flow');
-  assert.match(emailUserContent, /Inbound email\.|真实能力验证邮件|自动进到一个新会话/u, 'email showcase should demonstrate the inbound email transcript shape');
-  assert.match(emailAssistantContent, /邮件进来后的实际起点|手动新建聊天/u, 'email showcase should end with the actual session handoff explanation');
+  assert.match(emailUserContent, /预置示例邮件/u, 'email showcase should identify the transcript as an example');
+  assert.match(emailAssistantContent, /实际是否创建会话取决于当前配置和邮件处理结果/u, 'email showcase should make delivery conditional on actual configuration and processing');
 
   const calendarGuideSession = list.json?.sessions?.[5];
   assert.ok(calendarGuideSession?.id, 'calendar guide session should always exist when the calendar feed is enabled');
