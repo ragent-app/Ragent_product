@@ -6055,6 +6055,9 @@ async function main() {
   };
 
   providerStdoutInput = createInterface({ input: providerStdoutStream });
+  // An input error can occur before readline is created. A reader attached
+  // to an already destroyed stream will never observe its close event.
+  if (providerStdoutStream.destroyed) providerStdoutInput.close();
   trackStdoutReader(providerStdoutInput, providerStdoutStream);
   // A few harnesses stream a JSON/text frame in several chunks before the
   // terminating newline arrives. Treat readable-byte activity as liveness as
@@ -6069,6 +6072,7 @@ async function main() {
   const handleProviderStdoutError = (error) => {
     const reason = `Provider stdout reader failed: ${normalizeErrorMessage(error)}`;
     stdoutProcessingFailureReason ||= reason;
+    providerStdoutInput.close();
     providerProtocolErrorPreview = clipDiagnosticMessage(
       `${providerProtocolErrorPreview} ${reason}`.trim(),
       2000,
@@ -6083,6 +6087,7 @@ async function main() {
   // readline does not forward errors emitted by its input stream. The
   // buffering stream therefore needs its own handler after setup, too.
   providerStdoutStream.on('error', handleProviderStdoutError);
+  if (earlyStdoutError) handleProviderStdoutError(earlyStdoutError);
   providerStdoutInput.on('line', (line) => {
     void enqueueStdoutLine(line);
   });
