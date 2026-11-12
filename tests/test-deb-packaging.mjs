@@ -121,7 +121,8 @@ assert.match(prerm, /stop_unit agentoc-storage-gc\.timer[\s\S]*stop_unit agentoc
 // Exercise the real removal guard with simulated systemd outcomes, without
 // stopping the system services on the machine running the test.
 if (process.platform !== 'win32') {
-  const stopGuard = prerm.slice(prerm.indexOf('stop_unit() {'), prerm.indexOf('\nif [ "${1:-}" = remove ]'));
+  const stopStart = prerm.indexOf('stop_unit() {');
+  const stopGuard = prerm.slice(stopStart, prerm.indexOf('\nif [ "${1:-}" = remove ]', stopStart));
   assert.ok(stopGuard.startsWith('stop_unit() {'));
   for (const [stopResult, reportedState, expectedStatus] of [
     ['0', '', 0], ['1', 'inactive', 0], ['1', 'failed', 0],
