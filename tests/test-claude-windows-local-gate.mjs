@@ -338,9 +338,15 @@ output.on('line', (line) => {
       approvals++;
       // Never let a regression execute the uninstall, even for the nonexistent
       // package: only a deny response can reach the real CLI in this fixture.
-      const gatedChild = uninstallCase ? { stdin: { writable: true, write(value) {
+      const gatedChild = uninstallCase || (readCase === 'select-string' && process.env.AGENTOC_QA_SEARCH_GLOB === '1') ? { stdin: { writable: true, write(value) {
         const response = JSON.parse(String(value));
-        assert.equal(response?.response?.response?.behavior, 'deny', 'uninstall must never be auto-approved');
+        if (uninstallCase) assert.equal(response?.response?.response?.behavior, 'deny', 'uninstall must never be auto-approved');
+        else {
+          const result = response?.response?.response;
+          assert.equal(result?.behavior, 'allow', 'ordinary wildcard search must be approved');
+          assert.match(result?.updatedInput?.command || '', /Select-String -LiteralPath/i);
+          assert.doesNotMatch(result?.updatedInput?.command || '', /\*/);
+        }
         return child.stdin.write(value);
       } } } : child;
       await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : cliReadCase ? { cliReadHelperPath } : {});

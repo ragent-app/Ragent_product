@@ -118,7 +118,7 @@ import {
   isUserFacingGateKind,
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
-import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
+import { buildClaudeWindowsRipgrepBridge, buildWindowsSelectStringGlobBridge } from './windows-ripgrep-bridge.mjs';
 import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
@@ -2978,6 +2978,20 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
 
   const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
+  const searchGlobBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.reason === 'wildcard search requires bound targets'
+    ? await buildWindowsSelectStringGlobBridge({ approval, state }) : null;
+  if (searchGlobBridge) {
+    const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: searchGlobBridge.updatedCommand } });
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound wildcard search response');
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+      autoApproved: true, reason: 'wildcard search bound to verified file paths', ...riskAuditFields(searchGlobBridge.risk),
+    } });
+    const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, searchGlobBridge.risk));
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return record;
+  }
   const ripgrepBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
     && ['ripgrep configuration is not disabled', 'ripgrep sensitive exclusions are not enforced', 'recursive file operation needs verification'].includes(gateDecision.reason)
     ? await buildClaudeWindowsRipgrepBridge({ approval, state }) : null;

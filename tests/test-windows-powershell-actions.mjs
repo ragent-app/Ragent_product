@@ -6,6 +6,7 @@ import os from 'node:os';
 import { analyzeWindowsFileChanges, analyzeWindowsPowerShell, analyzeWindowsRipgrep, decideWindowsPowerShellActions } from '../chat/windows-powershell-actions.mjs';
 import { decideWindowsApproval } from '../chat/windows-approval-gate.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
+import { buildWindowsSelectStringGlobBridge } from '../chat/windows-ripgrep-bridge.mjs';
 
 if (process.platform !== 'win32') {
   console.log('windows-powershell-actions: skipped (requires Windows)');
@@ -125,12 +126,41 @@ assert.equal(result.decision, 'allow');
 assert.equal(result.actions.length, 2);
 assert.equal((await inspect("Test-Path -LiteralPath '..\\protected\\secret'")).decision, 'allow', 'existence checks do not read protected file contents');
 assert.equal((await inspect("Get-Content -LiteralPath '..\\protected\\secret'")).decision, 'review', 'protected file contents still require review');
-for (const command of ["Select-String -Path readme.txt -Pattern fixture", "Select-String fixture readme.txt", "Select-String -LiteralPath '..\\ordinary.txt' -Pattern fixture -SimpleMatch", "Select-String -Path 'glob-read\\*.md' -Pattern fixture", "Select-String -Path '..\\ordinary.*' -Pattern fixture", "Select-String -Path 'glob-read\\no-match-*.md' -Pattern fixture"]) {
+for (const command of ["Select-String -Path readme.txt -Pattern fixture", "Select-String fixture readme.txt", "Select-String -LiteralPath '..\\ordinary.txt' -Pattern fixture -SimpleMatch"]) {
   assert.equal((await inspect(command)).decision, 'allow', `${command}: ordinary files can be searched`);
 }
-for (const command of ["Select-String -Path '..\\protected\\secret' -Pattern fixture", "Select-String -Path 'glob-read\\*.txt' -Pattern fixture", "Select-String -Path '..\\protected\\*.txt' -Pattern fixture", "Select-String -LiteralPath ordinary-link -Pattern fixture"]) {
+for (const command of ["Select-String -Path '..\\protected\\secret' -Pattern fixture", "Select-String -Path 'glob-read\\*.txt' -Pattern fixture", "Select-String -Path 'glob-read\\*.md' -Pattern fixture", "Select-String -Path '..\\protected\\*.txt' -Pattern fixture", "Select-String -LiteralPath ordinary-link -Pattern fixture"]) {
   assert.equal((await inspect(command)).decision, 'review', `${command}: file scope still needs checking`);
 }
+assert.equal((await inspect("Select-String -LiteralPath 'readme.txt','..\\protected\\secret' -Pattern fixture")).decision, 'review', 'every literal path in a list is checked');
+const hiddenGlobFile = path.join(workspace, 'glob-read', 'hidden.md');
+await writeFile(hiddenGlobFile, 'hidden-fixture');
+execFileSync(path.join(process.env.SystemRoot, 'System32', 'attrib.exe'), ['+H', hiddenGlobFile], { windowsHide: true });
+for (const riskMode of ['recommended', 'full-auto']) {
+  const glob = path.join(workspace, 'glob-read', '*.md');
+  const approval = { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: `Select-String -Path '${glob}' -Pattern fixture` } } };
+  const state = { riskMode, turnActive: true, cwd: workspace, riskContext: context, riskContextValid: true };
+  assert.equal((await decideWindowsApproval(approval, state)).decision, 'prompt', 'unmodified wildcard is never directly authorized');
+  const bridge = await buildWindowsSelectStringGlobBridge({ approval, state });
+  assert.ok(bridge, `${riskMode}: ordinary wildcard gets a bound rewrite`);
+  assert.match(bridge.updatedCommand, /-LiteralPath/i);
+  assert.doesNotMatch(bridge.updatedCommand, /\*/);
+  assert.doesNotMatch(bridge.updatedCommand, /hidden\.md/i, 'wildcard search does not add hidden files that Select-String would omit');
+  assert.equal((await inspect(bridge.updatedCommand)).decision, 'allow');
+  const lateSecret = path.join(workspace, 'glob-read', '.env.late.md');
+  await writeFile(lateSecret, 'late-sensitive-fixture');
+  try {
+    const actualOutput = execFileSync(resolveWindowsSystemPaths().powershell, ['-NoProfile', '-NonInteractive', '-Command', bridge.updatedCommand], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+    assert.doesNotMatch(actualOutput, /late-sensitive-fixture/, 'a file added after approval is not read by the bound command');
+  } finally { await rm(lateSecret, { force: true }); }
+  approval.params.input.command = `Select-String -Path '${path.join(workspace, 'glob-read', '*.txt')}' -Pattern fixture`;
+  assert.equal(await buildWindowsSelectStringGlobBridge({ approval, state }), null, 'sensitive matched file is not rewritten');
+  approval.params.input.command = `Select-String -Path '${glob}' -Pattern fixture; Remove-Item -LiteralPath '${path.join(workspace, 'readme.txt')}'`;
+  assert.equal(await buildWindowsSelectStringGlobBridge({ approval, state }), null, 'a compound command cannot be rewritten as a simple search');
+  approval.params.input.command = `Select-String -Path '${glob}' -Pattern fixture`;
+  assert.equal(await buildWindowsSelectStringGlobBridge({ approval: { ...approval, params: { ...approval.params, additionalPermissions: { network: true } } }, state }), null, 'extra permission requests cannot be silently granted');
+}
+execFileSync(path.join(process.env.SystemRoot, 'System32', 'attrib.exe'), ['-H', hiddenGlobFile], { windowsHide: true });
 for (const command of ["winget list --id Microsoft.VisualStudioCode --exact --disable-interactivity | Select-String 'Visual Studio'", "winget.exe list --source winget | Select-String -Pattern 'example' -SimpleMatch", "'text' | Select-String 'text'", "(winget list --id Example.App | Select-String 'Example')"]) {
   assert.equal((await inspect(command)).decision, 'allow', command);
 }

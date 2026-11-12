@@ -189,7 +189,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
 $request = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
-$items = @(Get-ChildItem -Path ([string]$request.pattern) -Force -File -ErrorAction Stop | Select-Object -First 10001 | ForEach-Object { $_.FullName })
+$items = @(Get-ChildItem -Path ([string]$request.pattern) -File -ErrorAction Stop | Select-Object -First 10001 | ForEach-Object { $_.FullName })
 @{ paths = $items } | ConvertTo-Json -Compress
 `;
 

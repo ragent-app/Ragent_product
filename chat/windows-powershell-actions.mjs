@@ -120,6 +120,18 @@ export function staticExternalArguments(elements) {
   return args;
 }
 
+export function parseWindowsSelectStringArgs(elements) {
+  const args = parseArguments(elements, new Set(['pattern', 'path', 'literalpath', 'encoding', 'simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']),
+    new Set(['simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']));
+  if (!args || (args.named.has('path') && args.named.has('literalpath'))) return null;
+  const namedPath = args.named.get('literalpath') || args.named.get('path');
+  const hasNamedPattern = args.named.has('pattern');
+  const expectedPositionals = hasNamedPattern ? 0 : 1;
+  if (args.positional.length < expectedPositionals || args.positional.length > expectedPositionals + (namedPath ? 0 : 1)) return null;
+  return { ...args, filePath: namedPath || args.positional[expectedPositionals],
+    pattern: hasNamedPattern ? args.named.get('pattern') : args.positional[0] };
+}
+
 function isWingetListQuery(program, args) {
   if (!['winget', 'winget.exe'].includes(program) || !Array.isArray(args) ||
       String(args[0]).toLowerCase() !== 'list') return false;
@@ -352,6 +364,25 @@ function isProtected(target, context, {
   });
 }
 
+// Return a bounded snapshot for a command rewrite. Never authorize the
+// original wildcard command from this snapshot: its matches can change.
+export async function resolveWindowsSelectStringGlob(filePath, context = {}, { expandGlob = expandWindowsPowerShellGlob, fsApi = { lstat, realpath, readdir }, executable } = {}) {
+  if (typeof filePath !== 'string' || typeof context.cwd !== 'string' || !win.isAbsolute(context.cwd) ||
+      (context.requireAbsolutePaths && !/^[a-z]:[\\/]/i.test(filePath)) ||
+      /[`$]/.test(filePath) || /^[~]/.test(filePath) || /^(?:\\\\[?.]\\|\\\\)/.test(filePath) ||
+      /^[a-z]:[^\\/]/i.test(filePath) ||
+      filePath.split(/[\\/]+/).some((part, index, all) => part === '..' && all.slice(0, index).some(value => /[*?\[\]]/.test(value)))) return null;
+  const absolute = win.resolve(context.cwd, filePath);
+  const parts = absolute.slice(3).split('\\');
+  const wildcardIndex = parts.findIndex(part => /[*?\[\]]/.test(part));
+  if (!/^[a-z]:\\/i.test(absolute) || absolute.slice(2).includes(':') || wildcardIndex < 0 ||
+      parts.some(part => /[. ]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(part))) return null;
+  const prefix = win.join(win.parse(absolute).root, ...parts.slice(0, wildcardIndex));
+  const parent = await resolveTarget(prefix, context.cwd, fsApi, context);
+  if (!parent?.directory || isProtected(parent, context, { allowOrdinarySystemRead: true })) return null;
+  try { return await expandGlob(absolute, { executable }); } catch { return null; }
+}
+
 export async function analyzeWindowsFileChanges(entries, context = {}, { fsApi = { lstat, realpath, readdir } } = {}) {
   if (!Array.isArray(entries) || !entries.length) return { complete: false, actions: [], reason: 'file targets are unavailable' };
   const actions = [];
@@ -529,7 +560,9 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
     const pathPosition = prefixSwitches || (previous?.kind === 'parameter' && !previous.argumentType &&
       ['path', 'literalpath'].includes(String(previous.name || '').toLowerCase()));
     const values = entry.elements[index].values;
-    if (lists.length !== 1 || !['get-content', 'get-item', 'get-filehash', 'test-path', 'resolve-path', 'remove-item'].includes(program) ||
+    const literalSearchPaths = program === 'select-string' && previous?.kind === 'parameter' &&
+      String(previous.name || '').toLowerCase() === 'literalpath' && !previous.argumentType;
+    if (lists.length !== 1 || (!literalSearchPaths && !['get-content', 'get-item', 'get-filehash', 'test-path', 'resolve-path', 'remove-item'].includes(program)) ||
         entry.pipelineInput !== false || !pathPosition || !Array.isArray(values) || !values.length || values.length > 128 ||
         values.some(value => typeof value !== 'string' || !value)) {
       return { complete: false, actions, reason: 'unsupported or ambiguous literal list' };
@@ -594,48 +627,19 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       continue;
     }
     if (program === 'select-string') {
-      const args = parseArguments(entry.elements, new Set(['pattern', 'path', 'literalpath', 'encoding', 'simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']),
-        new Set(['simplematch', 'casesensitive', 'quiet', 'notmatch', 'allmatches', 'list', 'raw', 'noemphasis']));
-      if (!args || (args.named.has('path') && args.named.has('literalpath'))) {
+      const args = parseWindowsSelectStringArgs(entry.elements);
+      if (!args) {
         return { complete: false, actions, reason: 'unsupported Select-String arguments' };
       }
-      const namedPath = args.named.get('literalpath') || args.named.get('path');
-      const hasNamedPattern = args.named.has('pattern');
-      const expectedPositionals = hasNamedPattern ? 0 : 1;
-      if (args.positional.length < expectedPositionals || args.positional.length > expectedPositionals + (namedPath ? 0 : 1)) {
-        return { complete: false, actions, reason: 'unsupported Select-String arguments' };
-      }
-      const filePath = namedPath || args.positional[expectedPositionals];
+      const { filePath } = args;
       if ((!filePath && entry.pipelineInput !== true) || (filePath && entry.pipelineInput === true)) {
         return { complete: false, actions, reason: 'unsupported Select-String arguments' };
       }
       if (filePath) {
-        let paths = [filePath];
         if (!args.named.has('literalpath') && /[*?\[\]]/.test(filePath)) {
-          if (typeof context.cwd !== 'string' || !win.isAbsolute(context.cwd) ||
-              (context.requireAbsolutePaths && !/^[a-z]:[\\/]/i.test(filePath)) ||
-              /[`$]/.test(filePath) || /^[~]/.test(filePath) || /^(?:\\\\[?.]\\|\\\\)/.test(filePath) ||
-              /^[a-z]:[^\\/]/i.test(filePath) ||
-              filePath.split(/[\\/]+/).some((part, index, all) => part === '..' && all.slice(0, index).some(value => /[*?\[\]]/.test(value)))) {
-            return { complete: false, actions, reason: 'wildcard search path is not attested' };
-          }
-          const absolute = win.resolve(context.cwd, filePath);
-          const parts = absolute.slice(3).split('\\');
-          const wildcardIndex = parts.findIndex(part => /[*?\[\]]/.test(part));
-          if (!/^[a-z]:\\/i.test(absolute) || absolute.slice(2).includes(':') || wildcardIndex < 0 ||
-              parts.some(part => /[. ]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(part))) {
-            return { complete: false, actions, reason: 'wildcard search path is invalid' };
-          }
-          const prefix = win.join(win.parse(absolute).root, ...parts.slice(0, wildcardIndex));
-          const parent = await resolveTarget(prefix, context.cwd, fsApi, context);
-          if (!parent?.directory || isProtected(parent, context, { allowOrdinarySystemRead: true })) {
-            return { complete: false, actions, reason: 'wildcard search directory needs review' };
-          }
-          try { paths = await expandGlob(absolute, { executable }); }
-          catch { return { complete: false, actions, reason: 'wildcard search targets cannot be inspected' }; }
-          if (!paths.length) { actions.push({ kind: 'read', program, target: null }); continue; }
+          return { complete: false, actions, reason: 'wildcard search requires bound targets' };
         }
-        const files = await analyzeWindowsFileChanges(paths.map(path => ({ path, kind: 'read' })), context, { fsApi });
+        const files = await analyzeWindowsFileChanges([{ path: filePath, kind: 'read' }], context, { fsApi });
         if (!files.complete) return { ...files, actions: [...actions, ...files.actions] };
         actions.push(...files.actions.map(action => ({ ...action, program })));
         continue;
