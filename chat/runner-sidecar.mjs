@@ -1894,6 +1894,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     agentocApprovalGate: state.agentocApprovalGate,
     threadMcpConfig: state.threadMcpConfig,
     threadShellEnvironment: state.threadShellEnvironment,
+    executionEnvironment: state.executionEnvironment,
   }));
   if (written) state.threadRequestSent = true;
   return written;
@@ -2428,6 +2429,7 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
     interactionMode: state.interactionMode,
     permissionMode: state.permissionMode,
     agentocApprovalGate: state.agentocApprovalGate,
+    executionEnvironment: state.executionEnvironment,
   }));
   if (written) state.startedTurn = true;
   if (written) state.providerStage = 'turn_start_sent';
@@ -3535,6 +3537,13 @@ async function main() {
   // Direct starts and recovery must not adopt an OAuth lock or execute a
   // temporary task through the ordinary sidecar.
   const { run, manifest } = await assertRunLaunchBoundary(runId);
+  if (isLinuxPeerResultRunner()) {
+    const attempt = run.runnerLaunchAttempt ?? 0;
+    if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt > 10000) throw new Error('Invalid protected Run launch attempt');
+    const { waitForProtectedLinuxRunReady } = await import('./linux-run-peer-result-client.mjs');
+    await waitForProtectedLinuxRunReady({ runId, launchAttempt: attempt,
+      socketPath: '/run/agentoc-peer-result/result.sock' });
+  }
   if (process.platform === 'win32' && executionIdentity?.sid) {
     try { await bindWindowsRunExecutionIdentity(runId, executionIdentity); }
     catch (error) { console.error(`[sidecar] Windows Run identity binding unavailable: ${error?.message || 'unknown error'}`); }
@@ -5330,6 +5339,7 @@ async function main() {
                 interactionMode: appServerState.interactionMode,
                 permissionMode: appServerState.permissionMode,
                 agentocApprovalGate: appServerState.agentocApprovalGate,
+                executionEnvironment: appServerState.executionEnvironment,
               });
               if (writeCodexAppServerMessage(proc, retryMessage)) {
                 appServerState.startedTurn = true;

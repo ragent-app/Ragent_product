@@ -80,15 +80,28 @@ try {
   const mcp = await request('mcpServerStatus/list', { threadId: thread.thread.id, serverName: 'fixture' });
   assert.ok(JSON.stringify(mcp).includes('blocked_and_env'), 'scoped MCP must retain its account environment and fail to write');
   const turn = buildCodexAppServerTurnStartMessage({ threadId: thread.thread.id, text: 'fixture', executionEnvironment: selected.executionEnvironment });
-  await request(turn.method, { ...turn.params, approvalPolicy: 'never' });
-  const outcome = await Promise.race([completed, new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error('turn timed out')), 30_000); timer.unref();
-  })]);
+  const unavailable = process.env.AGENTOC_QA_STOP_EXECUTOR === '1';
+  if (unavailable) await executor.stop();
+  let outcome;
+  try {
+    await request(turn.method, { ...turn.params, approvalPolicy: 'never' });
+    outcome = await Promise.race([completed, new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error('turn timed out')), 30_000); timer.unref();
+    })]);
+  } catch (error) {
+    if (!unavailable || /timed out/i.test(error.message)) throw error;
+    outcome = { status: 'failed' };
+  }
   const output = notifications.filter(item => item.method === 'item/completed' && item.params?.item?.type === 'commandExecution')
     .map(item => item.params.item.aggregatedOutput || '').join('');
-  assert.equal(outcome.status, 'completed'); assert.match(output, /SANDBOX_WRITE_BLOCKED/);
+  if (unavailable) {
+    const commands = notifications.filter(item => item.method === 'item/completed' && item.params?.item?.type === 'commandExecution');
+    assert.ok(commands.some(item => item.params.item.status === 'failed' && item.params.item.exitCode !== 0),
+      'an unavailable executor must fail the command instead of running on the broker host');
+  }
+  else { assert.equal(outcome.status, 'completed'); assert.match(output, /SANDBOX_WRITE_BLOCKED/); }
   assert.equal(await readFile(protectedFile, 'utf8'), 'original');
-  console.log('test-codex-readonly-broker-live: shared broker, executor and MCP retained read-only boundary');
+  console.log(`test-codex-readonly-broker-live: ${unavailable ? 'unavailable executor failed closed' : 'shared broker, executor and MCP retained read-only boundary'}`);
 } finally {
   await setup?.close(); if (!setup) await executor?.stop();
   proxy?.kill(); if (broker?.pid) { try { process.kill(broker.pid, 'SIGTERM'); } catch {} }
