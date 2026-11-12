@@ -118,7 +118,7 @@ check('join empty token', joinShimCommandTokens(['']) === "''");
       state: 'completed',
       resultRef: { exitCode: 0, stdout: 'set-property ok', stderr: '' },
     }],
-  }, { manifestHash: 'hash-1' });
+  }, { manifestHash: 'hash-1', opId: 'pop_1' });
   check('resolved payload maps completed', resolved.status === PRIVILEGED_SHIM_RESULT_STATUS.COMPLETED);
   check('resolved payload carries stdout', resolved.stdout === 'set-property ok');
 
@@ -143,9 +143,18 @@ check('join empty token', joinShimCommandTokens(['']) === "''");
   const installAuto = shimResultFromRunPayload({
     status: 'resolved',
     results: [{ manifestHash: '', opId: 'pop_1', state: 'failed', resultRef: { exitCode: 100, error: 'apt failed' } }],
-  }, { manifestHash: 'hash-1' });
+  }, { manifestHash: 'hash-1', opId: 'pop_1' });
   check('installAuto fallback picks only result', installAuto.status === PRIVILEGED_SHIM_RESULT_STATUS.FAILED);
   check('installAuto error surfaced', installAuto.error === 'apt failed');
+
+  const wrongResult = shimResultFromRunPayload({ status: 'resolved', results: [
+    { manifestHash: 'hash-other', opId: 'pop_other', state: 'completed', resultRef: { exitCode: 0 } },
+  ] }, { manifestHash: 'hash-1', opId: 'pop_1' });
+  check('unrelated successful result is not accepted', wrongResult.status === PRIVILEGED_SHIM_RESULT_STATUS.FAILED);
+  const wrongLegacy = shimResultFromRunPayload({ status: 'resolved', results: [
+    { manifestHash: '', opId: 'pop_other', state: 'completed', resultRef: { exitCode: 0 } },
+  ] }, { manifestHash: 'hash-1', opId: 'pop_1' });
+  check('legacy result must match op id', wrongLegacy.status === PRIVILEGED_SHIM_RESULT_STATUS.FAILED);
 
   const empty = shimResultFromRunPayload({ status: 'resolved', results: [] });
   check('resolved without results fails explicitly', empty.status === PRIVILEGED_SHIM_RESULT_STATUS.FAILED);

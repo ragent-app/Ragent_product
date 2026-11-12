@@ -385,6 +385,7 @@ export function buildPrivilegedShimCategoryUpdate(currentRun, batchId, resolved,
   const op = denied || approved;
   const success = approved && event.exitCode === 0 && !trimString(event.error);
   const result = {
+    opId,
     manifestHash: trimString(op.manifestHash),
     canonicalCommand: trimString(op.command),
     state: denied ? 'denied' : success ? 'completed' : 'failed',
@@ -422,6 +423,7 @@ export function buildPrivilegedShimInstallAutoUpdate(currentRun, batch, execResu
     const op = installAutoOps.find((candidate) => candidate?.opId === event?.opId) || null;
     const exitCode = Number.isInteger(event?.exitCode) ? event.exitCode : null;
     return {
+      opId: trimString(event?.opId),
       manifestHash: trimString(op?.manifestHash),
       canonicalCommand: trimString(op?.command),
       state: exitCode === 0 ? 'completed' : 'failed',

@@ -182,7 +182,7 @@ export async function startPrivilegedShimChannel({
     }
   };
 
-  const waitPrivileged = async (batch, pendingManifestHash) => {
+  const waitPrivileged = async (batch, pendingManifestHash, pendingOpId) => {
     const deadlineAt = Date.now() + timeoutBudgetMs;
     const interval = Math.max(50, Number(pollIntervalMs) || PRIVILEGED_SHIM_POLL_INTERVAL_MS);
     while (true) {
@@ -203,7 +203,7 @@ export async function startPrivilegedShimChannel({
       const result = current?.privilegedShimResult;
       if (result?.batchId === batch.batchId) {
         return {
-          ...shimResultFromRunPayload(result, { manifestHash: pendingManifestHash }),
+          ...shimResultFromRunPayload(result, { manifestHash: pendingManifestHash, opId: pendingOpId }),
           writeBack: false,
         };
       }
@@ -225,9 +225,9 @@ export async function startPrivilegedShimChannel({
     }
   };
 
-  const watchResolution = (batch, pendingManifestHash, requestId) => {
+  const watchResolution = (batch, pendingManifestHash, requestId, pendingOpId) => {
     const task = (async () => {
-      const result = await waitPrivileged(batch, pendingManifestHash);
+      const result = await waitPrivileged(batch, pendingManifestHash, pendingOpId);
       if (result?.writeBack === true && !channel.closed) {
         const terminalUpdater = buildPrivilegedShimTerminalUpdate(
           { privilegedShimPending: { batchId: batch.batchId, requestId } },
@@ -362,7 +362,7 @@ export async function startPrivilegedShimChannel({
     });
     // Start the watcher before diagnostic logging so a slow control-plane log
     // write cannot postpone timeout/cancellation handling.
-    void watchResolution(batch, op.manifestHash, request.requestId);
+    void watchResolution(batch, op.manifestHash, request.requestId, op.opId);
     await report('Privileged shim request submitted for owner approval', {
       requestId: request.requestId,
       batchId: batch.batchId,

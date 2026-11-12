@@ -266,14 +266,19 @@ export function shimResultFromRunPayload(runResult, expect = {}) {
   }
   const results = Array.isArray(runResult?.results) ? runResult.results : [];
   const wanted = trimString(expect.manifestHash);
-  const entry = results.find((candidate) => wanted && trimString(candidate?.manifestHash) === wanted)
-    || results.find((candidate) => !wanted) // single-op batches always match
-    || results[0]
-    || null;
+  const wantedOpId = trimString(expect.opId);
+  const entry = wanted
+    ? results.find((candidate) => trimString(candidate?.manifestHash) === wanted
+        && (!wantedOpId || !trimString(candidate?.opId) || trimString(candidate?.opId) === wantedOpId))
+      || results.find((candidate) => !trimString(candidate?.manifestHash)
+        && wantedOpId && trimString(candidate?.opId) === wantedOpId)
+    : wantedOpId
+      ? results.find((candidate) => trimString(candidate?.opId) === wantedOpId)
+      : results.length === 1 ? results[0] : null;
   if (!entry) {
     return {
       status: PRIVILEGED_SHIM_RESULT_STATUS.FAILED,
-      error: 'privileged batch resolved without any per-op result',
+      error: 'privileged batch resolved without a matching per-op result',
     };
   }
   const state = trimString(entry.state);
