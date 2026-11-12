@@ -15,7 +15,7 @@ export function readMacCleanupNotification(message, { threadId, runId } = {}) {
 
 // A clean scan is only an attempt, not a guarantee that an escaped or newly
 // created process cannot survive. Missing evidence is always unconfirmed.
-export function macCancellationCleanupStatus({ platform, brokered, cancelled, interruptSent, observed } = {}) {
-  if (platform !== 'darwin' || !brokered || !cancelled || !interruptSent) return null;
+export function macCancellationCleanupStatus({ platform, brokered, cancelled, observed } = {}) {
+  if (platform !== 'darwin' || !brokered || !cancelled) return null;
   return observed === 'attempted' ? 'attempted' : 'unconfirmed';
 }

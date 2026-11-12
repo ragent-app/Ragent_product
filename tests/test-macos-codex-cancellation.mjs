@@ -22,7 +22,7 @@ assert.equal(macCancellationCleanupStatus({ ...base, observed: 'unconfirmed' }),
 assert.equal(macCancellationCleanupStatus(base), 'unconfirmed');
 assert.equal(macCancellationCleanupStatus({ ...base, platform: 'linux' }), null);
 assert.equal(macCancellationCleanupStatus({ ...base, cancelled: false }), null);
-assert.equal(macCancellationCleanupStatus({ ...base, interruptSent: false }), null);
+assert.equal(macCancellationCleanupStatus({ ...base, interruptSent: false }), 'unconfirmed');
 
 const time = '2026-11-12T02:00:00.000Z';
 const run = { id: 'run-1', sessionId: 'session-1', state: 'cancelled', createdAt: time, updatedAt: time,
