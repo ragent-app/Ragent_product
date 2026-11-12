@@ -414,6 +414,20 @@ export function resolveAccountsRateLimits({ options = {}, env = process.env } = 
   };
 }
 
+// Signed instance operations can be frequent when several computers share a
+// network address. Keep their bounded allowance separate from login and other
+// account-control requests; the handlers still verify every instance proof.
+export function accountsInstanceSyncRateBucket(url, body, basePath = '') {
+  let path = String(url || '').split(/[?#]/, 1)[0];
+  if (basePath && basePath !== '/' && path.startsWith(`${basePath}/`)) path = path.slice(basePath.length);
+  if (path === '/v1/owner-auth/provider-sync/authorize'
+    || /^\/v1\/owner-auth\/sync\/catalog\/[^/]+$/.test(path)
+    || /^\/v1\/owner-auth\/devices\/[^/]+$/.test(path)
+    || path === '/v1/owner-auth/turn/connections/reserve'
+    || path === '/v1/owner-auth/turn/connections/release') return 'instance-sync';
+  return '';
+}
+
 export async function startAccountsServer(options = {}) {
   const databaseUrl = options.databaseUrl || process.env.AGENTOC_ACCOUNTS_DATABASE_URL || '';
   const auditLogger = createAccountsLogger({ level: process.env.AGENTOC_ACCOUNTS_LOG_LEVEL || 'info' });
@@ -726,11 +740,12 @@ export async function startAccountsServer(options = {}) {
     ...(basePath && basePath !== '/' ? [`${basePath}${authorityPath}`, `${basePath}${workspaceAuthorityPath}`] : [])]);
   const mount = (method, max, path = '/*') =>
     fastify[method](path, { config: { rateLimit: { max: method === 'post' && path === '/*'
-      ? request => authorityPaths.has(String(request.url).split(/[?#]/, 1)[0]) ? rateLimits.authorityMax : max
+      ? request => authorityPaths.has(String(request.url).split(/[?#]/, 1)[0]) || accountsInstanceSyncRateBucket(request.url, request.body, basePath) ? rateLimits.authorityMax : max
       : max, timeWindow: '1 minute',
       ...(method === 'post' && path === '/*' ? { keyGenerator: request => JSON.stringify([
         request.ip, inboxPaths.has(String(request.url).split(/[?#]/, 1)[0]) ? 'rendezvous-inbox'
-          : authorityPaths.has(String(request.url).split(/[?#]/, 1)[0]) ? 'binding-authority' : 'account-control',
+          : accountsInstanceSyncRateBucket(request.url, request.body, basePath) ||
+          (authorityPaths.has(String(request.url).split(/[?#]/, 1)[0]) ? 'binding-authority' : 'account-control'),
       ]) } : {}),
     } },
       ...(path.includes('/v1/account-deletion/') ? { bodyLimit: ACCOUNT_DELETION_BODY_LIMIT } : {}) }, async (request, reply) => {

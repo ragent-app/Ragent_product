@@ -145,6 +145,18 @@ try {
   console.log(`test-accounts-rate-limits: ok`);
 }
 
+{
+  const { accountsInstanceSyncRateBucket } = await import('../accounts/server.mjs');
+  const bucket = (path, body = {}) => accountsInstanceSyncRateBucket(path, body, '/accounts');
+  assert.equal(bucket('/accounts/v1/owner-auth/provider-sync/authorize'), 'instance-sync');
+  assert.equal(bucket('/accounts/v1/owner-auth/sync/catalog/acct_123'), 'instance-sync');
+  assert.equal(bucket('/accounts/v1/owner-auth/devices/acct_123', { purpose: 'devices' }), 'instance-sync');
+  assert.equal(bucket('/accounts/v1/owner-auth/turn/connections/reserve'), 'instance-sync');
+  assert.equal(bucket('/accounts/v1/owner-auth/devices/acct_123/unbind', { purpose: 'unbind' }), '');
+  assert.equal(bucket('/accounts/v1/owner-auth/sync/catalog/acct_123/extra'), '');
+  assert.equal(bucket('/accounts/v1/owner-auth/login'), '');
+}
+
 // ---------- Google ID token verifier 加固 ----------
 {
   const nowSeconds = Math.floor(Date.now() / 1000);
