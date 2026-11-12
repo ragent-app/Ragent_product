@@ -2175,6 +2175,11 @@ class ChatViewModel(
         }
         val restoredDraft = sessionDrafts[fixed to sessionId].orEmpty()
         val restoredPendingTurn = sessionPendingTurns[fixed to sessionId]
+        // Creating the first turn assigns its server session ID while the
+        // same message is already visible locally. Do not cover that pending
+        // message with the history transition while its initial sync runs.
+        val initialTurnVisible = restoredPendingTurn != null &&
+            uncommittedNewSessions[fixed to sessionId] == restoredPendingTurn.requestId
         val selectedSession = knownSessions.takeIf { knownSessionsRepository === fixed }?.firstOrNull { it.id == sessionId }
         updateState {
             copy(
@@ -2198,7 +2203,7 @@ class ChatViewModel(
                 timelineItems = emptyList(),
                 timelineSessionId = null,
                 messageCount = 0,
-                historyLoading = true,
+                historyLoading = !initialTurnVisible,
                 approval = null,
                 resolvingApprovalId = null,
                 error = null,

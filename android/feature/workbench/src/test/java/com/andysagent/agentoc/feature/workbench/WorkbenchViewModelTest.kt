@@ -1086,6 +1086,39 @@ class WorkbenchViewModelTest {
     }
 
     @Test
+    fun `first message remains visible while new session history is loading`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val historyGate = CompletableDeferred<Unit>()
+            val sendGate = CompletableDeferred<Unit>()
+            val repository = FakeSessionRepository(
+                connection = RuntimeConnectionState.Connected,
+                refreshGate = historyGate,
+                messageSendGate = sendGate,
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+            viewModel.onEvent(ChatEvent.CreateSession())
+            viewModel.onEvent(ChatEvent.ComposerChanged("first message"))
+            viewModel.onEvent(ChatEvent.SendMessage)
+            advanceUntilIdle()
+
+            assertEquals("session-created", viewModel.state.value.sessionId)
+            assertEquals("first message", viewModel.state.value.pendingTurn?.text)
+            assertFalse(viewModel.state.value.historyLoading)
+
+            sendGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("first message", viewModel.state.value.acceptedTurns.single().text)
+            assertFalse(viewModel.state.value.historyLoading)
+            historyGate.complete(Unit)
+            advanceUntilIdle()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `explicit new session stays provisional until the first turn`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
