@@ -54,10 +54,10 @@ assert.deepEqual(harnesses.find((harness) => harness.id === 'hermes').installArg
 assert.equal(harnesses.find((harness) => harness.id === 'pi').package, '@earendil-works/pi-coding-agent');
 assert.equal(harnesses.find((harness) => harness.id === 'deepseek-harness').runtimeFamily, 'deepseek-harness-acp');
 assert.equal(harnesses.find((harness) => harness.id === 'deepseek-harness').status, 'ready');
-assert.equal(harnesses.find((harness) => harness.id === 'codex').harnessVersion, '0.164.0');
-assert.equal(harnesses.find((harness) => harness.id === 'codex').adapterCompatibility.adapterVersion, '1.2');
+assert.equal(harnesses.find((harness) => harness.id === 'codex').harnessVersion, '0.167.2');
+assert.equal(harnesses.find((harness) => harness.id === 'codex').adapterCompatibility.adapterVersion, '1.3');
 assert.deepEqual(harnesses.find((harness) => harness.id === 'codex').adapterCompatibility.compatibleVersions, [
-  '0.150.x', '0.151.x', '0.152.x', '0.153.x', '0.164.0',
+  '0.150.x', '0.151.x', '0.152.x', '0.153.x', '0.164.0', '0.167.2',
 ]);
 assert.equal(harnesses.find((harness) => harness.id === 'claude').harnessVersion, '2.1.310');
 assert.equal(isAdapterCompatible('agy', '1.1.22'), true, 'agy latest-channel policy must accept a parsed release version');
@@ -72,6 +72,8 @@ assert.equal(isAdapterCompatible('codex', '0.152.9'), true, 'validated Codex 0.1
 assert.equal(isAdapterCompatible('codex', '0.153.4'), true, 'current stable Codex release must be accepted');
 assert.equal(isAdapterCompatible('codex', '0.154.0'), false, 'unvalidated Codex releases must fail closed');
 assert.equal(isAdapterCompatible('codex', '0.164.0'), true);
+assert.equal(isAdapterCompatible('codex', '0.167.2'), true);
+assert.equal(isAdapterCompatible('codex', '0.167.3'), false);
 assert.equal(isAdapterCompatible('codex', '0.165.0'), false);
 assert.equal(isAdapterCompatible('codex', '0.165.0-alpha.1'), false);
 assert.equal(isAdapterCompatible('codex', '0.165.0', { compatibleVersions: ['*'] }), false,

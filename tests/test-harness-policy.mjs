@@ -9,7 +9,7 @@ const policy = buildHarnessPolicyDocument();
 assert.equal(policy.schemaVersion, 2);
 assert.equal(policy.catalogRevision, HARNESS_POLICY_CATALOG_REVISION);
 assert.equal(policy.policies.claude.minimumVersion, '2.1.247');
-assert.equal(policy.policies.codex.targetVersion, '0.164.0');
+assert.equal(policy.policies.codex.targetVersion, '0.167.2');
 assert.equal(Object.keys(policy.policies).length, Object.keys(DEFAULT_HARNESS_POLICY).length);
 
 process.env.AGENTOC_HARNESS_POLICY_URL = 'https://policy.example.test';
@@ -26,7 +26,7 @@ const stale = await fetchHarnessPolicy({
   }),
 });
 assert.equal(stale.source, 'builtin-fallback');
-assert.equal(stale.policies.codex.targetVersion, '0.164.0');
+assert.equal(stale.policies.codex.targetVersion, '0.167.2');
 
 clearHarnessPolicyCache();
 const current = await fetchHarnessPolicy({
