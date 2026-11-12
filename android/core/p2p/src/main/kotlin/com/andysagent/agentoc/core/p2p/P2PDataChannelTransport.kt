@@ -188,6 +188,36 @@ class WebRTCDataChannelTransport(
             }
         }
     }
+    /** Selected ICE path diagnostics deliberately exclude candidate addresses and identifiers. */
+    private fun traceIceRtcStats(stage: String) {
+        if (!debuggable || !Log.isLoggable("AgentoC.Ice", Log.DEBUG)) return
+        runCatching {
+            peerConnection?.getStats { report ->
+                runCatching {
+                    val entries = report.statsMap
+                    val pairId = entries.values.firstOrNull { it.type == "transport" &&
+                        it.members["selectedCandidatePairId"] is String }?.members?.get("selectedCandidatePairId") as? String
+                    val pair = pairId?.let { entries[it] } ?: entries.values.firstOrNull { it.type == "candidate-pair" &&
+                        it.members["nominated"] == true && it.members["state"] == "succeeded" }
+                    val local = (pair?.members?.get("localCandidateId") as? String)?.let { entries[it] }
+                    val remote = (pair?.members?.get("remoteCandidateId") as? String)?.let { entries[it] }
+                    fun category(value: Any?, allowed: Set<String>): String =
+                        (value as? String)?.lowercase()?.takeIf { it in allowed } ?: "unknown"
+                    val types = setOf("host", "srflx", "prflx", "relay")
+                    val protocols = setOf("udp", "tcp", "tls")
+                    val rtt = (pair?.members?.get("currentRoundTripTime") as? Number)?.toDouble()
+                        ?.takeIf { it.isFinite() && it >= 0.0 && it <= 3600.0 }
+                    Log.d("AgentoC.Ice", "channel=$debugCarrierId stage=$stage" +
+                        " localType=${category(local?.members?.get("candidateType"), types)}" +
+                        " localProtocol=${category(local?.members?.get("protocol"), protocols)}" +
+                        " relayProtocol=${category(local?.members?.get("relayProtocol"), protocols)}" +
+                        " remoteType=${category(remote?.members?.get("candidateType"), types)}" +
+                        " remoteProtocol=${category(remote?.members?.get("protocol"), protocols)} rttSeconds=$rtt")
+                }
+            }
+        }
+    }
+
     private val debugCarrierId = debugCarrierSequence.incrementAndGet()
     private val debuggable = appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
     private fun traceConnect(stage: String) {
@@ -286,11 +316,13 @@ class WebRTCDataChannelTransport(
             Log.i(TAG, "ice_connection_state=$state channel=$debugCarrierId")
             when (state) {
                 PeerConnection.IceConnectionState.DISCONNECTED -> {
+                    traceIceRtcStats("disconnected")
                     iceDisconnected = true
                     if (isOpen) iceDisconnectWatchdog.disconnected()
                 }
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> {
+                    if (state == PeerConnection.IceConnectionState.CONNECTED) traceIceRtcStats("connected")
                     traceConnect("ice_connected")
                     iceDisconnected = false
                     iceDisconnectWatchdog.recovered()
