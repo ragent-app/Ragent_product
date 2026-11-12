@@ -64,6 +64,7 @@ import {
 } from './codex-session-metrics.mjs';
 import { codexRolloutAccountId, findAccountCodexRollout, findManagedCodexRollout } from './codex-managed-rollout.mjs';
 import { codexRunBindingPath, verifyCodexRunBinding } from '../lib/provider-runtime/codex-run-binding.mjs';
+import { assertCodexHomeNotFenced } from '../lib/provider-runtime/codex-home-fence.mjs';
 import {
   buildCodexAppServerInitializeMessage,
   buildCodexAppServerInitializedNotification,
@@ -4253,6 +4254,9 @@ async function main() {
     nativeOAuthLockHandle = await acquireNativeOAuthLock(
       join(dirname(runnerCodexHomeDir), '.agentoc-native-oauth.lock'),
     );
+  }
+  if (isCodexAppServerFamily && codexOAuthRuntime && !codexAppServerBrokered) {
+    await assertCodexHomeNotFenced(dirname(runnerCodexHomeDir));
   }
   let sandboxEmptyDir = null;
   const providerSpawnEnv = isCodexAppServerFamily && !codexAppServerBrokered

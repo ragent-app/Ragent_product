@@ -21,6 +21,7 @@ import { mkdir, unlink, chmod, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-runtime/oauth-lock.mjs';
+import { assertCodexHomeNotFenced } from '../lib/provider-runtime/codex-home-fence.mjs';
 import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
 import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.mjs';
 import { createCodexWindowsHookRouter } from './codex-windows-hook-router.mjs';
@@ -239,6 +240,7 @@ export async function ensureCodexAppServerBroker({
     error.code = 'CODEX_APP_SERVER_BROKER_INVALID';
     throw error;
   }
+  if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
   if (await probeBroker(normalizedSocket)) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
 
   if (!isWindowsNamedPipePath(normalizedSocket)) {
@@ -252,6 +254,7 @@ export async function ensureCodexAppServerBroker({
       waitMs: BROKER_LOCK_WAIT_MS,
       pollMs: 50,
     });
+    if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
     if (await probeBroker(normalizedSocket)) {
       return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
     }
@@ -499,6 +502,8 @@ function runBroker() {
     if (!home) throw new Error('Codex broker requires its managed provider home');
     oauthLock = await acquireNativeOAuthLock(nativeOAuthLockPath(dirname(home)), { waitMs: 15_000 });
     if (stopping) { await oauthLock.release(); return; }
+    try { await assertCodexHomeNotFenced(dirname(home)); }
+    catch (error) { await oauthLock.release(); oauthLock = null; throw error; }
     try {
       const auth = JSON.parse(await readFile(join(home, 'auth.json'), 'utf8'));
       accountDigest = codexBrokerAccountDigest(codexAuthAccountId(auth?.tokens));

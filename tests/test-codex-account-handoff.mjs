@@ -12,10 +12,11 @@ test('legacy ownership remains fenced through reconciliation and canonical start
     acquireCreationLock: async () => { events.push('creation-acquired'); return { release: async () => events.push('creation-released') }; },
     retireAndAcquireHome: async () => { events.push('legacy-fenced'); return { release: async () => events.push('legacy-released') }; },
     reconcileCredentials: async () => { events.push('reconciled'); },
+    installFence: async () => { events.push('durable-fence'); },
     startCanonical: async () => { events.push('canonical-started'); return 'ready'; },
   });
   assert.equal(result, 'ready');
-  assert.deepEqual(events, ['creation-acquired', 'legacy-fenced', 'reconciled', 'canonical-started', 'legacy-released', 'creation-released']);
+  assert.deepEqual(events, ['creation-acquired', 'legacy-fenced', 'reconciled', 'durable-fence', 'canonical-started', 'legacy-released', 'creation-released']);
 });
 
 test('failed reconciliation releases both locks and never starts canonical', async () => {
