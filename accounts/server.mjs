@@ -30,6 +30,7 @@ import { handleAccountPairingRoutes } from './account-pairing-routes.mjs';
 import { createPostgresStoreFromUrl } from './store/postgres.mjs';
 import { ACCOUNT_ASR_MAX_AUDIO_BYTES } from './asr-audio.mjs';
 import { ACCOUNT_ASR_MODEL } from './asr-policy.mjs';
+import { createAttachmentRelay } from './attachment-relay.mjs';
 import { createAccountAsrPostgresStore } from './asr-postgres-store.mjs';
 import { createAccountAsrService } from './asr-service.mjs';
 import { createOpenAiTranscriber } from './asr-openai.mjs';
@@ -471,7 +472,12 @@ export async function startAccountsServer(options = {}) {
     bodyLimit: 64 * 1024,
   });
   await fastify.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
+  // Disabled until the mobile and instance clients negotiate this capability.
+  // The relay itself has no disk spool and never receives an encryption key.
+  const attachmentRelay = (options.attachmentRelayEnabled ??
+    process.env.AGENTOC_ACCOUNTS_ATTACHMENT_RELAY_ENABLED === '1') ? createAttachmentRelay() : null;
   fastify.addHook('preClose', async () => { app.broker.closeRendezvousInboxWaiters(); });
+  fastify.addHook('preClose', async () => { attachmentRelay?.close(); });
   fastify.addHook('onClose', async () => {
     await app.accountDeletion?.close();
     await app.asrService?.close?.();
@@ -533,6 +539,48 @@ export async function startAccountsServer(options = {}) {
   const asrUsagePath = '/v1/owner-auth/account/asr/usage';
   const asrConsentPath = '/v1/owner-auth/account/asr/consent';
   const asrPath = (path) => [...new Set([path, ...(basePath && basePath !== '/' ? [`${basePath}${path}`] : [])])];
+  if (attachmentRelay) {
+    // Keep the body as a stream. The relay applies its own reservation-bound
+    // byte limit and pipeline backpressure; it must never be buffered by Fastify.
+    fastify.addContentTypeParser('application/vnd.agentoc.attachment-relay',
+      (_request, payload, done) => done(null, payload));
+    const bearer = request => /^Bearer\s+([A-Za-z0-9_-]+)$/i.exec(request.headers.authorization || '')?.[1] || '';
+    for (const path of asrPath('/v1/owner-auth/account/attachment-relay/reservations')) {
+      fastify.post(path, { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async (request, reply) => {
+        reply.headers({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+        const body = request.body;
+        if (!body || Array.isArray(body) || typeof body !== 'object' ||
+            Object.keys(body).length !== 1 || !Number.isSafeInteger(body.sizeBytes)) {
+          return reply.code(400).send({ code: 'attachment_relay_invalid' });
+        }
+        try {
+          const account = await app.broker.authenticateAccountAsr({ credential: bearer(request) });
+          return reply.code(201).send(attachmentRelay.reserve(account.accountId, body.sizeBytes));
+        } catch (error) {
+          const status = Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 500
+            ? error.statusCode : error?.message === 'Relay capacity exhausted' ? 429 : 400;
+          return reply.code(status).send({ code: status === 429 ? 'attachment_relay_capacity' : 'attachment_relay_unavailable' });
+        }
+      });
+    }
+    for (const path of asrPath('/v1/owner-auth/account/attachment-relay/:id/content')) {
+      fastify.put(path, { bodyLimit: 64 * 1024 * 1024,
+        config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
+        if (!/^[a-f0-9]{32}$/.test(request.params.id) ||
+            request.headers['content-type'] !== 'application/vnd.agentoc.attachment-relay') {
+          return reply.code(400).send({ code: 'attachment_relay_invalid' });
+        }
+        reply.hijack();
+        attachmentRelay.attachWriter(request.params.id, bearer(request), request.body, reply.raw,
+          request.headers['content-length']);
+      });
+      fastify.get(path, { config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
+        if (!/^[a-f0-9]{32}$/.test(request.params.id)) return reply.code(404).send();
+        reply.hijack();
+        attachmentRelay.attachReader(request.params.id, bearer(request), reply.raw);
+      });
+    }
+  }
   fastify.addContentTypeParser('audio/wav', { parseAs: 'buffer', bodyLimit: ACCOUNT_ASR_MAX_AUDIO_BYTES },
     (_request, body, done) => done(null, body));
   for (const path of asrPath(asrConsentPath)) {
