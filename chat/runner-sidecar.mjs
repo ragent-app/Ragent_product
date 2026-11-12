@@ -3159,7 +3159,7 @@ async function flushCodexAppServerApprovalResponses(proc, state, run) {
   }
 }
 
-async function flushClaudeBidiApprovalResponses(proc, state, run) {
+export async function flushClaudeBidiApprovalResponses(proc, state, run) {
   if (!state || state.terminalSeen) return;
   const queue = Array.isArray(run?.appServerApprovalResponseQueue) ? run.appServerApprovalResponseQueue : [];
   for (const entry of queue) {
@@ -3675,10 +3675,8 @@ async function main() {
     })
     : null;
   if (appServerState?.agentocApprovalGate) {
-    // The OAuth app-server broker is shared by multiple Run directories, so
-    // it cannot carry one Run's project trust setting. Project-trust gated
-    // Codex Runs use a private app-server process; the existing native OAuth
-    // lock keeps refresh-token mutation exclusive while the process is active.
+    // Direct process launches still need this override. The shared broker
+    // uses the equivalent thread-scoped trust configuration instead.
     args = [...args, ...buildCodexAppServerProjectTrustArgs(resolvedFolder.cwd)];
   }
   if (appServerState && manifest.tool === 'codex') {
@@ -3772,8 +3770,9 @@ async function main() {
     ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
     : null;
   const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
-  const threadScopedCodexMcp = Boolean(appServerState && codexOAuthRuntime && !readOnlyRequested && !WORKBENCH_EXECUTION_POLICY
-    && !windowsElevationHook && !appServerState.agentocApprovalGate);
+  const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime && !readOnlyRequested && !WORKBENCH_EXECUTION_POLICY
+    && !windowsElevationHook);
+  const threadScopedCodexMcp = sharedCodexThreadSupported;
   const windowsBrokerChannel = manifest.options?.windowsBrokerChannel;
   const windowsBrokerMcpRequested = !readOnlyRequested && Boolean(
     windowsBrokerChannel?.token && windowsBrokerChannel?.endpoint,
@@ -4085,18 +4084,22 @@ async function main() {
   // only the broker process can observe/refresh auth.json. This removes the
   // refresh-token race without forbidding same-account concurrency.
   const runSpecificCodexMcp = isCodexAppServerFamily
-    && ((Boolean(managedMcpOverlay) && !threadScopedCodexMcp) || appServerState?.agentocApprovalGate === true);
+    && ((Boolean(managedMcpOverlay) && !threadScopedCodexMcp)
+      || (appServerState?.agentocApprovalGate === true && !sharedCodexThreadSupported));
   let codexAppServerBrokered = false;
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
       && !sandboxRequired) {
     const brokerSocketPath = codexAppServerBrokerSocketPath(runnerCodexHomeDir);
     try {
+      const brokerCommand = appServerState?.agentocApprovalGate
+        ? await resolveCommandSpawnSpec(initialCommand, initialArgs, { cwd: resolvedFolder.cwd, env: spawnEnv })
+        : resolvedCommand;
       await ensureCodexAppServerBroker({
         socketPath: brokerSocketPath,
         lockPath: codexAppServerBrokerLockPath(runnerCodexHomeDir),
-        upstreamFile: resolvedCommand.file,
-        upstreamArgs: resolvedCommand.args,
-        upstreamWindowsVerbatimArguments: resolvedCommand.windowsVerbatimArguments === true,
+        upstreamFile: brokerCommand.file,
+        upstreamArgs: brokerCommand.args,
+        upstreamWindowsVerbatimArguments: brokerCommand.windowsVerbatimArguments === true,
         cwd: resolvedFolder.cwd,
         env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, AGENTOC_CODEX_BROKER_BASE_PATH: codexBrokerBasePath },
         scriptPath: CODEX_APP_SERVER_BROKER_SCRIPT,
