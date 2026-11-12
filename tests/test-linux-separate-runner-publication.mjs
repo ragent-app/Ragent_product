@@ -56,7 +56,7 @@ try {
   runAs(owner, 'create', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'agentoc-runner' });
   const dir = join(spool, 'run_scopedaclfixture');
   const acl = execFileSync('/usr/bin/getfacl', ['-cpn', join(dir,'status.json')], {encoding:'utf8'});
-  assert.match(acl, new RegExp(`^user:${runner.uid}:rw-$`, 'm'));
+  assert.match(acl, new RegExp(`^user:${runner.uid}:r--$`, 'm'));
   assert.match(acl, /^group::---$/m);
   assert.match(acl, /^other::---$/m);
   const tokenAcl = execFileSync('/usr/bin/getfacl', ['-cpn', join(dir,'session-control.cap')], {encoding:'utf8'});
@@ -66,6 +66,7 @@ try {
   ]).status;
   assert.equal(testAs(runner, '-r', join(dir,'session-control.cap')), 0);
   assert.notEqual(testAs(runner, '-w', join(dir,'session-control.cap')), 0);
+  assert.notEqual(testAs(runner, '-w', join(dir,'status.json')), 0);
   await symlink('/etc/passwd', join(dir,'browser.cap'));
   await assert.rejects(() => grantExistingRunnerFiles(dir, {controlUid:owner.uid, runnerUid:runner.uid}),
     {code:'RUNNER_FILE_ACCESS_INVALID'});

@@ -1737,10 +1737,10 @@ export async function createRun({ status, manifest }, { authorizePublication } =
       // status.json is the acceptance commit point. A manifest-only directory is
       // an unpublished orphan, not a Run. All execution inputs precede that point.
       await writeJsonAtomic(runManifestPath(run.id), persistedManifest,
-        await runFileWriteOptions(run.id, { ...COMPACT_JSON_OPTIONS, durable: true }, { writable:true }));
+        await runFileWriteOptions(run.id, { ...COMPACT_JSON_OPTIONS, durable: true }));
       await authorizePublication?.();
       await writeJsonAtomic(runStatusPath(run.id), run,
-        await runFileWriteOptions(run.id, { ...COMPACT_JSON_OPTIONS, durable: true }, { writable:true }));
+        await runFileWriteOptions(run.id, { ...COMPACT_JSON_OPTIONS, durable: true }));
       runStatusCache.set(run.id, run);
       runManifestCache.set(run.id, persistedManifest);
       await recordCacheMeta(run.id, runStatusPath(run.id), runStatusCacheMeta);
@@ -1819,7 +1819,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
       durable: Boolean(next.runPublication),
       beforeReplace: beforeCommit,
       preserveOwner,
-    }, { writable:true }));
+    }));
     runStatusCache.set(runId, next);
     await recordCacheMeta(runId, runStatusPath(runId), runStatusCacheMeta);
     // Heartbeats and observer ticks update status.json frequently.  The index
@@ -1849,7 +1849,7 @@ export async function updateRunManifest(runId, updater) {
     const next = prepared.manifest;
     await writeSessionControlSecrets(runId, prepared);
     await writeJsonAtomic(runManifestPath(runId), next,
-      await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: Boolean(next.runPublication) }, { writable:true }));
+      await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: Boolean(next.runPublication) }));
     runManifestCache.set(runId, next);
     return clone(next);
   }));
@@ -1977,7 +1977,7 @@ export async function renewRunSessionControlCapability({
     }, manifest);
     await writeSessionControlSecrets(normalizedRunId, prepared);
     await writeJsonAtomic(runManifestPath(normalizedRunId), prepared.manifest,
-      await runFileWriteOptions(normalizedRunId, { ...COMPACT_JSON_OPTIONS, durable: Boolean(prepared.manifest.runPublication) }, { writable:true }));
+      await runFileWriteOptions(normalizedRunId, { ...COMPACT_JSON_OPTIONS, durable: Boolean(prepared.manifest.runPublication) }));
     runManifestCache.set(normalizedRunId, prepared.manifest);
     return { capability, renewal, manifest: clone(prepared.manifest) };
   }));
