@@ -97,14 +97,22 @@ function trustedContext(options) {
 
 // --- 默认 fs facts provider（真实 fs 适配；git/package/service 为 shadow 占位） ---
 
-function statToFacts(st) {
+export function statToFacts(st) {
+  // Node's default number-based stat can round device and inode identifiers.
+  // Keep them as exact decimal strings; file size is advisory and becomes
+  // unknown if it cannot be represented safely by existing consumers.
+  const device = String(st.dev);
+  const inode = String(st.ino);
+  const size = typeof st.size === 'bigint'
+    ? (st.size >= 0n && st.size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(st.size) : null)
+    : (Number.isSafeInteger(st.size) && st.size >= 0 ? st.size : null);
   return {
     type: st.isDirectory() ? 'dir' : st.isFile() ? 'file' : st.isSymbolicLink() ? 'symlink' : 'other',
-    dev: st.dev,
-    ino: st.ino,
-    size: st.size,
-    mountId: String(st.dev),
-    identity: `${st.dev}:${st.ino}`,
+    dev: device,
+    ino: inode,
+    size,
+    mountId: device,
+    identity: `${device}:${inode}`,
   };
 }
 
@@ -116,8 +124,8 @@ export function createDefaultFsProvider() {
   return {
     name: 'default',
     async realpath(p) { return realpath(p); },
-    async lstat(p) { return statToFacts(await lstat(p)); },
-    async stat(p) { return statToFacts(await stat(p)); },
+    async lstat(p) { return statToFacts(await lstat(p, { bigint: true })); },
+    async stat(p) { return statToFacts(await stat(p, { bigint: true })); },
     async readdir(p) {
       const entries = await readdir(p, { withFileTypes: true });
       return entries.map((e) => ({
@@ -125,8 +133,8 @@ export function createDefaultFsProvider() {
         type: e.isDirectory() ? 'dir' : e.isSymbolicLink() ? 'symlink' : 'file',
       }));
     },
-    async mountId(p) { return String((await stat(p)).dev); },
-    async identity(p) { const st = await stat(p); return `${st.dev}:${st.ino}`; },
+    async mountId(p) { return String((await stat(p, { bigint: true })).dev); },
+    async identity(p) { const st = await stat(p, { bigint: true }); return `${st.dev}:${st.ino}`; },
     async gitFacts() { return { supported: false, gitRoot: null, tracked: null, modified: null }; },
     async packageFacts() { return null; },
     async serviceFacts() { return null; },
@@ -378,7 +386,9 @@ async function walkTree(provider, canonicalPath, options) {
         }
       } else {
         files += 1;
-        size += Number.isFinite(f.size) ? f.size : 0;
+        if (!Number.isSafeInteger(f.size) || f.size < 0) unreadable = true;
+        else size += f.size;
+        if (!Number.isSafeInteger(size)) unreadable = true;
       }
     }
   }
@@ -581,6 +591,7 @@ async function resolveFilesystemTarget(target, caller, options, provider) {
       const tree = await walkTree(provider, resolved.canonicalPath, options);
       totalItems += tree.count;
       totalSize += tree.size;
+      if (!Number.isSafeInteger(totalSize)) unknowns.push('scope:file-size-unavailable');
       if (tree.unreadable) {
         anyUnreadable = true;
         unknowns.push('scope:tree-unreadable');
@@ -603,7 +614,12 @@ async function resolveFilesystemTarget(target, caller, options, provider) {
       }
     } else if (resolved.type === 'dir' || resolved.type === 'file') {
       totalItems += 1;
-      totalSize += Number.isFinite(resolved.size) ? resolved.size : 0;
+      if (resolved.type === 'file' && (!Number.isSafeInteger(resolved.size) || resolved.size < 0)) {
+        unknowns.push('scope:file-size-unavailable');
+      } else {
+        totalSize += Number.isSafeInteger(resolved.size) ? resolved.size : 0;
+        if (!Number.isSafeInteger(totalSize)) unknowns.push('scope:file-size-unavailable');
+      }
     } else {
       totalItems += 0;
     }
@@ -657,6 +673,7 @@ async function resolveFilesystemTarget(target, caller, options, provider) {
   }
   const incompleteScope = unknowns.some((code) => (
     code === 'scope:trusted-project-root-unavailable'
+    || code === 'scope:file-size-unavailable'
     || code === 'scope:tree-unreadable'
     || code === 'tree:too-large'
     || code === 'tree:depth-limit'

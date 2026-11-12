@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import assert from 'assert/strict';
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import {
   createDefaultFsProvider,
+  statToFacts,
   resolveSemanticContext,
   RESOLVER_PLATFORM,
   SEMANTIC_RESOLVER_VERSION,
@@ -133,6 +136,29 @@ check('default provider shape', typeof defaultProvider.realpath === 'function'
   && typeof defaultProvider.readdir === 'function'
   && typeof defaultProvider.stat === 'function');
 eq('default provider git shadow', defaultProvider.gitFacts && typeof defaultProvider.gitFacts === 'function', true);
+const largeFacts = statToFacts({
+  dev: 9007199254740993n, ino: 9007199254740995n, size: 9007199254740997n,
+  isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false,
+});
+eq('large identity retains exact integers', largeFacts.identity, '9007199254740993:9007199254740995');
+eq('unrepresentable advisory size is unknown', largeFacts.size, null);
+const ownPath = fileURLToPath(import.meta.url);
+const actualStat = await stat(ownPath, { bigint: true });
+const actualFacts = await defaultProvider.stat(ownPath);
+eq('default provider identity matches native bigints', actualFacts.identity, `${actualStat.dev}:${actualStat.ino}`);
+eq('default identity probe matches native bigints', await defaultProvider.identity(ownPath), `${actualStat.dev}:${actualStat.ino}`);
+const unknownSizeFixture = makeFixture({ mutate: ({ put }) => put('/project/app.js', { type: 'file', ino: 105, size: null }) });
+const unknownSize = await resolveSemanticContext({
+  target: { kind: 'filesystem_file', root: '/project/app.js' }, caller, options: opts(unknownSizeFixture),
+});
+eq('unknown file size cannot produce complete scope', unknownSize.scope.computed, false);
+check('unknown file size is recorded', unknownSize.unknowns.includes('scope:file-size-unavailable'));
+const unknownTreeFixture = makeFixture({ mutate: ({ put }) => put('/project/build/cache/x.o', { type: 'file', ino: 103, size: null }) });
+const unknownTree = await resolveSemanticContext({
+  target: { kind: 'filesystem_tree', root: '/project/build/cache', recursive: true }, caller, options: opts(unknownTreeFixture),
+});
+eq('unknown tree file size cannot produce complete scope', unknownTree.scope.computed, false);
+check('unknown tree file size is recorded', unknownTree.unknowns.includes('scope:tree-unreadable'));
 
 // --- golden：项目内普通删除 ---
 
