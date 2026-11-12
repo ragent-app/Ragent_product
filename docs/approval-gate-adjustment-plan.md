@@ -6,6 +6,7 @@
 
 - Windows 审批器已支持一部分静态 Bash 管道和常见 Git 只读参数，并区分上下文不足、配置不可信、额外权限等原因；`recommended` 与 `full-auto` 继续使用同一自动放行标准。
 - 2026-11-12 在本机 Windows 重跑 `test-windows-approval-gate.mjs`、`test-windows-bash-actions.mjs`、`test-windows-powershell-actions.mjs` 和 `test-windows-sidecar-approval-live.mjs`，四项均通过，最后一项覆盖 Claude 和 Codex 的 sidecar 决策。这些是本地回归，不能代表真实生产工作负载的审批频率；执行期间共享工作区另有并行修改。
+- 同日用真实 Windows Claude CLI、Run 准入生成的风险上下文和本机模拟模型复验：`rg -n SEARCH_TOKEN .` 在 recommended 和 full-auto 都经审批回调自动通过，测试敏感内容未返回；危险卸载命令在 recommended 进入人工队列并由夹具拒绝，在 full-auto 自动拒绝。四次均通过，未调用官方模型。首次把实例控制目录放在被搜索的项目内，触发受保护目录判断并等待人工回复；调整夹具，将实例目录置于项目外后才得到上述结果。受保护目录位于搜索范围内的情形不包含在这次通过结果中。
 - 本机发现 ripgrep 配置可以改变默认搜索范围或运行预处理器。对于受支持的绝对路径搜索，托管桥接会先禁用隐式配置，再重新通过风险门；真实 Windows Codex App Server 使用本地模拟模型服务验证了两种档位，未使用官方账号额度。Codex Hook 的相对路径搜索仍缺少可靠的实际工作目录；Claude 的受支持相对路径搜索现已使用运行时目录校验。
 - 三星 SM-S9060、Android 16 上，审批界面和事件重放合计 18 项全部通过。该测试使用设备上的合成数据，不能证明手机经真实服务提交审批的链路已经通过。
 - 2026-11-12 再次用同一三星和已有隔离测试 APK，连接当前 Windows 审批分类和队列：Claude 危险请求拒绝回传 1/1 通过，Codex 同组两个请求的一次拒绝回传 1/1 通过。两次使用本机 HTTP 测试适配器和 USB 反向端口，未调用真实账号；测试后已移除测试包和端口映射。

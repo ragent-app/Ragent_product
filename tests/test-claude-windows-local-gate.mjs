@@ -13,15 +13,21 @@ const binary = process.env.AGENTOC_TEST_CLAUDE_BINARY;
 if (!binary || !path.isAbsolute(binary)) throw new Error('absolute Claude executable required');
 const unicodeFixture = process.env.AGENTOC_QA_CLAUDE_UNICODE === '1';
 const root = await mkdtemp(path.join(os.tmpdir(), unicodeFixture ? 'agentoc-claude-local-gate-项目 空格-' : 'agentoc-claude-local-gate-'));
+// The real admission snapshot protects the instance's control directories.
+// Keep those outside the project so ordinary recursive project searches do
+// not inadvertently search the fixture's own Ragent configuration.
+const separateInstance = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
+  ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-instance-')) : '';
+const instance = separateInstance || path.join(root, 'instance');
 const config = path.join(root, 'config');
 await mkdir(config);
 const askAll = process.env.AGENTOC_QA_CLAUDE_ASK_ALL === '1';
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+process.env.AGENTOC_INSTANCE_ROOT = instance;
+process.env.AGENTOC_CONFIG_DIR = path.join(instance, 'config');
+process.env.AGENTOC_WORK_ROOT_DIR = path.join(instance, 'workspace');
+process.env.AGENTOC_MEMORY_DIR = path.join(instance, 'memory');
+process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(instance, 'provider-homes');
+process.env.AGENTOC_RUN_SPOOL_DIR = path.join(instance, 'data', 'chat-runs');
 const { buildClaudeBidiArgs } = await import('../chat/adapters/claude-bidi.mjs');
 const { buildPlatformSpawnSpec } = await import('../lib/executable-resolution.mjs');
 const { buildClaudeBidiApprovalResponseMessage, buildClaudeBidiInitializeMessage, buildClaudeBidiUserMessage, readClaudeBidiApprovalRequest, serializeClaudeBidiMessage } = await import('../chat/claude-bidi-protocol.mjs');
@@ -275,6 +281,11 @@ output.on('line', (line) => {
         return child.stdin.write(value);
       } } } : child;
       await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : {});
+      if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
+        const current = await getRun(run.id);
+        const pending = current.appServerPendingApprovals?.find((item) => item.approvalId === approval.approvalId);
+        process.stderr.write(`[fixture] gate outcome: ${JSON.stringify({ pending: Boolean(pending), riskReasonCodes: pending?.riskReasonCodes, riskTier: pending?.riskTier })}\n`);
+      }
       if (readCase === 'git-status' && mode === 'recommended') {
         const current = await getRun(run.id);
         assert.ok(!current.appServerPendingApprovals?.some((item) => item.approvalId === approval.approvalId),
@@ -347,7 +358,7 @@ try {
 } finally {
   child.kill(); output.close(); await new Promise((resolve) => server.close(resolve));
   const parent = path.resolve(os.tmpdir()).toLowerCase();
-  for (const [target, prefix] of [[root, 'agentoc-claude-local-gate-'], [outsideRoot, 'agentoc-claude-outside-'], [outsideFileRoot, 'agentoc-claude-outside-file-'], [outsideGitRoot, 'agentoc-claude-outside-git-'], [outsideReadRoot, 'agentoc-claude-outside-read-']]) {
+  for (const [target, prefix] of [[root, 'agentoc-claude-local-gate-'], [separateInstance, 'agentoc-claude-instance-'], [outsideRoot, 'agentoc-claude-outside-'], [outsideFileRoot, 'agentoc-claude-outside-file-'], [outsideGitRoot, 'agentoc-claude-outside-git-'], [outsideReadRoot, 'agentoc-claude-outside-read-']]) {
     if (!target) continue;
     const resolved = path.resolve(target);
     if (path.dirname(resolved).toLowerCase() !== parent || !path.basename(resolved).startsWith(prefix)) throw new Error('unsafe fixture cleanup target');
