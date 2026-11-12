@@ -30,14 +30,20 @@ function decimal(value, { signed = false, min = 0n, max = UNSIGNED_MAX } = {}) {
   return value;
 }
 
-/** Bind the exact absolute Linux path to all identity facts emitted by preflight. */
-export function createLinuxTargetBinding(requestedPath, snapshot) {
+/** Validate without rewriting any bytes of a path passed to the native helper. */
+export function validateLinuxTargetPath(requestedPath) {
   if (typeof requestedPath !== 'string' || requestedPath === '/' || !requestedPath.startsWith('/') || requestedPath.endsWith('/') ||
       path.normalize(requestedPath) !== requestedPath || /[\x00-\x1f\x7f]/.test(requestedPath) ||
       /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(requestedPath) ||
       Buffer.byteLength(requestedPath, 'utf8') >= 4096) {
     bad('target path must be an exact normalized absolute Linux path');
   }
+  return requestedPath;
+}
+
+/** Bind the exact absolute Linux path to all identity facts emitted by preflight. */
+export function createLinuxTargetBinding(requestedPath, snapshot) {
+  validateLinuxTargetPath(requestedPath);
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) || !Object.hasOwn(snapshot, 'version') || snapshot.version !== 1 ||
       Object.keys(snapshot).length !== FIELDS.length + 1 ||
       FIELDS.some((field) => !Object.hasOwn(snapshot, field))) {

@@ -28,7 +28,8 @@ function directoryPath(value) {
   return value;
 }
 
-async function assertDirectoryChain(directory) {
+export async function assertLinuxRootControlledDirectory(directory) {
+  if (directory !== '/') directoryPath(directory);
   let current = '/';
   const components = directory.slice(1).split('/');
   for (const component of ['', ...components]) {
@@ -96,7 +97,7 @@ function readPublicRecord(text) {
 /** Read a root-owned, non-writable public key, including its directory chain. */
 export async function loadLinuxTargetPublicKey(directory = DEFAULT_LINUX_TARGET_KEY_DIRECTORY) {
   directory = directoryPath(directory);
-  await assertDirectoryChain(directory);
+  await assertLinuxRootControlledDirectory(directory);
   const record = readPublicRecord(await readProtectedFile(path.join(directory, PUBLIC_NAME), 0o644));
   return { publicKey: record.publicKey, keyId: record.keyId };
 }
@@ -105,10 +106,10 @@ export async function loadLinuxTargetPublicKey(directory = DEFAULT_LINUX_TARGET_
 export async function loadOrCreateLinuxTargetKey(directory = DEFAULT_LINUX_TARGET_KEY_DIRECTORY, { initialize = false } = {}) {
   if (process.platform !== 'linux' || typeof process.geteuid !== 'function' || process.geteuid() !== 0) fail('root on Linux is required');
   directory = directoryPath(directory);
-  await assertDirectoryChain(path.dirname(directory));
+  await assertLinuxRootControlledDirectory(path.dirname(directory));
   try { await mkdir(directory, { mode: 0o755 }); await chmod(directory, 0o755); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
-  await assertDirectoryChain(directory);
+  await assertLinuxRootControlledDirectory(directory);
   const privatePath = path.join(directory, PRIVATE_NAME), publicPath = path.join(directory, PUBLIC_NAME);
   let privateText;
   try { privateText = await readProtectedFile(privatePath, 0o600); }

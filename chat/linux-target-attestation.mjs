@@ -24,7 +24,7 @@ function exactKeys(value, keys) {
     Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function canonicalContext(context) {
+export function canonicalLinuxTargetContext(context) {
   if (!exactKeys(context, CONTEXT_FIELDS)) invalid('invalid target observation context');
   const result = {};
   for (const field of CONTEXT_FIELDS) {
@@ -67,7 +67,7 @@ export function signLinuxTargetAttestation({ privateKey, context, path, snapshot
   const binding = createLinuxTargetBinding(path, snapshot);
   const value = {
     version: 1, purpose: PURPOSE, keyId: publicKeyId(createPublicKey(privateKey)),
-    context: canonicalContext(context), binding,
+    context: canonicalLinuxTargetContext(context), binding,
     bindingHash: hashLinuxTargetBinding(path, snapshot), issuedAt, expiresAt,
   };
   return { ...value, signature: sign(null, Buffer.from(canonicalPayload(value)), privateKey).toString('base64url') };
@@ -77,8 +77,8 @@ export function verifyLinuxTargetAttestation(attestation, { publicKey, expectedC
   try {
     if (!exactKeys(attestation, ATTESTATION_FIELDS) || attestation.version !== 1 || attestation.purpose !== PURPOSE ||
         !Number.isSafeInteger(now) || attestation.keyId !== publicKeyId(publicKey)) invalid('invalid target observation');
-    const context = canonicalContext(attestation.context);
-    const expected = canonicalContext(expectedContext);
+    const context = canonicalLinuxTargetContext(attestation.context);
+    const expected = canonicalLinuxTargetContext(expectedContext);
     if (CONTEXT_FIELDS.some((field) => context[field] !== expected[field])) invalid('target observation context mismatch');
     const binding = canonicalBinding(attestation.binding);
     if (binding.path !== expectedPath) invalid('target observation path mismatch');
