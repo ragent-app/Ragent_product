@@ -49,6 +49,7 @@ import { buildSandboxedSpawn, requireSandboxAvailability } from '../lib/runner-s
 import { readOnlyWorkspaceForRun } from './read-only-run-sandbox.mjs';
 import { openReadOnlyProviderSeeds, closeReadOnlyProviderSeeds, deliverReadOnlyProviderSeeds } from './read-only-provider-home.mjs';
 import { createCodexReadOnlyEnvironmentSetup } from './codex-readonly-environment-setup.mjs';
+import { startReadOnlyCodexExecutor } from './codex-readonly-executor.mjs';
 import { createFileChangeStatsTracker } from './file-change-stats.mjs';
 import {
   FILE_ASSET_ID_PATTERN,
@@ -1951,7 +1952,7 @@ function continueCodexAppServerStartup(proc, state) {
 }
 
 export function configureCodexReadOnlyEnvironment({ proc, state, executor, environmentId, workspace, hidePaths,
-  beforeReady = async () => {}, onFailure = () => {}, prepareMcp } = {}) {
+  beforeReady = async () => {}, onFailure = () => {}, prepareMcp, readOnly = true, runnerHome = '' } = {}) {
   if (!state || !executor) return null;
   const fail = error => {
     if (state.terminalSeen || state.startupCancelled) return;
@@ -1960,7 +1961,8 @@ export function configureCodexReadOnlyEnvironment({ proc, state, executor, envir
     state.providerErrorCode = error?.code || 'CODEX_READONLY_ENVIRONMENT_UNAVAILABLE';
     onFailure(error);
   };
-  const setup = createCodexReadOnlyEnvironmentSetup({ environmentId, cwd: state.cwd, workspace, hidePaths, executor,
+  const setup = createCodexReadOnlyEnvironmentSetup({ environmentId, cwd: state.cwd, workspace, hidePaths, executor, readOnly, runnerHome,
+    additionalServers: state.threadMcpConfig?.mcp_servers || {},
     nextRequestId: () => state.nextControlRequestId++, send: message => writeCodexAppServerMessage(proc, message),
     ...(prepareMcp ? { prepareMcp } : {}),
     onReady: selected => {
@@ -3966,7 +3968,10 @@ async function main() {
     ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
     : null;
   const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
-  const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime && !readOnlyRequested && !WORKBENCH_EXECUTION_POLICY);
+  const sharedReadOnlyCodex = Boolean(process.platform === 'linux' && appServerState && codexOAuthRuntime
+    && readOnlyRequested && !WORKBENCH_EXECUTION_POLICY);
+  const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime
+    && (!readOnlyRequested || sharedReadOnlyCodex) && !WORKBENCH_EXECUTION_POLICY);
   const threadScopedCodexMcp = sharedCodexThreadSupported;
   const windowsBrokerChannel = manifest.options?.windowsBrokerChannel;
   const windowsBrokerMcpRequested = !readOnlyRequested && Boolean(
@@ -4255,6 +4260,8 @@ async function main() {
   // a provider unsandboxed if the platform or sandbox setup cannot support it.
   const readOnlyWorkspace = readOnlyWorkspaceForRun(manifest, resolvedFolder.cwd);
   const sandboxRequired = requireSandboxAvailability({ required: Boolean(readOnlyWorkspace) });
+  const sharedSandboxCodex = Boolean(process.platform === 'linux' && sandboxRequired
+    && appServerState && codexOAuthRuntime && !WORKBENCH_EXECUTION_POLICY);
   let resolvedCommand = await resolveCommandSpawnSpec(initialCommand, args, {
     cwd: resolvedFolder.cwd,
     env: spawnEnv,
@@ -4283,9 +4290,24 @@ async function main() {
   const runSpecificCodexMcp = isCodexAppServerFamily
     && ((Boolean(managedMcpOverlay) && !threadScopedCodexMcp)
       || (appServerState?.agentocApprovalGate === true && !sharedCodexThreadSupported));
+  let sharedSandboxHidePaths = null;
+  if (sharedSandboxCodex) {
+    const homePath = await realpath(runnerCodexHomeDir);
+    const boundary = homePath.lastIndexOf('/by-provider/');
+    // An old per-Run home may contain a copied rotating credential. Never
+    // start a broker for it: wait until preparation supplies the account home.
+    if (boundary <= 0 || homePath.slice(boundary).includes('/by-run/')) {
+      throw Object.assign(new Error('The Codex account home is not prepared for shared sandbox execution'),
+        { code: 'CODEX_READONLY_ENVIRONMENT_UNAVAILABLE' });
+    }
+    sharedSandboxHidePaths = [homePath.slice(0, boundary)];
+    for (const candidate of ['/var/lib/agentoc/config', '/etc/agentoc']) {
+      if (await lstat(candidate).then(() => true, () => false)) sharedSandboxHidePaths.push(candidate);
+    }
+  }
   let codexAppServerBrokered = false;
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
-      && !sandboxRequired) {
+      && (!sandboxRequired || sharedSandboxCodex)) {
     const expectedAccountDigest = codexBrokerAccountDigest(codexRolloutAccountId(runtimeAuth));
     if (!expectedAccountDigest) {
       throw Object.assign(new Error('A verified Codex account identity is required'), { code: 'CODEX_ACCOUNT_UNVERIFIED' });
@@ -4350,6 +4372,19 @@ async function main() {
   }
   if (isCodexAppServerFamily && codexOAuthRuntime && !codexAppServerBrokered) {
     await assertCodexHomeNotFenced(dirname(runnerCodexHomeDir));
+  }
+  let readOnlyCodexExecutor = null;
+  let readOnlyCodexHidePaths = null;
+  if (sharedSandboxCodex) {
+    if (!codexAppServerBrokered || (readOnlyRequested && !readOnlyWorkspace) || resolvedCommand.shell
+        || !isAbsolute(resolvedCommand.file)) {
+      throw Object.assign(new Error('A shared, isolated Codex executor is required'), { code: 'CODEX_READONLY_ENVIRONMENT_UNAVAILABLE' });
+    }
+    readOnlyCodexHidePaths = sharedSandboxHidePaths;
+    await assertRunLaunchBoundary(runId);
+    readOnlyCodexExecutor = await startReadOnlyCodexExecutor({ command: resolvedCommand.file,
+      cwd: resolvedFolder.cwd, workspace: readOnlyWorkspace || resolvedFolder.cwd, readOnly: Boolean(readOnlyWorkspace),
+      hidePaths: readOnlyCodexHidePaths, env: spawnEnv });
   }
   let sandboxEmptyDir = null;
   const providerSpawnEnv = isCodexAppServerFamily && !codexAppServerBrokered
@@ -4483,10 +4518,15 @@ async function main() {
       providerSeedsDelivered = true;
     }
   } catch (error) {
+    await readOnlyCodexExecutor?.stop();
     if (sandboxEmptyDir) { try { rmSync(sandboxEmptyDir, { recursive: true, force: true }); } catch {} }
     throw error;
   } finally {
     if (!providerSeedsDelivered) closeReadOnlyProviderSeeds(sandboxProviderSeeds);
+  }
+  if (readOnlyCodexExecutor) {
+    proc.once('exit', () => { void readOnlyCodexExecutor.stop(); });
+    proc.once('error', () => { void readOnlyCodexExecutor.stop(); });
   }
   if (sandboxEmptyDir) {
     proc.once('close', () => {
@@ -6105,6 +6145,18 @@ async function main() {
   if (earlyStderrError) handleProviderStderrError(earlyStderrError);
   providerStderrStream.on('data', handleStderrChunk);
   if (appServerState) {
+    if (readOnlyCodexExecutor) {
+      configureCodexReadOnlyEnvironment({ proc, state: appServerState, executor: readOnlyCodexExecutor,
+        environmentId: `run_${randomUUID().replaceAll('-', '')}`, workspace: readOnlyWorkspace || resolvedFolder.cwd,
+        readOnly: Boolean(readOnlyWorkspace), runnerHome: spawnEnv.HOME || '',
+        hidePaths: readOnlyCodexHidePaths,
+        beforeReady: async () => {
+          const { run: latest } = await assertRunLaunchBoundary(runId);
+          if (cancelSent || latest.cancelRequested === true || ['completed', 'failed', 'cancelled'].includes(latest.state)) {
+            throw new Error('Run stopped during isolated environment setup');
+          }
+        }, onFailure: () => { void terminateManagedProcess(); } });
+    }
     configureCodexAccountModelCatalog({
       proc, state: appServerState,
       beforeReady: async () => {
@@ -6223,6 +6275,7 @@ async function main() {
       clearTimeout(appServerState?.mcpReadinessTimer);
       clearTimeout(appServerState?.mcpStartupFallbackTimer);
       clearTimeout(claudeBidiState?.privilegedBatchTimer);
+      await appServerState?.readOnlyEnvironmentSetup?.close();
       await managedMcpOverlay?.cleanup?.();
       await windowsJob?.close();
       await waitForControlFlush();
@@ -6273,6 +6326,7 @@ async function main() {
       clearTimeout(appServerState?.mcpReadinessTimer);
       clearTimeout(appServerState?.mcpStartupFallbackTimer);
       clearTimeout(claudeBidiState?.privilegedBatchTimer);
+      await appServerState?.readOnlyEnvironmentSetup?.close();
       await managedMcpOverlay?.cleanup?.();
       await windowsJob?.close();
       await waitForControlFlush();
