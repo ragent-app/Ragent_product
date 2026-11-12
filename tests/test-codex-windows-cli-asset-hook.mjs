@@ -23,6 +23,10 @@ try {
     const current = { ...state, riskMode };
     const decision = await buildCodexWindowsCliAssetHookDecision({ event, state: current, runId, helperPath, port });
     assert.equal(decision.hookSpecificOutput?.permissionDecision, 'allow');
+    const unquotedEvent = { ...event, tool_input: { command: command.replace('"/api/sessions/$env:AGENTOC_SESSION_ID/assets"', '/api/sessions/$env:AGENTOC_SESSION_ID/assets') } };
+    const unquoted = await buildCodexWindowsCliAssetHookDecision({ event: unquotedEvent, state: current, runId, helperPath, port });
+    assert.deepEqual(unquoted, decision);
+
     const replacement = decision.hookSpecificOutput.updatedInput.command;
     const wrapper = [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', replacement].map(quote).join(' ');
     const approval = { kind: 'command', providerMethod: 'item/commandExecution/requestApproval', params: { threadId: 'thread', turnId: 'turn', itemId: 'item', cwd: workspace, command: wrapper } };

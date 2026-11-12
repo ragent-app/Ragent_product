@@ -89,6 +89,16 @@ try {
     assert.deepEqual(JSON.parse(Buffer.from(result.updatedCommand.match(/'([A-Za-z0-9_-]+)'$/)[1], 'base64url').toString()), JSON.parse(body));
   }
   assert.ok((await asset(`ragent api POST "/api/sessions/$RAGENT_SESSION_ID/assets" --body '${body}'`))?.updatedCommand.includes(' asset-publish '));
+  const psAsset = (command, mode = 'recommended') => buildWindowsCliAssetBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command } } }, state: { ...assetState, riskMode: mode }, helperPath, port: 7690, runId: 'fixture-run' }, { inspect });
+  const psRoute = '/api/sessions/$env:AGENTOC_SESSION_ID/assets';
+  for (const mode of ['recommended', 'full-auto']) for (const routeText of [psRoute, `"${psRoute}"`]) {
+    assert.ok((await psAsset(`agentoc api POST ${routeText} --body '${body}'`, mode))?.updatedCommand.includes(' asset-publish '), `${mode}: ${routeText}`);
+  }
+  for (const routeText of [`"${psRoute}`, `${psRoute}"`, '/api/sessions/$env:OTHER/assets', `${psRoute}?other=1`]) {
+    assert.equal(await psAsset(`agentoc api POST ${routeText} --body '${body}'`), null);
+  }
+  assert.equal(await psAsset(`agentoc api POST ${psRoute} --body '${body}'; Remove-Item secret`), null);
+
   for (const command of [
     `agentoc api POST "/api/sessions/other/assets" --body '${body}'`,
     `agentoc api POST '__SESSION_ASSETS__' --body '${body}'`,

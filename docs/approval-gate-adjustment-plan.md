@@ -246,6 +246,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - 后续核对本机控制服务的 `/healthz/owner-activation` 返回 503、状态 `OSV_STOPPED`，CLI 启动端点记录已过期；在确认没有活动 Run 和其他安装进程后，通过授权管理员通道重启 `AgentoC-ControlPlane`，owner 激活恢复 listening、健康状态 200。中断遗留的测试 provider 已通过正式 API 删除。随后在已安装提交 `a7b22afd` 上重跑真实 Codex full-auto：工作区外 PowerShell `-not` 与 `-PathType Leaf` 组合读取自动通过，隔离敏感目录删除自动拒绝，CLI 收到拒绝且文件完整；本地模拟模型未消耗官方额度。此前已在相同审批文件版本上通过 Claude recommended/full-auto 与 Codex recommended 对应场景。重启恢复了服务，但未查明此前停止的根因，也未证明其他命令和生产审批频率。
 
+- Windows 当前会话资产登记桥接现接受 PowerShell 未加引号的 `/api/sessions/$env:AGENTOC_SESSION_ID/assets`，仍固定当前会话、本机服务和经检查的文件。两条历史请求的只读回放现匹配桥接，目标文件存在且读取判断允许；未执行历史请求。真实 Claude 和 Codex CLI 在推荐与全自动两种模式下，通过本地模拟模型和模拟会话服务完成工作区外隔离文件登记；桥接、错误引号及跨会话边界测试通过。未使用官方模型额度，改动尚未部署，也不能据两条记录估算整体通过率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)

@@ -42,9 +42,9 @@ export async function buildWindowsCliAssetBridge({ approval, state, helperPath, 
       typeof input.command !== 'string' || input.command.length > 8192 || /[\r\n\0]/.test(input.command)) return null;
   let rawBody;
   if (params.tool_name === 'PowerShell') {
-    const match = /^\s*(?:agentoc(?:\.cmd)?|ragent(?:\.cmd)?|node(?:\.exe)?\s+"\$env:(?:AGENTOC|RAGENT)_PROJECT_ROOT[\\/]cli\.js")\s+api\s+POST\s+"\/api\/sessions\/\$env:(?:AGENTOC|RAGENT)_SESSION_ID\/assets"\s+--body\s+'((?:[^']|'')*)'\s*$/i.exec(input.command);
+    const match = /^\s*(?:agentoc(?:\.cmd)?|ragent(?:\.cmd)?|node(?:\.exe)?\s+"\$env:(?:AGENTOC|RAGENT)_PROJECT_ROOT[\\/]cli\.js")\s+api\s+POST\s+("?)\/api\/sessions\/\$env:(?:AGENTOC|RAGENT)_SESSION_ID\/assets\1\s+--body\s+'((?:[^']|'')*)'\s*$/i.exec(input.command);
     if (!match) return null;
-    rawBody = match[1].replaceAll("''", "'");
+    rawBody = match[2].replaceAll("''", "'");
   } else {
     const sessionRoute = /(?:"\/api\/sessions\/(?:\$(?:AGENTOC|RAGENT)_SESSION_ID|\$\{(?:AGENTOC|RAGENT)_SESSION_ID\})\/assets"|\/api\/sessions\/(?:\$(?:AGENTOC|RAGENT)_SESSION_ID|\$\{(?:AGENTOC|RAGENT)_SESSION_ID\})\/assets)(?=\s|$)/;
     if (!sessionRoute.test(input.command)) return null;
