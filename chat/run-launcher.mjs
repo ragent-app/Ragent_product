@@ -103,6 +103,15 @@ function providerPreparationGuidance(app, causeCode) {
       return `The selected ${label} provider is disabled on this computer. Enable it in Ragent Settings > Providers, then retry.`;
     case 'provider-not-ready':
       return `The selected ${label} provider is not ready on this computer. Complete its setup in Ragent Settings > Providers, then retry.`;
+    case 'codex_retire_busy':
+      return 'Another Codex session is still using the previous account process. Wait for it to finish, then retry.';
+    case 'codex_handoff_unavailable':
+    case 'codex_home_retired':
+    case 'codex_account_handoff_required':
+      return 'The shared Codex account process is not ready. Retry shortly; if it remains unavailable, restart the Ragent instance.';
+    case 'codex_handoff_credentials_diverged':
+    case 'codex_handoff_credentials_invalid':
+      return 'Codex account credentials could not be reconciled safely. Finish active sessions, reconnect the account in Ragent Settings > Providers, and retry.';
     default:
       return '';
   }
