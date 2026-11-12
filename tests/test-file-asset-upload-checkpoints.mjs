@@ -132,6 +132,21 @@ if (process.argv[2] === 'crash-before-manifest') {
         sizeBytes: MAX_STABLE_UPLOAD_BYTES + 1, sha256: 'f'.repeat(64) }), { code: 'INVALID_ARGUMENT' });
     });
 
+    await t.test('only an authorized account allowance permits a larger stable upload', async () => {
+      const sizeBytes = 2 * 1024 * 1024 * 1024;
+      const requestId = 'checkpoint-authorized-large';
+      await assert.rejects(assets.createFileAssetUploadIntent({ ...input, requestId,
+        sizeBytes, sha256: 'e'.repeat(64) }), { code: 'INVALID_ARGUMENT' });
+      await assert.rejects(assets.createFileAssetUploadIntent({ ...input, requestId,
+        sizeBytes, sha256: 'e'.repeat(64), uploadMaximumBytes: sizeBytes }), { code: 'INVALID_ARGUMENT' });
+      const receipt = await assets.createFileAssetUploadIntent({ ...input, requestId,
+        sizeBytes, sha256: 'e'.repeat(64), uploadMaximumBytes: Number.MAX_SAFE_INTEGER });
+      assert.equal(receipt.asset.sizeBytes, sizeBytes);
+      const recovered = await assets.findFileAssetUploadReceipt({ sessionId: input.sessionId, requestId });
+      assert.equal(recovered.asset.sizeBytes, sizeBytes);
+      assert.equal((await assets.readFileAssetUploadCheckpoint(receipt.asset.id)).totalBytes, sizeBytes);
+    });
+
     await t.test('duplicates recover lost replies; wrong order and different replay cannot mutate bytes', async () => {
       const id = await seed();
       assert.equal((await chunk(id)).offset, chunkBytes);

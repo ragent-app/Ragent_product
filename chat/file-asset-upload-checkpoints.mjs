@@ -7,6 +7,8 @@ import { writeJsonAtomic } from './fs-utils.mjs';
 export const UPLOAD_CHUNK_BYTES = 256 * 1024;
 export const UPLOAD_BATCH_BYTES = 1024 * 1024;
 export const MAX_STABLE_UPLOAD_BYTES = 1024 * 1024 * 1024;
+// Larger stable uploads require an explicit account quota reservation.
+export const MAX_AUTHORIZED_STABLE_UPLOAD_BYTES = Number.MAX_SAFE_INTEGER;
 export const UPLOAD_CHUNK_REQUEST_TIMEOUT_MS = 150_000;
 export const UPLOAD_CHECKPOINT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const UPLOAD_CHECKPOINT_MAX_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -51,7 +53,7 @@ export class FileAssetUploadCheckpoints {
     const chunkBytes = uploadChunkBytes(record);
     if (!Number.isFinite(created) || !/^[a-f0-9]{64}$/.test(record.uploadRequest.fingerprint || '')
       || !Number.isSafeInteger(record.sizeBytes) || record.sizeBytes < 1
-      || record.sizeBytes > MAX_STABLE_UPLOAD_BYTES || !/^[a-f0-9]{64}$/.test(record.sha256 || ''))
+      || record.sizeBytes > MAX_AUTHORIZED_STABLE_UPLOAD_BYTES || !/^[a-f0-9]{64}$/.test(record.sha256 || ''))
       fail('FILE_ASSET_RECEIPT_UNAVAILABLE', 503);
     const hardExpiresAt = created + UPLOAD_CHECKPOINT_MAX_LIFETIME_MS;
     return { version: 2, ...(chunkBytes === UPLOAD_BATCH_BYTES ? { chunkBytes } : {}),

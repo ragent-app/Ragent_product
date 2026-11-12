@@ -1390,6 +1390,7 @@ export async function handleControlRoutes({
           originalName: typeof payload?.originalName === 'string' ? payload.originalName : '',
           mimeType: typeof payload?.mimeType === 'string' ? payload.mimeType : '',
           sizeBytes: payload?.sizeBytes,
+          uploadMaximumBytes: quotaReservation?.limits?.unlimited === true ? Number.MAX_SAFE_INTEGER : MAX_STABLE_UPLOAD_BYTES,
           resumableChunkBytes: payload?.resumableChunkBytes,
           createdBy: authSession?.role === 'visitor' ? 'visitor' : 'owner',
           scopeCondition: readSessionApiScopeHeader(req, sessionId),
