@@ -564,6 +564,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
   socketPath = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET,
   connectImpl = connectSocket,
   launchAttempt = 0,
+  issueScopeGrant = null,
   timeoutMs = Number.isFinite(RUNNER_LIFECYCLE_TIMEOUT_MS) && RUNNER_LIFECYCLE_TIMEOUT_MS > 0
     ? RUNNER_LIFECYCLE_TIMEOUT_MS : 120_000,
 } = {}) {
@@ -572,6 +573,17 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
     throw new Error('Runner lifecycle broker socket is not configured');
   }
   const guiEnvironment = resolveRunnerGuiEnvironment();
+  let scopeGrant = null;
+  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1') {
+    try {
+      const issue = issueScopeGrant || (await import('./linux-run-scope-issuance.mjs')).issueLinuxRunScopeGrant;
+      scopeGrant = await issue(runId, launchAttempt);
+    } catch {
+      // A missing optional privileged capability must not duplicate or block
+      // an otherwise valid ordinary Run.
+      console.warn(`[runner-lifecycle] unable to issue privileged Run scope for ${runId}`);
+    }
+  }
   const unavailableError = (message) => {
     const error = new Error(message);
     error.code = 'RUNNER_BROKER_UNAVAILABLE';
@@ -603,6 +615,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
         launchAttempt: Number.isSafeInteger(Number(launchAttempt)) && Number(launchAttempt) >= 0
           ? Math.floor(Number(launchAttempt))
           : 0,
+        ...(scopeGrant ? { scopeGrant } : {}),
         ...(Object.keys(guiEnvironment).length > 0 ? { guiEnvironment } : {}),
       })}\n`);
     });
@@ -630,6 +643,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
         supervisorSocket: null,
         launchMode: DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
         launchAttempt: Number.isSafeInteger(response.launchAttempt) ? response.launchAttempt : 0,
+        ...(scopeGrant ? { privilegedContextRegistered: response.privilegedContextRegistered === true } : {}),
       });
     });
     socket.once('error', (error) => {
