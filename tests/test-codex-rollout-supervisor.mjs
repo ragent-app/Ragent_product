@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { createRunnerSupervisorServer } from '../chat/runner-supervisor-daemon.mjs';
+import { createRunnerSupervisorServer, spawnSupervisedRunner } from '../chat/runner-supervisor-daemon.mjs';
 import { buildDetachedRunnerEnvironment, launchDetachedRunnerViaSupervisor } from '../chat/run-launcher.mjs';
 
 test('runner does not inherit untrusted rollout source paths', () => {
@@ -37,5 +37,12 @@ test('supervisor forwards only scoped legacy Codex homes', async (t) => {
   const prepare = (sources) => async () => ({ manifest: {}, providerId: 'codex', providerHomesDir: canonical, codexRolloutSources: sources });
   await launchDetachedRunnerViaSupervisor('run_sources_12345678', { socketPath, prepareProviderImpl: prepare([legacy]) });
   assert.deepEqual(observed.options.codexRolloutSources, [legacy]);
+  let childEnv;
+  await spawnSupervisedRunner('run_sources_12345678', { ...observed.options, platform: 'win32',
+    assertExecutionIdentityImpl: async () => ({}), assertExecutionBoundaryImpl: async () => {},
+    resolveRunnerProxyEnvironmentImpl: async () => ({}),
+    spawnImpl: (_command, _args, options) => { childEnv = options.env; return { pid: 12345, unref() {} }; },
+  });
+  assert.deepEqual(JSON.parse(childEnv.AGENTOC_CODEX_ROLLOUT_SOURCES), [legacy]);
   await assert.rejects(launchDetachedRunnerViaSupervisor('run_sources_87654321', { socketPath, prepareProviderImpl: prepare([join(root, 'outside')]) }), /Invalid scoped Provider homes directory/);
 });
