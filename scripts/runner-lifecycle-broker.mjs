@@ -47,6 +47,7 @@ import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGrou
   resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 import { grantExistingRunnerFiles } from '../lib/linux-runner-file-access.mjs';
+import { registerLinuxRunContext } from './linux-run-context-store.mjs';
 
 const execFileAsync = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -536,6 +537,8 @@ async function launchLifecycleRunnerUnlocked(runId, {
   guiEnvironment = {},
   unitName = '',
   launchAttempt = 0,
+  scopeGrant = null,
+  runScopeRegistration = null,
   environment = process.env,
 } = {}) {
   const normalized = normalizeRunId(runId);
@@ -862,13 +865,31 @@ async function launchLifecycleRunnerUnlocked(runId, {
     }
     throw error;
   }
+  const pid = await readSystemdMainPid(resolvedUnitName, { execFileImpl });
+  let privilegedContextRegistered = false;
+  if (scopeGrant && runScopeRegistration && manifest?.runPublication) {
+    // This branch is reached only after this broker created the unit. Never
+    // claim a reused pre-existing unit as a newly authenticated launch.
+    const run = { id: normalized, sessionId: manifest.sessionId, requestId: manifest.requestId,
+      runPublication: manifest.runPublication };
+    try {
+      await registerLinuxRunContext({ directory: runScopeRegistration.directory,
+        pinDirectory: runScopeRegistration.pinDirectory, run, manifest, grant: scopeGrant, launchAttempt: normalizedAttempt });
+      privilegedContextRegistered = true;
+    } catch {
+      // Scope registration is not needed for ordinary execution. Failure must
+      // leave privileged actions unavailable without spawning a duplicate Run.
+      console.warn(`[runner-lifecycle] privileged Run context unavailable for ${normalized}`);
+    }
+  }
   return {
-    pid: await readSystemdMainPid(resolvedUnitName, { execFileImpl }),
+    pid,
     unitName: resolvedUnitName,
     unitScope: 'system',
     launchMode: DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
     launchAttempt: normalizedAttempt,
     workspaceAccessGroup: workspaceAccess?.group || null,
+    ...(scopeGrant ? { privilegedContextRegistered } : {}),
   };
   } finally {
     if (!nativeOAuthLockHandedOff) {
@@ -917,6 +938,7 @@ export async function createRunnerLifecycleServer({
   chownImpl = chown,
   inheritFd = null,
   inheritedSocketFdImpl = inheritedSocketFd,
+  runScopeRegistration = null,
 } = {}) {
   const normalizedSocketPath = trimString(socketPath);
   if (!normalizedSocketPath) throw new Error('Runner lifecycle socket path is required');
@@ -979,6 +1001,7 @@ export async function createRunnerLifecycleServer({
         serviceGroup: resolvedServiceGroup,
         controlUser: resolvedControlUser,
         launchAttempt: requestedLaunchAttempt,
+        ...(runScopeRegistration && request?.scopeGrant ? { scopeGrant: request.scopeGrant, runScopeRegistration } : {}),
         ...(Object.keys(requestedGuiEnvironment).length > 0
           ? { guiEnvironment: requestedGuiEnvironment }
           : {}),
@@ -1033,7 +1056,12 @@ export async function createRunnerLifecycleServer({
 }
 
 async function main() {
-  const server = await createRunnerLifecycleServer();
+  const directory = trimString(process.env.AGENTOC_LINUX_RUN_CONTEXT_DIR);
+  const pinDirectory = trimString(process.env.AGENTOC_LINUX_SERVICE_PIN_DIR);
+  // The optional directories are root-configured; request fields never choose
+  // them. The feature remains inactive until both protected stores are set up.
+  const runScopeRegistration = directory && pinDirectory ? { directory, pinDirectory } : null;
+  const server = await createRunnerLifecycleServer({ runScopeRegistration });
   const shutdown = async () => {
     process.removeListener('SIGTERM', shutdown);
     process.removeListener('SIGINT', shutdown);
