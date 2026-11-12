@@ -11,3 +11,6 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/agentoc-admin
 PrivateTmp=true
+
+[Install]
+Alias=agentoc-traffic-collector.service

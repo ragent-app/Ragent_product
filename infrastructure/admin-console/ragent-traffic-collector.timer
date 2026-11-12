@@ -5,7 +5,8 @@ Description=Sample Ragent server network counters every minute
 OnBootSec=15s
 OnUnitActiveSec=1min
 AccuracySec=5s
-Unit=agentoc-traffic-collector.service
+Unit=ragent-traffic-collector.service
 
 [Install]
 WantedBy=timers.target
+Alias=agentoc-traffic-collector.timer
