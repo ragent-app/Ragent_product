@@ -164,7 +164,7 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
         settled = true;
         clearTimeout(timer);
         socket.destroy();
-        const denied = new Error('The Codex broker pipe cannot be accessed by this process. Check the Windows service identities and pipe permissions before restarting the broker.');
+        const denied = new Error('The Codex broker endpoint cannot be accessed by this process. Check the service identities and endpoint permissions before restarting the broker.');
         denied.code = 'CODEX_APP_SERVER_BROKER_ACCESS_DENIED';
         reject(denied);
         return;
