@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { isLinuxRunPeerLive, matchesLinuxRunPeerCgroup } from '../scripts/linux-run-peer-identity.mjs';
 import { captureLinuxRunUnitIdentity } from '../scripts/linux-run-unit-liveness.mjs';
 import { createRunPublication, bindRunPublication } from '../chat/run-publication-contract.mjs';
@@ -13,6 +14,9 @@ import { signLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
 import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext, revokeLinuxRunContext, withLinuxRunPeerContext } from '../scripts/linux-run-context-store.mjs';
 import { stageLinuxRunPeerResult, readRevokedLinuxRunPeerResult } from '../scripts/linux-run-peer-result-store.mjs';
+import { createLinuxRunPeerResultServer } from '../scripts/linux-run-peer-result-server.mjs';
+
+const execAsync = promisify(execFile);
 
 const expected = { runId: 'run_peerfixture1', launchAttempt: 2 };
 const path = '/agentoc.slice/agentoc-runners.slice/agentoc-runner-run_peerfixture1-a2.service';
@@ -30,7 +34,7 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
     const otherUnit = 'agentoc-runner-run_peerfixture2-a2.service';
     const zombieUnit = 'agentoc-runner-run_peerfixture3-a2.service';
     const sockets = [], started = [];
-    let server;
+    let server, inbox;
     const stop = name => {
       try { execFileSync('/usr/bin/systemctl', ['stop', name], { stdio: 'ignore', timeout: 10000 }); return true; }
       catch { return false; }
@@ -46,8 +50,9 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       const helper = `${root}/peercred`;
       execFileSync('/usr/bin/gcc', ['-Wall', '-Wextra', '-Werror', '-O2', fileURLToPath(new URL('../native/privileged-peercred.c', import.meta.url)), '-o', helper]);
       const pending = [], waiting = [];
-      server = createServer(socket => { sockets.push(socket); const ready = waiting.shift(); if (ready) ready(socket); else pending.push(socket); });
+      server = createServer(socket => { socket.on('error', () => {}); sockets.push(socket); const ready = waiting.shift(); if (ready) ready(socket); else pending.push(socket); });
       const socketPath = `${root}/control.sock`;
+      const inboxPath = `${root}/inbox.sock`;
       await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
       await chmod(socketPath, 0o666);
       const nextSocket = () => pending.length ? Promise.resolve(pending.shift()) : new Promise((resolve, reject) => {
@@ -58,10 +63,10 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       const launch = (name, zombie = false) => {
         const code = zombie
           ? 'import array,os,socket,sys,time\na,b=socket.socketpair()\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); b.sendmsg([b"x"],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array("i",[s.fileno()]))]); os._exit(0)\nelse:\n a.recvmsg(1,socket.CMSG_SPACE(4)); time.sleep(120)'
-          : 'import os,socket,sys\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.recv(1); os._exit(0)\nelse:\n os.wait()';
+          : 'import json,os,socket,sys\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); signal=s.recv(1)\n if signal == b"w":\n  c=socket.socket(socket.AF_UNIX); c.connect(sys.argv[2]); c.sendall((json.dumps({"type":"stage","runId":"run_peerfixture1","launchAttempt":2,"result":{"exitCode":0,"message":"fixture"}})+"\\n").encode()); reply=b""\n  while not reply.endswith(b"\\n"):\n   chunk=c.recv(65536)\n   if not chunk: break\n   reply+=chunk\n  s.sendall(reply); s.recv(1)\n os._exit(0)\nelse:\n os.wait()';
         execFileSync('/usr/bin/systemd-run', ['--quiet', '--collect', '--service-type=exec', `--unit=${name}`,
           '--slice=agentoc-runners.slice', '--property=User=agentoc-runner', '--property=NoNewPrivileges=yes',
-          '/usr/bin/python3', '-c', code, socketPath], { timeout: 10000 });
+          '/usr/bin/python3', '-c', code, socketPath, inboxPath], { timeout: 10000 });
         started.push(name);
       };
       const credentials = async socket => {
@@ -114,6 +119,31 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       assert.equal(await isLinuxRunPeerLive(binding, peerB), false);
       await assert.rejects(withLinuxRunPeerContext({ ...peerContext, peer: peerB }, async () => 'unexpected'), { code: 'LINUX_RUN_CONTEXT_UNAVAILABLE' });
       await assert.rejects(stageLinuxRunPeerResult({ ...staged, peer: peerB }), { code: 'LINUX_RUN_CONTEXT_UNAVAILABLE' });
+      const controlAccount = execFileSync('/usr/bin/getent', ['passwd', 'nobody'], { encoding: 'utf8' }).trim().split(':');
+      const controlUid = Number(controlAccount[2]), controlGid = Number(controlAccount[3]);
+      assert.ok(controlUid > 0 && controlUid !== uid);
+      const options = { socketPath: inboxPath, directory, pinDirectory, resultDirectory, controlUid, peerHelper: helper };
+      inbox = await createLinuxRunPeerResultServer(options);
+      await assert.rejects(createLinuxRunPeerResultServer(options));
+      const peerRequest = socket => new Promise((resolve, reject) => {
+        let response = '';
+        const timer = setTimeout(() => { cleanup(); reject(new Error('result response timeout')); }, 5000);
+        const cleanup = () => { clearTimeout(timer); socket.off('data', onData); socket.off('error', onError); };
+        const onError = error => { cleanup(); reject(error); };
+        const onData = data => { response += data.toString('utf8'); if (response.endsWith('\n')) { cleanup(); resolve(JSON.parse(response)); } };
+        socket.on('data', onData); socket.on('error', onError); socket.write('w');
+      });
+      assert.deepEqual(await peerRequest(a), { ok: true, value: { staged: true, duplicate: true } });
+      assert.deepEqual(await peerRequest(b), { ok: false });
+      const requestAs = async (user, group, request) => {
+        const code = 'import socket,sys\ns=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall((sys.argv[2]+"\\n").encode()); data=b""\nwhile not data.endswith(b"\\n"):\n part=s.recv(65536)\n if not part: raise RuntimeError("connection closed")\n data+=part\nprint(data.decode(),end="")';
+        const { stdout } = await execAsync('/usr/bin/setpriv', ['--reuid', String(user), '--regid', String(group), '--clear-groups',
+          '/usr/bin/python3', '-c', code, inboxPath, JSON.stringify(request)], { timeout: 5000 });
+        return JSON.parse(stdout);
+      };
+      const readRequest = { type: 'read', ...expected };
+      assert.deepEqual(await requestAs(controlUid, controlGid, readRequest), { ok: false });
+      assert.deepEqual(await requestAs(controlUid, controlGid, { ...readRequest, peer: peerA }), { ok: false });
       assert.equal(await isLinuxRunPeerLive({ ...binding, invocationId: 'b'.repeat(32) }, peerA), false);
       assert.equal(await isLinuxRunPeerLive(binding, { ...peerA, gid: 0 }), false);
       launch(zombieUnit, true);
@@ -146,12 +176,15 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       assert.equal(result.sessionId, 's1');
       assert.equal(result.invocationId, binding.invocationId);
       assert.deepEqual(result.result, staged.result);
+      assert.deepEqual(await requestAs(uid, peerA.gid, readRequest), { ok: false });
+      assert.deepEqual(await requestAs(controlUid, controlGid, readRequest), { ok: true, value: result });
       assert.equal(stop(unit), true);
       started.splice(started.indexOf(unit), 1);
       assert.equal(await isLinuxRunPeerLive(binding, peerA), false);
     } finally {
       let stopped = true;
       for (const name of started.reverse()) if (!stop(name)) stopped = false;
+      if (inbox) await inbox.close();
       for (const socket of sockets) socket.destroy();
       if (server) await new Promise(resolve => server.close(resolve));
       if (stopped) await rm(root, { recursive: true, force: true });
