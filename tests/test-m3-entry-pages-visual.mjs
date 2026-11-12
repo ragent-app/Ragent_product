@@ -12,7 +12,6 @@ const pageFiles = [
   ["login", "login.html", ".card"],
   ["admin-login", "admin-login.html", ".shell"],
   ["mobile-install", "mobile-install.html", ".card"],
-  ["wechat-login", "wechat-login.html", ".shell"],
 ];
 
 function fixtureFromTemplate(template, css) {

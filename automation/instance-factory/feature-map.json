@@ -63,23 +63,6 @@
       "healthCheck": "mailbox queue can drain approved items"
     },
     {
-      "id": "connector.feishu",
-      "title": "Feishu Connector",
-      "kind": "connector",
-      "modeKey": "CONNECTOR_FEISHU_MODE",
-      "defaultMode": "auto",
-      "requiredEnv": [
-        "FEISHU_APP_ID",
-        "FEISHU_APP_SECRET",
-        "FEISHU_VERIFICATION_TOKEN"
-      ],
-      "requiredCommands": ["node"],
-      "dependsOn": ["agentoc"],
-      "startAfter": ["agentoc"],
-      "systemdUnit": "agentoc-feishu-connector",
-      "healthCheck": "Feishu webhook and polling path succeed"
-    },
-    {
       "id": "connector.calendar",
       "title": "Calendar Connector",
       "kind": "connector",

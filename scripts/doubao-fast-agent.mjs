@@ -354,7 +354,7 @@ function buildTools(config) {
         parameters: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Application name, such as Safari or WeChat.' },
+            name: { type: 'string', description: 'Application name, such as a web browser.' },
           },
           required: ['name'],
           additionalProperties: false,

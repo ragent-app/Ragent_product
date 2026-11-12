@@ -10,15 +10,12 @@ import {
   buildAccessUrl,
   buildGuestMailboxAddress,
   buildBridgeBaseUrl,
-  buildGuestWeChatConnectorConfig,
   formatGuestInstance,
   formatGuestInstanceLinks,
   mergePlatformSkillsIndexContent,
   parseArgs,
   planGuestRuntimeDefaults,
   pickNextTrialInstanceName,
-  seedGuestWeChatConnectorConfig,
-  startGuestWeChatConnector,
   syncGuestPlatformSkills,
   syncGuestMailboxProvisioning,
 } from '../lib/guest-instance-command.mjs';
@@ -238,62 +235,6 @@ assert.match(formatted, /mailbox: rowan\+trial16@example\.test/);
 assert.match(formatted, /mailboxRouting: synced/);
 assert.match(formatted, /bridge: https:\/\/bridge\.example\.com\/trial16/);
 assert.match(formatted, /bridgeAccess: https:\/\/bridge\.example\.com\/trial16\/\?token=abc123/);
-
-const guestWeChatConfig = buildGuestWeChatConnectorConfig({
-  localBaseUrl: 'http://127.0.0.1:7711',
-});
-assert.equal(guestWeChatConfig.chatBaseUrl, 'http://127.0.0.1:7711');
-assert.equal(guestWeChatConfig.sourceName, 'WeChat');
-assert.equal(guestWeChatConfig.group, 'WeChat');
-
-const wechatSeedSandbox = mkdtempSync(join(tmpdir(), 'agentoc-guest-wechat-'));
-try {
-  const configDir = join(wechatSeedSandbox, 'instance', 'config');
-  mkdirSync(configDir, { recursive: true });
-
-  const seededWeChatConfig = await seedGuestWeChatConnectorConfig(configDir, {
-    localBaseUrl: 'http://127.0.0.1:7711',
-  });
-  assert.equal(seededWeChatConfig.changed, true);
-  assert.equal(
-    JSON.parse(readFileSync(seededWeChatConfig.configPath, 'utf8')).chatBaseUrl,
-    'http://127.0.0.1:7711',
-  );
-
-  writeFileSync(seededWeChatConfig.configPath, JSON.stringify({ chatBaseUrl: 'http://127.0.0.1:8800' }, null, 2));
-  const preservedWeChatConfig = await seedGuestWeChatConnectorConfig(configDir, {
-    localBaseUrl: 'http://127.0.0.1:7711',
-  });
-  assert.equal(preservedWeChatConfig.changed, false);
-  assert.equal(
-    JSON.parse(readFileSync(preservedWeChatConfig.configPath, 'utf8')).chatBaseUrl,
-    'http://127.0.0.1:8800',
-  );
-
-  let startInvocation = null;
-  const startResult = await startGuestWeChatConnector({
-    instanceRoot: '/tmp/agentoc-instance',
-    port: 7711,
-    publicBaseUrl: 'https://trial24.example.com',
-    execFileFn: async (command, args, options) => {
-      startInvocation = { command, args, options };
-      return {
-        stdout: 'started wechat connector (pid 123)\n',
-        stderr: '',
-      };
-    },
-  });
-  assert.equal(startResult.stdout, 'started wechat connector (pid 123)');
-  assert.equal(startInvocation.command, join(repoRoot, 'scripts', 'wechat-connector-instance.sh'));
-  assert.deepEqual(startInvocation.args, ['start']);
-  assert.equal(startInvocation.options.cwd, repoRoot);
-  assert.equal(startInvocation.options.env.AGENTOC_INSTANCE_ROOT, '/tmp/agentoc-instance');
-  assert.equal(startInvocation.options.env.CHAT_PORT, '7711');
-  assert.equal(startInvocation.options.env.AGENTOC_PUBLIC_BASE_URL, 'https://trial24.example.com');
-  assert.equal(startInvocation.options.env.AGENTOC_CONFIG_DIR, undefined);
-} finally {
-  rmSync(wechatSeedSandbox, { recursive: true, force: true });
-}
 
 const ownerMicroSelection = {
   selectedTool: 'micro-agent',

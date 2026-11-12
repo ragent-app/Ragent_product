@@ -57,9 +57,6 @@ const runnerSidecar = read('chat/runner-sidecar.mjs');
 const runnerSidecarRecovery = read('lib/runner-sidecar-recovery.mjs');
 const runnerSidecarWindowsTest = read('tests/test-runner-sidecar-windows-spawn.mjs');
 const runnerSidecarLiveHarness = readOptionalLive('tests/live-windows-runner-recovery-sidecar.mjs');
-const wechatLogin = read('lib/wechat-connector-login.mjs');
-const wechatLoginTest = read('tests/test-wechat-login-managed-spawn.mjs');
-const wechatLoginLiveHarness = readOptionalLive('tests/live-windows-wechat-login-worker.mjs');
 const claudeMcpManager = read('lib/claude-mcp-manager.mjs');
 const codexMcpManager = read('lib/codex-mcp-manager.mjs');
 
@@ -291,16 +288,6 @@ assert.match(runnerSidecarWindowsTest, /preserveOnControllerExit: true/);
 if (runnerSidecarLiveHarness !== null) assert.match(runnerSidecarLiveHarness, /spawnFreshCodexRecoverySidecar/);
 if (runnerSidecarLiveHarness !== null) assert.match(runnerSidecarLiveHarness, /taskkill\.exe/);
 if (runnerSidecarLiveHarness !== null) assert.match(runnerSidecarLiveHarness, /replacement sidecar must survive controller exit/);
-assert.match(wechatLogin, /buildPlatformSpawnSpec/);
-assert.match(wechatLogin, /spawnManagedProcess/);
-assert.match(wechatLogin, /preserveOnControllerExit: true/);
-assert.doesNotMatch(wechatLogin, /spawn\(process\.execPath/);
-assert.match(wechatLoginTest, /platform: 'win32'/);
-assert.match(wechatLoginTest, /preserveOnControllerExit: true/);
-if (wechatLoginLiveHarness !== null) assert.match(wechatLoginLiveHarness, /spawnWeChatLoginProcess/);
-if (wechatLoginLiveHarness !== null) assert.match(wechatLoginLiveHarness, /__agentocWindowsJobList/);
-if (wechatLoginLiveHarness !== null) assert.match(wechatLoginLiveHarness, /worker survives controller exit/);
-if (wechatLoginLiveHarness !== null) assert.match(wechatLoginLiveHarness, /taskkill\.exe/);
 for (const [label, source, commandName] of [
   ['Claude MCP manager', claudeMcpManager, 'claudeBin'],
   ['Codex MCP manager', codexMcpManager, 'codexBin'],

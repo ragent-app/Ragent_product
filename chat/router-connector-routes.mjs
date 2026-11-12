@@ -1,8 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
-import { readFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import {
   ensureCalendarConnectorBinding,
   ensureGoogleConnectorBinding,
@@ -42,13 +40,6 @@ import { pathExists, readJson, writeJsonAtomic } from './fs-utils.mjs';
 import { readBody } from '../lib/utils.mjs';
 import { getConnectorSurface, listConnectorSurfaces } from '../lib/connector-surface-registry.mjs';
 import {
-  getWeChatLoginQrUrl,
-  getWeChatLoginSurface,
-  WECHAT_LOGIN_PAGE_PATH,
-  WECHAT_LOGIN_QR_PATH,
-  WECHAT_LOGIN_STATUS_PATH,
-} from '../lib/wechat-connector-login.mjs';
-import {
   CALENDAR_SUBSCRIBE_HELPER_PATH,
   buildCalendarSubscriptionChannels,
   buildSubscriptionUrl,
@@ -70,7 +61,6 @@ import {
   sendUserMessage,
 } from './session-manager.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHORTCUT_BODY_MAX_BYTES = 32 * 1024;
 const SHORTCUT_DEFAULT_WAIT_MS = 0;
 const SHORTCUT_MAX_WAIT_MS = 20_000;
@@ -80,7 +70,6 @@ const CALENDAR_CONNECTOR_DIR = join(CONFIG_DIR, 'calendar-connector');
 const GOOGLE_CALENDAR_CREDENTIALS_PATH = join(CALENDAR_CONNECTOR_DIR, 'google-oauth-client.json');
 const GOOGLE_CALENDAR_TOKEN_PATH = join(CALENDAR_CONNECTOR_DIR, 'google-calendar-token.json');
 const GOOGLE_CALENDAR_AUTH_STATE_PATH = join(CALENDAR_CONNECTOR_DIR, 'google-calendar-auth-state.json');
-const WECHAT_CONNECTOR_LOGIN_TEMPLATE_PATH = join(__dirname, '..', 'templates', 'wechat-login.html');
 const DEFAULT_CALENDAR_BINDING_ID = 'binding_calendar_21d351117862';
 const DEFAULT_CALENDAR_ACCOUNT_HINT = 'Google Calendar';
 const DEFAULT_GMAIL_BINDING_ID = 'binding_gmail_google';
@@ -88,6 +77,11 @@ const DEFAULT_GMAIL_ACCOUNT_HINT = 'Google Gmail';
 const DEFAULT_DRIVE_BINDING_ID = 'binding_drive_google';
 const DEFAULT_DRIVE_ACCOUNT_HINT = 'Google Drive';
 const DEFAULT_GITHUB_BINDING_ID = GITHUB_BINDING_ID;
+const RETIRED_CONNECTOR_IDS = new Set(['feishu', 'lark', 'wechat', 'weixin']);
+
+function isRetiredConnector(id) {
+  return RETIRED_CONNECTOR_IDS.has(String(id || '').trim().toLowerCase());
+}
 
 function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -113,10 +107,6 @@ function normalizeForwardedPrefix(value) {
   if (!trimmed) return '';
   const normalized = `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
   return normalized === '/' ? '' : normalized;
-}
-
-function getRequestProductBasePath(req) {
-  return normalizeForwardedPrefix(req?.headers?.['x-forwarded-prefix']);
 }
 
 function parseConnectorSurfaceProxyRoute(pathname) {
@@ -241,43 +231,14 @@ function buildConnectorSurfaceInfoResponse(surface, description = null) {
   };
 }
 
-async function getLegacyConnectorSurfaceInfo(connectorId) {
-  if (trimString(connectorId).toLowerCase() !== 'wechat') return null;
-  const surface = await getWeChatLoginSurface({
-    autoStart: false,
-    authPath: WECHAT_LOGIN_PAGE_PATH,
-    qrPath: WECHAT_LOGIN_QR_PATH,
-  });
-  return {
-    connectorId: 'wechat',
-    title: 'WeChat',
-    entryUrl: WECHAT_LOGIN_PAGE_PATH,
-    allowEmbed: true,
-    updatedAt: trimString(surface?.login?.updatedAt || surface?.account?.savedAt),
-    surfaceType: 'login',
-    description: 'Scan in WeChat to connect this workspace. The QR code refreshes behind one stable link.',
-    embed: {
-      mode: 'iframe',
-      sameOrigin: true,
-    },
-    surface,
-  };
-}
-
 async function listResolvedConnectorSurfaceInfo({ nonce = '' } = {}) {
   const results = [];
-  const seen = new Set();
 
   for (const surface of await listConnectorSurfaces()) {
-    seen.add(surface.connectorId);
+    if (isRetiredConnector(surface.connectorId)) continue;
     const mountPath = buildConnectorMountPath(surface.connectorId);
     const description = await fetchConnectorSurfaceDescription(surface, { mountPath, nonce });
     results.push(buildConnectorSurfaceInfoResponse(surface, description));
-  }
-
-  const legacyWeChat = await getLegacyConnectorSurfaceInfo('wechat');
-  if (legacyWeChat && !seen.has(legacyWeChat.connectorId)) {
-    results.push(legacyWeChat);
   }
 
   return results.sort((left, right) => String(left?.title || left?.connectorId || '').localeCompare(
@@ -649,13 +610,8 @@ export async function handleConnectorSurfaceRoutes({
       writeJson(res, 403, { error: 'Owner access required' });
       return true;
     }
-    const surface = await getConnectorSurface(infoConnectorId);
+    const surface = isRetiredConnector(infoConnectorId) ? null : await getConnectorSurface(infoConnectorId);
     if (!surface) {
-      const fallbackSurface = await getLegacyConnectorSurfaceInfo(infoConnectorId);
-      if (fallbackSurface) {
-        writeJson(res, 200, fallbackSurface);
-        return true;
-      }
       writeJson(res, 404, { error: 'Connector surface not found' });
       return true;
     }
@@ -672,6 +628,7 @@ export async function handleConnectorSurfaceRoutes({
     return true;
   }
 
+  if (isRetiredConnector(route.connectorId)) return false;
   const surface = await getConnectorSurface(route.connectorId);
   if (!surface?.baseUrl) {
     return false;
@@ -725,111 +682,7 @@ export async function handleConnectorApiRoutes({
   pathname,
   authSession,
   writeJson,
-  nonce,
-  buildHeaders,
-  getPageBuildInfo,
-  renderPageTemplate,
-  buildTemplateReplacements,
-  serializeJsonForScript,
 }) {
-  if (pathname === WECHAT_LOGIN_PAGE_PATH && req.method === 'GET') {
-    if (authSession?.role !== 'owner') {
-      writeJson(res, 403, { error: 'Owner access required' });
-      return true;
-    }
-
-    let template = '';
-    try {
-      template = await readFile(WECHAT_CONNECTOR_LOGIN_TEMPLATE_PATH, 'utf8');
-    } catch {
-      res.writeHead(500, {
-        'Content-Type': 'text/plain; charset=utf-8',
-      });
-      res.end('WeChat login template missing.');
-      return true;
-    }
-
-    const pageBuildInfo = await getPageBuildInfo();
-    const initialState = await getWeChatLoginSurface({ autoStart: true });
-    const body = renderPageTemplate(template, nonce, {
-      ...buildTemplateReplacements(pageBuildInfo, getRequestProductBasePath(req)),
-      PAGE_TITLE: 'Connect WeChat',
-      BODY_CLASS: 'wechat-login-page',
-      BOOTSTRAP_JSON: serializeJsonForScript({
-        wechatLogin: {
-          initialState,
-          statusEndpoint: WECHAT_LOGIN_STATUS_PATH,
-          qrEndpoint: WECHAT_LOGIN_QR_PATH,
-        },
-      }),
-    });
-    res.writeHead(200, buildHeaders({
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'X-Robots-Tag': 'noindex, nofollow, noarchive',
-    }));
-    res.end(body);
-    return true;
-  }
-
-  if (pathname === WECHAT_LOGIN_STATUS_PATH && req.method === 'GET') {
-    if (authSession?.role !== 'owner') {
-      writeJson(res, 403, { error: 'Owner access required' });
-      return true;
-    }
-    writeJson(res, 200, await getWeChatLoginSurface({ autoStart: true }));
-    return true;
-  }
-
-  if (pathname === WECHAT_LOGIN_QR_PATH && req.method === 'GET') {
-    if (authSession?.role !== 'owner') {
-      writeJson(res, 403, { error: 'Owner access required' });
-      return true;
-    }
-    const { surface, qrcodeUrl } = await getWeChatLoginQrUrl({ autoStart: true });
-    if (surface?.capabilityState === 'ready') {
-      res.writeHead(409, buildHeaders({
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-      }));
-      res.end('WeChat is already connected.');
-      return true;
-    }
-    if (!qrcodeUrl) {
-      res.writeHead(503, buildHeaders({
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-      }));
-      res.end('WeChat QR code is not ready yet.');
-      return true;
-    }
-    try {
-      const response = await fetch(qrcodeUrl);
-      if (!response.ok) {
-        throw new Error(`QR upstream ${response.status}`);
-      }
-      const contentType = trimString(response.headers.get('content-type')) || 'image/png';
-      const body = Buffer.from(await response.arrayBuffer());
-      res.writeHead(200, buildHeaders({
-        'Content-Type': contentType,
-        'Content-Length': String(body.length),
-        'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-        'X-Robots-Tag': 'noindex, nofollow, noarchive',
-      }));
-      res.end(body);
-      return true;
-    } catch (error) {
-      res.writeHead(502, buildHeaders({
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-      }));
-      res.end(`Failed to load WeChat QR image: ${error?.message || 'unknown error'}`);
-      return true;
-    }
-  }
-
   if (pathname === '/api/connectors/calendar/google/callback' && req.method === 'GET') {
     const code = trimString(new URL(req.url || '/', 'http://127.0.0.1').searchParams.get('code'));
     const state = trimString(new URL(req.url || '/', 'http://127.0.0.1').searchParams.get('state'));
@@ -1113,7 +966,7 @@ export async function handleConnectorApiRoutes({
   }
 
   if (pathname === '/api/connectors' && req.method === 'GET') {
-    const bindings = await listConnectorBindings();
+    const bindings = (await listConnectorBindings()).filter((binding) => !isRetiredConnector(binding.connectorId));
     writeJson(res, 200, { bindings });
     return true;
   }

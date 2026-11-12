@@ -3,7 +3,6 @@
     "chat/session-manager.mjs": 3855,
     "chat/router.mjs": 2175,
     "scripts/github-auto-triage.mjs": 1726,
-    "scripts/feishu-connector.mjs": 1713,
     "scripts/proactive-observer.mjs": 1424,
     "scripts/remote-capability-monitor.mjs": 1415,
     "tests/test-http-runtime-phase1.mjs": 1007,

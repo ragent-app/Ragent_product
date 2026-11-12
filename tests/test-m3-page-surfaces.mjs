@@ -12,7 +12,6 @@ const [pages, ...templates] = await Promise.all([
     "admin-login.html",
     "instance-admin.html",
     "mobile-install.html",
-    "wechat-login.html",
   ].map((file) => readFile(join(repoRoot, "templates", file), "utf8")),
 ]);
 

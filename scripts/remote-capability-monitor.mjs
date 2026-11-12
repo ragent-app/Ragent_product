@@ -1109,12 +1109,12 @@ function buildNotificationMessage({ pendingInteresting, allInteresting, reportPa
 }
 
 function materializeNotificationChannels(channelTemplates, message) {
-  return (Array.isArray(channelTemplates) ? channelTemplates : []).map((channel) => {
+  return (Array.isArray(channelTemplates) ? channelTemplates : [])
+    .filter((channel) => !['feishu', 'lark', 'wechat', 'weixin'].includes(trimString(channel?.type).toLowerCase()))
+    .map((channel) => {
     const type = trimString(channel?.type).toLowerCase();
     const next = { ...channel };
-    if (type === 'feishu') {
-      next.text = truncate(trimString(channel?.text) || message.text, 900);
-    } else if (type === 'email') {
+    if (type === 'email') {
       next.subject = trimString(channel?.subject) || message.title;
       next.text = trimString(channel?.text) || message.text;
     } else if (type === 'agentoc_web_push') {

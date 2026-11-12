@@ -86,8 +86,8 @@ assert.match(portablePrompt, /Auto user memory: .*\/memory\/model-context\/auto-
 assert.match(portablePrompt, /Auto system memory: .*\/memory\/auto-system-memory\.md/);
 assert.match(freshPrompt, /Model-managed writable context root:/);
 assert.match(portablePrompt, /\/memory\/model-context/);
-assert.match(freshPrompt, /execution substrate, not as the end user's personal Mac|Treat the host as execution substrate/);
-assert.match(freshPrompt, /only use connectors and delivery channels that are explicitly configured|prefer instance-scoped connectors/);
+assert.match(freshPrompt, /The host is an execution surface; do not assume whether the user can access it locally/);
+assert.match(freshPrompt, /use only connectors and delivery channels actually authorized for this session/);
 assert.doesNotMatch(freshPrompt, /Subscription link \(webcal\): webcal:\/\/127\.0\.0\.1:/);
 assert.doesNotMatch(freshPrompt, /Subscription link \(https\): http:\/\/127\.0\.0\.1:/);
 assert.match(freshPrompt, /Session presentation metadata \(hidden protocol\)/);
@@ -417,30 +417,6 @@ const splitPrompt = await buildPrompt(
 assert.match(splitPrompt, /lightweight external context hook/);
 assert.match(splitPrompt, /Stable context entry points:/);
 assert.doesNotMatch(splitPrompt, /Routing principle for this turn/);
-
-const feishuSourcePrompt = await buildPrompt(
-  'session-test-3',
-  {
-    ...baseSession,
-    sourceId: 'feishu',
-    sourceName: 'Feishu',
-    sourceContext: {
-      chatType: 'group',
-    },
-  },
-  '帮我看一下这个仓库的问题。',
-  'codex',
-  'codex',
-  null,
-  { skipSessionContinuation: true },
-);
-
-assert.match(feishuSourcePrompt, /Source\/runtime instructions \(backend-owned for this session source\):/);
-assert.match(feishuSourcePrompt, /same AgentoC executor you would be in ChatUI/);
-assert.match(feishuSourcePrompt, /Do not collapse action requests into a one-line acknowledgement/);
-assert.match(feishuSourcePrompt, /Do not include emoji characters, emoticons, or sticker aliases/);
-assert.match(feishuSourcePrompt, /source-context/);
-assert.match(feishuSourcePrompt, /This session maps to a group chat/);
 
 const observerSourcePrompt = await buildPrompt(
   'session-test-4',
