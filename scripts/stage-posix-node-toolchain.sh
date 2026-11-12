@@ -12,6 +12,10 @@ mkdir -p "$runtime/node_modules"
 test ! -e "$runtime/node_modules/npm" && test ! -e "$runtime/node_modules/corepack"
 cp -R "$distribution/lib/node_modules/npm" "$runtime/node_modules/npm"
 cp -R "$distribution/lib/node_modules/corepack" "$runtime/node_modules/corepack"
+# Package builds may run with a restrictive umask. The resulting tools are
+# installed as root but executed by the instance user, so their public code
+# and directories must remain readable and searchable by that user.
+chmod -R a+rX "$runtime/node_modules/npm" "$runtime/node_modules/corepack"
 # npm's manuals include sample keys; they are not needed for managed installs.
 rm -rf "$runtime/node_modules/npm/docs" "$runtime/node_modules/npm/man"
 cat > "$runtime/npm" <<'EOF'
