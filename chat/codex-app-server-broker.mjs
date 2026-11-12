@@ -25,6 +25,7 @@ import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
 import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.mjs';
 import { createCodexWindowsHookRouter } from './codex-windows-hook-router.mjs';
 import { MAC_CLEANUP_NOTIFICATION, MAC_CLEANUP_SPOOL_TYPE } from './macos-codex-cancellation.mjs';
+import { createCodexBrokerTurnActivity } from './codex-broker-turn-activity.mjs';
 
 const BROKER_PING = 'agentoc-codex-broker-ping';
 const BROKER_PONG = 'agentoc-codex-broker-pong';
@@ -334,6 +335,7 @@ function runBroker() {
   }
 
   const clients = new Set();
+  const turnActivity = createCodexBrokerTurnActivity();
   const threadOwners = new Map();
   const pending = new Map();
   // Server-initiated requests use a separate id namespace from client
@@ -426,6 +428,7 @@ function runBroker() {
 
   const handleUpstreamMessage = (message) => {
     if (!message || typeof message !== 'object') return;
+    turnActivity.upstream(message);
     const serverRequest = typeof message.method === 'string' && isRequest(message);
     if (message.method === MAC_CLEANUP_NOTIFICATION || message.type === MAC_CLEANUP_SPOOL_TYPE) {
       if (serverRequest) {
@@ -552,6 +555,26 @@ function runBroker() {
 
   const handleClientMessage = (client, message) => {
     if (!message || typeof message !== 'object') return;
+    if (message.type === 'agentoc-codex-broker-retire') {
+      const accountMatches = Boolean(accountDigest && message.expectedAccountDigest === accountDigest);
+      const idle = accountMatches && upstreamReady && !stopping && clients.size === 1
+        && turnActivity.isIdle() && pending.size === 0 && pendingServerRequests.size === 0
+        && pendingThreadReloads.size === 0 && pendingThreadClients.length === 0
+        && threadStartQueue.length === 0 && activeThreadRequestId === null
+        && pendingHookCalls.size === 0 && mcpOAuthOwners.size === 0;
+      if (!idle) {
+        sendClient(client, { type: 'agentoc-codex-broker-retire-result', accepted: false });
+        return;
+      }
+      // Stop accepting connections in the same event-loop turn as the idle
+      // check, so no new request can start before shutdown begins.
+      stopping = true;
+      server?.close();
+      sendClient(client, { type: 'agentoc-codex-broker-retire-result', accepted: true });
+      void shutdown();
+      return;
+    }
+    if (stopping) return;
     if (message.type === BROKER_PING) {
       sendClient(client, { type: BROKER_PONG, ready: upstreamReady,
         ...(typeof message.expectedAccountDigest === 'string'
