@@ -7,6 +7,7 @@ import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protoc
 import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { createDemoAccountAuth, createDemoAccountPolicy } from '../accounts/demo-credentials.mjs';
 import { createAccountEntitlementResolver } from '../accounts/turn-lease-policy.mjs';
+import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
 
 const home = mkdtempSync(join(tmpdir(), 'agentoc-account-file-quota-'));
 process.env.HOME = home;
@@ -127,6 +128,26 @@ try {
   assert.equal(testReservation.limits.unlimited, true);
   assert.equal(testReservation.reservedBytes, largeSize);
   assert.equal((await testBroker.completeAccountFileUpload(largeRequest('complete'))).usedBytes, largeSize);
+
+  const grant = issueInstanceAccessGrant(state, { instanceId: identity.instanceId, ownerAccountId: accountId,
+    accountId: policy.accountId, requestId: 'shared_quota_grant_0001', now }).grant;
+  const sharedRequest = (operation, grantId = grant.grantId) => {
+    const fields = { accountId: policy.accountId, operation, requestId: 'shared-large', quotaBatchId: 'shared-batch',
+      sizeBytes: largeSize, sha256: digest('c'), issuedAt: new Date(now).toISOString(),
+      audience: 'agentoc-account-file-upload', grantId };
+    return { ...fields, instance: publicInstanceIdentity(identity), signature: signAccountFileUploadQuotaProof(identity, fields).signature };
+  };
+  assert.equal((await testBroker.getAccountFileUploadPolicy(sharedRequest('policy'))).limits.unlimited, true);
+  assert.equal((await testBroker.reserveAccountFileUpload(sharedRequest('reserve'))).limits.unlimited, true);
+  assert.equal(state.accountFileUploads.find(row => row.requestId === 'shared-large').accountId, policy.accountId);
+  const tamperedGrant = sharedRequest('reserve');
+  tamperedGrant.grantId = `iag_${'x'.repeat(32)}`;
+  await assert.rejects(() => testBroker.reserveAccountFileUpload(tamperedGrant), { code: 'owner_auth_proof_invalid' });
+  revokeInstanceAccessGrant(state, { grantId: grant.grantId, ownerAccountId: accountId, now });
+  await assert.rejects(() => testBroker.completeAccountFileUpload(sharedRequest('complete')), { code: 'instance_access_unavailable' });
+  issueInstanceAccessGrant(state, { instanceId: identity.instanceId, ownerAccountId: accountId,
+    accountId: policy.accountId, requestId: 'shared_quota_grant_0002', now });
+  await assert.rejects(() => testBroker.reserveAccountFileUpload(sharedRequest('reserve')), { code: 'instance_access_unavailable' });
 
   const forged = request('reserve', 'tampered-proof', 1, digest('8'));
   forged.quotaBatchId = 'changed-message';

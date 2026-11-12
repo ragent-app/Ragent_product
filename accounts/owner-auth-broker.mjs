@@ -199,6 +199,7 @@ function normalizeAccountFileUploadQuotaInput(input, operation, clock) {
   const publicKey = trimString(instanceInput.publicKey);
   const keyFingerprint = trimString(instanceInput.keyFingerprint);
   const accountId = trimString(input?.accountId);
+  const grantId = trimString(input?.grantId);
   const requestId = trimString(input?.requestId);
   const quotaBatchId = trimString(input?.quotaBatchId);
   const sizeBytes = Number(input?.sizeBytes);
@@ -211,6 +212,7 @@ function normalizeAccountFileUploadQuotaInput(input, operation, clock) {
     || !isProtocolField(quotaBatchId, { min: 1, max: 200 }) || !Number.isSafeInteger(sizeBytes)
     || sizeBytes <= 0 || !/^[a-f0-9]{64}$/.test(sha256)
     || !issuedMs || !isProtocolField(issuedAt, { min: 20, max: 64 })
+    || (grantId && !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId))
     || trimString(input?.audience) !== 'agentoc-account-file-upload') {
     throw createError('account_file_upload_request_invalid', 'Invalid account file upload quota request.', 400);
   }
@@ -221,11 +223,11 @@ function normalizeAccountFileUploadQuotaInput(input, operation, clock) {
     throw createError('owner_auth_instance_invalid', 'Instance key fingerprint does not match.', 401);
   }
   const message = buildAccountFileUploadQuotaMessage({ instanceId, accountId, operation, requestId,
-    quotaBatchId, sizeBytes, sha256, issuedAt });
+    quotaBatchId, sizeBytes, sha256, issuedAt, grantId });
   if (!verifyInstanceProofSignature({ publicKey, message, signature: input?.signature })) {
     throw createError('owner_auth_proof_invalid', 'Invalid account file upload quota signature.', 401);
   }
-  return { instance: { instanceId, publicKey, keyFingerprint }, accountId, requestId, quotaBatchId, sizeBytes, sha256 };
+  return { instance: { instanceId, publicKey, keyFingerprint }, accountId, grantId, requestId, quotaBatchId, sizeBytes, sha256 };
 }
 
 function hasCredentialScope(credential, scope) {
@@ -3530,12 +3532,23 @@ export function createOwnerAuthBroker({
     });
   }
 
+  function assertUploadAccount(draft, normalized) {
+    if (!normalized.grantId) return assertBoundAccount(draft, normalized.instance, normalized.accountId);
+    const access = resolveInstanceWorkspaceAccess(draft, { instanceId: normalized.instance.instanceId, accountId: normalized.accountId });
+    if (access?.kind !== 'workspace' || access.grant.grantId !== normalized.grantId) {
+      throw createError('instance_access_unavailable', 'Instance access authorization is unavailable.', 403);
+    }
+    assertBoundInstanceKey(access.binding, normalized.instance);
+    assertDemoAccount(draft, access.binding.accountId, normalized.instance.instanceId);
+    return access.binding;
+  }
+
   // A signed instance proof selects the bound account; this is a policy hint,
   // while every actual upload still requires its own atomic reservation.
   async function getAccountFileUploadPolicy(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'policy', clock);
     return store.mutate((draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertUploadAccount(draft, normalized);
       assertAccountNotDeleting(draft, normalized.accountId);
       assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
       const entitlement = resolveEntitlement(draft, normalized.accountId, clock());
@@ -3547,7 +3560,7 @@ export function createOwnerAuthBroker({
   async function reserveAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'reserve', clock);
     const result = await store.mutate(async (draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertUploadAccount(draft, normalized);
       assertAccountNotDeleting(draft, normalized.accountId);
       assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
       const now = clock();
@@ -3598,7 +3611,7 @@ export function createOwnerAuthBroker({
   async function completeAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'complete', clock);
     const result = await store.mutate(async (draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertUploadAccount(draft, normalized);
       assertAccountNotDeleting(draft, normalized.accountId);
       assertDemoAccount(draft, normalized.accountId, normalized.instance.instanceId);
       const now = clock();
@@ -3635,7 +3648,7 @@ export function createOwnerAuthBroker({
   async function releaseAccountFileUpload(input) {
     const normalized = normalizeAccountFileUploadQuotaInput(input, 'release', clock);
     const result = await store.mutate(async (draft) => {
-      assertBoundAccount(draft, normalized.instance, normalized.accountId);
+      assertUploadAccount(draft, normalized);
       const now = clock();
       const row = getAccountFileUploads(draft).find((item) => item.accountId === normalized.accountId
         && item.requestId === normalized.requestId);
