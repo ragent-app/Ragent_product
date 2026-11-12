@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-runtime/oauth-lock.mjs';
 import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
 import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.mjs';
+import { createCodexWindowsHookRouter } from './codex-windows-hook-router.mjs';
 
 const BROKER_PING = 'agentoc-codex-broker-ping';
 const BROKER_PONG = 'agentoc-codex-broker-pong';
@@ -309,6 +310,8 @@ function runBroker() {
   const pendingThreadClients = [];
   const threadStartQueue = [];
   const pendingThreadReloads = new Map();
+  const hookRouters = new Map();
+  const pendingHookCalls = new Map();
   let activeThreadRequestId = null;
   let nextRequestId = 10_000;
   let upstreamReady = false;
@@ -329,6 +332,9 @@ function runBroker() {
 
   const routeNotification = (message) => {
     const threadId = readThreadId(message);
+    if (message?.method === 'hook/started' || message?.method === 'hook/completed') {
+      hookRouters.get(threadOwners.get(threadId))?.observe(message);
+    }
     if (threadId && threadOwners.has(threadId)) {
       sendClient(threadOwners.get(threadId), message);
       return;
@@ -406,6 +412,10 @@ function runBroker() {
       return;
     }
     if (serverRequest) {
+      if (message.method === 'agentoc/windowsHook' || message.method === 'agentoc/registerWindowsHook') {
+        try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32601, message: 'Reserved broker method' } })}\n`); } catch {}
+        return;
+      }
       const client = threadOwners.get(readThreadId(message));
       if (!client || client.destroyed) {
         try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32000, message: 'No connected owner for this thread' } })}\n`); } catch {}
@@ -510,7 +520,49 @@ function runBroker() {
       return;
     }
     if (message.method === 'initialized') return;
+    if (message.method === 'agentoc/registerWindowsHook' && isRequest(message)) {
+      const sourcePath = message.params?.sourcePath;
+      const order = message.params?.displayOrder;
+      if (typeof sourcePath !== 'string' || !sourcePath || !Number.isSafeInteger(order) || order < 0 || order > 10000) {
+        sendClient(client, { id: message.id, error: { code: -32602, message: 'Invalid managed hook identity' } });
+        return;
+      }
+      hookRouters.set(client, createCodexWindowsHookRouter({ sourcePath,
+        runIdPrefix: `pre-tool-use:${order}:${sourcePath}:`, getOwner: id => threadOwners.get(id) }));
+      sendClient(client, { id: message.id, result: {} });
+      return;
+    }
+    if (message.type === 'agentoc-codex-windows-hook') {
+      const event = message.event;
+      const deny = () => sendClient(client, { error: 'No matching active managed hook' });
+      const tryClaim = (remaining) => {
+        if (client.destroyed) return;
+        const owner = threadOwners.get(event?.session_id);
+        const matched = owner && hookRouters.get(owner)?.claim(event);
+        if (!matched) {
+          if (remaining > 0) { const timer = setTimeout(() => tryClaim(remaining - 1), 50); timer.unref?.(); }
+          else deny();
+          return;
+        }
+        const id = `agentoc-hook-${nextRequestId++}`;
+        const timer = setTimeout(() => { pendingHookCalls.delete(id); deny(); }, 60_000);
+        timer.unref?.();
+        pendingHookCalls.set(id, { owner, client, timer });
+        if (!sendClient(owner, { id, method: 'agentoc/windowsHook', params: { event } })) {
+          clearTimeout(timer); pendingHookCalls.delete(id); deny();
+        }
+      };
+      tryClaim(20);
+      return;
+    }
     if (!message.method && isRequest(message)) {
+      const hookCall = pendingHookCalls.get(message.id);
+      if (hookCall) {
+        if (hookCall.owner !== client) return;
+        clearTimeout(hookCall.timer); pendingHookCalls.delete(message.id);
+        sendClient(hookCall.client, message.error ? { error: 'Hook evaluation failed' } : { result: message.result });
+        return;
+      }
       const request = pendingServerRequests.get(message.id);
       if (!request || request.client !== client) return;
       pendingServerRequests.delete(message.id);
@@ -566,6 +618,12 @@ function runBroker() {
     });
     client.on('close', () => {
       clients.delete(client);
+      hookRouters.delete(client);
+      for (const [id, call] of pendingHookCalls) {
+        if (call.client !== client && call.owner !== client) continue;
+        clearTimeout(call.timer); pendingHookCalls.delete(id);
+        if (call.owner === client) sendClient(call.client, { error: 'Hook owner disconnected' });
+      }
       for (let index = pendingThreadClients.length - 1; index >= 0; index -= 1) {
         if (pendingThreadClients[index] === client) pendingThreadClients.splice(index, 1);
       }

@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -125,6 +126,17 @@ const fakeUpstream = `
         process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
         process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id }, config: message.params.config } }) + '\\n');
       } else if (message.method === 'turn/start') {
+        if (message.params.input[0].text === 'hook') {
+          const threadId = message.params.threadId;
+          const sourcePath = 'C:/fixture/hooks.json';
+          const sendHook = { method: 'hook/started', params: { threadId, turnId: 'hook-turn', run: {
+            id: 'pre-tool-use:0:' + sourcePath + ':hook-call', sourcePath, eventName: 'preToolUse',
+            handlerType: 'command', executionMode: 'sync', status: 'running',
+          } } };
+          process.stdout.write(JSON.stringify(sendHook) + '\\n');
+          process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+          continue;
+        }
         if (message.params.input[0].text === 'approval') {
           // Server request ids may collide with pending client request ids.
           const approvalId = message.id;
@@ -304,6 +316,22 @@ assert.equal(resumeMessages.find(message => message.id === 97).result.config.mcp
 assert.equal(resumeMessages.find(message => message.method === 'thread/started').params.thread.id, left.threadId);
 right.proxy.send({ method: 'turn/start', id: 99, params: { threadId: left.threadId, input: [{ type: 'text', text: 'approval' }] } });
 assert.equal((await right.proxy.next()).error.code, -32004);
+left.proxy.send({ method: 'agentoc/registerWindowsHook', id: 93, params: { sourcePath: 'C:/fixture/hooks.json', displayOrder: 0 } });
+assert.equal((await left.proxy.next()).id, 93);
+left.proxy.send({ method: 'turn/start', id: 94, params: { threadId: left.threadId, input: [{ type: 'text', text: 'hook' }] } });
+const hookStartMessages = [await left.proxy.next(), await left.proxy.next()];
+assert.ok(hookStartMessages.some(message => message.method === 'hook/started'));
+const hookSocket = connect(socketPath);
+await new Promise((resolve, reject) => { hookSocket.once('connect', resolve); hookSocket.once('error', reject); });
+const hookReply = new Promise(resolve => createInterface({ input: hookSocket }).once('line', line => resolve(JSON.parse(line))));
+hookSocket.write(JSON.stringify({ type: 'agentoc-codex-windows-hook', event: { session_id: left.threadId, turn_id: 'hook-turn',
+  tool_use_id: 'hook-call', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'Write-Output fixture' } } }) + '\n');
+const hookRequest = await left.proxy.next();
+assert.equal(hookRequest.method, 'agentoc/windowsHook');
+right.proxy.send({ id: hookRequest.id, result: { owner: 'wrong' } });
+left.proxy.send({ id: hookRequest.id, result: { owner: 'left' } });
+assert.deepEqual(await hookReply, { result: { owner: 'left' } });
+hookSocket.end();
 for (const item of [left, right]) item.proxy.send({ method: 'turn/start', id: 2, params: { threadId: item.threadId, input: [{ type: 'text', text: 'approval' }] } });
 const [leftMessages, rightMessages] = await Promise.all([
   Promise.all([left.proxy.next(), left.proxy.next()]),
