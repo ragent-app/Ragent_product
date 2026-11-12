@@ -25,7 +25,8 @@ check('null on empty string', parsePrivilegedSentinel('') === null);
 check('null on whitespace', parsePrivilegedSentinel('   ') === null);
 check('null on non-string', parsePrivilegedSentinel(null) === null);
 check('null on unrelated agentoc- prefix', parsePrivilegedSentinel('agentoc-foo -- true') === null);
-check('constant exported', PRIVILEGED_SENTINEL_PROGRAM === 'agentoc-privileged');
+check('constant exported', PRIVILEGED_SENTINEL_PROGRAM === 'ragent-privileged');
+check('new sentinel accepted', parsePrivilegedSentinel('ragent-privileged -- true')?.valid === true);
 
 // --- bare sentinel, no separator -> malformed ---
 {
@@ -46,7 +47,7 @@ check('constant exported', PRIVILEGED_SENTINEL_PROGRAM === 'agentoc-privileged')
   check('declaredCategory raw', r.declaredCategory === 'install');
   check('realCommand verbatim', r.realCommand === 'apt-get install -y nginx');
   check('no malformedReason when valid', r.malformedReason === undefined);
-  check('program field', r.program === 'agentoc-privileged');
+  check('program field', r.program === 'ragent-privileged');
 }
 
 // --- single-quoted description, delete ---

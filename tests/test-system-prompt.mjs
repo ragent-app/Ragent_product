@@ -156,7 +156,7 @@ assert.match(context, /Only surface options when materially different branches t
 assert.match(context, /Pause only for a real blocker: an explicitly requested stop\/wait, missing credentials or external information you cannot obtain yourself, a destructive or irreversible action without clear authorization, or a decision that only the user can make/);
 assert.match(context, /Do not treat the absence of micro-instructions as a blocker; execution-layer decisions are part of your job/);
 assert.match(context, /## Privileged Operations/);
-assert.match(context, /agentoc-privileged --description \"<why>\" --category install\|other\|delete -- <real command>/);
+assert.match(context, /ragent-privileged --description \"<why>\" --category install\|other\|delete -- <real command>/);
 assert.match(context, /separate managed privileged executor/);
 assert.match(context, /ragent_request_actions/);
 assert.match(context, /never direct elevation/);

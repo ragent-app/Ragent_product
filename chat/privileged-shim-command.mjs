@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Real `agentoc-privileged` command (design docs/privileged-shim-channel-2026-09-03.md).
+// Real `ragent-privileged` command (design docs/privileged-shim-channel-2026-09-03.md).
 //
 // The sidecar installs a per-Run launcher for this module on the provider's
 // PATH (see privileged-shim-listener.mjs). When the privileged sentinel
@@ -31,12 +31,12 @@ import {
 } from './privileged-shim-protocol.mjs';
 
 function fail(code, message) {
-  process.stderr.write(`agentoc-privileged: ${message}\n`);
+  process.stderr.write(`ragent-privileged: ${message}\n`);
   process.exit(code);
 }
 
 function failUsage(message) {
-  process.stderr.write(`agentoc-privileged: ${message}\n\n${buildPrivilegedShimUsageText()}\n`);
+  process.stderr.write(`ragent-privileged: ${message}\n\n${buildPrivilegedShimUsageText()}\n`);
   process.exit(PRIVILEGED_SHIM_EXIT.USAGE);
 }
 
@@ -156,7 +156,7 @@ function main() {
     clearTimeout(connectTimer);
     socket.destroy();
     const exit = resolveShimExit(result);
-    if (exit.message) process.stderr.write(`agentoc-privileged: ${exit.message}\n`);
+    if (exit.message) process.stderr.write(`ragent-privileged: ${exit.message}\n`);
     if (result?.status === 'completed') {
       const stdout = clampOutput(result.stdout);
       const stderr = clampOutput(result.stderr);
@@ -172,7 +172,7 @@ function main() {
     clearTimeout(connectTimer);
     socket.end();
     const accepted = resolveShimAccepted(frame);
-    process.stderr.write(`agentoc-privileged: ${accepted.message}\n`);
+    process.stderr.write(`ragent-privileged: ${accepted.message}\n`);
     process.exit(accepted.code);
   };
 
@@ -222,7 +222,7 @@ function main() {
     settled = true;
     socket.destroy();
     clearTimeout(connectTimer);
-    process.stderr.write(`agentoc-privileged: aborted by ${signal}; the declared operation may still be pending owner review\n`);
+    process.stderr.write(`ragent-privileged: aborted by ${signal}; the declared operation may still be pending owner review\n`);
     process.exit(signal === 'SIGINT' ? 130 : 143);
   };
   process.once('SIGINT', () => onSignal('SIGINT'));

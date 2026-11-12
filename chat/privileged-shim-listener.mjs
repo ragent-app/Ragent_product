@@ -29,6 +29,7 @@ import {
   DEFAULT_PRIVILEGED_SHIM_TIMEOUT_MS,
   MAX_PRIVILEGED_SHIM_REQUEST_BYTES,
   PRIVILEGED_SHIM_BIN_NAME,
+  LEGACY_PRIVILEGED_SHIM_BIN_NAME,
   PRIVILEGED_SHIM_POLL_INTERVAL_MS,
   PRIVILEGED_SHIM_PROTOCOL_VERSION,
   PRIVILEGED_SHIM_RESULT_STATUS,
@@ -125,6 +126,10 @@ export async function startPrivilegedShimChannel({
   await mkdir(binDir, { recursive: true });
   await writeFile(binPath, buildPrivilegedShimLauncherScript(node, entry), { mode: 0o755 });
   await chmod(binPath, 0o755);
+  // Preserve commands queued before the migration within this run.
+  const legacyBinPath = join(binDir, LEGACY_PRIVILEGED_SHIM_BIN_NAME);
+  await writeFile(legacyBinPath, buildPrivilegedShimLauncherScript(node, entry), { mode: 0o755 });
+  await chmod(legacyBinPath, 0o755);
 
   let socketPath = join(baseDir, 'shim.sock');
   let shortSocketDir = '';

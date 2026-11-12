@@ -11,7 +11,7 @@ function unwrapInstallSentinel(command) {
   if (!sentinel) return command;
   if (!sentinel.valid || (sentinel.declaredCategory && sentinel.declaredCategory !== 'install')) return '';
   const wrapper = command.trim().slice(0, command.trim().length - sentinel.realCommand.length);
-  if (!/^agentoc-privileged\s+(?:(?:--description|--desc|--category)\s+(?:"[^"\\\r\n$`]*"|'[^'\\\r\n]*'|[A-Za-z0-9._-]+)\s+)*--\s+$/i.test(wrapper)) return '';
+  if (!/^(?:agentoc|ragent)-privileged\s+(?:(?:--description|--desc|--category)\s+(?:"[^"\\\r\n$`]*"|'[^'\\\r\n]*'|[A-Za-z0-9._-]+)\s+)*--\s+$/i.test(wrapper)) return '';
   return sentinel.realCommand;
 }
 

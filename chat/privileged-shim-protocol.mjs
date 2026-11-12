@@ -22,7 +22,8 @@ export const PRIVILEGED_SHIM_PROTOCOL_VERSION = 1;
 // Env names used by the per-Run sidecar and its provider-facing launcher.
 export const PRIVILEGED_SHIM_SOCKET_ENV = 'AGENTOC_PRIVILEGED_SHIM_SOCKET';
 export const PRIVILEGED_SHIM_TIMEOUT_ENV = 'AGENTOC_PRIVILEGED_SHIM_TIMEOUT_MS';
-export const PRIVILEGED_SHIM_BIN_NAME = 'agentoc-privileged';
+export const PRIVILEGED_SHIM_BIN_NAME = 'ragent-privileged';
+export const LEGACY_PRIVILEGED_SHIM_BIN_NAME = 'agentoc-privileged';
 
 // Owner approval is a human checkpoint on a phone; mirror the gate path's
 // unbounded waiting_user posture with a generous ceiling instead of a chatty

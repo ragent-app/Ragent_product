@@ -48,7 +48,7 @@ const bash = buildClaudeWindowsInstallBridge({ ...options, approval: { ...approv
 assert.match(bash.updatedCommand, /^'D:\/Program Files\/node\.exe'/);
 for (const riskMode of ['recommended', 'full-auto']) {
   for (const toolName of ['PowerShell', 'Bash']) {
-    const wrappedCommand = 'agentoc-privileged --description "Install Git" --category install -- winget install Git.Git';
+    const wrappedCommand = 'ragent-privileged --description "Install Git" --category install -- winget install Git.Git';
     const wrapped = buildClaudeWindowsInstallBridge({ ...options, state: { ...state, riskMode },
       approval: { ...approval, params: { ...approval.params, tool_name: toolName, input: { command: wrappedCommand } } } });
     assert.equal(wrapped?.installCommand, 'winget install Git.Git');

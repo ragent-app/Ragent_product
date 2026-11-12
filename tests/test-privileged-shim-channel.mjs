@@ -155,6 +155,13 @@ if (process.platform !== 'win32') {
   });
   try {
     check('launcher installed', existsSync(channel.binPath));
+    check('legacy launcher retained', existsSync(join(channel.binDir, 'agentoc-privileged')));
+    if (process.platform !== 'win32') {
+      for (const executable of [channel.binPath, join(channel.binDir, 'agentoc-privileged')]) {
+        const help = spawnSync(executable, ['--help'], { encoding: 'utf8' });
+        check('launcher runs help', help.status === 0 && help.stdout.includes('ragent-privileged'));
+      }
+    }
     check('launcher executable', (statSync(channel.binPath).mode & 0o111) !== 0);
     check('socket created', existsSync(channel.socketPath));
     if (process.platform === 'linux' && resultsDir.startsWith('/tmp/')) {

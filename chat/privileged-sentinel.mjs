@@ -14,7 +14,7 @@
 //
 // Not yet wired into any live gate; no live code references this module today.
 
-export const PRIVILEGED_SENTINEL_PROGRAM = 'agentoc-privileged';
+export const PRIVILEGED_SENTINEL_PROGRAM = 'ragent-privileged';
 
 // Flags understood in the options segment. Also used as the set of tokens that
 // are NEVER consumed as a flag's value (so `--category --description "x"` parses
@@ -32,7 +32,7 @@ function isSentinelProgram(token) {
   const value = trimString(token);
   if (!value) return false;
   const base = value.slice(value.lastIndexOf('/') + 1);
-  return base === PRIVILEGED_SENTINEL_PROGRAM;
+  return base === PRIVILEGED_SENTINEL_PROGRAM || base === 'agentoc-privileged';
 }
 
 // Quote-aware tokenizer that records character spans in the source string. NOT
