@@ -1,6 +1,6 @@
 param([string]$Package,[string]$AppRoot,[string]$Executable,[int]$ParentId,[string]$Result,[int]$Port,[string]$Digest)
 $ErrorActionPreference = 'Stop'
-function Save-Result([string]$State) { [IO.File]::WriteAllText($Result, ('{"status":"' + $State + '"}')) }
+function Save-Result([string]$State) { [IO.File]::WriteAllText($Result, ('{"status":"' + $State + '","digest":"' + $Digest + '"}')) }
 try {
   if ($Digest -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Digest) { throw 'Package checksum mismatch' }
   [Console]::Out.WriteLine('RAGENT_READY')

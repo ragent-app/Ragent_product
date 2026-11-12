@@ -66,20 +66,23 @@ function createTray() {
   }
 }
 
+async function queryUpdate() {
+  const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
+  let currentVersion = (await fs.readFile(path.join(metadataDir, ".agentoc-package-version"), "utf8")).trim();
+  if (process.platform !== "win32") currentVersion = currentVersion.split("+")[0];
+  const currentCommit = await fs.readFile(path.join(metadataDir, ".agentoc-source-commit"), "utf8").catch(() => "");
+  const currentBuild = await fs.readFile(path.join(metadataDir, ".agentoc-package-build"), "utf8").catch(() => "");
+  return updateCheck.check(currentVersion, undefined, { currentCommit, currentBuild });
+}
+
 async function refreshUpdate() {
   if (installationPending) return updateState;
   if (updatePending) return updatePending;
   updatePending = (async () => {
-    let currentVersion;
     try {
-      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
-      currentVersion = (await fs.readFile(path.join(metadataDir, ".agentoc-package-version"), "utf8")).trim();
-      if (process.platform !== "win32") currentVersion = currentVersion.split("+")[0];
-      const currentCommit = await fs.readFile(path.join(metadataDir, ".agentoc-source-commit"), "utf8").catch(() => "");
-      const currentBuild = await fs.readFile(path.join(metadataDir, ".agentoc-package-build"), "utf8").catch(() => "");
-      updateState = { status: "ready", ...(await updateCheck.check(currentVersion, undefined, { currentCommit, currentBuild })) };
+      updateState = { status: "ready", ...(await queryUpdate()) };
     } catch {
-      updateState = { status: "error", ...(currentVersion ? { currentVersion } : {}) };
+      updateState = { status: "error" };
     }
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop:update-state", updateState);
     return updateState;
@@ -101,6 +104,10 @@ async function readUpdateResult(attempt = 0) {
       setTimeout(() => void readUpdateResult(attempt + 1), 2000);
     } else if (result.status === "installed" || result.status === "failed") {
       publishUpdate({ status: result.status === "installed" ? "installed" : "installError" });
+      if (result.status === "installed" && /^[a-f0-9]{64}$/.test(result.digest || "")) {
+        try { await autoUpdate.clearCachedPackage(path.join(app.getPath("userData"), "ragent-update-cache"), result.digest); }
+        catch { if (attempt < 120) setTimeout(() => void readUpdateResult(attempt + 1), 2000); return; }
+      }
       await fs.unlink(resultFile).catch(() => {});
     }
   } catch { /* No previous update result. */ }
@@ -110,12 +117,14 @@ async function installUpdate() {
   if (installationPending) return false;
   if (!updateState.updateAvailable || !updateCheck.releaseAssetUrl(updateState.downloadUrl)) return false;
   installationPending = (async () => {
-    let packageDir;
     let resultFile;
     try {
+      publishUpdate({ status: "checking" });
+      const latest = await queryUpdate();
+      if (!latest.updateAvailable) { publishUpdate({ ...latest, status: "ready" }); return; }
+      publishUpdate({ ...latest });
       publishUpdate({ status: "downloading", progress: 0 });
-      const downloaded = await autoUpdate.downloadPackage(updateState, { onProgress: (bytes, total) => publishUpdate({ status: "downloading", progress: total ? Math.floor(bytes * 100 / total) : null }) });
-      packageDir = downloaded.directory;
+      const downloaded = await autoUpdate.downloadPackage(updateState, { cacheRoot: path.join(app.getPath("userData"), "ragent-update-cache"), onProgress: (bytes, total) => publishUpdate({ status: "downloading", progress: total ? Math.floor(bytes * 100 / total) : null }) });
       publishUpdate({ status: "waiting" });
       const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
       const appRoot = process.platform === "darwin" ? path.resolve(metadataDir, "../..") : metadataDir;
@@ -123,12 +132,11 @@ async function installUpdate() {
       await fs.writeFile(resultFile, '{"status":"pending"}\n', { mode: 0o600 });
       const result = await autoUpdate.startInstaller({ ...downloaded, appRoot, executable: process.execPath, resultFile, packageSha256: updateState.packageSha256, servicePort: Number(configuredPort),
         onStatus: status => publishUpdate({ status }), onReadyToQuit: () => app.quit() });
-      if (result.installed) { await fs.writeFile(resultFile, '{"status":"installed"}\n', { mode: 0o600 }); await fs.rm(packageDir, { recursive: true, force: true }); publishUpdate({ status: "installed" }); app.relaunch(); app.quit(); }
+      if (result.installed) { await fs.writeFile(resultFile, JSON.stringify({ status: "installed", digest: updateState.packageSha256 }), { mode: 0o600 }); await autoUpdate.clearCachedPackage(path.join(app.getPath("userData"), "ragent-update-cache"), updateState.packageSha256).catch(() => {}); publishUpdate({ status: "installed" }); app.relaunch(); app.quit(); }
     } catch (error) {
       console.error("Ragent update failed:", error.message);
       publishUpdate({ status: "installError" });
       if (resultFile) await fs.unlink(resultFile).catch(() => {});
-      if (packageDir) await fs.rm(packageDir, { recursive: true, force: true }).catch(() => {});
     }
   })().finally(() => { installationPending = null; });
   return true;

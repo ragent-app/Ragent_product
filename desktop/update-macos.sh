@@ -16,7 +16,7 @@ backup="${app}.ragent-update-backup-$$"
 failed="${app}.ragent-update-failed-$$"
 cli="$app/Contents/Resources/ragent"
 stop="$app/Contents/Resources/ragent-stop"
-status() { printf '{"status":"%s"}\n' "$1" > "$result"; }
+status() { printf '{"status":"%s","digest":"%s"}\n' "$1" "$digest" > "$result"; }
 fail() { status failed; "$cli" restart-check --end --json >/dev/null 2>&1 || true; /usr/bin/open "$app" >/dev/null 2>&1 || true; exit 1; }
 mkdir -p "$mount" || fail
 /usr/bin/hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$package" >/dev/null || fail
@@ -57,7 +57,10 @@ fi
 "$app/Contents/Resources/ragent" restart-check --end --json >/dev/null 2>&1 || true
 /usr/bin/open "$app" || true
 for n in $(seq 1 60); do
-  if /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then status installed; exit 0; fi
+  if /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
+    if /usr/bin/hdiutil detach "$mount" >/dev/null 2>&1; then trap - EXIT; status installed; exit 0; fi
+    status failed; exit 1
+  fi
   sleep 1
 done
 # Restore the old application only after verifying that no new task is active.
