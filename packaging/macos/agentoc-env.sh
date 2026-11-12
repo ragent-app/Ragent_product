@@ -196,6 +196,6 @@ agentoc_ensure_runtime_shims() {
     return 1
   }
   AGENTOC_PACKAGED_HARNESS_ROOT="${AGENTOC_PACKAGED_HARNESS_ROOT:-$bin_dir}"
-  PATH="$bin_dir:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+  PATH="$bin_dir:$AGENTOC_RESOURCES_DIR:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
   export AGENTOC_PACKAGED_HARNESS_ROOT PATH
 }

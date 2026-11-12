@@ -22,6 +22,7 @@ unset AGENTOC_PACKAGED_HARNESS_ROOT
 AGENTOC_RESOURCES_DIR="$bundle"
 agentoc_ensure_runtime_shims
 [ "$AGENTOC_PACKAGED_HARNESS_ROOT" = "$bundle/runtime" ]
+case ":$PATH:" in *":$bundle:"*) ;; *) echo 'packaged CLI resources are missing from PATH' >&2; exit 1 ;; esac
 # Resolve both commands in a detached-process environment, not just in the
 # launcher's shell. macOS has no /opt/agentoc/runtime fallback.
 export QA_BUNDLE="$bundle" QA_ROOT="$root" QA_HOME="$test_dir/detached-home"
