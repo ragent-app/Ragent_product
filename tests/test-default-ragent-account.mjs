@@ -125,11 +125,23 @@ try {
       assert.equal((await (await fetch(`http://127.0.0.1:${pgApp.server.address().port}/v1/owner-auth/demo-status`)).json()).status, 'configured');
       const row = await pg.pool.query('select provider, provider_subject from accounts where account_id=$1', [firstAccount.accountId]);
       assert.equal(row.rows.length, 1); assert.equal(row.rows[0].provider, 'demo');
+      const pgKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+      const pgPublicKey = pgKey.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+      const pgRequestId = 'request_default_postgres_fixture', pgDeviceId = 'adev_default_postgres_fixture';
+      const pgChallenge = await pgApp.broker.createAccountSessionChallenge({ requestId: pgRequestId,
+        device: { deviceId: pgDeviceId, publicKey: pgPublicKey } });
+      const pgSignature = sign('sha256', Buffer.from(buildAccountSessionMessage({ transactionId: pgChallenge.transactionId,
+        requestId: pgRequestId, deviceId: pgDeviceId, publicKeyFingerprint: createDevicePublicKeyFingerprint(pgPublicKey),
+        nonce: pgChallenge.nonce })), pgKey.privateKey).toString('base64url');
+      const pgSession = await pgApp.broker.completeDemoAccountSession({ transactionId: pgChallenge.transactionId,
+        requestId: pgRequestId, username: firstAccount.username, password: firstAccount.password, signature: pgSignature });
+      assert.equal(pgSession.accountId, firstAccount.accountId);
       await pgApp.close(); pgApp = null;
       pg = createPostgresStoreFromUrl(databaseUrl);
       pgApp = await startAccountsServer({ ...pgOptions, store: pg });
       assert.equal(await readFile(join(pgDir, 'ragent-account', 'account.json'), 'utf8'), firstPolicy);
       assert.equal((await (await fetch(`http://127.0.0.1:${pgApp.server.address().port}/v1/owner-auth/demo-status`)).json()).status, 'configured');
+      assert.deepEqual((await pgApp.broker.discoverInstances({}, { credential: pgSession.credential.token })).instances, []);
       console.log('PASS default account PostgreSQL: initialization, persistent identity and restart');
     } finally { if (pgApp) await pgApp.close(); else await pg?.close(); }
   }
