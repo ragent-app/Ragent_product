@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import { buildWorkbenchCodexEnvironment, constrainCodexBrokerRequest } from '../lib/workbench-execution-policy.mjs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { connect, createServer } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -30,6 +30,25 @@ const BROKER_PONG = 'agentoc-codex-broker-pong';
 const BROKER_READY_TIMEOUT_MS = 30_000;
 const BROKER_LOCK_WAIT_MS = 15_000;
 const BROKER_INTERNAL_INITIALIZE_ID = -1;
+
+// Each run owns a separate broker client and supplies its tag as a scoped
+// thread environment. Never derive it from an interrupt request itself.
+export function codexThreadRunTag(message) {
+  if (!['thread/start', 'thread/resume'].includes(message?.method)) return '';
+  const value = message?.params?.config?.shell_environment_policy?.set?.AGENTOC_RUN_ID;
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : '';
+}
+
+export function cleanupMacCodexRun(rootPid, runTag, {
+  platform = process.platform,
+  executable = join(dirname(process.execPath), 'agentoc-macos-run-cleanup'),
+  run = spawnSync,
+} = {}) {
+  if (platform !== 'darwin' || !Number.isSafeInteger(rootPid) || rootPid <= 1 ||
+      !/^[A-Za-z0-9_-]{1,160}$/.test(runTag)) return false;
+  const result = run(executable, [String(rootPid), runTag], { stdio: 'ignore', timeout: 5000 });
+  return !result.error && result.status === 0;
+}
 
 export const CODEX_APP_SERVER_BROKER_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -312,6 +331,7 @@ function runBroker() {
   const pendingThreadReloads = new Map();
   const hookRouters = new Map();
   const pendingHookCalls = new Map();
+  const clientRunTags = new WeakMap();
   let activeThreadRequestId = null;
   let nextRequestId = 10_000;
   let upstreamReady = false;
@@ -583,6 +603,17 @@ function runBroker() {
     if (owner && owner !== client && !owner.destroyed && message.method !== 'thread/fork') {
       if (isRequest(message)) sendClient(client, { id: message.id, error: { code: -32004, message: 'Codex thread is owned by another connected client' } });
       return;
+    }
+    if (message.method === 'thread/start' || message.method === 'thread/resume') {
+      clientRunTags.set(client, codexThreadRunTag(message));
+    }
+    if (process.platform === 'darwin' && message.method === 'turn/interrupt' && owner === client) {
+      const runTag = clientRunTags.get(client);
+      if (runTag && !cleanupMacCodexRun(upstream?.pid, runTag)) {
+        // Still send the provider interrupt. A failed cleanup must not prevent
+        // cooperative cancellation; it also must not expose process details.
+        console.error('[codex-broker] macOS run process cleanup was incomplete');
+      }
     }
     // A fork reads its source thread; it must not take ownership of that
     // source. Ownership of the newly created thread comes from its response.
