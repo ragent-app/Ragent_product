@@ -133,12 +133,13 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(stagedCode, 23, stagedError);
         assert.equal(JSON.parse(await readFile(runPendingResultPath(offlineId), 'utf8')).result.exitCode, 0);
         await assert.rejects(readFile(runResultPath(offlineId), 'utf8'), { code: 'ENOENT' });
-        assert.equal(await getRunResult(offlineId), null);
+        await assert.rejects(getRunResult(offlineId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
         const pending = JSON.parse(await readFile(runPendingResultPath(offlineId), 'utf8'));
         await writeFile(runPendingResultPath(offlineId), JSON.stringify({ ...pending, publicationId: 'tampered' }));
-        assert.equal(await getRunResult(offlineId), null);
+        await assert.rejects(getRunResult(offlineId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         await writeFile(runPendingResultPath(offlineId), JSON.stringify(pending));
+        await new Promise((resolve) => setTimeout(resolve, 1100));
         assert.deepEqual(await getRunResult(offlineId), outcome);
         await assert.rejects(readFile(runPendingResultPath(offlineId), 'utf8'), { code: 'ENOENT' });
         const offlineMarker = `${root}/contexts/${createHash('sha256').update(offlineId).digest('hex')}-0.revoked`;
@@ -163,9 +164,10 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), false);
         await updateRun(pausedId, { state: 'running', approvedActionPending: null, actionPause: null });
         process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
-        assert.equal(await getRunResult(pausedId), null);
+        await assert.rejects(getRunResult(pausedId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), true);
         process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        await new Promise((resolve) => setTimeout(resolve, 1100));
         assert.deepEqual(await getRunResult(pausedId), outcome);
         const receipt = `${root}/config/linux-run-cancel-intents/${createHash('sha256').update(pausedId).digest('hex')}-0.completion.json`;
         const savedReceipt = JSON.parse(await readFile(receipt, 'utf8'));
@@ -173,12 +175,12 @@ test('runner terminal write invalidates only its protected control binding',
         process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
         assert.deepEqual(await getRunResult(pausedId), outcome);
         await writeFile(receipt, JSON.stringify({ ...savedReceipt, publicationId: 'tampered' }));
-        assert.equal(await getRunResult(pausedId), null);
+        await assert.rejects(getRunResult(pausedId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         await writeFile(receipt, JSON.stringify(savedReceipt));
         assert.deepEqual(await getRunResult(pausedId), outcome);
         const pausedStatus = JSON.parse(await readFile(runStatusPath(pausedId), 'utf8'));
         await writeFile(runStatusPath(pausedId), JSON.stringify({ ...pausedStatus, runnerLaunchAttempt: 'invalid' }));
-        assert.equal(await getRunResult(pausedId), null);
+        await assert.rejects(getRunResult(pausedId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         await writeFile(runStatusPath(pausedId), JSON.stringify(pausedStatus));
         assert.deepEqual(await getRunResult(pausedId), outcome);
         const ordinaryId = 'run_ordinaryfixture1';
@@ -189,6 +191,15 @@ test('runner terminal write invalidates only its protected control binding',
         await createRun({ status: { id: legacyId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
         await writeRunResult(legacyId, outcome);
         assert.deepEqual(await getRunResult(legacyId), outcome);
+        const syntheticId = 'run_syntheticfixture1';
+        await createRun({ status: { id: syntheticId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+        await issueLinuxRunScopeGrant(syntheticId, 0);
+        await assert.rejects(writeRunResult(syntheticId, outcome), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await assert.rejects(readFile(runResultPath(syntheticId), 'utf8'), { code: 'ENOENT' });
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await writeRunResult(syntheticId, outcome);
+        assert.deepEqual(await getRunResult(syntheticId), outcome);
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });

@@ -3129,6 +3129,8 @@ function scheduleObservedRunSync(runId, delayMs = 40) {
           stopObservedRun(runId);
           return;
         }
+        // The normal poller retries once the root revocation becomes available.
+        if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') return;
         console.error(`[runs] observer sync failed for ${runId}: ${error.message}`);
       }
   }, delayMs);
@@ -3145,7 +3147,7 @@ function observeDetachedRun(sessionId, runId) {
     const watcher = watch(runDir(runId), (_eventType, filename) => {
       if (filename) {
         const changed = String(filename);
-        if (!['spool.jsonl', 'status.json', 'result.json'].includes(changed)) {
+        if (!['spool.jsonl', 'status.json', 'result.json', 'result.pending.json'].includes(changed)) {
           return;
         }
       }
@@ -5477,7 +5479,10 @@ async function runHasSideEffectEvidence(runId) {
 }
 
 async function runHasSuccessfulTerminalEvidence(run, manifest) {
-  const fileResult = await getRunResult(run?.id).catch(() => null);
+  const fileResult = await getRunResult(run?.id).catch((error) => {
+    if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') throw error;
+    return null;
+  });
   const persistedResults = [run?.result, fileResult]
     .filter((result) => result && typeof result === 'object');
   if (persistedResults.some((result) => (
@@ -5580,6 +5585,19 @@ function scheduleRunAuthRecoveryLaunch(runId) {
     broadcastSessionInvalidation(run.sessionId);
     return launch;
   })().catch(async (error) => {
+    if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') {
+      const retry = setTimeout(() => {
+        void getRun(normalizedRunId).then((current) => {
+          if (current && !current.cancelRequested &&
+              normalizeRunAuthRecovery(current.authRecovery).authRetryState === 'auth_retrying' &&
+              RESUMABLE_AUTH_RECOVERY_LAUNCH_STATES.has(trimString(current.runnerLaunchState))) {
+            scheduleRunAuthRecoveryLaunch(normalizedRunId);
+          }
+        }).catch(() => {});
+      }, 1000);
+      retry.unref?.();
+      return null;
+    }
     const run = await getRun(normalizedRunId).catch(() => null);
     const failureReason = `Run auth recovery launch failed: ${error?.message || String(error)}`;
     await updateRun(normalizedRunId, (current) => ({
@@ -6814,7 +6832,10 @@ const {
         && `${trimString(event.childSessionId)}:${trimString(event.runId)}` === identity,
     ).catch(() => null));
     if (alreadyPublished) return null;
-    const result = await getRunResult(finalizedRun.id).catch(() => null);
+    const result = await getRunResult(finalizedRun.id).catch((error) => {
+      if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') throw error;
+      return null;
+    });
     const history = await loadRunScopedHistory(session.id, finalizedRun.id, {
       includeBodies: true,
       includeAssistantControlBlocks: true,

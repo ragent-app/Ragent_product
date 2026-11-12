@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createSessionTurnCompletionHelpers } from '../chat/session-turn-completion.mjs';
 
-function buildHarness() {
+function buildHarness({ publishDelegatedResult } = {}) {
   const sessionState = {
     id: 'session-1',
     tool: 'fake-tool',
@@ -65,6 +65,7 @@ function buildHarness() {
     },
     normalizeAttachmentSizeBytes: (value) => value,
     normalizePublishedResultAssetAttachments: () => [],
+    publishDelegatedResult,
     nowIso: () => '2026-08-31T00:00:00.000Z',
     renameSession: async () => null,
     scheduleQueuedFollowUpDispatch: () => {},
@@ -101,5 +102,12 @@ assert.equal(sessionState.goal.continuationCount, 1, 'continuation accounting is
 
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(calls.completionPushes, 1, 'rename completion path sends exactly one completion push');
+
+const blocked = buildHarness({ publishDelegatedResult: async () => {
+  throw Object.assign(new Error('temporarily unavailable'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+} });
+await assert.rejects(blocked.helpers.runSessionTurnCompletionEffects('session-1', { ...blocked.sessionState },
+  { id: 'run-1', state: 'completed', tool: 'fake-tool' }, {}), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+assert.equal(blocked.calls.inlineLabels, 0, 'completion effects wait for the delegated result');
 
 console.log('test-session-turn-completion-effects: ok');

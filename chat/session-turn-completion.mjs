@@ -702,6 +702,7 @@ export function createSessionTurnCompletionHelpers(services) {
 
     if (allowCompletionEffects && typeof publishDelegatedResult === 'function') {
       await publishDelegatedResult({ session, finalizedRun, manifest }).catch((error) => {
+        if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') throw error;
         console.error(`[delegation] result publication failed for ${sessionId?.slice(0, 8)}: ${error.message}`);
       });
     }

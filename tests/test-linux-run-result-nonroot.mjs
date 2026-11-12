@@ -67,7 +67,7 @@ test('non-root control recovers a distinct runner result after root broker retur
       const pending = `${root}/spool/${ready.runId}/result.pending.json`;
       assert.equal((await lstat(pending)).uid, runner.uid);
       control.stdin.write('read\n');
-      assert.equal((await next()).result, null);
+      assert.equal((await next()).error, 'LINUX_RUN_RESULT_UNAVAILABLE');
       let closed = new Promise((resolve) => control.once('close', resolve));
       control.stdin.end('exit\n');
       assert.equal(await closed, 0, controlError);

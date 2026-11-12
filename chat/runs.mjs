@@ -184,6 +184,9 @@ const runResultCache = makeLruOrMap({
   bytesOf: approximateJsonBytes,
   onEvict: (runId) => runResultCacheMeta.delete(runId),
 });
+// Observer polling can otherwise hammer an offline root broker several times
+// per second for each blocked result. Receipt discovery still takes priority.
+const linuxScopeResultRetry = new BoundedLruMap({ maxEntries: 4096, ttlMs: 1000 });
 // Artifact text cache (DS-08): bounded by entries, total bytes AND TTL. Each
 // cached value is already capped at MAX_RUN_ARTIFACT_TEXT_CHARS on read; the
 // byte cap keeps aggregate resident text flat even when every entry sits near
@@ -1079,6 +1082,10 @@ function linuxScopeAttempt(run) {
   return attempt;
 }
 
+function linuxScopeResultUnavailable() {
+  return Object.assign(new Error('Run result is awaiting scope revocation'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+}
+
 async function requireRunnerScopeFinalization(run, manifest) {
   let invalidated = false;
   try {
@@ -1089,6 +1096,25 @@ async function requireRunnerScopeFinalization(run, manifest) {
     console.warn(`[runs] control-plane Run finalization unavailable for ${run?.id}`);
     throw Object.assign(new Error('Run scope finalization could not be confirmed'), { code: 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' });
   }
+}
+
+async function confirmLinuxScopeCompletion(runId, run, manifest, attempt) {
+  const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+  if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: attempt })) return false;
+  const { hasLinuxRunCompletionReceipt, persistLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+  if (await hasLinuxRunCompletionReceipt(runId, attempt)) { linuxScopeResultRetry.delete(runId); return true; }
+  if (linuxScopeResultRetry.get(runId)) return false;
+  const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
+  await persistLinuxRunCancelIntent(runId, attempt);
+  const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
+  if ((await revokeLinuxRunScope(run, { enabled: true, timeoutMs: 10_000 })).state !== 'revoked') {
+    linuxScopeResultRetry.set(runId, true);
+    return false;
+  }
+  try { await persistLinuxRunCompletionReceipt(runId, attempt); }
+  catch (error) { linuxScopeResultRetry.set(runId, true); throw error; }
+  linuxScopeResultRetry.delete(runId);
+  return true;
 }
 
 export function runArtifactsDir(runId) {
@@ -2063,30 +2089,18 @@ export async function getRunResult(runId) {
     // control-service process. Recovery only revokes; it cannot grant scope.
     try { await lstat(runPendingResultPath(runId)); recoverPending = true; }
     catch (error) {
-      if (error.code !== 'ENOENT') return null;
+      if (error.code !== 'ENOENT') throw linuxScopeResultUnavailable();
       try {
         const run = await getRunUnlocked(runId);
         if (run) {
           const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
           recoverPending = await hasLinuxRunControlBinding(runId, linuxScopeAttempt(run));
         }
-      } catch { return null; }
+      } catch { throw linuxScopeResultUnavailable(); }
     }
   }
   if (recoverPending) {
     return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
-      const confirmCompletion = async (run, manifest, attempt) => {
-        const { matchesLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
-        if (!await matchesLinuxRunControlBinding({ run, manifest, launchAttempt: attempt })) return false;
-        const { hasLinuxRunCompletionReceipt, persistLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
-        if (await hasLinuxRunCompletionReceipt(runId, attempt)) return true;
-        const { persistLinuxRunCancelIntent } = await import('./linux-run-cancel-intent.mjs');
-        await persistLinuxRunCancelIntent(runId, attempt);
-        const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
-        if ((await revokeLinuxRunScope(run, { enabled: true, timeoutMs: 10_000 })).state !== 'revoked') return false;
-        await persistLinuxRunCompletionReceipt(runId, attempt);
-        return true;
-      };
       let handle;
       try {
         handle = await open(runPendingResultPath(runId), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
@@ -2100,33 +2114,34 @@ export async function getRunResult(runId) {
             const attempt = linuxScopeAttempt(run);
             const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
             if (!await hasLinuxRunControlBinding(runId, attempt)) return result;
-            return await confirmCompletion(run, await getRunManifestUnlocked(runId), attempt) ? result : null;
-          } catch { return null; }
+            if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
+            return result;
+          } catch { throw linuxScopeResultUnavailable(); }
         }
-        return null;
+        throw linuxScopeResultUnavailable();
       }
       let pending;
       try {
         const stat = await handle.stat();
-        if (!stat.isFile() || stat.nlink !== 1 || stat.size < 1 || stat.size > 4 * 1024 * 1024) return null;
+        if (!stat.isFile() || stat.nlink !== 1 || stat.size < 1 || stat.size > 4 * 1024 * 1024) throw linuxScopeResultUnavailable();
         pending = JSON.parse(await handle.readFile('utf8'));
-      } catch { return null; }
+      } catch { throw linuxScopeResultUnavailable(); }
       finally { await handle.close(); }
       const run = await getRunUnlocked(runId), manifest = await getRunManifestUnlocked(runId);
       let attempt;
-      try { attempt = linuxScopeAttempt(run); } catch { return null; }
+      try { attempt = linuxScopeAttempt(run); } catch { throw linuxScopeResultUnavailable(); }
       if (!pending || Object.keys(pending).sort().join(',') !== 'launchAttempt,publicationId,result,runId,version' ||
           pending.version !== 1 || pending.runId !== runId || pending.launchAttempt !== attempt ||
           pending.publicationId !== run?.runPublication?.publicationId || !pending.result ||
-          typeof pending.result !== 'object' || Array.isArray(pending.result) || hasUnresolvedResultApproval(run, pending.result)) return null;
+          typeof pending.result !== 'object' || Array.isArray(pending.result) || hasUnresolvedResultApproval(run, pending.result)) throw linuxScopeResultUnavailable();
       try {
-        if (!await confirmCompletion(run, manifest, attempt)) return null;
+        if (!await confirmLinuxScopeCompletion(runId, run, manifest, attempt)) throw linuxScopeResultUnavailable();
         await writeJsonAtomic(runResultPath(runId), pending.result, { ...COMPACT_JSON_OPTIONS, durable: true });
         runResultCache.set(runId, pending.result);
         await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
         await removePath(runPendingResultPath(runId));
         return clone(pending.result);
-      } catch { return null; }
+      } catch { throw linuxScopeResultUnavailable(); }
     }));
   }
   return getRunResultUnlocked(runId);
@@ -2147,6 +2162,19 @@ export async function writeRunResult(runId, result) {
           await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: true }));
         staged = true;
         await requireRunnerScopeFinalization(run, await getRunManifestUnlocked(runId));
+      }
+    } else if (process.platform === 'linux' && (process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' ||
+        (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE))) {
+      const run = await getRunUnlocked(runId);
+      if (run && !hasUnresolvedResultApproval(run, result)) {
+        try {
+          const attempt = linuxScopeAttempt(run);
+          const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
+          if (await hasLinuxRunControlBinding(runId, attempt) &&
+              !await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) {
+            throw linuxScopeResultUnavailable();
+          }
+        } catch { throw linuxScopeResultUnavailable(); }
       }
     }
     await writeJsonAtomic(runResultPath(runId), result || {}, COMPACT_JSON_OPTIONS);

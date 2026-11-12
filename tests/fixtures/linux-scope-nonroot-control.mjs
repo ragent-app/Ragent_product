@@ -29,7 +29,10 @@ const server = createServer((req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 process.stdout.write(`QA:${JSON.stringify({ port: server.address().port, runId, uid: process.geteuid() })}\n`);
 for await (const line of createInterface({ input: process.stdin })) {
-  if (line === 'read') process.stdout.write(`QA:${JSON.stringify({ result: await getRunResult(runId) })}\n`);
+  if (line === 'read') {
+    try { process.stdout.write(`QA:${JSON.stringify({ result: await getRunResult(runId) })}\n`); }
+    catch (error) { process.stdout.write(`QA:${JSON.stringify({ error: error.code })}\n`); }
+  }
   if (line === 'exit') break;
 }
 process.stdin.destroy();
