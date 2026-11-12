@@ -26,6 +26,8 @@ const env = {
   AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
   AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
   HOME: tempHome,
+  AGENTOC_INSTANCE_ROOT: tempHome,
+  AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
   AGENTOC_CONFIG_DIR: configDir,
   AGENTOC_MEMORY_DIR: join(tempHome, '.agentoc', 'memory'),
   AGENTOC_PUBLIC_BASE_URL: 'https://trial23.example.com',
@@ -50,7 +52,7 @@ try {
 
   const help = runCli(['--help'], env);
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /agentoc agenda <command> \[options\]/);
+  assert.match(help.stdout, /ragent agenda <command> \[options\]/);
 
   const list = runCli(['list', '--json'], env);
   assert.equal(list.status, 0, list.stderr);

@@ -9,6 +9,8 @@ const homeDir = join(tempRoot, 'home');
 mkdirSync(join(homeDir, '.config', 'agentoc'), { recursive: true });
 writeFileSync(join(homeDir, '.config', 'agentoc', 'auth.json'), `${JSON.stringify({ token: 'owner-token' })}\n`, 'utf8');
 process.env.HOME = homeDir;
+process.env.AGENTOC_INSTANCE_ROOT = tempRoot;
+process.env.AGENTOC_CONFIG_DIR = join(homeDir, '.config', 'agentoc');
 
 let runPolls = 0;
 const sockets = new Set();
