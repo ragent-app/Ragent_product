@@ -30,11 +30,22 @@ agentoc_config_dir() {
 AGENTOC_PID_FILE="$(agentoc_config_dir)/agentoc.pid"
 AGENTOC_RUN_LOG="$(agentoc_config_dir)/chat-server.log"
 
-agentoc_is_server_pid() {
+agentoc_is_packaged_server_pid() {
   local pid="$1" command
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   command="$(ps -ww -p "$pid" -o command= 2>/dev/null || true)"
   [ "$command" = "$AGENTOC_NODE_BIN $AGENTOC_APP_DIR/chat-server.mjs" ]
+}
+
+# The same bundle can host multiple independent configurations. A matching
+# executable path is not enough to identify the intended instance. The native
+# check reads the process's original environment without printing it and
+# refuses if identity cannot be determined; it is not a security boundary
+# against other processes owned by the same user.
+agentoc_is_server_pid() {
+  agentoc_is_packaged_server_pid "$1" || return 1
+  "$AGENTOC_RESOURCES_DIR/runtime/agentoc-macos-instance-check" "$1" "$HOME" \
+    "$(agentoc_config_dir)" "${AGENTOC_INSTANCE_ROOT:-}" >/dev/null 2>&1
 }
 
 agentoc_server_pid() {

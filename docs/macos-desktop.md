@@ -20,6 +20,16 @@ launcher compares the service's startup package version and source commit
 with the installed bundle; if they differ or cannot be verified, it leaves the
 service untouched and asks for a restart.
 
+Before reusing or stopping a service, the launcher also checks its macOS user,
+original home, configuration directory and instance-root environment against
+the current instance. If the check fails or is unavailable, it leaves the
+process alone. This prevents ordinary accidental cross-instance stops; process
+environment and PID checks are not an authorization boundary against another
+program running as the same user, and process identity can change during a
+check. Older services started from the same bundle can be recognized when their
+original environment matches; if not, stop them through their original app or
+inspect them manually.
+
 ## Login startup
 
 Login startup is opt-in. Stop an existing Ragent service first, then run

@@ -14,6 +14,13 @@ ps() {
   esac
 }
 lsof() { printf '%s\n' 456 123; }
+mkdir -p "$test_dir/runtime"
+AGENTOC_RESOURCES_DIR="$test_dir"
+cat > "$test_dir/runtime/agentoc-macos-instance-check" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "$test_dir/runtime/agentoc-macos-instance-check"
 printf '123\n' > "$AGENTOC_PID_FILE"
 [ "$(agentoc_server_pid)" = 123 ]
 agentoc_server_running

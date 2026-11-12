@@ -15,6 +15,7 @@ mkdir -p "$contents/MacOS" "$contents/Resources/runtime" "$contents/Resources/ap
 cp "$root/packaging/macos/AgentoC" "$contents/MacOS/"
 cp "$root/packaging/macos/"{agentoc-env.sh,agentoc-stop} "$contents/Resources/"
 chmod 0755 "$contents/MacOS/AgentoC" "$contents/Resources/agentoc-stop"
+xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=13.0 "$root/native/macos-instance-check.c" -o "$contents/Resources/runtime/agentoc-macos-instance-check"
 ln -s "$(command -v node)" "$contents/Resources/runtime/node"
 printf '#!/bin/sh\nexit 0\n' > "$contents/Resources/runtime/codex"
 cp "$contents/Resources/runtime/codex" "$contents/Resources/runtime/claude"
@@ -50,6 +51,22 @@ export CHAT_PORT="$port"
 server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
 kill -0 "$server_pid"
 curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
+# A second configuration using the same port must neither attach to nor stop
+# the first instance, even though both use the same installed executable.
+other_config="$test_dir/other-config"
+mkdir -p "$other_config"
+if AGENTOC_CONFIG_DIR="$other_config" "$contents/Resources/agentoc-stop" >"$test_dir/other-stop" 2>&1; then
+  echo 'stop accepted another instance on the configured port' >&2
+  exit 1
+fi
+grep -Fq 'another instance or its identity could not be verified' "$test_dir/other-stop"
+kill -0 "$server_pid"
+if AGENTOC_INSTANCE_ROOT="$test_dir/other-instance" "$contents/Resources/agentoc-stop" >"$test_dir/other-root-stop" 2>&1; then
+  echo 'stop accepted another instance root' >&2
+  exit 1
+fi
+grep -Fq 'another instance or its identity could not be verified' "$test_dir/other-root-stop"
+kill -0 "$server_pid"
 node -e 'const fs=require("fs");if((fs.statSync(process.argv[1]).mode & 0o777)!==0o600)process.exit(1)' "$AGENTOC_CONFIG_DIR/chat-server.log"
 # A configuration load error must not make stop proceed with inherited or
 # default settings, which could stop a different instance.

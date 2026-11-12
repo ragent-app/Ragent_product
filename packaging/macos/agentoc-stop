@@ -49,6 +49,9 @@ if [ -n "$pids" ]; then
     if agentoc_is_server_pid "$pid"; then
       stop_server_pid "$pid" || exit 1
       stopped=1
+    elif agentoc_is_packaged_server_pid "$pid"; then
+      printf 'AgentoC service belongs to another instance or its identity could not be verified; it was not stopped\n' >&2
+      exit 1
     fi
   done
   if [ "$stopped" = 0 ]; then printf 'AgentoC chat server is not running\n'; fi
