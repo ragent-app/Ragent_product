@@ -38,6 +38,13 @@ jobs:
           set -euo pipefail
           [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           export AGENTOC_PACKAGE_VERSION="$RELEASE_VERSION"
+          # Release candidates must use the production transport endpoints even
+          # when the build environment defines package endpoint overrides.
+          export AGENTOC_PACKAGE_PUBLIC_BASE_URL="https://app.agentoncloud.com"
+          export AGENTOC_PACKAGE_ACCOUNTS_URL="https://ragent.agentoncloud.com/accounts"
+          export AGENTOC_PACKAGE_ACCOUNTS_JWKS_URL="https://ragent.agentoncloud.com/accounts/.well-known/jwks.json"
+          export AGENTOC_PACKAGE_TURN_BROKER_URL="https://ragent.agentoncloud.com/turn"
+          export AGENTOC_PACKAGE_SIGNALING_URL="https://ragent.agentoncloud.com/signal"
           export AGENTOC_NODE_CACHE_DIR="$RUNNER_TEMP/node-cache"
           export AGENTOC_DEB_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
           export AGENTOC_DMG_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
@@ -60,6 +67,15 @@ jobs:
             sudo env "PATH=$PATH" "TMPDIR=$RUNNER_TEMP" node tests/test-linux-run-status-ownership.mjs
             bash scripts/build-deb.sh
             asset="ragent_${RELEASE_VERSION}_amd64.deb"
+            package_check="$RUNNER_TEMP/ragent-package-check"
+            dpkg-deb --extract "$AGENTOC_DEB_OUTPUT_DIR/$asset" "$package_check"
+            account_env="$package_check/etc/agentoc/account-auth.env"
+            signal_env="$package_check/etc/agentoc/connectivity.env"
+            grep -Fx 'AGENTOC_PUBLIC_BASE_URL=https://app.agentoncloud.com' "$account_env"
+            grep -Fx 'AGENTOC_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts' "$account_env"
+            grep -Fx 'AGENTOC_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json' "$account_env"
+            grep -Fx 'AGENTOC_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn' "$account_env"
+            grep -Fx 'AGENTOC_P2P_SIGNALING_URL=https://ragent.agentoncloud.com/signal' "$signal_env"
             (cd "$AGENTOC_DEB_OUTPUT_DIR" && sha256sum "$asset" > SHA256SUMS.txt)
           else
             [ "$(uname -m)" = arm64 ]

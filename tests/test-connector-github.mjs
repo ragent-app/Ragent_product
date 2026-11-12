@@ -58,8 +58,8 @@ assert.equal(
   'https://agentoc.andyscodexagent.cyou/api/connectors/github/callback',
 );
 assert.equal(
-  resolveGitHubCallbackUrl('https://agentoc.andyscodexagent.cyou/'),
-  'https://agentoc.andyscodexagent.cyou/api/connectors/github/callback',
+  resolveGitHubCallbackUrl('https://ragent.agentoncloud.com/'),
+  'https://ragent.agentoncloud.com/api/connectors/github/callback',
 );
 assert.equal(resolveGitHubCallbackUrl(''), '');
 
@@ -106,10 +106,10 @@ await saveGitHubAppConfig({
   privateKey: '-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----',
 });
 
-const authorizeUrl = await buildGitHubAuthorizeUrl({ baseUrl: 'https://agentoc.andyscodexagent.cyou' });
+const authorizeUrl = await buildGitHubAuthorizeUrl({ baseUrl: 'https://ragent.agentoncloud.com' });
 assert.ok(authorizeUrl.startsWith('https://github.com/login/oauth/authorize?'));
 assert.ok(authorizeUrl.includes(`client_id=${encodeURIComponent('Iv23liYGXXeJlos97OHi')}`));
-assert.ok(authorizeUrl.includes(`redirect_uri=${encodeURIComponent('https://agentoc.andyscodexagent.cyou/api/connectors/github/callback')}`));
+assert.ok(authorizeUrl.includes(`redirect_uri=${encodeURIComponent('https://ragent.agentoncloud.com/api/connectors/github/callback')}`));
 const stateParam = new URL(authorizeUrl).searchParams.get('state');
 assert.ok(stateParam && stateParam.length >= 16);
 const storedState = await readJson(GITHUB_AUTH_STATE_PATH, null);
@@ -152,7 +152,7 @@ const fetchImpl = mockFetch([
 const result = await handleGitHubAuthCallback({
   code: 'code-1',
   state: stateParam,
-  baseUrl: 'https://agentoc.andyscodexagent.cyou',
+  baseUrl: 'https://ragent.agentoncloud.com',
   fetchImpl,
 });
 assert.deepEqual(result, { user: { id: '123', login: 'octo' }, installationId: '456' });
