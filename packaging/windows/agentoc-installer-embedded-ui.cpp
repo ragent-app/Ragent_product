@@ -438,7 +438,7 @@ void DrawBrandPanel(Gdiplus::Graphics& graphics, const RECT& client, float width
     DrawText(graphics, Text(L"Manage models, devices, and local runtimes in one place.", L"在一个地方管理模型、设备和本地运行环境。"),
         Px(43), Px(365), width - Px(80), Px(12), Color(104, 113, 130), false,
         Gdiplus::StringAlignmentNear, 5.0f);
-    DrawText(graphics, L"AGENTOC  ·  WINDOWS", Px(43), client.bottom - Px(38), width - Px(72), Px(10), Color(135, 143, 158), true);
+    DrawText(graphics, L"RAGENT  ·  WINDOWS", Px(43), client.bottom - Px(38), width - Px(72), Px(10), Color(135, 143, 158), true);
 }
 
 void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left) {
@@ -449,7 +449,7 @@ void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left
     const Gdiplus::Color accent = Color(22, 105, 199);
     const float y = Px(44);
 
-    std::wstring eyebrow = Text(L"AGENTOC SETUP", L"AGENTOC 安装程序");
+    std::wstring eyebrow = Text(L"RAGENT SETUP", L"RAGENT 安装程序");
     DrawText(graphics, eyebrow, x, y, width, Px(11), accent, true);
 
     switch (g.page) {

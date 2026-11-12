@@ -21,7 +21,7 @@ function printHelp() {
   node scripts/build-local-helper-bundle.mjs --session <session-id> [options]
 
 Options:
-  --session <id>           Required AgentoC session id
+  --session <id>           Required Ragent session id
   --server-url <url>       Public base URL to embed into bootstrap
   --output <path>          Output zip path (default: /tmp/agentoc-helper-mac-<session>.zip)
   --help                   Show this help
@@ -84,7 +84,7 @@ mkdir -p "$CONFIG_DIR" "$LOG_DIR"
 if [[ -f "$PID_FILE" ]]; then
   EXISTING_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [[ -n "$EXISTING_PID" ]] && kill -0 "$EXISTING_PID" 2>/dev/null; then
-    osascript -e 'display notification "AgentoC Helper is already running." with title "AgentoC Helper"' >/dev/null 2>&1 || true
+    osascript -e 'display notification "Ragent Helper is already running." with title "Ragent Helper"' >/dev/null 2>&1 || true
     exit 0
   fi
 fi
@@ -108,7 +108,7 @@ if [[ ! -f "$CONFIG_DIR/config.json" ]] && [[ -f "$BOOTSTRAP_SRC" ]]; then
 fi
 nohup "$MANAGED_BIN" run >> "$LOG_DIR/helper.log" 2>&1 &
 echo $! > "$PID_FILE"
-osascript -e 'display notification "AgentoC Helper started. Return to AgentoC and continue in the same session." with title "AgentoC Helper"' >/dev/null 2>&1 || true
+osascript -e 'display notification "Ragent Helper started. Return to Ragent and continue in the same session." with title "Ragent Helper"' >/dev/null 2>&1 || true
 exit 0
 `;
 }
@@ -125,13 +125,13 @@ if [[ -f "$PID_FILE" ]]; then
   fi
   rm -f "$PID_FILE"
 fi
-osascript -e 'display notification "AgentoC Helper stopped." with title "AgentoC Helper"' >/dev/null 2>&1 || true
+osascript -e 'display notification "Ragent Helper stopped." with title "Ragent Helper"' >/dev/null 2>&1 || true
 exit 0
 `;
 }
 
 function buildReadme(serverUrl) {
-  return `AgentoC Helper Mac bundle
+  return `Ragent Helper Mac bundle
 
 Bundled server URL:
 ${serverUrl}
@@ -140,12 +140,12 @@ Recommended:
 1. Unzip this folder on your Mac.
 2. Double-click "Start AgentoC Helper.command".
 3. If macOS blocks it the first time, right-click it and choose Open once.
-4. Return to the same AgentoC session and continue there.
+4. Return to the same Ragent session and continue there.
 
 What happens after the first launch:
 - The starter installs the helper binary into your user config directory.
 - Future launches keep using the managed copy instead of the download folder.
-- The helper can later fetch newer binaries from AgentoC without asking you to re-download the app manually.
+- The helper can later fetch newer binaries from Ragent without asking you to re-download the app manually.
 
 To stop the helper later, run "Stop AgentoC Helper.command".
 `;

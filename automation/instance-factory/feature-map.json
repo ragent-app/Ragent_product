@@ -3,7 +3,7 @@
   "modules": [
     {
       "id": "agentoc",
-      "title": "AgentoC Core",
+      "title": "Ragent Core",
       "kind": "core",
       "modeKey": "AGENTOC_MODE",
       "defaultMode": "on",

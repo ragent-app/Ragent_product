@@ -211,7 +211,7 @@ Notes:
 func runPair(argv []string) error {
 	fs := flag.NewFlagSet("pair", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	serverURL := fs.String("server", "", "AgentoC base URL")
+	serverURL := fs.String("server", "", "Ragent base URL")
 	code := fs.String("code", "", "pairing code")
 	var roots rootFlag
 	fs.Var(&roots, "root", "allowed root in alias=path form")
@@ -265,7 +265,7 @@ func runPair(argv []string) error {
 func runBootstrap(argv []string) error {
 	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	serverURL := fs.String("server", "", "AgentoC base URL")
+	serverURL := fs.String("server", "", "Ragent base URL")
 	token := fs.String("token", "", "bootstrap token")
 	filePath := fs.String("file", "", "bootstrap spec file")
 	var roots rootFlag
@@ -280,7 +280,7 @@ func runBootstrap(argv []string) error {
 func runRun(argv []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	serverURL := fs.String("server", "", "AgentoC base URL")
+	serverURL := fs.String("server", "", "Ragent base URL")
 	token := fs.String("token", "", "bootstrap token")
 	filePath := fs.String("file", "", "bootstrap spec file")
 	var roots rootFlag

@@ -83,7 +83,7 @@ try {
         $bannerGraphics.DrawImage($logo, 8, 8, 42, 42)
         $brandFont = [System.Drawing.Font]::new('Segoe UI Semibold', 14, [System.Drawing.FontStyle]::Regular)
         $subtitleFont = [System.Drawing.Font]::new('Segoe UI', 9, [System.Drawing.FontStyle]::Regular)
-        $bannerGraphics.DrawString('AgentoC', $brandFont, [System.Drawing.Brushes]::Black, 62, 7)
+        $bannerGraphics.DrawString('Ragent', $brandFont, [System.Drawing.Brushes]::Black, 62, 7)
         $bannerGraphics.DrawString('Desktop manager', $subtitleFont, [System.Drawing.Brushes]::DimGray, 63, 31)
         $banner.Save((Join-Path $OutputDirectory 'wix-banner.bmp'), [System.Drawing.Imaging.ImageFormat]::Bmp)
     } finally {
@@ -102,7 +102,7 @@ try {
         $copyFont = [System.Drawing.Font]::new('Segoe UI', 11, [System.Drawing.FontStyle]::Regular)
         $center = [System.Drawing.StringFormat]::new()
         $center.Alignment = [System.Drawing.StringAlignment]::Center
-        $dialogGraphics.DrawString('AgentoC', $titleFont, [System.Drawing.Brushes]::Black, [System.Drawing.RectangleF]::new(0, 196, 493, 40), $center)
+        $dialogGraphics.DrawString('Ragent', $titleFont, [System.Drawing.Brushes]::Black, [System.Drawing.RectangleF]::new(0, 196, 493, 40), $center)
         $dialogGraphics.DrawString('Manage your local AI workbench', $copyFont, [System.Drawing.Brushes]::DimGray, [System.Drawing.RectangleF]::new(0, 238, 493, 28), $center)
         $dialog.Save((Join-Path $OutputDirectory 'wix-dialog.bmp'), [System.Drawing.Imaging.ImageFormat]::Bmp)
     } finally {
