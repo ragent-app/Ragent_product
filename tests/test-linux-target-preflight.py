@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the read-only Linux target preflight in an isolated root fixture."""
+"""Exercise the standalone Linux file adapter in an isolated root fixture."""
 import json
 import os
 import pathlib
@@ -21,15 +21,25 @@ def run(path, ok, reason=None):
         assert result.stderr.strip() == reason, (path, result.stderr)
     return json.loads(result.stdout) if ok else None
 
+def remove(path, snapshot, ok, reason=None):
+    fields = ('mountId', 'parentDevice', 'parentInode', 'device', 'inode', 'size',
+              'ctimeSeconds', 'ctimeNanoseconds', 'mtimeSeconds', 'mtimeNanoseconds')
+    result = subprocess.run([binary, '--remove', str(path), *[str(snapshot[k]) for k in fields]],
+                            capture_output=True, text=True, timeout=10)
+    assert (result.returncode == 0) == ok, (path, result.returncode, result.stderr)
+    if reason:
+        assert result.stderr.strip() == reason, (path, result.stderr)
+    return json.loads(result.stdout) if ok else None
+
 try:
     target = root / 'target'
     target.write_bytes(b'unchanged')
     os.chmod(target, 0o600)
     evidence = run(target, True)
     stat = target.stat()
-    assert evidence['inode'] == stat.st_ino and evidence['device'] == stat.st_dev
-    assert evidence['parentInode'] == root.stat().st_ino
-    assert evidence['size'] == len(b'unchanged') and target.read_bytes() == b'unchanged'
+    assert evidence['inode'] == str(stat.st_ino) and evidence['device'] == str(stat.st_dev)
+    assert evidence['parentInode'] == str(root.stat().st_ino)
+    assert evidence['size'] == str(len(b'unchanged')) and target.read_bytes() == b'unchanged'
     run('relative/path', False, 'INVALID_PATH')
     run(str(root) + '/../etc/passwd', False, 'INVALID_PATH')
     run(root, False, 'UNTRUSTED_TARGET')
@@ -57,7 +67,32 @@ try:
         run(target, False, 'UNTRUSTED_DIRECTORY')
         subprocess.run(['setfacl', '-k', str(root)], check=True)
     assert target.read_bytes() == b'unchanged'
-    print('linux target preflight: isolated read-only checks passed')
+    snapshot = run(target, True)
+    bad_snapshot = dict(snapshot, inode=str(int(snapshot['inode']) + 1))
+    remove(target, bad_snapshot, False, 'SNAPSHOT_MISMATCH')
+    assert target.read_bytes() == b'unchanged'
+    hardlink = root / 'late-hardlink'
+    os.link(target, hardlink)
+    remove(target, snapshot, False, 'UNTRUSTED_TARGET')
+    hardlink.unlink()
+    snapshot = run(target, True)
+    os.chmod(root, 0o777)
+    remove(target, snapshot, False, 'UNTRUSTED_DIRECTORY')
+    os.chmod(root, 0o700)
+    snapshot = run(target, True)
+    target.write_bytes(b'changed since approval')
+    remove(target, snapshot, False, 'SNAPSHOT_MISMATCH')
+    assert target.read_bytes() == b'changed since approval'
+    snapshot = run(target, True)
+    target.rename(root / 'old-target')
+    target.write_bytes(b'replacement')
+    os.chmod(target, 0o600)
+    remove(target, snapshot, False, 'SNAPSHOT_MISMATCH')
+    assert target.read_bytes() == b'replacement'
+    fresh_snapshot = run(target, True)
+    assert remove(target, fresh_snapshot, True) == {'removed': True}
+    assert not target.exists() and (root / 'old-target').read_bytes() == b'changed since approval'
+    print('linux target adapter: isolated inspection and deletion checks passed')
 finally:
     os.chmod(root, 0o700)
     shutil.rmtree(root)

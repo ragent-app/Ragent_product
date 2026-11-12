@@ -1,4 +1,4 @@
-/* Read-only building block for a future Linux privileged file adapter.
+/* Standalone building block for a future Linux privileged file adapter.
  * Not an authorization mechanism and not connected to production execution.
  * Trust model: root and other root-equivalent processes are trusted. Every
  * traversed directory and the file must be root-owned, non-writable by other
@@ -77,10 +77,13 @@ static int same_file(const struct stat *a, const struct stat *b) {
 
 int main(int argc, char **argv) {
   if (geteuid() != 0) return fail("ROOT_REQUIRED");
-  if (argc != 2 || !argv[1] || argv[1][0] != '/' || !argv[1][1] ||
-      strlen(argv[1]) >= PATH_MAX || strstr(argv[1], "//") ||
-      argv[1][strlen(argv[1]) - 1] == '/') return fail("INVALID_PATH");
-  char *path = strdup(argv[1] + 1);
+  int remove_requested = argc == 13 && !strcmp(argv[1], "--remove");
+  if (argc != 2 && !remove_requested) return fail("INVALID_ARGUMENTS");
+  const char *requested_path = argv[remove_requested ? 2 : 1];
+  if (!requested_path || requested_path[0] != '/' || !requested_path[1] ||
+      strlen(requested_path) >= PATH_MAX || strstr(requested_path, "//") ||
+      requested_path[strlen(requested_path) - 1] == '/') return fail("INVALID_PATH");
+  char *path = strdup(requested_path + 1);
   if (!path) return fail("INTERNAL_ERROR");
   int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
   if (parent < 0) { free(path); return fail("ROOT_UNAVAILABLE"); }
@@ -125,10 +128,40 @@ int main(int argc, char **argv) {
     if (target >= 0) close(target);
     close(parent); free(path); return fail("TARGET_CHANGED_OR_UNTRUSTED");
   }
-  printf("{\"version\":1,\"mountId\":%llu,\"parentDevice\":%llu,\"parentInode\":%llu,"
-         "\"device\":%llu,\"inode\":%llu,\"size\":%lld,"
-         "\"ctimeSeconds\":%lld,\"ctimeNanoseconds\":%ld,"
-         "\"mtimeSeconds\":%lld,\"mtimeNanoseconds\":%ld}\n",
+  if (remove_requested) {
+    /* This snapshot is only an identity check. The future caller must verify
+     * authorization, bind the exact path, and durably consume its nonce. */
+    char fields[10][32];
+    snprintf(fields[0], sizeof(fields[0]), "%llu", root_mount);
+    snprintf(fields[1], sizeof(fields[1]), "%llu", (unsigned long long)parent_after.st_dev);
+    snprintf(fields[2], sizeof(fields[2]), "%llu", (unsigned long long)parent_after.st_ino);
+    snprintf(fields[3], sizeof(fields[3]), "%llu", (unsigned long long)after.st_dev);
+    snprintf(fields[4], sizeof(fields[4]), "%llu", (unsigned long long)after.st_ino);
+    snprintf(fields[5], sizeof(fields[5]), "%lld", (long long)after.st_size);
+    snprintf(fields[6], sizeof(fields[6]), "%lld", (long long)after.st_ctim.tv_sec);
+    snprintf(fields[7], sizeof(fields[7]), "%ld", after.st_ctim.tv_nsec);
+    snprintf(fields[8], sizeof(fields[8]), "%lld", (long long)after.st_mtim.tv_sec);
+    snprintf(fields[9], sizeof(fields[9]), "%ld", after.st_mtim.tv_nsec);
+    for (int i = 0; i < 10; i++) {
+      if (strcmp(fields[i], argv[i + 3])) {
+        close(target); close(parent); free(path); return fail("SNAPSHOT_MISMATCH");
+      }
+    }
+    if (unlinkat(parent, cursor, 0)) {
+      close(target); close(parent); free(path); return fail("DELETE_FAILED");
+    }
+    if (fsync(parent)) {
+      close(target); close(parent); free(path); return fail("DELETE_DURABILITY_UNKNOWN");
+    }
+    puts("{\"removed\":true}");
+    close(target); close(parent); free(path);
+    return 0;
+  }
+  /* Decimal strings retain full kernel identity precision in JavaScript. */
+  printf("{\"version\":1,\"mountId\":\"%llu\",\"parentDevice\":\"%llu\",\"parentInode\":\"%llu\","
+         "\"device\":\"%llu\",\"inode\":\"%llu\",\"size\":\"%lld\","
+         "\"ctimeSeconds\":\"%lld\",\"ctimeNanoseconds\":\"%ld\","
+         "\"mtimeSeconds\":\"%lld\",\"mtimeNanoseconds\":\"%ld\"}\n",
          root_mount, (unsigned long long)parent_after.st_dev, (unsigned long long)parent_after.st_ino,
          (unsigned long long)after.st_dev, (unsigned long long)after.st_ino,
          (long long)after.st_size, (long long)after.st_ctim.tv_sec, after.st_ctim.tv_nsec,
