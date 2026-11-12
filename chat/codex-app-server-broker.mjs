@@ -17,7 +17,7 @@ import { createInterface } from 'node:readline';
 import { connect, createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir, unlink, chmod } from 'node:fs/promises';
+import { mkdir, unlink, chmod, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-runtime/oauth-lock.mjs';
@@ -30,6 +30,18 @@ const BROKER_PONG = 'agentoc-codex-broker-pong';
 const BROKER_READY_TIMEOUT_MS = 30_000;
 const BROKER_LOCK_WAIT_MS = 15_000;
 const BROKER_INTERNAL_INITIALIZE_ID = -1;
+
+export function codexBrokerAccountDigest(value) {
+  const id = typeof value === 'string' ? value.trim() : '';
+  return id ? createHash('sha256').update(`agentoc-codex-account:${id}`).digest('hex') : '';
+}
+
+function codexAuthAccountId(tokens) {
+  for (const key of ['account_id', 'accountId', 'account_uuid', 'accountUuid', 'user_id', 'userId']) {
+    if (typeof tokens?.[key] === 'string' && tokens[key].trim()) return tokens[key].trim();
+  }
+  return '';
+}
 
 // Each run owns a separate broker client and supplies its tag as a scoped
 // thread environment. Never derive it from an interrupt request itself.
@@ -338,6 +350,7 @@ function runBroker() {
   let upstream = null;
   let server = null;
   let oauthLock = null;
+  let accountDigest = '';
   let stopping = false;
 
   const sendClient = (client, message) => {
@@ -477,6 +490,10 @@ function runBroker() {
     oauthLock = await acquireNativeOAuthLock(nativeOAuthLockPath(dirname(home)), { waitMs: 15_000 });
     if (stopping) { await oauthLock.release(); return; }
     try {
+      const auth = JSON.parse(await readFile(join(home, 'auth.json'), 'utf8'));
+      accountDigest = codexBrokerAccountDigest(codexAuthAccountId(auth?.tokens));
+    } catch { accountDigest = ''; }
+    try {
     upstream = await spawnCodexAppServerProcess({
       file: upstreamFile,
       args: upstreamArgs,
@@ -529,7 +546,9 @@ function runBroker() {
   const handleClientMessage = (client, message) => {
     if (!message || typeof message !== 'object') return;
     if (message.type === BROKER_PING) {
-      sendClient(client, { type: BROKER_PONG, ready: upstreamReady });
+      sendClient(client, { type: BROKER_PONG, ready: upstreamReady,
+        ...(typeof message.expectedAccountDigest === 'string'
+          ? { accountMatches: Boolean(accountDigest && message.expectedAccountDigest === accountDigest) } : {}) });
       return;
     }
     if (message.method === 'initialize') {

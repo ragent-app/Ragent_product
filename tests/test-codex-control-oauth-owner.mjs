@@ -10,6 +10,7 @@ import { runCodexControlPrompt } from '../chat/codex-control-prompt.mjs';
 import { ensureCodexAppServerBroker, codexAppServerBrokerSocketPath, codexAppServerBrokerLockPath } from '../chat/codex-app-server-broker.mjs';
 import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-runtime/oauth-lock.mjs';
 import { dirname } from 'node:path';
+import { createServer } from 'node:net';
 
 const root = await mkdtemp(join(tmpdir(), 'agentoc-control-refresh-'));
 const configDir = join(root, 'config');
@@ -42,7 +43,7 @@ async function ensure() {
   if (result.pid) pids.add(result.pid);
   return result;
 }
-const prompt = (text, timeoutMs = 3000) => runCodexControlPrompt({ codexHomeDir: home, prompt: text, cwd: root, timeoutMs });
+const prompt = (text, timeoutMs = 3000) => runCodexControlPrompt({ codexHomeDir: home, prompt: text, cwd: root, timeoutMs, expectedAccountId:'fixture-account' });
 try {
   await mkdir(configDir, { recursive: true });
   await secretStore.writeSecret('credential', {
@@ -61,7 +62,14 @@ try {
   const background = await control();
   assert.equal(background.codexHomeDir, home, 'background must not copy rotating OAuth to a second home');
   assert.equal(background.codexBroker, true);
+  assert.equal(background.codexAccountId, 'fixture-account');
   await assert.rejects(() => prompt('absent'), { code: 'CODEX_CONTROL_BROKER_REQUIRED' });
+  const legacyBroker = createServer(socket => socket.once('data', () => socket.end(
+    JSON.stringify({ type:'agentoc-codex-broker-pong', ready:true }) + '\n',
+  )));
+  await new Promise((resolve, reject) => legacyBroker.once('error', reject).listen(codexAppServerBrokerSocketPath(home), resolve));
+  try { await assert.rejects(() => prompt('legacy'), { code:'CODEX_CONTROL_ACCOUNT_UNVERIFIED' }); }
+  finally { await new Promise(resolve => legacyBroker.close(resolve)); }
 
   await writeFile(fakePath, `
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
@@ -111,6 +119,8 @@ createInterface({ input: process.stdin }).on('line', line => {
   await preparedWhileRunning.cleanup();
   await background.cleanup();
   assert.equal((await readJson(join(home, 'auth.json'))).tokens.refresh_token, 'fixture-refresh-2', 'cleanup/preparation must preserve the rotated generation');
+  await assert.rejects(() => runCodexControlPrompt({ codexHomeDir:home, prompt:'wrong-account', cwd:root,
+    timeoutMs:3000, expectedAccountId:'other-account' }), { code:'CODEX_CONTROL_ACCOUNT_UNVERIFIED' });
   const replies = await Promise.all([prompt('foreground-equivalent'), prompt('background-title')]);
   assert.deepEqual(replies.map((x) => x.text), ['foreground-equivalent', 'background-title']);
   const [slow, fast] = await Promise.allSettled([prompt('slow', 100), prompt('still-alive')]);

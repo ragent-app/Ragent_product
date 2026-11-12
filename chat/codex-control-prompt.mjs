@@ -2,7 +2,7 @@
 // never start Codex under the control service identity or copy its credentials.
 import { connect } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
-import { codexAppServerBrokerSocketPath, isCodexAppServerBrokerReady } from './codex-app-server-broker.mjs';
+import { codexAppServerBrokerSocketPath, codexBrokerAccountDigest, isCodexAppServerBrokerReady } from './codex-app-server-broker.mjs';
 import {
   buildCodexAppServerInitializeMessage, buildCodexAppServerInitializedNotification,
   buildCodexAppServerThreadMessage, buildCodexAppServerTurnStartMessage,
@@ -14,7 +14,7 @@ const MAX_LINE_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT_CHARS = 1024 * 1024;
 
 export async function runCodexControlPrompt({
-  codexHomeDir, prompt, cwd, model = '', effort = '', developerInstructions = '',
+  codexHomeDir, prompt, cwd, model = '', effort = '', developerInstructions = '', expectedAccountId = '',
   timeoutMs = 180_000,
 } = {}) {
   const socketPath = codexAppServerBrokerSocketPath(codexHomeDir);
@@ -36,6 +36,8 @@ export async function runCodexControlPrompt({
     let turnId = '';
     let turnSent = false;
     let usage = null;
+    const expectedAccountDigest = codexBrokerAccountDigest(expectedAccountId);
+    let checkingAccount = Boolean(expectedAccountDigest);
     let outputChars = 0;
     let wireBytes = 0;
     const parts = [];
@@ -64,9 +66,19 @@ export async function runCodexControlPrompt({
     socket.on('error', () => finish(new Error('Codex background broker connection failed')));
     socket.on('end', () => finish(new Error('Codex background broker closed before completion')));
     socket.on('close', () => finish(new Error('Codex background broker disconnected')));
-    socket.once('connect', () => write(buildCodexAppServerInitializeMessage()));
+    socket.once('connect', () => write(checkingAccount
+      ? { type:'agentoc-codex-broker-ping', expectedAccountDigest }
+      : buildCodexAppServerInitializeMessage()));
     const consume = (message, line) => {
       if (settled) return;
+      if (checkingAccount) {
+        if (message?.type !== 'agentoc-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
+          return finish(Object.assign(new Error('The shared Codex broker could not verify the selected account'), { code:'CODEX_CONTROL_ACCOUNT_UNVERIFIED' }));
+        }
+        checkingAccount = false;
+        write(buildCodexAppServerInitializeMessage());
+        return;
+      }
       // Requests have a private id namespace per connection, remapped by broker.
       if (message.id === 0 && !message.method) {
         if (message.error) return finish(new Error('Codex background initialize failed'));

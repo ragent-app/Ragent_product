@@ -86,6 +86,7 @@ export async function prepareControlSideNativeProvider({
     model: prepared.snapshot?.model || '',
     codexHomeDir: prepared.codexHomeDir || '',
     codexBroker: sharedCodexOAuth,
+    codexAccountId: sharedCodexOAuth ? (prepared.oauthAccountId || '') : '',
     claudeHomeDir: prepared.claudeHomeDir,
     claudeHomeBridgeDir: prepared.claudeHomeDir,
     claudeModelContract: prepared.snapshot?.claudeModelContract || claudeModelContract || null,

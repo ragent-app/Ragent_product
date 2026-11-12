@@ -94,6 +94,7 @@ export async function runDetachedAssistantPrompt(sessionMeta, prompt, options = 
   if (controlProvider?.codexBroker) {
     const result = await runCodexControlPrompt({
       codexHomeDir: controlProvider.codexHomeDir,
+      expectedAccountId: controlProvider.codexAccountId,
       prompt: `${options.systemPrefix || ''}${prompt}`,
       cwd: resolveRunnableSessionFolder(folder).cwd,
       model: controlProvider.model || resolvedModel.split('@')[0],
