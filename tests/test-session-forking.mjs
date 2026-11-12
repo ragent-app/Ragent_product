@@ -2,10 +2,13 @@
 import assert from 'assert/strict';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { delimiter, join } from 'path';
 
 const home = mkdtempSync(join(tmpdir(), 'agentoc-session-fork-'));
 process.env.HOME = home;
+process.env.AGENTOC_INSTANCE_ROOT = home;
+process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
+process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 const workspace = join(home, 'workspace');
 const configDir = join(home, '.config', 'agentoc');
@@ -14,7 +17,7 @@ mkdirSync(workspace, { recursive: true });
 mkdirSync(configDir, { recursive: true });
 mkdirSync(localBin, { recursive: true });
 delete process.env.AGENTOC_USER_SHELL_ENV_B64;
-process.env.PATH = `${localBin}:${process.env.PATH || ''}`;
+process.env.PATH = `${localBin}${delimiter}${process.env.PATH || ''}`;
 writeFileSync(
   join(localBin, 'codex-fake-fork'),
   `#!/usr/bin/env node
@@ -43,6 +46,9 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   'utf8',
 );
 chmodSync(join(localBin, 'codex-fake-fork'), 0o755);
+if (process.platform === 'win32') {
+  writeFileSync(join(localBin, 'codex-fake-fork.cmd'), `@"${process.execPath}" "${join(localBin, 'codex-fake-fork')}" %*\r\n`, 'utf8');
+}
 // The runtime resolves `codex` through PREFERRED_RUNTIME_COMMAND_PATHS (lib/user-shell-env.mjs),
 // which wins over PATH, so a PATH-shim cannot intercept the fork. Register a custom tool whose
 // command is an absolute path instead (absolute commands skip the preferred-path lookup).
@@ -51,7 +57,7 @@ writeFileSync(
   JSON.stringify([{
     id: 'codex-fake-fork',
     name: 'Fake Codex Fork',
-    command: join(localBin, 'codex-fake-fork'),
+    command: join(localBin, process.platform === 'win32' ? 'codex-fake-fork.cmd' : 'codex-fake-fork'),
     runtimeFamily: 'codex-app-server-json',
     models: [{ id: 'fake-model', label: 'Fake model', defaultEffort: 'low' }],
     reasoning: { kind: 'enum', label: 'Reasoning', levels: ['low'], default: 'low' },
@@ -245,9 +251,10 @@ try {
   );
   assert.equal(typeof childForkContext?.updatedAt, 'string', 'forked prepared context should keep its own timestamp');
 
-  const promptParent = await createSession(workspace, 'missing-tool', 'Prompt cache parent', {
+  const promptParent = await createSession(workspace, 'codex-fake-fork', 'Prompt cache parent', {
     group: 'Painting',
     description: 'Prepared context prompt reuse',
+    riskMode: 'recommended',
   });
   await appendEvents(promptParent.id, [
     {

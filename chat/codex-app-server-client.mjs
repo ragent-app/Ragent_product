@@ -25,6 +25,8 @@ import {
 } from './codex-app-server-broker.mjs';
 import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
 import { WORKBENCH_EXECUTION_POLICY } from '../lib/workbench-execution-policy.mjs';
+import { CONFIG_DIR, CODEX_MANAGED_HOME_DIR } from '../lib/config.mjs';
+import { dirname } from 'node:path';
 
 const CODEX_APP_SERVER_REQUEST_IDS = Object.freeze({
   fork: 10,
@@ -457,6 +459,13 @@ function normalizeForkResult(message) {
   };
 }
 
+export async function forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {}) {
+  const result = await requestCodexCapabilityCatalogFromBroker(socketPath, 'thread/fork', forkMessage.params, { timeoutMs });
+  const normalized = normalizeForkResult({ id: CODEX_APP_SERVER_REQUEST_IDS.fork, result });
+  if (!normalized) throw new Error('Codex thread/fork response did not include a thread id');
+  return normalized;
+}
+
 async function runCodexAppServerForkRequest({
   toolId = 'codex',
   cwd,
@@ -466,12 +475,23 @@ async function runCodexAppServerForkRequest({
   interactionMode,
   permissionMode,
   riskMode,
+  providerProfileId,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 } = {}) {
   const sourceThreadId = trimString(threadId);
   if (!sourceThreadId) return null;
   const agentocApprovalGate = isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode });
-  const { command, env } = await resolveCodexToolInvocation(toolId);
+  let codexHomeDir = '';
+  {
+    const { prepareNativeRunProviderHome } = await import('../lib/provider-runtime/run-provider-prepare.mjs');
+    const prepared = await prepareNativeRunProviderHome(`fork-${sourceThreadId}`, {
+      tool: toolId, runtimeFamily: 'codex-app-server-json', options: { runtimeFamily: 'codex-app-server-json',
+        ...(providerProfileId ? { providerProfile: providerProfileId } : {}), ...(model ? { model } : {}) },
+    }, { configDir: CONFIG_DIR, providerHomesRoot: dirname(CODEX_MANAGED_HOME_DIR), externalOAuthOwnership: false, holdNativeOAuthLock: false });
+    if (prepared?.ok && prepared.codexHomeDir) codexHomeDir = prepared.codexHomeDir;
+    else if (toolId === 'codex' || providerProfileId) throw new Error(prepared?.error || prepared?.reason || 'Codex provider home is unavailable');
+  }
+  const { command, env } = await resolveCodexToolInvocation(toolId, { codexHomeDir });
   const forkMessage = buildCodexAppServerThreadForkMessage({
     id: CODEX_APP_SERVER_REQUEST_IDS.fork,
     threadId: sourceThreadId,
@@ -483,6 +503,18 @@ async function runCodexAppServerForkRequest({
     agentocApprovalGate,
   });
   if (!forkMessage) return null;
+
+  if (codexHomeDir) {
+    const socketPath = codexAppServerBrokerSocketPath(codexHomeDir);
+    const args = ['app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY
+      ? buildSharedCodexWindowsHook({ socketPath }).args : [])];
+    const spawnSpec = buildPlatformSpawnSpec(command, args, { cwd: trimString(cwd) || process.cwd(), env });
+    await ensureCodexAppServerBroker({ socketPath, lockPath: codexAppServerBrokerLockPath(codexHomeDir),
+      upstreamFile: spawnSpec.file, upstreamArgs: spawnSpec.args,
+      upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
+      cwd: trimString(cwd) || process.cwd(), env, waitMs: timeoutMs });
+    return forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs });
+  }
 
   const args = ['app-server', '--stdio', ...(agentocApprovalGate ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
   const spawnSpec = buildPlatformSpawnSpec(command, args, {

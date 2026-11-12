@@ -16,7 +16,7 @@ import {
   ensureCodexAppServerBroker,
   spawnCodexAppServerProcess,
 } from '../chat/codex-app-server-broker.mjs';
-import { listCodexAppServerModels } from '../chat/codex-app-server-client.mjs';
+import { forkCodexThreadViaBroker, listCodexAppServerModels } from '../chat/codex-app-server-client.mjs';
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -125,6 +125,10 @@ const fakeUpstream = `
         const id = message.params.threadId;
         process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
         process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id }, config: message.params.config } }) + '\\n');
+      } else if (message.method === 'thread/fork') {
+        const id = 'fork-of-' + message.params.threadId;
+        process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id } } }) + '\\n');
+        process.stdout.write(JSON.stringify({ id: message.id, result: { thread: { id } } }) + '\\n');
       } else if (message.method === 'turn/start') {
         if (message.params.input[0].text === 'hook') {
           const threadId = message.params.threadId;
@@ -300,6 +304,8 @@ async function startApprovalProxy() {
 }
 
 const [left, right] = await Promise.all([startApprovalProxy(), startApprovalProxy()]);
+const forked = await forkCodexThreadViaBroker(socketPath, { params: { threadId: left.threadId } });
+assert.equal(forked.threadId, 'fork-of-' + left.threadId);
 left.proxy.send({ method: 'thread/resume', id: 91, params: { threadId: 'new-resume', config: {} } });
 await new Promise(resolve => setTimeout(resolve, 10));
 right.proxy.send({ method: 'thread/resume', id: 92, params: { threadId: 'new-resume', config: {} } });

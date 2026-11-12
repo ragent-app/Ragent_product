@@ -15667,6 +15667,7 @@ async function maybeForkNativeCodexThread(source) {
     const result = await forkCodexAppServerThread({
       toolId,
       threadId: sourceThreadId,
+      providerProfileId: source.providerProfile || undefined,
       cwd: source.folder,
       model: source.model || undefined,
       interactionMode: source.interactionMode || undefined,
