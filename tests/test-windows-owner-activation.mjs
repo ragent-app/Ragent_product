@@ -32,7 +32,7 @@ test('idle listener re-inspects without issuing authority; only actual native ca
   await f.service.stop();assert.equal(f.service.snapshot().ready,false);assert.equal(f.endpoints[2].closes,1);
 });
 test('confirmed delivery rollback and pipe close permit delayed listening with no new authority',async()=>{
-  for(const code of ['OBC_DELIVERY_UNCONFIRMED','OBC_PEER_DISCONNECTED','OBC_ACTIVATION_FRAME_INVALID','OBC_OPERATION_DENIED','OBC_BINDING_MISMATCH','OBC_EXPIRED','OBC_LAUNCH_NONCE_INVALID','OBC_LAUNCH_NONCE_MISMATCH']){
+  for(const code of ['OBC_DELIVERY_UNCONFIRMED','OBC_PEER_DISCONNECTED','OBC_ACTIVATION_FRAME_INVALID','OBC_OPERATION_DENIED','OBC_BINDING_MISMATCH','OBC_EXPIRED','OBC_LAUNCH_NONCE_INVALID','OBC_LAUNCH_NONCE_MISMATCH','OSV_STOPPED']){
     const f=fixture();f.service.start({});await settle();f.endpoints[0].d.reject(error(code));await settle();
     assert.equal(f.endpoints[0].closes,1);assert.equal(f.safetyChecks,1);assert.deepEqual(f.service.snapshot(),{state:'backoff',code,ready:false});assert.equal(f.inspects,1);assert.equal(f.activates,0);
     assert.equal(f.waits[0].ms,250);f.now+=250;f.waits[0].d.resolve();await settle();assert.equal(f.inspects,2);assert.equal(f.service.snapshot().ready,true);assert.equal(f.activates,0);
