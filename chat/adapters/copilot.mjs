@@ -258,7 +258,7 @@ export function buildCopilotArgs(prompt, options = {}) {
   // channel. Keep the server-owned instructions in the prompt instead of
   // passing unsupported flags that make the CLI exit before a Run starts.
   const effectivePrompt = [
-    developerInstructions ? `AgentoC developer instructions:\n${developerInstructions}` : '',
+    developerInstructions ? `Ragent developer instructions:\n${developerInstructions}` : '',
     (options.systemPrefix ?? COPILOT_SYSTEM_PREFIX),
     typeof prompt === 'string' ? prompt : '',
   ].filter(Boolean).join('\n\n');
