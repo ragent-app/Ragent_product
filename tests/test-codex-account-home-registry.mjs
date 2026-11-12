@@ -31,7 +31,11 @@ test('verified accounts converge on one guarded home across provider profiles', 
       guarded = true;
     } }), first);
   assert.equal(guarded, true);
-  assert.deepEqual(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true }), { home: first, sources: [second] });
+  assert.deepEqual(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true }), { home: first, sources: [second], aliases: [second] });
+  const emptyAlias = join(providerHomesRoot, 'by-provider', 'empty');
+  await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: emptyAlias, initialize: true, assertMigrationSafe: async () => ({ retainLegacySource: false }) });
+  assert.deepEqual(await resolveCanonicalCodexAccountHome({ ...base, candidateHomeRoot: first, includeSources: true }), { home: first, sources: [second], aliases: [second, emptyAlias] });
+  await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: emptyAlias, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_OWNED' });
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: first, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_OWNED' });
   await assert.rejects(resolveCanonicalCodexAccountHome({ ...base, accountId: 'account-b', candidateHomeRoot: second, initialize: true }), { code: 'CODEX_ACCOUNT_HOME_OWNED' });
   const third = join(providerHomesRoot, 'by-provider', 'third');
