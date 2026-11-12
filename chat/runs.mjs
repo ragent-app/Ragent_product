@@ -1090,7 +1090,7 @@ function linuxScopeResultUnavailable() {
   return Object.assign(new Error('Run result is awaiting scope revocation'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
 }
 
-function linuxPeerResultClientOptions() {
+export function linuxPeerResultClientOptions() {
   return {
     socketPath: process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET || '/run/agentoc-peer-result/result.sock',
     peerHelper: process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER || '/usr/lib/agentoc/privileged-peercred',

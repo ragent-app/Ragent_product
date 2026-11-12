@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'child_process';
 import { accessSync, constants, rmSync, statSync } from 'fs';
 import { createInterface } from 'readline';
+import { PassThrough } from 'node:stream';
 import { dirname, isAbsolute, join, relative, resolve, win32 } from 'path';
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
@@ -139,6 +140,7 @@ import {
   getRun,
   getRunManifest,
   isLinuxPeerResultRunner,
+  linuxPeerResultClientOptions,
   readRunBrowserToken,
   readRunAuthRecoveryToken,
   readRunSessionControlToken,
@@ -3578,8 +3580,7 @@ async function main() {
     const attempt = run.runnerLaunchAttempt ?? 0;
     if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt > 10000) throw new Error('Invalid protected Run launch attempt');
     const { waitForProtectedLinuxRunReady } = await import('./linux-run-peer-result-client.mjs');
-    await waitForProtectedLinuxRunReady({ runId, launchAttempt: attempt,
-      socketPath: '/run/agentoc-peer-result/result.sock' });
+    await waitForProtectedLinuxRunReady({ ...linuxPeerResultClientOptions(), runId, launchAttempt: attempt });
   }
   if (process.platform === 'win32' && executionIdentity?.sid) {
     try { await bindWindowsRunExecutionIdentity(runId, executionIdentity); }
@@ -4408,6 +4409,15 @@ async function main() {
   const managedStdin = isClaudeFamily || isCodexAppServerFamily || isAgyFamily || isPiFamily || acp === true;
   let windowsJob;
   let proc;
+  let providerStdoutStream;
+  let providerStderrStream;
+  let earlyStdoutError = null;
+  let pendingProcessEvent = null;
+  let dispatchProcessEvent = null;
+  const captureProcessEvent = (type, ...args) => {
+    if (dispatchProcessEvent) dispatchProcessEvent(type, args);
+    else if (!pendingProcessEvent) pendingProcessEvent = { type, args };
+  };
   let providerSeedsDelivered = false;
   try {
     windowsJob = assertWindowsManagedJob(await createWindowsJobObject());
@@ -4433,7 +4443,6 @@ async function main() {
         await windowsJob.close();
         throw error;
       }
-      await updateRun(runId, (current) => ({ ...current, windowsJobObjectManaged: true, windowsJobObjectCreation: 'suspended-create-assign-resume' }));
     } else {
       await assertRunLaunchBoundary(runId);
       proc = spawn(spawnCommand, spawnArgs, {
@@ -4449,6 +4458,25 @@ async function main() {
         ...(process.platform !== 'win32' ? { detached: true } : {}),
       });
     }
+    // The provider can exit while the async Run bookkeeping below is still
+    // in progress. Capture lifecycle events immediately; replay them only
+    // after stdout readers and terminalization handlers are installed.
+    proc.on('error', error => captureProcessEvent('error', error));
+    proc.once('exit', (code, signal) => captureProcessEvent('exit', code, signal));
+    // Node may drain unused child pipes immediately after a fast exit. Claim
+    // both pipes before any async bookkeeping, using bounded backpressure so
+    // output survives until the real readers are installed.
+    providerStdoutStream = new PassThrough({ highWaterMark: 64 * 1024 });
+    providerStderrStream = new PassThrough({ highWaterMark: 64 * 1024 });
+    providerStdoutStream.on('error', error => { earlyStdoutError ||= error; });
+    providerStderrStream.on('error', () => {});
+    proc.stdout.on('error', error => providerStdoutStream.destroy(error));
+    proc.stderr.on('error', error => providerStderrStream.destroy(error));
+    proc.stdout.pipe(providerStdoutStream);
+    proc.stderr.pipe(providerStderrStream);
+    if (Number.isInteger(proc.exitCode) || (typeof proc.signalCode === 'string' && proc.signalCode))
+      captureProcessEvent('exit', proc.exitCode, proc.signalCode);
+    if (windowsJob) await updateRun(runId, (current) => ({ ...current, windowsJobObjectManaged: true, windowsJobObjectCreation: 'suspended-create-assign-resume' }));
     if (sandboxProviderSeeds?.seeds.length) {
       deliverReadOnlyProviderSeeds(proc, sandboxProviderSeeds);
       providerSeedsDelivered = true;
@@ -5473,11 +5501,12 @@ async function main() {
   let pendingStdoutBytes = 0;
   const closedStdoutReaders = new WeakSet();
   let providerErrorPreview = '';
-  let stdoutProcessingFailureReason = '';
+  let stdoutProcessingFailureReason = earlyStdoutError ? `Provider stdout reader failed: ${normalizeErrorMessage(earlyStdoutError)}` : '';
   const stdoutReaderClosePromises = [];
   const stdoutStreamEndPromises = [];
   const trackStdoutReader = (reader, stream) => {
     stdoutReaderClosePromises.push(new Promise((resolveReader) => {
+      if (reader.closed) { closedStdoutReaders.add(reader); resolveReader(); return; }
       reader.once('close', () => {
         closedStdoutReaders.add(reader);
         resolveReader();
@@ -5488,6 +5517,7 @@ async function main() {
     // readline buffer cannot be mistaken for a drained provider output.
     if (stream?.once) {
       stdoutStreamEndPromises.push(new Promise((resolveStream) => {
+        if (stream.readableEnded || stream.destroyed) { resolveStream(); return; }
         let settled = false;
         const settle = () => {
           if (settled) return;
@@ -6024,13 +6054,13 @@ async function main() {
     }
   };
 
-  providerStdoutInput = createInterface({ input: proc.stdout });
-  trackStdoutReader(providerStdoutInput, proc.stdout);
+  providerStdoutInput = createInterface({ input: providerStdoutStream });
+  trackStdoutReader(providerStdoutInput, providerStdoutStream);
   // A few harnesses stream a JSON/text frame in several chunks before the
   // terminating newline arrives. Treat readable-byte activity as liveness as
   // well as complete readline frames; otherwise the generic watchdog can kill
   // a healthy provider that is actively streaming a large/slow record.
-  proc.stdout.on('data', (chunk) => {
+  providerStdoutStream.on('data', (chunk) => {
     if (!chunk || chunk.length === 0) return;
     lastProviderLineAt = Date.now();
     lastOutputAt = lastProviderLineAt;
@@ -6052,7 +6082,7 @@ async function main() {
   providerStdoutInput.on('line', (line) => {
     void enqueueStdoutLine(line);
   });
-  proc.stderr.on('data', handleStderrChunk);
+  providerStderrStream.on('data', handleStderrChunk);
   if (appServerState) {
     configureCodexAccountModelCatalog({
       proc, state: appServerState,
@@ -6149,7 +6179,7 @@ async function main() {
     }
   }
 
-  proc.on('error', (error) => {
+  const handleProcessError = (error) => {
     if (terminalizationInFlight) return;
     terminalizationInFlight = true;
     void (async () => {
@@ -6198,9 +6228,9 @@ async function main() {
       // Runs no longer hold a WorkspaceLease; nothing to mark terminal.
       process.exit(1);
     })().catch((callbackError) => failProviderLifecycleCallback(callbackError, 'tool-process-error'));
-  });
+  };
 
-  proc.on('exit', (code, signal) => {
+  const handleProcessExit = (code, signal) => {
     if (terminalizationInFlight) return;
     terminalizationInFlight = true;
     void (async () => {
@@ -6443,7 +6473,12 @@ async function main() {
       // Runs no longer hold a WorkspaceLease; nothing to mark terminal.
       process.exit(effectiveExitCode);
     })().catch((callbackError) => failProviderLifecycleCallback(callbackError, 'tool-process-exit'));
-  });
+  };
+  dispatchProcessEvent = (type, args) => {
+    if (type === 'error') handleProcessError(...args);
+    else handleProcessExit(...args);
+  };
+  if (pendingProcessEvent) dispatchProcessEvent(pendingProcessEvent.type, pendingProcessEvent.args);
 }
 
 if (isMainEntry) {

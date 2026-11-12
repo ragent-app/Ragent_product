@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, createPublicKey } from 'node:crypto';
-import { chmod, chown, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, chown, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { createRunnerLifecycleServer } from '../scripts/runner-lifecycle-broker.mjs';
@@ -10,7 +10,7 @@ import { createLinuxRunPeerResultServer } from '../scripts/linux-run-peer-result
 import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
 
-test('systemd runner hands a result to real root broker and non-root control',
+for (const realSidecar of [false, true]) test(`systemd ${realSidecar ? 'sidecar' : 'runner fixture'} hands a result to real root broker and non-root control`,
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.AGENTOC_TEST_SYSTEMD_PEER !== '1', timeout: 45000 }, async () => {
     const account = name => {
       const fields = execFileSync('/usr/bin/getent', ['passwd', name], { encoding: 'utf8' }).trim().split(':');
@@ -19,9 +19,9 @@ test('systemd runner hands a result to real root broker and non-root control',
     const controlAccount = account('nobody'), runner = account('agentoc-runner');
     assert.ok(controlAccount.uid > 0 && runner.uid > 0 && controlAccount.uid !== runner.uid);
     const root = await mkdtemp('/srv/agentoc-peer-handoff-');
-    const runId = 'run_peerhandofffixture1';
+    const runId = realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
     const unit = `agentoc-runner-${runId}.service`;
-    let lifecycle, inbox, control, started = false;
+    let lifecycle, inbox, control, started = false, succeeded = false;
     try {
       assert.equal(execFileSync('/usr/bin/systemctl', ['show', '--property=LoadState', '--value', unit], { encoding: 'utf8' }).trim(), 'not-found');
       await chmod(root, 0o711);
@@ -31,6 +31,11 @@ test('systemd runner hands a result to real root broker and non-root control',
       }
       await mkdir(`${root}/runner-home`, { mode: 0o700 });
       await chown(`${root}/runner-home`, runner.uid, runner.gid);
+      if (realSidecar) {
+        await mkdir(`${root}/workspace`, { mode: 0o700 });
+        await chown(`${root}/workspace`, runner.uid, runner.gid);
+        await writeFile(`${root}/fixture-cline`, '#!/bin/sh\nprintf executed > marker\nprintf \'%s\\n\' \'{"type":"completed"}\'\n', { mode: 0o755 });
+      }
       for (const name of ['contexts', 'pin', 'results']) await mkdir(`${root}/${name}`, { mode: 0o700 });
       const helper = `${root}/peercred`, endpoint = `${root}/result.sock`, lifecycleSocket = `${root}/lifecycle.sock`;
       execFileSync('/usr/bin/gcc', ['-Wall', '-Wextra', '-Werror', '-O2',
@@ -43,7 +48,7 @@ test('systemd runner hands a result to real root broker and non-root control',
       control = spawn('/usr/bin/setpriv', ['--reuid', String(controlAccount.uid), '--regid', String(controlAccount.gid), '--clear-groups', '--',
         process.execPath, fixture], { env: { ...process.env, HOME: `${root}/home`, AGENTOC_CONFIG_DIR: `${root}/config`,
           AGENTOC_MEMORY_DIR: `${root}/memory`, AGENTOC_RUN_SPOOL_DIR: `${root}/spool`, AGENTOC_TEST_ROOT: root,
-          AGENTOC_TEST_RUNNER_UID: String(runner.uid), AGENTOC_LINUX_RUN_SCOPE_GRANTS: '1',
+          AGENTOC_TEST_RUNNER_UID: String(runner.uid), AGENTOC_TEST_REAL_SIDECAR: realSidecar ? '1' : '0', AGENTOC_LINUX_RUN_SCOPE_GRANTS: '1',
           AGENTOC_RUNNER_LIFECYCLE_SOCKET: lifecycleSocket, AGENTOC_LINUX_PEER_RESULT_SOCKET: endpoint,
           AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: helper }, stdio: ['pipe', 'pipe', 'pipe'] });
       control.stderr.on('data', data => { errorOutput += data.toString(); });
@@ -64,30 +69,35 @@ test('systemd runner hands a result to real root broker and non-root control',
       await enrollLinuxServiceKeyPin({ directory: `${root}/pin`, publicKey, expectedKeyId: keyId });
       inbox = await createLinuxRunPeerResultServer({ socketPath: endpoint, directory: `${root}/contexts`,
         pinDirectory: `${root}/pin`, resultDirectory: `${root}/results`, controlUid: controlAccount.uid, peerHelper: helper });
-      const task = fileURLToPath(new URL('./fixtures/linux-peer-handoff-task.mjs', import.meta.url));
+      const task = fileURLToPath(new URL(realSidecar ? '../chat/runner-sidecar.mjs' : './fixtures/linux-peer-handoff-task.mjs', import.meta.url));
       const env = { HOME: `${root}/runner-home`, AGENTOC_CONFIG_DIR: `${root}/runner-home`,
         AGENTOC_MEMORY_DIR: `${root}/runner-home/memory`, AGENTOC_RUN_SPOOL_DIR: `${root}/spool`,
         AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1',
         AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1', AGENTOC_LINUX_PEER_RESULT_RUNNER: '1',
         AGENTOC_LINUX_PEER_RESULT_SOCKET: endpoint, AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: helper,
-        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${ready.port}` };
+        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${ready.port}`, IS_SANDBOX: '1' };
       const args = ['--quiet', '--collect', '--service-type=exec', `--unit=${unit}`, '--slice=agentoc-runners.slice',
         '--property=User=agentoc-runner', '--property=NoNewPrivileges=yes', '--property=KillMode=control-group'];
       for (const [key, value] of Object.entries(env)) args.push(`--setenv=${key}=${value}`);
       started = true;
-      execFileSync('/usr/bin/systemd-run', [...args, process.execPath, task], { timeout: 10000 });
+      execFileSync('/usr/bin/systemd-run', [...args, process.execPath, task, ...(realSidecar ? [runId] : [])], { timeout: 10000 });
       await registerLinuxRunContext({ directory: `${root}/contexts`, pinDirectory: `${root}/pin`,
         run: ready.run, manifest: ready.manifest, grant: ready.grant, launchAttempt: 0, runnerUid: runner.uid });
       let outcome;
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 250; i++) {
         control.stdin.write('read\n');
         outcome = await next();
         if (outcome.result) break;
         assert.equal(outcome.error, 'LINUX_RUN_RESULT_UNAVAILABLE');
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      const result = { completedAt: '2026-11-12T00:00:00.000Z', exitCode: 0, signal: null };
-      assert.deepEqual(outcome?.result, result, errorOutput);
+      if (realSidecar) {
+        assert.equal(outcome?.result?.exitCode, 0, errorOutput);
+        assert.equal(outcome?.result?.providerTerminalSeen, true);
+        assert.equal(await readFile(`${root}/workspace/marker`, 'utf8'), 'executed');
+      } else {
+        assert.deepEqual(outcome?.result, { completedAt: '2026-11-12T00:00:00.000Z', exitCode: 0, signal: null }, errorOutput);
+      }
       assert.equal(JSON.parse(await readFile(`${root}/spool/${runId}/status.json`, 'utf8')).state, 'completed');
       control.stdin.write('clear\n');
       assert.deepEqual(await next(), { cleared: true });
@@ -99,6 +109,7 @@ test('systemd runner hands a result to real root broker and non-root control',
       control.stdin.end('exit\n');
       assert.equal(await controlExit, 0, errorOutput);
       control = null;
+      succeeded = true;
     } finally {
       let stopped = true;
       if (started) {
@@ -117,7 +128,7 @@ test('systemd runner hands a result to real root broker and non-root control',
       }
       if (inbox) await inbox.close();
       if (lifecycle) await lifecycle.close();
-      if (stopped) await rm(root, { recursive: true, force: true });
-      else console.error(`Retaining ${root}: fixture unit did not stop`);
+      if (stopped && succeeded) await rm(root, { recursive: true, force: true });
+      else console.error(`Retaining ${root}: ${stopped ? 'fixture failed' : 'fixture unit did not stop'}`);
     }
   });

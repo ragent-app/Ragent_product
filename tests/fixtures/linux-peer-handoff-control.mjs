@@ -6,23 +6,33 @@ import { createInterface } from 'node:readline';
 
 const root = process.env.AGENTOC_TEST_ROOT;
 const runnerUid = Number(process.env.AGENTOC_TEST_RUNNER_UID);
-const runId = 'run_peerhandofffixture1', sessionId = 's1', requestId = 't1';
+const realSidecar = process.env.AGENTOC_TEST_REAL_SIDECAR === '1';
+const runId = realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
+const sessionId = 's1', requestId = 't1';
 const { createRun, getRunAcceptanceEvidence, getRunManifest, getRunResult, clearRunResult } = await import('../../chat/runs.mjs');
 const { computeExecutionScopeDigest } = await import('../../chat/execution-scope.mjs');
 const { issueLinuxRunScopeGrant } = await import('../../chat/linux-run-scope-issuance.mjs');
 const { getActivePrivilegedSigningKey } = await import('../../chat/privileged-signing-keys.mjs');
 const { handleTemporaryControlRunCheck } = await import('../../chat/router-temporary-control-run-check.mjs');
 const token = Buffer.alloc(32, 17).toString('base64url');
-const scope = { sessionId, cwd: { realPath: '/srv/work' }, scopeRoot: { realPath: '/srv/work' },
-  riskContext: { platform: 'linux', cwd: '/srv/work', trustedWorkspaceRoot: '/srv/work' } };
-await createRun({ status: { id: runId, sessionId, requestId, state: 'running', runnerLaunchAttempt: 0 },
+const workspace = realSidecar ? `${root}/workspace` : '/srv/work';
+const scope = { sessionId, cwd: { realPath: workspace }, scopeRoot: { realPath: workspace },
+  riskContext: { platform: 'linux', cwd: workspace, trustedWorkspaceRoot: workspace } };
+await createRun({ status: { id: runId, sessionId, requestId, state: 'running', runnerLaunchAttempt: 0,
+    ...(realSidecar ? { tool: 'fixture-cline', runtimeFamily: 'cline-json' } : {}) },
   manifest: { sessionId, requestId, executionScope: scope, executionScopeDigest: computeExecutionScopeDigest(scope),
-    options: { approvedActionChannel: { turnId: requestId, token, tokenHash: createHash('sha256').update(token).digest('hex') } } } });
+    ...(realSidecar ? { tool: 'fixture-cline', prompt: 'fixture request' } : {}),
+    options: { ...(realSidecar ? { runtimeFamily: 'cline-json', toolCommand: `${root}/fixture-cline` } : {}),
+      approvedActionChannel: { turnId: requestId, token, tokenHash: createHash('sha256').update(token).digest('hex') } } } });
 const grant = await issueLinuxRunScopeGrant(runId, 0, { resultChannel: 'peer-v1' });
 for (const dir of [`${root}/spool`, `${root}/spool/${runId}`])
   execFileSync('/usr/bin/setfacl', ['-m', `u:${runnerUid}:rwx`, dir]);
 for (const name of ['status.json', 'manifest.json'])
-  execFileSync('/usr/bin/setfacl', ['-m', `u:${runnerUid}:r`, `${root}/spool/${runId}/${name}`]);
+  execFileSync('/usr/bin/setfacl', ['-m', `u:${runnerUid}:${realSidecar ? 'rw' : 'r'}`, `${root}/spool/${runId}/${name}`]);
+if (realSidecar) {
+  for (const name of ['run-index.jsonl', 'request-index.jsonl'])
+    execFileSync('/usr/bin/setfacl', ['-m', `u:${runnerUid}:rw`, `${root}/spool/${name}`]);
+}
 const server = createServer((req, res) => {
   void handleTemporaryControlRunCheck({ req, res, pathname: new URL(req.url, 'http://127.0.0.1').pathname,
     writeJson: (response, status, body) => response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body)) });
