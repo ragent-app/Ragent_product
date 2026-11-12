@@ -74,6 +74,8 @@ const fakeUpstream = `
       }
       if (message.method === 'initialize') {
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+      } else if (message.method === 'fixture/environment') {
+        process.stdout.write(JSON.stringify({ id: message.id, result: { privateValue: process.env.AGENTOC_PRIVATE_FIXTURE || null } }) + '\\n');
       } else if (message.method === 'model/list') {
         const cursor = message.params && message.params.cursor;
         const result = cursor === 'page-2'
@@ -159,7 +161,7 @@ const broker = await ensureCodexAppServerBroker({
   upstreamFile: process.execPath,
   upstreamArgs: [fakeUpstreamPath],
   cwd: projectRoot,
-  env: { ...process.env, CODEX_HOME: home },
+  env: { ...process.env, CODEX_HOME: home, AGENTOC_PRIVATE_FIXTURE: 'run-a-secret' },
   lockPath: join(home, '.agentoc-codex-app-server.lock'),
 });
 assert.equal(broker.ok, true);
@@ -253,6 +255,13 @@ async function runProxy(text) {
 }
 
 await Promise.all([runProxy('one'), runProxy('two')]);
+
+const environmentProxy = startProxy();
+environmentProxy.send({ method: 'initialize', id: 0, params: {} });
+await environmentProxy.next();
+environmentProxy.send({ method: 'fixture/environment', id: 1, params: {} });
+assert.equal((await environmentProxy.next()).result.privateValue, null);
+environmentProxy.child.kill('SIGTERM');
 
 const rejected = startProxy();
 const afterRejection = startProxy();

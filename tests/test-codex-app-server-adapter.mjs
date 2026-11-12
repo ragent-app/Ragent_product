@@ -237,8 +237,10 @@ const executeThreadResume = buildCodexAppServerThreadMessage({
 });
 const scopedMcp = { mcp_servers: { fixture: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'fixture' } } } };
 for (const useResume of [false, true]) {
-  const scopedThread = buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume, interactionMode: 'plan', threadMcpConfig: scopedMcp });
+  const scopedThread = buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume, interactionMode: 'plan', threadMcpConfig: scopedMcp,
+    threadShellEnvironment: { AGENTOC_RUN_ID: 'run-fixture' } });
   assert.deepEqual(scopedThread.params.config.mcp_servers, scopedMcp.mcp_servers);
+  assert.deepEqual(scopedThread.params.config.shell_environment_policy.set, { AGENTOC_RUN_ID: 'run-fixture' });
   assert.equal(scopedThread.params.config.mode, 'plan');
 }
 assert.equal(executeThreadResume.method, 'thread/resume');

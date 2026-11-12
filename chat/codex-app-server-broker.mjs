@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 
 import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-runtime/oauth-lock.mjs';
 import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
+import { buildSharedCodexProcessEnvironment } from './codex-shared-environment.mjs';
 
 const BROKER_PING = 'agentoc-codex-broker-ping';
 const BROKER_PONG = 'agentoc-codex-broker-pong';
@@ -450,7 +451,9 @@ function runBroker() {
       file: upstreamFile,
       args: upstreamArgs,
       cwd: upstreamCwd,
-      env: buildWorkbenchCodexEnvironment(process.env),
+      env: buildSharedCodexProcessEnvironment(buildWorkbenchCodexEnvironment(process.env), {
+        basePath: process.env.AGENTOC_CODEX_BROKER_BASE_PATH || '',
+      }),
       windowsVerbatimArguments: upstreamWindowsVerbatimArguments,
     });
     } catch (error) {

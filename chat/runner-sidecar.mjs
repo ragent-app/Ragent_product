@@ -7,6 +7,7 @@ import { createInterface } from 'readline';
 import { dirname, isAbsolute, join, relative, resolve, win32 } from 'path';
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
+import { buildCodexRunShellEnvironment } from './codex-shared-environment.mjs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createToolInvocation, prependAttachmentPaths, resolveCommandSpawnSpec } from './process-runner.mjs';
 import { readPiTerminalOutcome } from './adapters/pi.mjs';
@@ -1859,6 +1860,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     permissionMode: state.permissionMode,
     agentocApprovalGate: state.agentocApprovalGate,
     threadMcpConfig: state.threadMcpConfig,
+    threadShellEnvironment: state.threadShellEnvironment,
   }));
   if (written) state.threadRequestSent = true;
   return written;
@@ -3552,6 +3554,7 @@ async function main() {
     agyHomeDir: runnerAgyHomeDir,
     acp,
   });
+  const codexBrokerBasePath = spawnEnv.PATH || spawnEnv.Path || '';
   configureWindowsClaudeWorkingDirectory(spawnEnv, { bidi: isClaudeBidiFamily, riskMode: manifest.options?.riskMode });
   let args = initialArgs;
 
@@ -4089,7 +4092,7 @@ async function main() {
         upstreamArgs: resolvedCommand.args,
         upstreamWindowsVerbatimArguments: resolvedCommand.windowsVerbatimArguments === true,
         cwd: resolvedFolder.cwd,
-        env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir },
+        env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, AGENTOC_CODEX_BROKER_BASE_PATH: codexBrokerBasePath },
         scriptPath: CODEX_APP_SERVER_BROKER_SCRIPT,
         assertLaunchBoundary: () => assertRunLaunchBoundary(runId),
       });
@@ -4102,6 +4105,7 @@ async function main() {
       spawnShell = false;
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;
+      appServerState.threadShellEnvironment = buildCodexRunShellEnvironment(buildWorkbenchCodexEnvironment(spawnEnv));
     } catch (error) {
       await logSidecarDiagnostic(runId, 'Machine-local Codex app-server broker unavailable; using the safe exclusive fallback', {
         error: normalizeErrorMessage(error),
