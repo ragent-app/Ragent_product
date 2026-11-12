@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { codexAppServerBrokerSocketPath, codexAppServerBrokerLockPath, codexBrokerAccountDigest } from '../chat/codex-app-server-broker.mjs';
-import { retireCodexBrokerAndAcquireHome } from '../chat/codex-broker-retirement.mjs';
+import { withCodexAccountHomeHandoff } from '../lib/provider-runtime/codex-account-handoff.mjs';
 import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-runtime/oauth-lock.mjs';
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -97,15 +97,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   assert.equal((await oauthProbe.next()).accepted, false);
   oauthProbe.socket.end();
   await delay(1000);
-  const creationLock = await acquireNativeOAuthLock(codexAppServerBrokerLockPath(home), { waitMs: 5000 });
-  let oauthLock;
-  try {
-    oauthLock = await retireCodexBrokerAndAcquireHome({ homeRoot: root, accountId: 'fixture-account' });
-    await assert.rejects(acquireNativeOAuthLock(nativeOAuthLockPath(root), { waitMs: 50, pollMs: 10 }), { code: 'NATIVE_OAUTH_LOCK_TIMEOUT' });
-  } finally {
-    await oauthLock?.release();
-    await creationLock.release();
-  }
+  const events = [];
+  await withCodexAccountHomeHandoff({ accountId: 'fixture-account', legacyHomeRoot: root, canonicalHomeRoot: join(root, 'new-home'),
+    reconcileCredentials: async () => {
+      await assert.rejects(acquireNativeOAuthLock(nativeOAuthLockPath(root), { waitMs: 50, pollMs: 10 }), { code: 'NATIVE_OAUTH_LOCK_TIMEOUT' });
+      await assert.rejects(acquireNativeOAuthLock(codexAppServerBrokerLockPath(home), { waitMs: 50, pollMs: 10 }), { code: 'NATIVE_OAUTH_LOCK_TIMEOUT' });
+      events.push('reconciled');
+    },
+    startCanonical: async () => { events.push('started'); },
+  });
+  assert.deepEqual(events, ['reconciled', 'started']);
   if (broker.exitCode === null && broker.signalCode === null) {
     await Promise.race([new Promise((done) => broker.once('exit', done)), delay(5000)]);
   }
