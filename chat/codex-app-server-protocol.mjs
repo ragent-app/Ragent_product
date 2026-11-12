@@ -145,7 +145,8 @@ export function buildCodexAppServerThreadOptions({
     ...(namedProfile ? { permissions: namedProfile } : { sandbox: permissionPolicy.sandbox || 'danger-full-access' }),
     config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
       ...(namedPermissionConfig ? { [`permissions.${namedProfile}`]: namedPermissionConfig } : {}),
-      ...(threadMcpConfig?.mcp_servers ? { mcp_servers: threadMcpConfig.mcp_servers } : {}),
+      ...(threadMcpConfig?.mcp_servers && Object.keys(threadMcpConfig.mcp_servers).length
+        ? { mcp_servers: threadMcpConfig.mcp_servers } : {}),
       ...(threadShellEnvironment ? { shell_environment_policy: { set: threadShellEnvironment } } : {}) },
     ...(typeof developerInstructions === 'string' && developerInstructions.trim()
       ? { developerInstructions: developerInstructions.trim() }

@@ -3974,7 +3974,7 @@ async function main() {
     appServerState.agentocApprovalGate = false;
   }
   const sharedReadOnlyCodex = Boolean(process.platform === 'linux' && appServerState && codexOAuthRuntime
-    && readOnlyRequested && !WORKBENCH_EXECUTION_POLICY);
+    && readOnlyRequested);
   const sharedCodexThreadSupported = Boolean(appServerState && codexOAuthRuntime
     && (!readOnlyRequested || sharedReadOnlyCodex));
   const threadScopedCodexMcp = sharedCodexThreadSupported;
@@ -4266,7 +4266,7 @@ async function main() {
   const readOnlyWorkspace = readOnlyWorkspaceForRun(manifest, resolvedFolder.cwd);
   const sandboxRequired = requireSandboxAvailability({ required: Boolean(readOnlyWorkspace) });
   const sharedSandboxCodex = Boolean(process.platform === 'linux' && sandboxRequired
-    && appServerState && codexOAuthRuntime && !WORKBENCH_EXECUTION_POLICY);
+    && appServerState && codexOAuthRuntime);
   let resolvedCommand = await resolveCommandSpawnSpec(initialCommand, args, {
     cwd: resolvedFolder.cwd,
     env: spawnEnv,
