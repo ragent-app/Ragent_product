@@ -67,6 +67,8 @@ process.stdin.on('data', (chunk) => {
 });
 `, 'utf8');
 chmodSync(fakeCodexPath, 0o755);
+const fakeCodexCommand = process.platform === 'win32' ? `${fakeCodexPath}.cmd` : fakeCodexPath;
+if (process.platform === 'win32') writeFileSync(fakeCodexCommand, `@"${process.execPath}" "${fakeCodexPath}" %*\r\n`, 'utf8');
 
 const providers = [
   {
@@ -175,13 +177,16 @@ globalThis.fetch = async (url) => {
 };
 
 process.env.HOME = tempHome;
+process.env.AGENTOC_INSTANCE_ROOT = tempHome;
 process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.AGENTOC_HARNESS_ROOT = join(tempHome, 'harnesses');
 const originalPackagedHarnessRoot = process.env.AGENTOC_PACKAGED_HARNESS_ROOT;
 process.env.AGENTOC_PACKAGED_HARNESS_ROOT = binDir;
 const originalPath = process.env.PATH;
 process.env.PATH = `${binDir}${delimiter}${originalPath || ''}`;
 
-const { getModelsForTool, parseScopedCodexModel } = await import(
+const { getModelsForTool, getToolModelCatalogs, parseScopedCodexModel } = await import(
   pathToFileURL(join(repoRoot, 'chat', 'models.mjs')).href,
 );
 const { resolveToolCommandPathAsync } = await import(
@@ -190,7 +195,7 @@ const { resolveToolCommandPathAsync } = await import(
 
 try {
   writeNativeRegistry();
-  assert.equal(await resolveToolCommandPathAsync('codex'), fakeCodexPath, 'fixture codex must own app-server discovery');
+  assert.equal(await resolveToolCommandPathAsync('codex'), fakeCodexCommand, 'fixture codex must own app-server discovery');
   assert.deepEqual(parseScopedCodexModel('gpt-5.6-sol@codex-official-2'), { model: 'gpt-5.6-sol', providerId: 'codex-official-2' });
   assert.deepEqual(parseScopedCodexModel('a@b@c'), { model: 'a@b', providerId: 'c' });
   assert.deepEqual(parseScopedCodexModel('m@bad id!'), { model: 'm@bad id!', providerId: '' });
@@ -215,6 +220,9 @@ try {
   );
   assert.equal(result.models.some((m) => m.id === 'gpt-official-extra@codex-official'), true, 'official row uses its own dynamic app-server catalog');
   assert.equal(result.models.some((m) => m.id === 'gpt-official-extra@codex-official-2'), false, 'a failed account falls back without borrowing another account catalog');
+  const catalogs = await getToolModelCatalogs('codex');
+  assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official').source, 'discovered');
+  assert.equal(catalogs.find((entry) => entry.providerProfileId === 'codex-official-2').source, 'static');
   assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official').capabilities.effort.source, 'upstream');
   assert.equal(result.models.find((m) => m.id === 'gpt-6-astra@codex-official-2').capabilities.effort.source, 'builtin');
   assert.equal(result.models.find((m) => m.id === 'deepseek-v4-flash@deepseek-v4-flash-codex').label, 'deepseek-v4-flash · DeepSeek');

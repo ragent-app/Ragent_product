@@ -10,8 +10,15 @@ import {
   normalizeCatalogError,
   normalizeModelCatalog,
   normalizeModelCatalogEntry,
+  sourceFromModelOrigins,
   validateRunModelSelection,
 } from '../lib/provider-runtime/model-catalog.mjs';
+
+assert.equal(sourceFromModelOrigins(['builtin', 'builtin']), 'static');
+assert.equal(sourceFromModelOrigins(['configured']), 'static');
+assert.equal(sourceFromModelOrigins(['upstream']), 'discovered');
+assert.equal(sourceFromModelOrigins(['builtin', 'upstream']), 'discovered');
+assert.equal(sourceFromModelOrigins([undefined]), 'discovered');
 
 // --- entry normalization --------------------------------------------------------
 

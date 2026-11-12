@@ -8,7 +8,7 @@ import { getToolDefinitionAsync } from '../lib/tools.mjs';
 import { CODEX_SERVICE_TIER_OPTIONS } from '../lib/codex-service-tier.mjs';
 import { AGY_EFFORT_LEVELS, listAgyModels } from '../lib/agy-manager.mjs';
 import { lookupModelContextWindowTokens } from './model-context-windows.mjs';
-import { normalizeModelCatalog } from '../lib/provider-runtime/model-catalog.mjs';
+import { normalizeModelCatalog, sourceFromModelOrigins } from '../lib/provider-runtime/model-catalog.mjs';
 import { getHarnessProviderProtocols } from '../lib/provider-runtime/harness-bridge.mjs';
 import { getHarnessDefinition, listHarnesses } from '../lib/harness-registry.mjs';
 
@@ -747,7 +747,7 @@ export function invalidateToolModelCatalogCache(toolId = '') {
   }
 }
 
-export async function getToolModelCatalogs(toolId, providerProfile = '', { fast = false } = {}) {
+export async function getToolModelCatalogs(toolId, providerProfile = '', { fast = false, getModelsImpl = getModelsForTool } = {}) {
   const tool = String(toolId || '').trim();
   if (!tool) return [];
   const selectedProviderProfile = String(providerProfile || '').trim();
@@ -755,16 +755,20 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
   const now = Date.now();
   let entry = cacheGet(toolCatalogCache, cacheKey);
   if (!entry || now - entry.at >= TOOL_CATALOG_CACHE_TTL_MS) {
-    const result = await getModelsForTool(tool, { providerProfile: selectedProviderProfile, fast });
+    const result = await getModelsImpl(tool, { providerProfile: selectedProviderProfile, fast });
     const catalogs = new Map();
     const providerGroups = new Map();
+    const providerOrigins = new Map();
     for (const model of Array.isArray(result?.models) ? result.models : []) {
       const { model: bareModel, providerId } = parseScopedCodexModel(model?.id || '');
       const groupKey = providerId || '';
       if (!providerGroups.has(groupKey)) providerGroups.set(groupKey, []);
+      if (!providerOrigins.has(groupKey)) providerOrigins.set(groupKey, []);
+      providerOrigins.get(groupKey).push(model?.catalogSource);
       providerGroups.get(groupKey).push({
         model: bareModel,
         label: model?.label || bareModel,
+        source: sourceFromModelOrigins([model?.catalogSource]),
         capabilities: model?.capabilities || null,
         ...(Number.isFinite(model?.contextWindow) ? { contextWindow: model.contextWindow } : {}),
       });
@@ -777,7 +781,7 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
         // providerModelListCache) already carry freshness semantics; this
         // projection is 'discovered' when it came from provider enumeration
         // and static for tool-definition fallbacks.
-        source: entries.length > 0 ? 'discovered' : 'static',
+        source: sourceFromModelOrigins(providerOrigins.get(groupKey)),
         fetchedAt: new Date(now).toISOString(),
         expiresAt: now + TOOL_CATALOG_CACHE_TTL_MS,
         nowMs: now,
@@ -1216,6 +1220,7 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
           label: `${stripTrailingProviderSuffix(entry.label)} · ${providerDisplayTag(row)}`,
           effortLevels: entry.effortLevels,
           defaultEffort: entry.defaultEffort,
+          catalogSource: entry.catalogSource,
           serviceTiers: CODEX_SERVICE_TIER_OPTIONS,
           capabilities: parseModelCapabilities({
             ...entry,
@@ -1257,6 +1262,7 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
           label: `${entry.label || entry.id} · ${providerDisplayTag(row)}`,
           serviceTiers: ['standard'],
           contextWindow: entry.contextWindow,
+          catalogSource: list && list.length > 0 ? 'upstream' : 'configured',
           capabilities,
         });
       });
@@ -1326,6 +1332,7 @@ function buildCodexModelRecord({
   serviceTiers = ['standard'],
   capabilities = null,
   contextWindow = null,
+  catalogSource = '',
 }) {
   const modelCapabilities = capabilities || parseModelCapabilities({
     ...(Array.isArray(effortLevels) ? { effortLevels } : {}),
@@ -1339,6 +1346,7 @@ function buildCodexModelRecord({
   const model = {
     id,
     label,
+    ...(catalogSource ? { catalogSource } : {}),
     ...(Number.isFinite(contextWindow) && contextWindow > 0
       ? { contextWindow: Math.floor(contextWindow) }
       : {}),
