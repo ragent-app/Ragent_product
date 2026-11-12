@@ -32,7 +32,7 @@ function log(kind) {
 }
 
 const isMerged = prompt.includes('You are updating Ragent backend session memory after a completed turn.');
-const isLegacyTaskCard = prompt.includes('You are updating backend-owned task memory for a AgentoC session.');
+const isLegacyTaskCard = prompt.includes('You are updating backend-owned task memory for a Ragent session.');
 const isLegacyWorkflow = prompt.includes('You are updating Ragent workflow state for a developer session.');
 
 let text = '我先继续推进。';

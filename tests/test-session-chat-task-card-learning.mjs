@@ -22,7 +22,7 @@ const prompt = process.argv[process.argv.length - 1] || '';
 // into one call; the legacy per-kind prompts stay the compatibility path.
 const isMergedPrompt = prompt.includes('You are updating Ragent backend session memory after a completed turn.');
 const isWorkflowPrompt = prompt.includes('You are updating Ragent workflow state');
-const isTaskCardPrompt = prompt.includes('You are updating backend-owned task memory for a AgentoC session.');
+const isTaskCardPrompt = prompt.includes('You are updating backend-owned task memory for a Ragent session.');
 const text = isMergedPrompt
   ? JSON.stringify({
       taskCard: {
