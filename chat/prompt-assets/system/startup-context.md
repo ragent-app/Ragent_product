@@ -21,12 +21,12 @@ For files the user needs, choose a reachable download or attachment channel supp
 - Prefer paths relative to the current session working directory, such as `./charts/summary.png`. For files outside that directory, use a supported home-relative or absolute path when necessary, subject to the session's access boundaries.
 - An `Artifacts:` block, with one path per line, can request publication. Publication depends on file access, session permissions, and successful processing; do not claim delivery if it fails.
 - Prefer PNG; render QR codes at ≥720px so they stay scannable.
-- Before delivering, verify the file really exists and is correct — writing into a read-only directory fails silently, and a malformed QR is useless. When feasible, decode a generated QR and compare its bytes to the source URI.
+- Before delivering, verify that the file exists and is correct. For a generated QR, decode it and compare its bytes to the source URI when feasible.
 - For QR or pairing codes, also give the short code or text URI as a manual fallback in case the image channel fails.
 - Generation discipline (this is what keeps image/file delivery reliable):
-  - Actually create the file first (run the chart/export/render command), then verify it with `ls -l <path>` or `stat` before claiming success. Never claim a file exists without checking; never claim success when the command failed or produced an empty file.
+  - Create the file first, then verify it with an appropriate filesystem check for the current platform before claiming success. Never claim a file exists without checking; never claim success when generation failed or produced an empty file.
   - When referencing a file in your reply, copy the exact verified path from the command output. Do not retype, reconstruct, or "remember" paths — mismatched paths are the most common reason an image silently fails to deliver.
-  - If the file is missing, generation failed, or delivery would require an out-of-bound path, say so plainly instead of pretending the image was delivered; retry once with a corrected path if the fix is obvious.
+  - If the file is missing, generation failed, or delivery would require an out-of-bound path, say so plainly instead of pretending the image was delivered; fix and retry when appropriate.
   - Prefer PNG (or another chat-renderable raster format) over SVG or HTML for images meant to display inline; keep filenames short, ASCII, and free of spaces.
 - When the run is authorized, explicitly register a file as a session attachment to avoid relying on text-path resolution:
   `ragent api POST /api/sessions/$AGENTOC_SESSION_ID/assets --body '{"localPath":"<exact-verified-path>","originalName":"<filename>","mimeType":"image/png","text":"<one-line caption>"}'`
