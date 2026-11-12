@@ -271,6 +271,19 @@ try {
   assert.ok(!dropArgs.some(arg => arg.startsWith('SupplementaryGroups=')));
   assert.ok(dropArgs.includes('AGENTOC_RUNNER_DISTINCT_IDENTITY=0'));
   dropCalls.length = 0;
+  await launchLifecycleRunner('run_autodropfixture', { ...dropOptions,
+    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'1' },
+  });
+  assert.ok(dropCalls.find(item => item.command === '/usr/bin/systemd-run').args.includes('/usr/bin/setpriv'));
+  dropCalls.length = 0;
+  await launchLifecycleRunner('run_autodedicated', { ...dropOptions,
+    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    verifyRunnerSystemGroupsImpl:async () => {},
+  });
+  const dedicatedArgs = dropCalls.find(item => item.command === '/usr/bin/systemd-run').args;
+  assert.ok(dedicatedArgs.includes('User=svc'));
+  assert.ok(!dedicatedArgs.includes('/usr/bin/setpriv'));
+  dropCalls.length = 0;
   await launchLifecycleRunner('run_distinctfixture', { ...dropOptions, controlUser:'control' });
   assert.ok(dropCalls.find(item => item.command === '/usr/bin/systemd-run').args
     .includes('AGENTOC_RUNNER_DISTINCT_IDENTITY=1'));

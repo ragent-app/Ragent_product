@@ -551,7 +551,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
     error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
   }
-  const useGroupDrop = environment.AGENTOC_RUNNER_DROP_GROUPS === '1';
+  const groupDropSetting = trimString(environment.AGENTOC_RUNNER_DROP_GROUPS).toLowerCase();
+  const useGroupDrop = groupDropSetting === '1'
+    || (groupDropSetting === 'auto' && isSameUserRunnerMode(environment));
   let restrictedIds = null;
   if (useGroupDrop) {
     if (!isTrustedSetprivImpl()) throw Object.assign(new Error('Trusted group-drop executable unavailable'), { code: 'RUNNER_IDENTITY_INVALID' });

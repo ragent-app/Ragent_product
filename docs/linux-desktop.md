@@ -31,10 +31,12 @@ The installer uses the invoking sudo user as the service user when it can
 establish that identity; otherwise it uses the `agentoc` system account. Runs
 have the configured service user's ordinary file access. Check
 `/etc/agentoc/service-user` before relying on access to an existing workspace.
-The systemd runner currently refuses accounts that belong to restricted
-system groups such as `sudo` or `docker`: systemd automatically inherits
-those memberships even when they are omitted from supplementary group settings.
-The check compares numeric group IDs as well as names to catch aliases.
+By default, the systemd launcher removes restricted supplementary groups such
+as `sudo` and `docker` before starting a same-user Run. It uses the trusted
+`/usr/bin/setpriv` and verifies numeric group IDs as well as names to catch
+aliases. If the executable or group identities cannot be verified, the Run is
+refused. This preserves ordinary access granted directly to the service user;
+access that depends on a removed group is unavailable to the Run.
 For a separate unprivileged runner, set `AGENTOC_RUNNER_SAME_USER=0`,
 `AGENTOC_RUNNER_USER` and `AGENTOC_RUNNER_GROUP` in the root-controlled
 environment, then restart the lifecycle broker and service. Run publication
@@ -43,14 +45,13 @@ versions of those files are repaired on launch.
 On a physical Ubuntu 24.04 x86-64 host, an OAuth Codex Run completed after
 the managed Codex home was migrated from the previous runner identity. Other
 providers, upgrades and security boundaries still need release acceptance.
-An experimental launcher can be enabled with `AGENTOC_RUNNER_DROP_GROUPS=1`
-in the lifecycle broker's root-controlled environment. It uses the trusted
-`/usr/bin/setpriv` to drop to the configured non-root identity and explicit
-permitted numeric groups before starting the runner. It fails closed if group
-identities or the executable cannot be verified. On one Ubuntu 24.04 x86-64
-host, a real Codex request completed and a separate process-identity probe
-confirmed that restricted groups were absent. This is experimental, opt-in
-coverage; broader host, security and release acceptance are still outstanding.
+The packaged `AGENTOC_RUNNER_DROP_GROUPS=auto` setting uses this path for
+same-user Runs; a separate runner uses the systemd group-membership check.
+Setting it to `0` retains that check for all Runs, so an account in a restricted
+group is refused. Setting it to `1` explicitly uses group dropping for both
+configurations. On one Ubuntu 24.04 x86-64 host, a real same-user Codex request
+completed and a process-identity probe confirmed restricted groups were absent.
+Broader host, security and release acceptance are still outstanding.
 
 ## Optional runner sandbox
 

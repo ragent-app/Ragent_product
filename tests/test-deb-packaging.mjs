@@ -32,6 +32,28 @@ const storageGcTimer = read('packaging/deb/agentoc-storage-gc.timer');
 const environmentFile = read('packaging/deb/agentoc.env');
 const preinst = read('packaging/deb/preinst');
 const postinst = read('packaging/deb/postinst');
+assert.match(environmentFile, /^AGENTOC_RUNNER_DROP_GROUPS=auto$/m);
+{
+  const temp = mkdtempSync(join(tmpdir(), 'agentoc-group-drop-default-'));
+  try {
+    const path = join(temp, 'agentoc.env');
+    const start = postinst.indexOf('ensure_runner_group_drop_default() {');
+    const end = postinst.indexOf('\n}', start);
+    assert.ok(start >= 0 && end > start);
+    const fn = postinst.slice(start, end + 2);
+    for (const [before, after] of [
+      ['AGENTOC_RUNNER_SAME_USER=1\n', 'AGENTOC_RUNNER_SAME_USER=1\n\nAGENTOC_RUNNER_DROP_GROUPS=auto\n'],
+      ['AGENTOC_RUNNER_DROP_GROUPS=0\n', 'AGENTOC_RUNNER_DROP_GROUPS=0\n'],
+      [' AGENTOC_RUNNER_DROP_GROUPS=1\n', ' AGENTOC_RUNNER_DROP_GROUPS=1\n'],
+    ]) {
+      writeFileSync(path, before);
+      execFileSync('sh', ['-c', `${fn}\nensure_runner_group_drop_default`], {
+        env:{...process.env, AGENTOC_ENV_FILE:path},
+      });
+      assert.equal(readFileSync(path, 'utf8'), after);
+    }
+  } finally { rmSync(temp, {recursive:true,force:true}); }
+}
 const prerm = read('packaging/deb/prerm');
 const postrm = read('packaging/deb/postrm');
 const runAsServiceUser = read('packaging/deb/run-as-service-user');
