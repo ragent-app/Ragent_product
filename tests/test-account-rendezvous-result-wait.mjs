@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import { rendezvousWaitFixture, makeRendezvousWaitBroker, until } from './fixtures/rendezvous-result-wait.mjs';
 
 const read=(f,waitMs,signal)=>f.broker.getAccountRendezvousResult({requestId:f.requestId,...(waitMs===undefined?{}:{waitMs})},{credential:f.token,signal});
@@ -94,4 +95,62 @@ test('a different broker committing is observed by the bounded fresh-read checkp
 test('shutdown releases a waiter and the response still requires a fresh read',async()=>{
   const f=rendezvousWaitFixture(),pending=read(f,500);await until(()=>f.activity.reads>=2&&f.hub.stats().total===1);
   f.broker.closeRendezvousResultWaiters();assert.equal((await pending).result,null);assert.equal(f.activity.reads,3);
+});
+
+
+test('an expired unused join grant ends result wait without waiting for intent expiry', async () => {
+  const f = rendezvousWaitFixture();
+  const intent = f.state.accountJoinIntents[0];
+  const raw = 'raj_fixture_expiring';
+  intent.status = 'rendezvous_offered';
+  intent.rendezvousGrant = raw;
+  f.state.accountJoinGrants = [{ intentId: intent.intentId, accountId: intent.accountId,
+    grantHash: createHash('sha256').update(raw).digest('hex'), expiresAt: new Date(Date.now() + 200).toISOString(), redeemedAt: null }];
+  const started = performance.now();
+  const result = await read(f, 3000);
+  assert.equal(result.grantExpired, true);
+  assert.equal(result.result, null);
+  assert(performance.now() - started < 1800);
+  assert.equal(f.hub.stats().total, 0);
+});
+
+test('a redeemed grant remains eligible for its in-flight result after grant expiry', async () => {
+  const f = rendezvousWaitFixture();
+  const intent = f.state.accountJoinIntents[0];
+  const raw = 'raj_fixture_redeemed';
+  intent.status = 'completed';
+  intent.rendezvousGrant = raw;
+  f.state.accountJoinGrants = [{ intentId: intent.intentId, accountId: intent.accountId,
+    grantHash: createHash('sha256').update(raw).digest('hex'), expiresAt: new Date(Date.now() - 1000).toISOString(), redeemedAt: new Date().toISOString() }];
+  const pending = read(f, 1000);
+  await until(() => f.hub.stats().total === 1);
+  await f.broker.completeAccountRendezvous(f.completion());
+  const result = await pending;
+  assert.equal(result.result.fixture, 'ready');
+  assert.notEqual(result.grantExpired, true);
+});
+
+
+test('expiry is rechecked after a concurrent redemption before asking the phone to retry', async () => {
+  const f = rendezvousWaitFixture();
+  const intent = f.state.accountJoinIntents[0];
+  const raw = 'raj_fixture_race';
+  intent.status = 'rendezvous_offered';
+  intent.rendezvousGrant = raw;
+  f.state.accountJoinGrants = [{ intentId: intent.intentId, accountId: intent.accountId,
+    grantHash: createHash('sha256').update(raw).digest('hex'), expiresAt: new Date(Date.now() - 1).toISOString(), redeemedAt: null }];
+  const mutate = f.store.mutate;
+  let confirmed = false;
+  f.store.mutate = async fn => {
+    if (!confirmed) {
+      confirmed = true;
+      intent.status = 'completed';
+      f.state.accountJoinGrants[0].redeemedAt = new Date().toISOString();
+    }
+    return mutate(fn);
+  };
+  const result = await read(f);
+  assert.equal(confirmed, true);
+  assert.equal(result.status, 'completed');
+  assert.notEqual(result.grantExpired, true);
 });

@@ -1020,6 +1020,30 @@ class AccountSessionManagerTest {
         Unit
     }
 
+    @Test fun `expired unused rendezvous grant fails promptly for recovery`() = runBlocking {
+        val identity = FakeDeviceIdentityStore()
+        val fingerprint = devicePublicKeyFingerprint(identity.publicKeyEncoded())
+        val transport = RecordingTransport { request ->
+            when {
+                request.path == "/v1/owner-auth/rendezvous" -> ApiResponse(201,
+                    """{"intent":{"intentId":"rji_expired","instanceId":"inst_target","deviceId":"adev_test","devicePublicKeyFingerprint":"$fingerprint","nonce":"rnonce","issuedAt":"2026-08-25T00:00:00Z","expiresAt":"2099-01-01T00:00:00Z"}}""")
+                request.path.endsWith("/authorize") -> ApiResponse(200,
+                    """{"accountJoinGrant":"raj_expired","expiresAt":"2099-01-01T00:00:00Z","intentId":"rji_expired","instanceId":"inst_target","deviceId":"adev_test","rendezvousGrantSubmitted":true}""")
+                request.path.endsWith("/result") -> ApiResponse(200, """{"result":null,"grantExpired":true}""")
+                else -> error("Unexpected request: ${request.path}")
+            }
+        }
+        val metadata = FakeAccountSessionMetadataStore("adev_test", AccountSessionMetadata(
+            "acct_1", "adev_test", "cred_1", "account-directory", "2099-01-01T00:00:00Z"))
+        val error = assertFailsWith<AccountSessionException> {
+            manager(transport, transport, identity, FakeAccountCredentialStore("rac_active"), metadata)
+                .rendezvous("inst_target", "Phone")
+        }
+        assertEquals("owner_auth_account_join_grant_expired", error.code)
+        assertTrue(error.retryable)
+        assertEquals(1, transport.requests.count { it.path.endsWith("/result") })
+    }
+
     @Test fun `intent creation overlaps cleanup but authorization cannot pass its barrier`() = runBlocking {
         val cleanupEntered = CompletableDeferred<Unit>()
         val finishCleanup = CompletableDeferred<Unit>()

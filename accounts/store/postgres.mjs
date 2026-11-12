@@ -10,6 +10,7 @@
 // 按主键写入差异，其余表保持既有完整快照写入；锁协议不变。
 // 数据库不可用时 mutate 直接抛错（fail-closed）。
 import { Pool } from 'pg';
+import { createHash } from 'node:crypto';
 import { insertRowsInBatches, syncRowsByPrimaryKey } from './insert-batches.mjs';
 
 // A single blocked advisory lock used to stall this process-local queue
@@ -1401,6 +1402,14 @@ export function createPostgresStore({
                 'select * from account_join_intents where rendezvous_request_id = $1 and account_id = $2 limit 1',
                 [requestId, credential.accountId]);
               snapshot.accountJoinIntents = intents.rows.map(rowToAccountJoinIntent);
+              const intent = snapshot.accountJoinIntents[0];
+              if (intent?.status === 'rendezvous_offered' && intent.rendezvousGrant) {
+                const grantHash = createHash('sha256').update(intent.rendezvousGrant).digest('hex');
+                const grants = await client.query(
+                  'select * from account_join_grants where intent_id = $1 and account_id = $2 and grant_hash = $3 limit 1',
+                  [intent.intentId, credential.accountId, grantHash]);
+                snapshot.accountJoinGrants = grants.rows.map(rowToAccountJoinGrant);
+              }
             }
           }
           await client.query('commit');

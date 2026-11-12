@@ -2430,7 +2430,16 @@ export function createOwnerAuthBroker({
       const intent = getAccountJoinIntents(draft).find((item) => item.rendezvousRequestId === requestId
         && item.accountId === authenticated.credential.accountId);
       if (!intent || Date.parse(intent.expiresAt || '') <= clock()) throw createError('owner_auth_rendezvous_expired', 'Rendezvous request is expired or unknown.', 410);
-      return { value: publicRendezvousResult(intent),
+      // An unused grant cannot be redeemed after its own deadline, even when
+      // the surrounding rendezvous intent is still valid. Tell this phone to
+      // retry promptly; a redeemed grant must keep waiting for its result.
+      const grant = intent.status === 'rendezvous_offered' && trimString(intent.rendezvousGrant)
+        ? getAccountJoinGrants(draft).find((item) => item.intentId === intent.intentId
+          && item.accountId === intent.accountId && item.grantHash === hashSecret(intent.rendezvousGrant)) : null;
+      const grantExpiry = !grant?.redeemedAt ? Date.parse(grant?.expiresAt || '') : NaN;
+      const grantExpired = Number.isFinite(grantExpiry) && grantExpiry <= clock();
+      return { value: { ...publicRendezvousResult(intent), ...(grantExpired ? { grantExpired: true } : {}) },
+        grantDeadline: Number.isFinite(grantExpiry) ? grantExpiry : null,
         subjectId: `${authenticated.credential.accountId}\0${authenticated.credential.deviceId}` };
     };
     const read = async () => {
@@ -2441,7 +2450,14 @@ export function createOwnerAuthBroker({
         const snapshot = await store.readAccountRendezvousSnapshot({ tokenHash: hashSecret(token),
           requestId: isProtocolField(requestId, { min: 16, max: 128 }) ? requestId : '' });
         signal?.throwIfAborted();
-        return readResult(snapshot, false);
+        const observed = readResult(snapshot, false);
+        if (!observed.value.grantExpired) return observed;
+        // A completion can validate just before expiry and commit just after
+        // this read-only snapshot. Recheck under the same serialized mutation
+        // boundary used by redemption before declaring the grant unused.
+        const confirmed = await store.mutate(async (draft) => readResult(draft, false));
+        signal?.throwIfAborted();
+        return confirmed;
       }
       const value = await store.mutate(async (draft) => readResult(draft, true));
       signal?.throwIfAborted();
@@ -2450,8 +2466,9 @@ export function createOwnerAuthBroker({
     const initial = await read();
     if (!waitMs) return initial.value;
     const response = value => ({ ...value, resultWaitVersion: 1 });
-    if (initial.value.result != null) return response(initial.value);
-    const budget = Math.min(waitMs, Date.parse(initial.value.expiresAt) - clock());
+    if (initial.value.result != null || initial.value.grantExpired === true) return response(initial.value);
+    const grantBudget = Number.isFinite(initial.grantDeadline) ? initial.grantDeadline - clock() : Infinity;
+    const budget = Math.min(waitMs, Date.parse(initial.value.expiresAt) - clock(), grantBudget);
     if (budget <= 0) return response((await read()).value);
     const started = performance.now();
     const remaining = () => budget - (performance.now() - started);
@@ -2468,7 +2485,7 @@ export function createOwnerAuthBroker({
       };
       // Close the commit-between-read-and-subscribe race before waiting.
       let current = await readAfterWait();
-      while (current.value.result == null && remaining() > 0) {
+      while (current.value.result == null && current.value.grantExpired !== true && remaining() > 0) {
         await waitForRendezvousResultTick(waiter, Math.min(RENDEZVOUS_RESULT_CHECKPOINT_MS, remaining()));
         signal?.throwIfAborted();
         // A different Accounts process may have committed. Every checkpoint

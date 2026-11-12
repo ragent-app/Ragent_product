@@ -42,6 +42,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -716,6 +717,13 @@ class AccountSessionManager(
                 if (result != null) {
                     traceRendezvous(targetInstanceId, "result-wait-ready")
                     return@coroutineScope AccountRendezvousHandoff(requestId, intent, result)
+                }
+                // The Accounts server verifies that this grant expired without
+                // being redeemed. The caller can safely create a fresh intent.
+                val expired = response["grantExpired"] as? JsonPrimitive
+                if (expired?.isString == false && expired.content == "true") {
+                    throw AccountSessionException(410, "owner_auth_account_join_grant_expired",
+                        "The connection authorization expired before the computer accepted it.", retryable = true)
                 }
                 // Only a recognized server wait that actually lasted at least
                 // the old polling interval can replace the following delay.

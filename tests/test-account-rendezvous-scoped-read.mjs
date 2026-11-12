@@ -108,7 +108,7 @@ test('read failure does not silently fall back to the full snapshot writer', asy
   assert.equal(f.calls.writes, 0);
 });
 
-function sqlFixture({ fail = false, unknown = false } = {}) {
+function sqlFixture({ fail = false, unknown = false, offered = false } = {}) {
   const queries = [], values = [], released = [];
   const credential = { credential_id: 'cred_scoped', token_hash: tokenHash, account_id: 'acct_scoped',
     device_id: 'adev_scoped', key_id: key.keyId, scope: 'account-directory', issued_at: before,
@@ -123,7 +123,11 @@ function sqlFixture({ fail = false, unknown = false } = {}) {
     account_join_intents: [{ intent_id: 'rji_scoped', account_id: credential.account_id,
       rendezvous_request_id: requestId, expires_at: future, status: 'rendezvous_completed',
       rendezvous_result: { fixture: 'result' } }],
+    account_join_grants: [{ intent_id: 'rji_scoped', account_id: 'acct_scoped',
+      grant_hash: createHash('sha256').update('raj_scoped').digest('hex'), expires_at: before }],
   };
+  if (offered) Object.assign(rows.account_join_intents[0], { status: 'rendezvous_offered',
+    rendezvous_grant: 'raj_scoped', rendezvous_result: null });
   const store = createPostgresStore({ pool: { connect: async () => ({
     release: () => released.push(true),
     query: async (sql, args = []) => {
@@ -135,6 +139,7 @@ function sqlFixture({ fail = false, unknown = false } = {}) {
       if (table === 'account_credentials') assert.deepEqual(args, [tokenHash]);
       if (table === 'account_devices') assert.deepEqual(args, ['adev_scoped', 'acct_scoped']);
       if (table === 'account_device_keys') assert.deepEqual(args, [key.keyId, 'adev_scoped', 'acct_scoped']);
+      if (table === 'account_join_grants') assert.deepEqual(args, ['rji_scoped', 'acct_scoped', createHash('sha256').update('raj_scoped').digest('hex')]);
       if (table === 'account_join_intents') {
         assert.deepEqual(args, [requestId, 'acct_scoped']);
         if (fail) throw new Error('intent read failed');
@@ -155,6 +160,14 @@ test('Postgres view uses a read-only MVCC transaction and five bounded parameter
   assert(f.values.some(v => v[0] === 'lock_timeout' && v[1] === '1000ms'));
   assert.equal(view.accountJoinIntents[0].rendezvousResult.fixture, 'result');
   assert.deepEqual(f.released, [true]);
+});
+
+test('offered rendezvous reads only its matching account grant in the same snapshot', async () => {
+  const f = sqlFixture({ offered: true });
+  const view = await f.store.readAccountRendezvousSnapshot({ tokenHash, requestId });
+  assert.equal(f.queries.filter(q => q.startsWith('select *')).length, 6);
+  assert.equal(view.accountJoinGrants.length, 1);
+  assert.equal(view.accountJoinGrants[0].intentId, 'rji_scoped');
 });
 
 test('unknown credential reads no phone, key or intent', async () => {
