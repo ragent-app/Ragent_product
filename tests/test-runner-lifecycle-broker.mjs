@@ -12,6 +12,7 @@ import {
   readWorkspaceAccessScope,
   resolveRunnerResourceProfile,
   resolveRunnerOwnership,
+  resolveRunnerUser,
   verifyRunnerSystemGroups,
   resolveRunnerInheritedGroups,
 } from '../scripts/runner-lifecycle-broker.mjs';
@@ -239,6 +240,13 @@ try {
   });
 
   const ownershipCalls = [];
+  const resolveOptions = { file: '/runner', controlUserFile: '/control', environment: { AGENTOC_RUNNER_SAME_USER: '0' },
+    readFileImpl: async () => 'control\n', getentImpl: async () => ({ stdout: 'agentoc-runner:x:1234:1234::/tmp:/bin/false\n' }) };
+  assert.equal(await resolveRunnerUser(resolveOptions), 'agentoc-runner');
+  await assert.rejects(resolveRunnerUser({ ...resolveOptions, environment: { ...resolveOptions.environment, AGENTOC_RUNNER_USER: 'control' } }),
+    { code: 'RUNNER_IDENTITY_INVALID' });
+  await assert.rejects(resolveRunnerUser({ ...resolveOptions, getentImpl: async () => { throw new Error('missing'); } }),
+    { code: 'RUNNER_IDENTITY_INVALID' });
   assert.deepEqual(
     await resolveRunnerOwnership('agentoc-runner', 'agentoc-runners', {
       getentImpl: async (command, args) => {
@@ -276,8 +284,19 @@ try {
   });
   assert.ok(dropCalls.find(item => item.command === '/usr/bin/systemd-run').args.includes('/usr/bin/setpriv'));
   dropCalls.length = 0;
-  await launchLifecycleRunner('run_autodedicated', { ...dropOptions,
+  await assert.rejects(launchLifecycleRunner('run_aliasedfixture', { ...dropOptions,
     environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    verifyRunnerSystemGroupsImpl:async () => {},
+  }), { code: 'RUNNER_IDENTITY_INVALID' });
+  await assert.rejects(launchLifecycleRunner('run_aliasreuse', { ...dropOptions,
+    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    verifyRunnerSystemGroupsImpl:async () => {},
+    readUnitStateImpl:async () => ({loadState:'loaded', activeState:'active', pid:4321, user:'svc'}),
+  }), { code: 'RUNNER_IDENTITY_INVALID' });
+  await launchLifecycleRunner('run_autodedicated', { ...dropOptions, controlUser:'control',
+    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    resolveRunnerOwnershipImpl:async user => ({ uid:user === 'control' ? 1235 : 1234, gid:1234 }),
+    grantExistingRunnerFilesImpl:async () => {},
     verifyRunnerSystemGroupsImpl:async () => {},
   });
   const dedicatedArgs = dropCalls.find(item => item.command === '/usr/bin/systemd-run').args;

@@ -156,13 +156,16 @@ export async function resolveRunnerUser({
     }
     return controlUser;
   }
-  if (configured) return configured;
+  if (configured) {
+    if (configured === controlUser) throw Object.assign(new Error('Separate runner mode requires a different user'), { code: 'RUNNER_IDENTITY_INVALID' });
+    return configured;
+  }
   try {
     const fromFile = trimString((await readFileImpl(file, 'utf8')).split(/\r?\n/, 1)[0]);
-    if (fromFile && await getentPasswdExists(fromFile, { getentImpl })) return fromFile;
+    if (fromFile && fromFile !== controlUser && await getentPasswdExists(fromFile, { getentImpl })) return fromFile;
   } catch {}
-  if (await getentPasswdExists(DEFAULT_RUNNER_USER, { getentImpl })) return DEFAULT_RUNNER_USER;
-  return controlUser;
+  if (DEFAULT_RUNNER_USER !== controlUser && await getentPasswdExists(DEFAULT_RUNNER_USER, { getentImpl })) return DEFAULT_RUNNER_USER;
+  throw Object.assign(new Error('Separate runner account is unavailable'), { code: 'RUNNER_IDENTITY_INVALID' });
 }
 
 // Runner group resolution: explicit AGENTOC_RUNNER_GROUP env wins, then a group
@@ -565,6 +568,17 @@ async function launchLifecycleRunnerUnlocked(runId, {
     error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
   }
+  let resolvedControlUser = controlUser;
+  let controlOwnership = null;
+  let distinctIdentity = false;
+  if (!isSameUserRunnerMode(environment)) {
+    resolvedControlUser ||= await resolveControlUser();
+    controlOwnership = await resolveRunnerOwnershipImpl(resolvedControlUser, resolvedServiceGroup);
+    if (!Number.isSafeInteger(controlOwnership?.uid) || controlOwnership.uid <= 0 || controlOwnership.uid === runnerOwnership.uid) {
+      throw Object.assign(new Error('Separate runner mode requires a different verified numeric UID'), { code: 'RUNNER_IDENTITY_INVALID' });
+    }
+    distinctIdentity = true;
+  }
   const groupDropSetting = trimString(environment.AGENTOC_RUNNER_DROP_GROUPS).toLowerCase();
   const useGroupDrop = groupDropSetting === '1'
     || (groupDropSetting === 'auto' && isSameUserRunnerMode(environment));
@@ -614,20 +628,13 @@ async function launchLifecycleRunnerUnlocked(runId, {
     throw error;
   }
   const resolvedServiceHome = serviceHome || await resolveServiceHome(resolvedServiceUser);
-  // Same-user is intentional: it restores owner permissions for existing user
-  // worktrees and home files. Supplementary groups still come from the trusted
-  // control user and pass the fixed deny-list; same UID never authorizes sudo,
-  // docker, privileged-executor, or hardware privilege channels.
-  const resolvedControlUser = controlUser || await resolveControlUser();
-  let distinctIdentity = resolvedServiceUser !== resolvedControlUser;
-  let controlOwnership = null;
-  if (distinctIdentity && String(environment.AGENTOC_RUNNER_SAME_USER ?? '1').trim() === '0') {
-    controlOwnership = await resolveRunnerOwnershipImpl(resolvedControlUser, resolvedServiceGroup);
-    if (!Number.isSafeInteger(controlOwnership?.uid) || controlOwnership.uid <= 0) {
-      throw Object.assign(new Error('Cannot verify control user identity'), { code:'RUNNER_IDENTITY_INVALID' });
-    }
-    distinctIdentity = controlOwnership.uid !== runnerOwnership.uid;
-    if (distinctIdentity) await grantExistingRunnerFilesImpl(join(RUN_SPOOL_DIR, normalized), {
+  // Same-user mode retains owner access for existing worktrees, but its
+  // dropped groups are not a security boundary: same-UID IPC can launch a
+  // process outside this unit. Explicit separate-user mode is checked above.
+  resolvedControlUser ||= await resolveControlUser();
+  if (isSameUserRunnerMode(environment)) distinctIdentity = resolvedServiceUser !== resolvedControlUser;
+  if (controlOwnership && distinctIdentity) {
+    await grantExistingRunnerFilesImpl(join(RUN_SPOOL_DIR, normalized), {
       controlUid: controlOwnership.uid, runnerUid: runnerOwnership.uid,
     });
   }

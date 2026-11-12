@@ -19,6 +19,13 @@ try {
     currentUid:1001, execFileImpl:async()=>({stdout:'runner:x:1002:1002::/tmp:/bin/false\n'}) }), 1002);
   await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'root' },
     currentUid:1001, execFileImpl:async()=>({stdout:'root:x:0:0::/root:/bin/bash\n'}) }), { code:'RUNNER_FILE_ACCESS_INVALID' });
+  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'alias' },
+    currentUid:1001, execFileImpl:async()=>({stdout:'alias:x:1001:1001::/tmp:/bin/false\n'}) }), { code:'RUNNER_FILE_ACCESS_INVALID' });
+  const rootOwned = (entry) => ({ uid: 0, mode: 0o755, isSymbolicLink: () => false,
+    isDirectory: () => entry !== '/etc/agentoc/runner-user', isFile: () => entry === '/etc/agentoc/runner-user' });
+  assert.equal(await resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0' }, currentUid:1001,
+    statImpl:async entry => rootOwned(entry), readFileImpl:async () => 'control\n',
+    execFileImpl:async (_command, args) => ({stdout: `${args[1]}:x:${args[1] === 'control' ? 1001 : 1002}:1002::/tmp:/bin/false\n`}) }), 1002);
   const handle = await open(path, 'wx+', 0o600);
   try {
     await handle.writeFile('fixture');

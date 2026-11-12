@@ -2,7 +2,7 @@
 // Run as root on an isolated QA host with ubuntu and agentoc-runner accounts.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmod, chown, mkdtemp, mkdir, readFile, rm, symlink, unlink } from 'node:fs/promises';
+import { chmod, chown, mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { grantExistingRunnerFiles } from '../lib/linux-runner-file-access.mjs';
 
@@ -33,11 +33,16 @@ const getent = name => {
   const fields = execFileSync('/usr/bin/getent', ['passwd', name], {encoding:'utf8'}).trim().split(':');
   return {uid:Number(fields[2]),gid:Number(fields[3])};
 };
-const owner = getent('ubuntu');
+const owner = getent(process.env.AGENTOC_TEST_OWNER_USER || 'ubuntu');
 const runner = getent('agentoc-runner');
+if (!Number.isSafeInteger(owner.uid) || owner.uid <= 0 || owner.uid === runner.uid) throw new Error('A distinct unprivileged test owner is required');
 const base = await mkdtemp('/tmp/agentoc-scoped-acl-');
+const systemConfig = await mkdtemp('/srv/agentoc-runner-config-');
 const spool = join(base, 'spool');
 try {
+  const staleRunnerFile = join(systemConfig, 'runner-user');
+  await chmod(systemConfig, 0o755);
+  await writeFile(staleRunnerFile, `${process.env.AGENTOC_TEST_OWNER_USER || 'ubuntu'}\n`, { mode: 0o644 });
   await chown(base, owner.uid, owner.gid);
   await chmod(base, 0o711);
   await mkdir(spool, {mode:0o770});
@@ -53,7 +58,7 @@ try {
     '--reuid', String(identity.uid), '--regid', String(identity.gid), '--clear-groups', '--',
     process.execPath, new URL(import.meta.url).pathname, phase,
   ], { env:{...common,...environment}, encoding:'utf8', stdio:['ignore','pipe','pipe'] });
-  runAs(owner, 'create', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'agentoc-runner' });
+  runAs(owner, 'create', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER_FILE:staleRunnerFile });
   const dir = join(spool, 'run_scopedaclfixture');
   const acl = execFileSync('/usr/bin/getfacl', ['-cpn', join(dir,'status.json')], {encoding:'utf8'});
   assert.match(acl, new RegExp(`^user:${runner.uid}:r--$`, 'm'));
@@ -67,6 +72,9 @@ try {
   assert.equal(testAs(runner, '-r', join(dir,'session-control.cap')), 0);
   assert.notEqual(testAs(runner, '-w', join(dir,'session-control.cap')), 0);
   assert.notEqual(testAs(runner, '-w', join(dir,'status.json')), 0);
+  // File ACLs alone do not protect an entry inside a writable directory.
+  // Until the write-back layout is split, the runner can replace that entry.
+  assert.equal(testAs(runner, '-w', dir), 0);
   await symlink('/etc/passwd', join(dir,'browser.cap'));
   await assert.rejects(() => grantExistingRunnerFiles(dir, {controlUid:owner.uid, runnerUid:runner.uid}),
     {code:'RUNNER_FILE_ACCESS_INVALID'});
@@ -82,7 +90,7 @@ try {
   assert.equal(testAs(runner, '-r', join(dir,'session-control.cap')), 0);
   assert.notEqual(testAs(runner, '-w', join(dir,'session-control.cap')), 0);
   runAs(runner, 'runner', { AGENTOC_RUNNER_DISTINCT_IDENTITY:'1' });
-  runAs(owner, 'control', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'agentoc-runner' });
+  runAs(owner, 'control', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER_FILE:staleRunnerFile });
   assert.equal(JSON.parse(await readFile(join(dir,'status.json'), 'utf8')).state, 'completed');
   // Even if another account can traverse the fixture directories, the files
   // must not grant it access through an inherited group or the other class.
@@ -90,4 +98,4 @@ try {
   await chmod(dir, 0o751);
   assert.notEqual(testAs(getent('nobody'), '-r', join(dir,'status.json')), 0);
   console.log('Separate Linux runner publication integration passed');
-} finally { await rm(base, {recursive:true,force:true}); }
+} finally { await rm(base, {recursive:true,force:true}); await rm(systemConfig, {recursive:true,force:true}); }
