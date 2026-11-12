@@ -4201,6 +4201,10 @@ async function main() {
   let codexAppServerBrokered = false;
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
       && !sandboxRequired) {
+    const expectedAccountDigest = codexBrokerAccountDigest(codexRolloutAccountId(runtimeAuth));
+    if (!expectedAccountDigest) {
+      throw Object.assign(new Error('A verified Codex account identity is required'), { code: 'CODEX_ACCOUNT_UNVERIFIED' });
+    }
     const brokerSocketPath = codexAppServerBrokerSocketPath(runnerCodexHomeDir);
     try {
       const sharedHook = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY
@@ -4225,8 +4229,7 @@ async function main() {
         '--socket',
         brokerSocketPath,
       ];
-      const expectedAccountDigest = codexBrokerAccountDigest(codexRolloutAccountId(runtimeAuth));
-      if (expectedAccountDigest) spawnArgs.push('--account-digest', expectedAccountDigest);
+      spawnArgs.push('--account-digest', expectedAccountDigest);
       spawnShell = false;
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;

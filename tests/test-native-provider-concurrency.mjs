@@ -28,8 +28,8 @@ const secretStore = createSecretStore({ configDir });
 
 // Matrix: 4 codex providers × distinct accounts + 2 claude gateways.
 const matrix = [
-  { agent: 'codex', provider: 'offa', baseUrl: 'https://off-a.example/backend-api', auth: 'oauth-a', authType: 'oauth', model: 'gpt-5.5', secret: { authType: 'oauth', tokens: { access_token: 'at-offa', refresh_token: 'rt-offa' } } },
-  { agent: 'codex', provider: 'offb', baseUrl: 'https://off-b.example/backend-api', auth: 'oauth-b', authType: 'oauth', model: 'gpt-5.5', secret: { authType: 'oauth', tokens: { access_token: 'at-offb', refresh_token: 'rt-offb' } } },
+  { agent: 'codex', provider: 'offa', baseUrl: 'https://off-a.example/backend-api', auth: 'oauth-a', authType: 'oauth', model: 'gpt-5.5', secret: { authType: 'oauth', tokens: { account_id: 'account-offa', access_token: 'at-offa', refresh_token: 'rt-offa' } } },
+  { agent: 'codex', provider: 'offb', baseUrl: 'https://off-b.example/backend-api', auth: 'oauth-b', authType: 'oauth', model: 'gpt-5.5', secret: { authType: 'oauth', tokens: { account_id: 'account-offb', access_token: 'at-offb', refresh_token: 'rt-offb' } } },
   { agent: 'codex', provider: 'relay-x', baseUrl: 'https://relay-x.example/v1', auth: 'key-x', authType: 'api-key', model: 'gpt-x', secret: { authType: 'api-key', apiKey: 'sk-matrix-xxxx' } },
   { agent: 'codex', provider: 'relay-y', baseUrl: 'https://relay-y.example/v1', auth: 'key-y', authType: 'api-key', model: 'ds-y', secret: { authType: 'api-key', apiKey: 'sk-matrix-yyyy' } },
   { agent: 'claude', provider: 'cgw-1', baseUrl: 'https://cgw-1.example', auth: 'ckey-1', authType: 'api-key', model: 'claude-sonnet-x', secret: { authType: 'api-key', apiKey: 'sk-claude-1111' } },

@@ -114,6 +114,8 @@ function providerPreparationGuidance(app, causeCode) {
     case 'codex_handoff_credentials_diverged':
     case 'codex_handoff_credentials_invalid':
       return 'Codex account credentials could not be reconciled safely. Finish active sessions, reconnect the account in Ragent Settings > Providers, and retry.';
+    case 'codex_account_unverified':
+      return 'The Codex account identity could not be verified. Reconnect the account in Ragent Settings > Providers, then retry.';
     default:
       return '';
   }

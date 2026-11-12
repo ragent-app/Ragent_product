@@ -20,6 +20,7 @@ test('automatic handoff fences an unused home and routes to the verified running
   const base = { configDir: join(root, 'config'), providerHomesRoot: join(root, 'homes'), accountId: 'account-a' };
   const canonical = join(base.providerHomesRoot, 'a');
   const legacy = join(base.providerHomesRoot, 'b');
+  await assert.rejects(coordinateCodexAccountRoute({ ...base, accountId: '', candidateHomeRoot: canonical }), { code: 'CODEX_ACCOUNT_UNVERIFIED' });
   assert.equal(await coordinateCodexAccountRoute({ ...base, candidateHomeRoot: canonical }), canonical);
   await mkdir(join(canonical, 'codex'), { recursive: true });
   await writeFile(join(canonical, 'codex', 'auth.json'), JSON.stringify({ tokens: { account_id: 'account-a', refresh_token: 'secret' } }));
