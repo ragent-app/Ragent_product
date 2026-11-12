@@ -152,8 +152,11 @@ export function resolveShimExit(result) {
   const error = trimString(result?.error);
   switch (status) {
     case PRIVILEGED_SHIM_RESULT_STATUS.COMPLETED:
+      if (!Number.isInteger(result?.exitCode) || result.exitCode < 0 || result.exitCode > 255 || error) {
+        return { code: PRIVILEGED_SHIM_EXIT.EXEC_FAILED, message: 'privileged execution outcome is unknown; do not repeat it automatically' };
+      }
       return {
-        code: Number.isInteger(result?.exitCode) ? result.exitCode : 0,
+        code: result.exitCode,
         message: '',
       };
     case PRIVILEGED_SHIM_RESULT_STATUS.DENIED:
@@ -285,9 +288,12 @@ export function shimResultFromRunPayload(runResult, expect = {}) {
   const ref = entry.resultRef && typeof entry.resultRef === 'object' ? entry.resultRef : {};
   const error = trimString(ref.error);
   if (state === 'completed') {
+    if (!Number.isInteger(ref.exitCode) || ref.exitCode < 0 || ref.exitCode > 255 || error) {
+      return { status: PRIVILEGED_SHIM_RESULT_STATUS.FAILED, error: 'privileged execution outcome is unknown; do not repeat it automatically' };
+    }
     return {
       status: PRIVILEGED_SHIM_RESULT_STATUS.COMPLETED,
-      exitCode: Number.isInteger(ref.exitCode) ? ref.exitCode : 0,
+      exitCode: ref.exitCode,
       stdout: typeof ref.stdout === 'string' ? ref.stdout : '',
       stderr: typeof ref.stderr === 'string' ? ref.stderr : '',
       error: '',

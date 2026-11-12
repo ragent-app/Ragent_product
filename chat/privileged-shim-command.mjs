@@ -116,8 +116,8 @@ function main() {
       PRIVILEGED_SHIM_EXIT.CHANNEL_UNAVAILABLE,
       'no privileged callback channel: AGENTOC_PRIVILEGED_SHIM_SOCKET is not set. '
       + 'This process was not started by an AgentoC Run sidecar, so the privileged-approval '
-      + 'flow cannot be reached from here. Run the command inside an AgentoC session, or ask '
-      + 'the owner to execute it outside the sandbox.',
+      + 'flow cannot be reached from here. Report that managed approval is unavailable; '
+      + 'do not bypass the approval channel.',
     );
   }
 
@@ -210,7 +210,7 @@ function main() {
       `privileged callback channel unavailable (${error?.code || error?.message || 'unknown error'}) at ${socketPath}. `
       + `${missing ? 'The Run sidecar is not serving the shim socket (run may have ended or the channel failed to start). ' : ''}`
       + `${refused ? 'The socket exists but is not connectable from this sandbox. ' : ''}`
-      + 'Retry without the agentoc-privileged wrapper, or ask the owner to run the command.',
+      + 'Report that managed approval is unavailable; do not bypass the approval channel.',
     );
   });
   socket.on('close', () => {

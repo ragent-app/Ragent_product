@@ -74,7 +74,9 @@ check('missing risk refused', shimOpRequiresPrivilegedExecution(null) === false)
   check('timeout maps to 75', resolveShimExit({ status: 'timeout' }).code === PRIVILEGED_SHIM_EXIT.TIMEOUT);
   check('failed maps to 76', resolveShimExit({ status: 'failed' }).code === PRIVILEGED_SHIM_EXIT.EXEC_FAILED);
   check('unknown status fails closed', resolveShimExit({ status: 'wat' }).code === PRIVILEGED_SHIM_EXIT.EXEC_FAILED);
-  check('completed without exit code defaults 0', resolveShimExit({ status: 'completed' }).code === 0);
+  check('completed without exit code fails closed', resolveShimExit({ status: 'completed' }).code === PRIVILEGED_SHIM_EXIT.EXEC_FAILED);
+  check('completed with invalid exit code fails closed', resolveShimExit({ status: 'completed', exitCode: 256 }).code === PRIVILEGED_SHIM_EXIT.EXEC_FAILED);
+  check('completed with error fails closed', resolveShimExit({ status: 'completed', exitCode: 0, error: 'unknown result' }).code === PRIVILEGED_SHIM_EXIT.EXEC_FAILED);
   check('accepted maps to pending exit', resolveShimAccepted({ batchId: 'pbatch_1' }).code === PRIVILEGED_SHIM_EXIT.PENDING);
   check('accepted explains command did not run', resolveShimAccepted({ batchId: 'pbatch_1' }).message.includes('has not run yet'));
 }
@@ -121,6 +123,10 @@ check('join empty token', joinShimCommandTokens(['']) === "''");
   }, { manifestHash: 'hash-1', opId: 'pop_1' });
   check('resolved payload maps completed', resolved.status === PRIVILEGED_SHIM_RESULT_STATUS.COMPLETED);
   check('resolved payload carries stdout', resolved.stdout === 'set-property ok');
+  const missingExit = shimResultFromRunPayload({ status: 'resolved', results: [
+    { manifestHash: 'hash-1', state: 'completed', resultRef: {} },
+  ] }, { manifestHash: 'hash-1' });
+  check('completed payload without exit code does not report success', missingExit.status === PRIVILEGED_SHIM_RESULT_STATUS.FAILED);
 
   const denied = shimResultFromRunPayload({
     status: 'resolved',
