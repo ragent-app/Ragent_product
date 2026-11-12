@@ -21,7 +21,7 @@ mkdirSync(binDir, { recursive: true });
 
 const fakeCodexPath = join(binDir, 'codex');
 writeFileSync(fakeCodexPath, `#!/usr/bin/env node
-const { readFileSync } = require('node:fs');
+const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 if (process.argv.includes('--version')) {
   console.log('codex-cli 0.0.0-fixture');
@@ -57,7 +57,7 @@ process.stdin.on('data', (chunk) => {
     if (message.method === 'initialize') {
       process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
     } else if (message.method === 'model/list') {
-      const response = providerId === 'codex-official'
+      const response = providerId === 'codex-official' || (process.env.FIXTURE_MODEL_RECOVERY_FILE && existsSync(process.env.FIXTURE_MODEL_RECOVERY_FILE))
         ? { id: message.id, result: { data: catalog, nextCursor: null } }
         : { id: message.id, error: { code: -32001, message: 'fixture account unavailable' } };
       process.stdout.write(JSON.stringify(response) + '\\n');
@@ -160,7 +160,7 @@ function writeNativeRegistry() {
       storageRef: secretRef,
     });
     writeFileSync(join(secretsDir, `${secretRef}.json`), JSON.stringify(provider.authType === 'oauth'
-      ? { authType: 'oauth', tokens: { access_token: `access-${provider.id}`, refresh_token: `refresh-${provider.id}` } }
+      ? { authType: 'oauth', tokens: { access_token: `access-${provider.id}`, refresh_token: `refresh-${provider.id}`, account_id: `account-${provider.id}` } }
       : { authType: 'api-key', apiKey: provider.apiKey }));
   }
   writeFileSync(join(nativeRuntimeDir, 'providers.json'), JSON.stringify({ version: 1, profiles: providerProfiles }));
@@ -184,6 +184,9 @@ process.env.AGENTOC_HARNESS_ROOT = join(tempHome, 'harnesses');
 const originalPackagedHarnessRoot = process.env.AGENTOC_PACKAGED_HARNESS_ROOT;
 process.env.AGENTOC_PACKAGED_HARNESS_ROOT = binDir;
 const originalPath = process.env.PATH;
+const originalRecoveryFile = process.env.FIXTURE_MODEL_RECOVERY_FILE;
+const originalNow = Date.now;
+process.env.FIXTURE_MODEL_RECOVERY_FILE = join(tempHome, 'model-recovered');
 process.env.PATH = `${binDir}${delimiter}${originalPath || ''}`;
 
 const { getModelsForTool, getToolModelCatalogs, parseScopedCodexModel } = await import(
@@ -247,9 +250,21 @@ try {
   assert.deepEqual(customImage.serviceTiers, ['standard', 'fast']);
   assert.equal(fetchCalls.filter((url) => url.includes('/models')).length, 4, 'each API-key row probes its own endpoint');
 
+  // Retry a previously failed official account after its failure cooldown,
+  // before the longer merged catalog TTL would have expired.
+  writeFileSync(process.env.FIXTURE_MODEL_RECOVERY_FILE, 'ready');
+  const baseNow = originalNow();
+  Date.now = () => baseNow + 61_000;
+  const recovered = await getModelsForTool('codex');
+  assert.equal(recovered.models.some((m) => m.id === 'gpt-official-extra@codex-official-2'), true,
+    'official discovery recovers after its failure cooldown');
+
   console.log('test-models-codex-merged: ok');
 } finally {
   globalThis.fetch = originalFetch;
+  Date.now = originalNow;
+  if (originalRecoveryFile === undefined) delete process.env.FIXTURE_MODEL_RECOVERY_FILE;
+  else process.env.FIXTURE_MODEL_RECOVERY_FILE = originalRecoveryFile;
   process.env.PATH = originalPath;
   if (originalPackagedHarnessRoot === undefined) delete process.env.AGENTOC_PACKAGED_HARNESS_ROOT;
   else process.env.AGENTOC_PACKAGED_HARNESS_ROOT = originalPackagedHarnessRoot;

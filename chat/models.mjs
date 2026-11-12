@@ -8,6 +8,7 @@ import { getToolDefinitionAsync } from '../lib/tools.mjs';
 import { CODEX_SERVICE_TIER_OPTIONS } from '../lib/codex-service-tier.mjs';
 import { AGY_EFFORT_LEVELS, listAgyModels } from '../lib/agy-manager.mjs';
 import { lookupModelContextWindowTokens } from './model-context-windows.mjs';
+import { mayCacheMergedCodexCatalog } from './codex-model-cache-policy.mjs';
 import { normalizeModelCatalog, sourceFromModelOrigins } from '../lib/provider-runtime/model-catalog.mjs';
 import { getHarnessProviderProtocols } from '../lib/provider-runtime/harness-bridge.mjs';
 import { getHarnessDefinition, listHarnesses } from '../lib/harness-registry.mjs';
@@ -1283,7 +1284,12 @@ async function getCodexModels(providerProfile = '', { allowNetwork = true } = {}
       }
       : { kind: 'none', label: 'Thinking' },
   };
-  if (allowNetwork) cacheSet(codexModelsCache, cacheKey, { at: Date.now(), result });
+  // A builtin or stale official catalog is a temporary fallback. Caching the
+  // merged result for the full TTL would hide a successful account refresh
+  // after the shorter failure cooldown has elapsed.
+  const allOfficialCatalogsFresh = mayCacheMergedCodexCatalog(officialRows,
+    (id) => cacheGet(officialCodexModelListCache, id), Date.now(), PROVIDER_MODEL_LIST_TTL_MS);
+  if (allowNetwork && allOfficialCatalogsFresh) cacheSet(codexModelsCache, cacheKey, { at: Date.now(), result });
   return result;
 }
 
