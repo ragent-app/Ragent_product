@@ -43,3 +43,16 @@ test('MCP authorization remains busy after its initiating client disconnects', (
   activity.upstream({ method: 'mcpServer/oauthLogin/completed', params: { name: 'service' } });
   assert.equal(activity.isIdle(), true);
 });
+
+test('a disconnected client cannot hide an outstanding generic request or review', () => {
+  const activity = createCodexBrokerTurnActivity();
+  activity.startRequest({ id: 6, method: 'fixture/long-request' });
+  assert.equal(activity.isIdle(), false);
+  activity.upstream({ id: 6, result: {} });
+  assert.equal(activity.isIdle(), true);
+  activity.startRequest({ id: 7, method: 'review/start', params: { threadId: 'a' } });
+  activity.upstream({ id: 7, result: {} });
+  assert.equal(activity.isIdle(), false);
+  activity.upstream({ method: 'turn/completed', params: { threadId: 'a' } });
+  assert.equal(activity.isIdle(), true);
+});
