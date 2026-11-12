@@ -17,6 +17,7 @@ test('account handoff failures provide safe actionable messages', async () => {
     for (const [code, expected] of [
       ['CODEX_RETIRE_BUSY', /Wait for it to finish/],
       ['CODEX_HANDOFF_UNAVAILABLE', /shared Codex account process is not ready/],
+      ['CODEX_RETIRE_PROTOCOL', /restart the Ragent instance/],
       ['CODEX_HANDOFF_CREDENTIALS_DIVERGED', /credentials could not be reconciled safely/],
     ]) {
       const error = createProviderPreparationError('generic', { app: 'codex', sourceError: Object.assign(new Error('private credential'), { code }) });

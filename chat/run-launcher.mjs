@@ -108,6 +108,8 @@ function providerPreparationGuidance(app, causeCode) {
     case 'codex_handoff_unavailable':
     case 'codex_home_retired':
     case 'codex_account_handoff_required':
+    case 'codex_retire_protocol':
+    case 'codex_retire_timeout':
       return 'The shared Codex account process is not ready. Retry shortly; if it remains unavailable, restart the Ragent instance.';
     case 'codex_handoff_credentials_diverged':
     case 'codex_handoff_credentials_invalid':
