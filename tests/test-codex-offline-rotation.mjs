@@ -10,7 +10,7 @@ const { prepareNativeRunProviderHome } = await import(process.env.RAGENT_TEST_CO
   ? pathToFileURL(process.env.RAGENT_TEST_CODEX_PREP_ENTRY).href
   : '../lib/provider-runtime/run-provider-prepare.mjs');
 
-test('offline Codex owner preserves a proven rotation even with a shorter expiry', async (t) => {
+test('offline Codex owner preserves a proven rotation and accepts another profile', { timeout: 25000 }, async (t) => {
   const parent = resolve(tmpdir());
   const root = await mkdtemp(join(parent, 'ragent-offline-rotation-'));
   t.after(async () => {
@@ -39,5 +39,12 @@ test('offline Codex owner preserves a proven rotation even with a shorter expiry
   const resumed = await prepareNativeRunProviderHome('run_rotation_resumed', manifest, options);
   assert.equal(resumed.ok, true);
   assert.equal((await secretStore.resolveSecret('credential')).tokens.refresh_token, 'new-refresh');
+  assert.equal(JSON.parse(await readFile(authPath, 'utf8')).tokens.refresh_token, 'new-refresh');
+  await registry.upsertProviderProfile({ id: 'profile-b', agentType: 'codex', protocol: 'openai-responses',
+    baseUrl: 'https://chatgpt.com/backend-api/codex', authProfileId: 'auth-a', modelPolicy: { defaultModel: 'gpt-5.5' } });
+  const other = await prepareNativeRunProviderHome('run_rotation_other_profile',
+    { tool: 'codex', options: { providerProfile: 'profile-b', model: 'gpt-5.5' } }, options);
+  assert.equal(other.ok, true);
+  assert.equal(other.codexHomeDir, first.codexHomeDir);
   assert.equal(JSON.parse(await readFile(authPath, 'utf8')).tokens.refresh_token, 'new-refresh');
 });
