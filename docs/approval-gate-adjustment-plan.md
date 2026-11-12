@@ -260,6 +260,9 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - 上述非敏感运行上下文插值进一步支持直接传给 `Write-Output`（及其常见别名）；凭据变量、子表达式和后续动态执行仍进入风险处理。PowerShell 动作回归及真实 Windows Claude/Codex 两种模式的本机模拟模型测试通过；修改尚未部署，未使用官方额度。
 
+- Windows 已构建并安装提交 `f3727ea8`，公开版本 `0.0.1`、内部 MSI 版本 `0.0.74`，EXE SHA-256 `196f92afc2b7e454aee22ab371479adbfad618b0074db0954d2c72f6666f390b`；安装返回 0，正式服务 ready，PowerShell 审批文件与该提交一致。真实 Claude/Codex 在 recommended/full-auto 四个组合中使用本地模拟模型，通过正式服务自动输出当前会话/项目上下文并读取工作区外隔离文件；危险目录删除分别进入审批并拒绝或自动拒绝，测试文件完整，临时会话及 provider 已清理。未使用官方额度。
+- 随后只读回放中，34 条曾因 Windows 分析不完整进入审批的历史记录有 26 条由所测分类器或助手处理、8 条未由这些路径处理，两种模式自动通过判断一致；随后对其中一条上下文输出单独回放已由新规则处理。回放未执行历史命令、未覆盖所有助手且只含曾拦截样本，不能用于估计真实通过率。另对当日 35 个可读取 Run 的审批响应作计数，只找到人工或自动拒绝响应，记录不包含完整工具调用分母，不能据此计算总体自动通过率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
