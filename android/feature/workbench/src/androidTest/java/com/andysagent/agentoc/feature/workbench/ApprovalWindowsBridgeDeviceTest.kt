@@ -47,7 +47,7 @@ class ApprovalWindowsBridgeDeviceTest {
         try {
             runBlocking { repository.refreshEvents("samsung-fixture") }
             val approval = runBlocking { repository.observePendingApprovals("samsung-fixture").first().single() }
-            assertTrue(approval.command.orEmpty().contains("example"))
+            assertTrue(approval.command.orEmpty().contains("example") || approval.command.orEmpty().contains("Nonexistent.Test.Fixture"))
             val state = AttentionReducer.reduce(AttentionUiState(), AttentionReducer.project(
                 listOf(Session("samsung-fixture", "Windows approval fixture")), listOf(approval))).copy(expanded = true)
             val done = AtomicBoolean(false)

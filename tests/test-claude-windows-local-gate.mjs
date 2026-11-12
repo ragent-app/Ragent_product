@@ -25,12 +25,23 @@ process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-ru
 const { buildClaudeBidiArgs } = await import('../chat/adapters/claude-bidi.mjs');
 const { buildPlatformSpawnSpec } = await import('../lib/executable-resolution.mjs');
 const { buildClaudeBidiApprovalResponseMessage, buildClaudeBidiInitializeMessage, buildClaudeBidiUserMessage, readClaudeBidiApprovalRequest, serializeClaudeBidiMessage } = await import('../chat/claude-bidi-protocol.mjs');
-const { createRun, getRun, readRunSpoolRecords } = await import('../chat/runs.mjs');
+const { appendRunSpoolRecord, createRun, getRun, readRunSpoolRecords } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 const { observeClaudePosixCwdResult } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
 const protectedCase = process.env.AGENTOC_QA_CLAUDE_PROTECTED === '1';
 const installCase = process.env.AGENTOC_QA_CLAUDE_INSTALL === '1';
 const uninstallCase = process.env.AGENTOC_QA_CLAUDE_UNINSTALL === '1';
+const phoneQueueCase = process.env.AGENTOC_QA_SAMSUNG_CLAUDE_QUEUE === '1';
+if (phoneQueueCase && (!uninstallCase || process.env.AGENTOC_QA_MODE !== 'recommended' || !askAll)) throw new Error('phone queue fixture requires the isolated recommended uninstall case');
+const phoneSessionId = 'samsung-fixture';
+let phoneApproval = null; let phoneQueued = false; let phoneToolResultObserved = false;
+const { handleSessionMainRoutes } = phoneQueueCase ? await import('../chat/router-session-main-routes.mjs') : {};
+const { getHistory } = phoneQueueCase ? await import('../chat/session-manager.mjs') : {};
+const { withSessionsMetaMutation, mutateSessionMeta } = phoneQueueCase ? await import('../chat/session-meta-store.mjs') : {};
+if (phoneQueueCase) await withSessionsMetaMutation(async (rows, save) => {
+  rows.push({ id: phoneSessionId, name: 'Samsung real Claude fixture', folder: root, tool: 'claude', sessionPlane: 'user', sessionClass: 'ROOT_LEADERSHIP', userAddressable: true });
+  await save(rows, { immediate: true, durable: true });
+});
 const deleteCase = process.env.AGENTOC_QA_CLAUDE_DELETE === '1';
 const nativePowerShell = process.env.AGENTOC_QA_CLAUDE_NATIVE_POWERSHELL === '1';
 const deleteList = process.env.AGENTOC_QA_CLAUDE_DELETE_LIST === '1';
@@ -113,6 +124,28 @@ const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Co
 let requests = 0;
 let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
 const server = createServer((req, res) => {
+  if (phoneQueueCase && req.url.startsWith('/api/')) {
+    void (async () => {
+      const url = new URL(req.url, 'http://127.0.0.1'); let status = 0; let body;
+      const isEvents = req.method === 'GET' && url.pathname === `/api/sessions/${phoneSessionId}/events`;
+      const isApproval = phoneApproval && req.method === 'POST' && url.pathname === `/api/runs/${encodeURIComponent(run.id)}/approvals/${encodeURIComponent(phoneApproval.approvalId)}`;
+      if (!isEvents && !isApproval) { res.writeHead(404).end(); return; }
+      const handled = await handleSessionMainRoutes({ req, res, pathname: url.pathname, parsedUrl: { pathname: url.pathname, query: Object.fromEntries(url.searchParams) },
+        ...(isEvents ? { sessionGetRoute: { kind: 'event-delta', sessionId: phoneSessionId } } : {}),
+        authSession: { role: 'owner', principalKind: 'trusted_device' }, requireSessionAccess: async (_response, _auth, id) => id === phoneSessionId,
+        writeJson: (_response, code, value) => { status = code; body = value; }, writeJsonCached: (_request, _response, value) => { status = 200; body = value; } });
+      assert.equal(handled, true); assert.equal(status, isEvents ? 200 : 202);
+      if (isApproval) {
+        const current = await getRun(run.id); const response = current.appServerApprovalResponseQueue.find(entry => entry.approvalId === phoneApproval.approvalId);
+        assert.equal(response?.decision, 'deny'); assert.equal(body?.approval?.decision, 'deny');
+        const message = buildClaudeBidiApprovalResponseMessage(phoneApproval, response.decision);
+        assert.equal(message?.response?.response?.behavior, 'deny'); child.stdin.write(serializeClaudeBidiMessage(message)); phoneQueued = true;
+      }
+      res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+    })().catch(error => { console.error(error); if (!res.headersSent) res.writeHead(500).end(); });
+    return;
+  }
+  if (phoneQueueCase && req.method === 'GET' && req.url === '/fixture/status') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ queued: phoneQueued })); return; }
   if (req.method === 'GET' && req.url === '/fixture/read') { res.writeHead(200).end('local read fixture'); return; }
   let body = ''; req.setEncoding('utf8');
   req.on('data', (chunk) => { body += chunk; if (body.length > 4_000_000) req.destroy(); });
@@ -137,6 +170,7 @@ const server = createServer((req, res) => {
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
+    if (!tool && phoneQueueCase) phoneToolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item => item.type === 'tool_result'));
     if (!tool && readCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes(cwdChangeCase ? 'CHILD_MARKER' : readCase === 'relative-write' ? 'changed' : readCase === 'npm-task' ? 'safe-task-fixture' : ['rg-text', 'cd-rg'].includes(readCase) ? 'SEARCH_TOKEN=public' : ['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'curl'].includes(readCase) ? 'local read fixture' : 'fixture.md');
     if (!tool && cwdChangeCase) {
       const messages = JSON.stringify(request.messages || []);
@@ -165,7 +199,7 @@ const server = createServer((req, res) => {
     res.end();
   });
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await new Promise((resolve) => server.listen(phoneQueueCase ? 18667 : 0, '127.0.0.1', resolve));
 if (readCase === 'curl') readCommand = `curl -fsS http://127.0.0.1:${server.address().port}/fixture/read`;
 const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
   XDG_CACHE_HOME: path.join(root, 'cache'), XDG_CONFIG_HOME: path.join(root, 'xdg-config'),
@@ -177,8 +211,10 @@ delete env.ANTHROPIC_AUTH_TOKEN;
 const mode = ['full-auto', 'conservative-auto'].includes(process.env.AGENTOC_QA_MODE) ? process.env.AGENTOC_QA_MODE : 'recommended';
 const boundContext = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
   ? await (await import('./fixtures/windows-admitted-context.mjs')).admittedWindowsContext(root, 'claude-local-fixture') : null;
-const run = await createRun({ status: { sessionId: 'claude-local-fixture', requestId: 'fixture', state: 'running', tool: 'claude' },
-  manifest: { sessionId: 'claude-local-fixture', requestId: 'fixture', folder: root, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: {} } });
+const fixtureSessionId = phoneQueueCase ? phoneSessionId : 'claude-local-fixture';
+const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 'fixture', state: 'running', tool: 'claude' },
+  manifest: { sessionId: fixtureSessionId, requestId: 'fixture', folder: root, tool: 'claude', runtimeFamily: 'claude-stream-json-bidi', prompt: 'fixture', options: { riskMode: 'recommended', permissionMode: 'default' } } });
+if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
 const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projectRoot: root, turnActive: true, riskContextValid: boundContext?.valid ?? true,
   riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
 if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
@@ -210,7 +246,7 @@ let errors = ''; child.stderr.on('data', (chunk) => { errors = (errors + String(
 let approvals = 0; let terminal = null; let handlerFailure = null;
 const output = createInterface({ input: child.stdout });
 const completed = new Promise((resolve, reject) => {
-  const timer = setTimeout(() => { child.kill(); reject(new Error(`Claude fixture timed out: ${errors}`)); }, 45000);
+  const timer = setTimeout(() => { child.kill(); reject(new Error(`Claude fixture timed out: ${errors}`)); }, phoneQueueCase ? 240000 : 45000);
   child.on('error', (error) => { clearTimeout(timer); reject(error); });
   child.on('exit', (code) => { clearTimeout(timer); resolve(code); });
 });
@@ -242,8 +278,12 @@ output.on('line', (line) => {
       if (reviewCase && mode === 'recommended') {
         const current = await getRun(run.id);
         assert.ok(current.appServerPendingApprovals?.some((item) => item.approvalId === approval.approvalId), 'protected operation must wait for the owner');
-        // Complete this disposable test as if the owner denied the request.
-        child.stdin.write(serializeClaudeBidiMessage(buildClaudeBidiApprovalResponseMessage(approval, 'deny')));
+        if (phoneQueueCase) {
+          phoneApproval = approval; await appendRunSpoolRecord(run.id, { stream: 'stdout', json: event });
+          const history = await getHistory(phoneSessionId);
+          assert.ok(history.some(item => item.type === 'approval_request' && item.approvalId === approval.approvalId));
+          console.log('SAMSUNG_CLAUDE_PROVIDER_READY');
+        } else child.stdin.write(serializeClaudeBidiMessage(buildClaudeBidiApprovalResponseMessage(approval, 'deny')));
       }
     }
     if (event.type === 'result') { terminal = event; child.stdin.end(); }
@@ -291,6 +331,7 @@ try {
   } else if (protectedCase || conservativeOutside || uninstallCase) await assert.rejects(access(artifact), { code: 'ENOENT' });
   else assert.equal((await readFile(artifact, 'utf8')).replace(/^\uFEFF/, ''), dotnetCase ? 'dotnet fixture' : 'local fixture\n');
   assert.ok(requests >= 2, 'local model must receive the tool result');
+  if (phoneQueueCase) { assert.equal(phoneQueued, true); assert.equal(phoneToolResultObserved, true, 'real Claude must return the denied tool result to the local model'); }
   const spool = await readRunSpoolRecords(run.id);
   if (deleteCase && !reviewCase) assert.ok(spool.some((record) => record.json?.reason === 'handle-bound workspace deletion'), 'actual sidecar must use the handle-bound deletion helper');
   else if (guidanceCase) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true && record.json?.reason?.includes('agentoc_request_actions')), 'actual sidecar must persist managed executor guidance');
