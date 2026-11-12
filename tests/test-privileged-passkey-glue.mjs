@@ -268,6 +268,28 @@ try {
   assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].privilegedExecutionState, 'failed');
   assert.equal(executionFailureUpdatedRun.appServerApprovalResponseQueue[0].updatedInput, undefined);
 
+  // Missing exit status is not proof of success (Number(null) is zero in JS).
+  const unknownRun = await createTestRun(createRun, 'session_passkey_unknown', 'req_passkey_unknown');
+  const unknownBatch = deleteBatch(buildPrivilegedBatch, unknownRun.id, 'gate-delete-unknown');
+  const unknownStore = createFakeStore();
+  await unknownStore.appendEvent(privilegedBatchRequestEvent(unknownBatch));
+  const unknownHash = computeBatchManifestHash(unknownBatch.delete, CATEGORY_DELETE);
+  writeProof('proof-token-unknown', {
+    purpose: 'privileged-category-approval', sessionId: 'session_passkey_unknown',
+    requestId: 'req_passkey_unknown', manifestHash: unknownHash,
+  });
+  await executePrivilegedPasskeyBatch('session_passkey_unknown', unknownRun, unknownBatch,
+    CATEGORY_DELETE, unknownStore, {
+      checkedOpIds: unknownBatch.delete.map((op) => op.opId), requestId: 'req_passkey_unknown',
+      webauthnProof: { token: 'proof-token-unknown', credentialId: 'cred-unknown', signedManifestHash: unknownHash },
+    }, {
+      loadSigningKeys: async () => ({ current: { kid: 'kid-unknown' }, previous: null }),
+      executeOpAsEvent: async (op) => privilegedExecResultEvent({ opId: op.opId, category: op.category }),
+    });
+  const unknownUpdatedRun = await getRun(unknownRun.id);
+  assert.equal(unknownUpdatedRun.appServerApprovalResponseQueue[0].decision, 'deny');
+  assert.equal(unknownUpdatedRun.appServerApprovalResponseQueue[0].privilegedExecutionState, 'unknown');
+
   // --- duplicate submission reuses the stored result (no re-execution) ---
   const successAgain = await executePrivilegedPasskeyBatch(
     'session_passkey_success',

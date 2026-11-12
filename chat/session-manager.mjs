@@ -3552,7 +3552,7 @@ function findPrivilegedExecResultForOp(events = [], opId = '') {
 function isSuccessfulPrivilegedExecResult(event) {
   return event?.type === 'privileged_exec_result'
     && !trimString(event?.error)
-    && Number(event?.exitCode) === 0;
+    && event?.exitCode === 0;
 }
 
 // Only runtimes with a live permission-response channel may receive an
@@ -3646,9 +3646,10 @@ async function enqueuePrivilegedCategoryApprovalResponses(
       ...entry,
       privilegedDecision,
       privilegedDecisionSource: decisionSource,
-      privilegedExecutionState: resultEvent
-        ? (isSuccessfulPrivilegedExecResult(resultEvent) ? 'completed' : 'failed')
-        : 'unknown',
+      privilegedExecutionState: isSuccessfulPrivilegedExecResult(resultEvent)
+        ? 'completed'
+        : (trimString(resultEvent?.error) || Number.isInteger(resultEvent?.exitCode))
+          ? 'failed' : 'unknown',
     });
   }
   if (entries.length === 0) return [];
