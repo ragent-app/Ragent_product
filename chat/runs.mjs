@@ -2584,11 +2584,18 @@ export async function materializeRunSpoolLine(runId, record) {
 }
 
 export async function requestRunCancel(runId, { beforeWrite = null, authorizeWrite = null } = {}) {
-  return updateRun(runId, (run) => ({
+  const updated = await updateRun(runId, (run) => ({
     ...run,
     cancelRequested: true,
     cancelRequestedAt: new Date().toISOString(),
   }), { beforeWrite, authorizeWrite });
+  if (updated && process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1') {
+    try {
+      const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
+      if ((await revokeLinuxRunScope(updated)).state !== 'revoked') console.warn(`[runs] privileged Run scope revocation unavailable for ${runId}`);
+    } catch { console.warn(`[runs] privileged Run scope revocation unavailable for ${runId}`); }
+  }
+  return updated;
 }
 
 export async function listRunIds() {

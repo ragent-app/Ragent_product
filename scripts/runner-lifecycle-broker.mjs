@@ -47,7 +47,7 @@ import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGrou
   resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 import { grantExistingRunnerFiles } from '../lib/linux-runner-file-access.mjs';
-import { registerLinuxRunContext } from './linux-run-context-store.mjs';
+import { registerLinuxRunContext, revokeLinuxRunContext } from './linux-run-context-store.mjs';
 
 const execFileAsync = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -939,6 +939,7 @@ export async function createRunnerLifecycleServer({
   inheritFd = null,
   inheritedSocketFdImpl = inheritedSocketFd,
   runScopeRegistration = null,
+  revokeRunContextImpl = revokeLinuxRunContext,
 } = {}) {
   const normalizedSocketPath = trimString(socketPath);
   if (!normalizedSocketPath) throw new Error('Runner lifecycle socket path is required');
@@ -988,11 +989,21 @@ export async function createRunnerLifecycleServer({
       }
       const runId = normalizeRunId(request?.runId);
       const requestedLaunchAttempt = Number(request?.launchAttempt ?? 0);
-      if (request?.type !== 'launch' || !runId
+      if (!['launch', 'revoke-scope'].includes(request?.type) || !runId
           || !Number.isSafeInteger(requestedLaunchAttempt)
           || requestedLaunchAttempt < 0
           || requestedLaunchAttempt > 10_000) {
         sendResponse(socket, { ok: false, code: 'RUNNER_LAUNCH_REQUEST_INVALID', error: 'Invalid runner launch request' });
+        return;
+      }
+      if (request.type === 'revoke-scope') {
+        if (!runScopeRegistration) {
+          sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_UNAVAILABLE', error: 'Run scope registration is unavailable' });
+          return;
+        }
+        void revokeRunContextImpl({ directory: runScopeRegistration.directory, runId, launchAttempt: requestedLaunchAttempt })
+          .then(() => sendResponse(socket, { ok: true }))
+          .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_REVOCATION_FAILED', error: 'Run scope revocation failed' }));
         return;
       }
       const requestedGuiEnvironment = pickRunnerGuiEnvironment(request?.guiEnvironment);
