@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { createPostgresStore } from '../accounts/store/postgres.mjs';
@@ -64,7 +64,49 @@ test('PostgreSQL shared join keeps owner authority and rejects revoked or replac
   assert.equal((await pool.query('select account_id from instance_bindings where instance_id=$1', [instance.instanceId])).rows[0].account_id, 'acct_inbox_qa');
   await store.mutate(draft => revokeInstanceAccessGrant(draft, { grantId: access.grant.grantId, ownerAccountId: 'acct_inbox_qa', now }));
   await assert.rejects(fixture.broker.completeAccountJoinIntent(completion), { code: 'owner_auth_binding_mismatch' });
-  await store.mutate(draft => issueInstanceAccessGrant(draft, { instanceId: instance.instanceId, ownerAccountId: 'acct_inbox_qa',
+  const replacement = await store.mutate(draft => issueInstanceAccessGrant(draft, { instanceId: instance.instanceId, ownerAccountId: 'acct_inbox_qa',
     accountId, requestId: 'qa_shared_pg_access_request_002', now }));
   await assert.rejects(fixture.broker.completeAccountJoinIntent(completion), { code: 'owner_auth_binding_mismatch' });
+  const beforeFence = (await pool.query('select revision::text from instance_authority_revisions where instance_id=$1', [instance.instanceId])).rows[0].revision;
+  const jobId = randomUUID(), requestUuid = randomUUID(), confirmationId = randomUUID();
+  await pool.query(`insert into account_deletion_jobs(job_id,request_id,account_id,confirmation_id,receipt_secret_hash,status,requested_at,updated_at)
+    values($1,$2,$3,$4,$5,'revoked',$6,$6)`, [jobId, requestUuid, accountId, confirmationId, 'a'.repeat(64), at]);
+  const transaction = await pool.connect();
+  try {
+    await transaction.query('begin');
+    await transaction.query('insert into account_deletion_fences(account_id,job_id,requested_at) values($1,$2,$3)', [accountId, jobId, at]);
+    // A stale writer racing with the deletion must not reactivate the grant.
+    const staleWrite = pool.query('update instance_access_grants set revoked_at=null where grant_id=$1', [replacement.grant.grantId]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    await transaction.query('commit');
+    await staleWrite;
+  } catch (error) { await transaction.query('rollback').catch(() => {}); throw error; }
+  finally { transaction.release(); }
+  const fenced = (await pool.query('select revoked_at from instance_access_grants where grant_id=$1', [replacement.grant.grantId])).rows[0];
+  assert.ok(fenced.revoked_at, 'a deletion fence permanently revokes workspace access');
+  const afterFence = (await pool.query('select revision::text from instance_authority_revisions where instance_id=$1', [instance.instanceId])).rows[0].revision;
+  assert.ok(BigInt(afterFence) > BigInt(beforeFence), 'existing instance authority proofs are invalidated');
+  await assert.rejects(fixture.broker.completeAccountJoinIntent(completion), { code: 'owner_auth_binding_mismatch' });
+  // Reverse race: an uncommitted grant exists before a deletion fence begins.
+  const other = 'acct_shared_pg_other', otherJob = randomUUID(), otherGrant = 'iag_' + 'd'.repeat(24);
+  await pool.query("insert into accounts(account_id,provider,provider_subject,created_at) values($1,'google','shared-pg-other',$2)", [other, at]);
+  await pool.query(`insert into account_deletion_jobs(job_id,request_id,account_id,confirmation_id,receipt_secret_hash,status,requested_at,updated_at)
+    values($1,$2,$3,$4,$5,'revoked',$6,$6)`, [otherJob, randomUUID(), other, randomUUID(), 'b'.repeat(64), at]);
+  const writer = await pool.connect();
+  try {
+    await writer.query('begin');
+    await writer.query(`insert into instance_access_grants(grant_id,request_id,instance_id,owner_account_id,account_id,
+      binding_key_fingerprint,binding_bound_at,binding_history_fingerprint,scope,created_at,revoked_at)
+      select $1,$2,instance_id,owner_account_id,$3,binding_key_fingerprint,binding_bound_at,binding_history_fingerprint,scope,created_at,null
+      from instance_access_grants where grant_id=$4`, [otherGrant, 'qa_other_shared_grant_request_001', other, replacement.grant.grantId]);
+    const pendingFence = pool.query('insert into account_deletion_fences(account_id,job_id,requested_at) values($1,$2,$3)', [other, otherJob, at]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    await writer.query('commit');
+    await pendingFence;
+  } catch (error) { await writer.query('rollback').catch(() => {}); throw error; }
+  finally { writer.release(); }
+  assert.ok((await pool.query('select revoked_at from instance_access_grants where grant_id=$1', [otherGrant])).rows[0].revoked_at,
+    'a fence racing an earlier grant revokes the committed grant');
+  await assert.rejects(pool.query(await readFile(new URL('../accounts/migrations/047_workspace_account_deletion_fence.down.sql', import.meta.url), 'utf8')),
+    /Cannot remove workspace account deletion protection/);
 });
