@@ -500,7 +500,7 @@ export function validateCrossProviderContinuityBundle(bundle) {
 export function renderCrossProviderContinuityBundle(bundle, { maxChars = 32_000 } = {}) {
   validateCrossProviderContinuityBundle(bundle);
   const rendered = [
-    '[AgentoC cross-provider semantic continuity bundle]',
+    '[Ragent cross-provider semantic continuity bundle]',
     'This bundle is the provider-neutral semantic state. Do not resume or inherit provider-native sessions from it.',
     'Workspace facts with lifecycle "refresh-needed" must be revalidated before relying on them.',
     JSON.stringify(bundle, null, 2),

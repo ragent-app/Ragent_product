@@ -102,7 +102,7 @@ export function formatPlanContextEvent(event, options = {}) {
       lines.push(`- [${item.status}] ${item.text}`);
     }
     if (omitted > 0) {
-      lines.push(`- [... ${omitted} more plan item${omitted === 1 ? '' : 's'} omitted by AgentoC ...]`);
+      lines.push(`- [... ${omitted} more plan item${omitted === 1 ? '' : 's'} omitted by Ragent ...]`);
     }
   }
 

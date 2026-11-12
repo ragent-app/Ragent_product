@@ -230,7 +230,7 @@ export function buildPrivilegedShimUsageText(program = PRIVILEGED_SHIM_BIN_NAME)
     `Usage: ${program} --description "<why>" --category install|other|delete -- <real command>`,
     '',
     'Declares one privileged operation for owner approval. The request returns',
-    'after it is accepted; the command runs as root via the AgentoC privileged',
+    'after it is accepted; the command runs as root via the Ragent privileged',
     'executor only after the owner approves it, and the final result is recorded',
     'asynchronously on the Run.',
   ].join('\n');

@@ -427,7 +427,7 @@ export async function buildProjectMemoryContext(session, options = {}) {
       JSON.stringify(workspaceSnapshot),
     ] : []),
     ...(memory?.summary ? [
-      'Project Memory (AgentoC-owned current project understanding; verify against current workspace/repository reality when they differ):',
+      'Project Memory (Ragent-owned current project understanding; verify against current workspace/repository reality when they differ):',
       clip(memory.summary, MAX_SUMMARY_CONTEXT_CHARS),
     ] : []),
   ];
