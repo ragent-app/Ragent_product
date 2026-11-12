@@ -51,6 +51,17 @@ server_pid="$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")"
 kill -0 "$server_pid"
 curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz"
 node -e 'const fs=require("fs");if((fs.statSync(process.argv[1]).mode & 0o777)!==0o600)process.exit(1)' "$AGENTOC_CONFIG_DIR/chat-server.log"
+# A configuration load error must not make stop proceed with inherited or
+# default settings, which could stop a different instance.
+cp "$AGENTOC_CONFIG_DIR/instance.env" "$test_dir/instance.env.before-stop"
+printf '\nfalse\n' >> "$AGENTOC_CONFIG_DIR/instance.env"
+if "$contents/Resources/agentoc-stop" >"$test_dir/stop-error" 2>&1; then
+  echo 'stop accepted a failing instance configuration' >&2
+  exit 1
+fi
+grep -Fq 'no service was stopped' "$test_dir/stop-error"
+kill -0 "$server_pid"
+cp "$test_dir/instance.env.before-stop" "$AGENTOC_CONFIG_DIR/instance.env"
 "$contents/MacOS/AgentoC"
 [ "$(cat "$AGENTOC_CONFIG_DIR/agentoc.pid")" = "$server_pid" ]
 # Replacing the bundle while a service retains the same command path must not

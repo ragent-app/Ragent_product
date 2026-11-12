@@ -5,7 +5,10 @@ set -uo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/agentoc-env.sh"
 
-agentoc_source_instance_env
+if ! agentoc_source_instance_env; then
+  printf 'Could not read AgentoC instance configuration; no service was stopped\n' >&2
+  exit 1
+fi
 
 stop_server_pid() {
   local pid="$1"
