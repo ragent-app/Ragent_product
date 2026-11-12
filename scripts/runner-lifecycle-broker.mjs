@@ -604,8 +604,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
   // docker, privileged-executor, or hardware privilege channels.
   const resolvedControlUser = controlUser || await resolveControlUser();
   let distinctIdentity = resolvedServiceUser !== resolvedControlUser;
+  let controlOwnership = null;
   if (distinctIdentity && String(environment.AGENTOC_RUNNER_SAME_USER ?? '1').trim() === '0') {
-    const controlOwnership = await resolveRunnerOwnershipImpl(resolvedControlUser, resolvedServiceGroup);
+    controlOwnership = await resolveRunnerOwnershipImpl(resolvedControlUser, resolvedServiceGroup);
     if (!Number.isSafeInteger(controlOwnership?.uid) || controlOwnership.uid <= 0) {
       throw Object.assign(new Error('Cannot verify control user identity'), { code:'RUNNER_IDENTITY_INVALID' });
     }
@@ -687,6 +688,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
         runnerReadable: true,
         runnerOwnerUid: runnerOwnership.uid,
         runnerOwnerGid: runnerOwnership.gid,
+        previousRunnerOwnerUid: distinctIdentity ? controlOwnership?.uid ?? null : null,
       });
       if (nativeResult?.ok !== true || !nativeResult.providerId) {
         throw createProviderPreparationError(

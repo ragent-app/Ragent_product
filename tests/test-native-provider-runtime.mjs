@@ -690,6 +690,23 @@ try {
   assert.equal(externallyUpdatedOAuth.tokens.access_token, 'at-3');
   assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.access_token, 'at-3');
 
+  if (process.platform === 'linux' && process.getuid?.() === 0) {
+    let migrationCall = null;
+    const migrated = await prepareNativeRunProviderHome('run_oauth_migration', {
+      tool:'codex', options:{providerProfile:'openai-official-a',model:'gpt-5.5'},
+    }, { configDir, providerHomesRoot:oauthHomeRoot, runnerReadable:true,
+      runnerOwnerUid:1001, runnerOwnerGid:1002, previousRunnerOwnerUid:1000,
+      chownImpl:async()=>{},
+      migrateManagedHomeOwnershipImpl:async (home, identity) => {
+        migrationCall = {home,identity,lockHeld:existsSync(join(home,'..','.agentoc-native-oauth.lock'))};
+      },
+    });
+    assert.equal(migrated.ok,true, migrated.error || migrated.reason);
+    assert.equal(migrationCall.home,oauthCodexHome);
+    assert.deepEqual(migrationCall.identity,{targetUid:1001,targetGid:1002,additionalSourceUid:1000});
+    assert.equal(migrationCall.lockHeld,true);
+  }
+
   // External Codex ownership: a matching account_id keeps the external
   // auth.json as the single rotating credential source. The Run must still
   // use its generated CODEX_HOME config instead of importing external Codex
