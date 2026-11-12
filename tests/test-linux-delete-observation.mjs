@@ -36,6 +36,10 @@ assert.equal(bound.decision, 'ASK');
 assert.notEqual(bound.operationManifestHash, decision.operationManifestHash);
 assert.deepEqual(bound.operation.target.resourceSnapshot.linuxTargetAttestation, attestation);
 const selected = buildSemanticCapabilitySelection([bound]);
+const instanceAttestation = signLinuxTargetAttestation({ privateKey: keys.privateKey,
+  context: { ...context, launchAttempt: 2, invocationId: 'a'.repeat(32) }, path: target, snapshot, now });
+const instanceBound = bindLinuxDeleteObservation({ decision, attestation: instanceAttestation, trustedPublicKey: keys.publicKey, now });
+assert.equal(buildSemanticCapabilitySelection([instanceBound]).operations[0].adapterInput.linuxTargetAttestation.version, 2);
 assert.notEqual(selected.selectionManifestHash, buildSemanticCapabilitySelection([decision]).selectionManifestHash);
 assert.deepEqual(selected.operations[0].adapterInput.linuxTargetAttestation, attestation);
 assert.deepEqual(selected.operations[0].adapterInput.linuxDeleteOperation, bound.operation);

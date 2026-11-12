@@ -38,4 +38,14 @@ assert.equal(verifyLinuxTargetAttestation({ ...signed, binding: { ...signed.bind
 assert.throws(() => signLinuxTargetAttestation({ privateKey, context, path, snapshot, now, ttlMs: LINUX_TARGET_ATTESTATION_TTL_MAX_MS + 1 }), { code: 'LINUX_TARGET_ATTESTATION_INVALID' });
 assert.throws(() => signLinuxTargetAttestation({ privateKey, context: { ...context, runId: '' }, path, snapshot, now }), { code: 'LINUX_TARGET_ATTESTATION_INVALID' });
 assert.throws(() => signLinuxTargetAttestation({ privateKey: publicKey, context, path, snapshot, now }), { code: 'LINUX_TARGET_ATTESTATION_INVALID' });
+const instance = { ...context, launchAttempt: 2, invocationId: 'a'.repeat(32) };
+const instanceSigned = signLinuxTargetAttestation({ privateKey, context: instance, path, snapshot, now });
+assert.equal(instanceSigned.version, 2);
+assert.equal(verifyLinuxTargetAttestation(instanceSigned, { ...options, expectedContext: instance }).ok, true);
+assert.equal(verifyLinuxTargetAttestation(instanceSigned, { ...options, expectedContext: { ...instance, launchAttempt: 3 } }).ok, false);
+assert.equal(verifyLinuxTargetAttestation(instanceSigned, { ...options, expectedContext: { ...instance, invocationId: 'b'.repeat(32) } }).ok, false);
+assert.equal(verifyLinuxTargetAttestation(instanceSigned, options).ok, false);
+assert.equal(verifyLinuxTargetAttestation(signed, { ...options, expectedContext: instance }).ok, false);
+assert.equal(verifyLinuxTargetAttestation({ ...instanceSigned, version: 1, purpose: 'linux-target-inspect/v1' }, { ...options, expectedContext: instance }).ok, false);
+assert.throws(() => signLinuxTargetAttestation({ privateKey, context: { ...instance, invocationId: '0'.repeat(32) }, path, snapshot, now }));
 console.log('linux target attestation: signature and binding checks passed');

@@ -13,6 +13,12 @@ import { verifyLinuxDeleteCapability } from '../scripts/linux-delete-capability.
 import { createLinuxDeleteExecutor } from '../scripts/linux-delete-execution.mjs';
 import { claimLinuxDeleteNonce } from '../scripts/linux-delete-ledger.mjs';
 import { handleSemanticRequest } from '../scripts/privileged-executor.mjs';
+import { createRunPublication, bindRunPublication } from '../chat/run-publication-contract.mjs';
+import { computeExecutionScopeDigest } from '../chat/execution-scope.mjs';
+import { signLinuxRunScopeGrant } from '../chat/linux-run-scope-grant.mjs';
+import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
+import { registerLinuxRunContext, revokeLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
+import { createLinuxRegisteredDeleteExecutor } from '../scripts/linux-registered-delete-executor.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.argv[2]) throw new Error('requires Linux root and native helper');
 const sourceStat = await lstat(process.argv[2]);
@@ -156,6 +162,52 @@ process.stdout.write(JSON.stringify(result.projection));`;
   assert.equal((await claimLinuxDeleteNonce({ directory: ledgerDirectory, nonce: auditFailureCapability.nonce,
     capabilityId: auditFailureCapability.capabilityId, runId: auditFailureCapability.runId,
     selectionHash: auditFailureCapability.selectionManifestHash })).state, 'consumed');
+  if (process.env.AGENTOC_TEST_SYSTEMD_INVOCATION) {
+    // End-to-end isolated fixture: root registration + live systemd unit +
+    // signed v2 observation + owner-proof substitute + fixed native helper.
+    await writeFile(target, 'registered-fixture', { mode: 0o600 });
+    const runId = 'run_test12345678', attempt = 2;
+    const run = { id: runId, sessionId: 's1', requestId: 't1', runPublication: createRunPublication() };
+    const scope = { sessionId: run.sessionId, cwd: { realPath: root }, scopeRoot: { realPath: root },
+      riskContext: { platform: 'linux', cwd: root, trustedWorkspaceRoot: root } };
+    const manifest = bindRunPublication(run, { executionScope: scope, executionScopeDigest: computeExecutionScopeDigest(scope),
+      options: { approvedActionChannel: { turnId: run.requestId } } });
+    const pinDirectory = `${root}/pin`, contextDirectory = `${root}/run-state`;
+    await mkdir(pinDirectory, { mode: 0o700 }); await mkdir(contextDirectory, { mode: 0o700 });
+    const serviceKeyId = createHash('sha256').update(serviceKeys.publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
+    await enrollLinuxServiceKeyPin({ directory: pinDirectory, publicKey: serviceKeys.publicKey, expectedKeyId: serviceKeyId });
+    const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: attempt, privateKey: serviceKeys.privateKey });
+    await registerLinuxRunContext({ directory: contextDirectory, pinDirectory, run, manifest, grant, launchAttempt: attempt });
+    const actualRequest = { ...request, runId };
+    const actualChild = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(actualRequest), root],
+      { uid: sourceStat.uid, gid: sourceStat.gid, encoding: 'utf8', maxBuffer: 1024 * 1024,
+        env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, AGENTOC_CONFIG_DIR: `${testHome}/config` } });
+    assert.equal(actualChild.status, 0, actualChild.stderr);
+    const actualDecision = JSON.parse(actualChild.stdout).decisions[0];
+    const actualContext = { ...context, runId, launchAttempt: attempt, invocationId: process.env.AGENTOC_TEST_SYSTEMD_INVOCATION };
+    const observed = await inspectAndAttestLinuxTarget({ helperPath: helper, expectedSha256: digest,
+      privateKey: keys.privateKey, targetPath: target, context: actualContext });
+    const selectedDecision = bindLinuxDeleteObservation({ decision: actualDecision, attestation: observed, trustedPublicKey: keys.publicKey });
+    const selected = buildSemanticCapabilitySelection([selectedDecision]);
+    const selectedCapability = await authorizeSemanticApproval({
+      prepared: { binding: { sessionId: 's1', runId, turnId: 't1', requestKey: 'q1' }, projection: { decisions: [selectedDecision] } },
+      selectedOperationIds: [selectedDecision.operationId], proofToken: 'fixture-proof', credentialId: 'fixture-owner',
+      kid: 'fixture-service', adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1,
+      consumeOwnerProof: async (proof) => proof.manifestHash === selected.selectionManifestHash,
+    });
+    const authorized = signSemanticCapability(selectedCapability, serviceKeys.privateKey);
+    const registeredConfig = { runId, launchAttempt: attempt, contextDirectory, pinDirectory,
+      trustedHome: testHome, trustedProtectedRoots: revalidation.trustedProtectedRoots,
+      rootPublicKey: keys.publicKey, rootPrivateKey: keys.privateKey, helperPath: helper, expectedHelperSha256: digest, ledgerDirectory };
+    const wrongAttemptExecutor = createLinuxRegisteredDeleteExecutor({ ...registeredConfig, launchAttempt: attempt + 1 });
+    assert.equal((await wrongAttemptExecutor(authorized)).state, 'rejected');
+    assert.equal(await readFile(target, 'utf8'), 'registered-fixture');
+    const registeredExecutor = createLinuxRegisteredDeleteExecutor(registeredConfig);
+    assert.equal((await registeredExecutor(authorized)).state, 'completed');
+    await assert.rejects(readFile(target), { code: 'ENOENT' });
+    await revokeLinuxRunContext({ directory: contextDirectory, runId, launchAttempt: attempt });
+    assert.equal((await registeredExecutor(authorized)).state, 'rejected');
+  }
   console.log('linux delete observation: native, resolver and root revalidation checks passed');
 } finally {
   await rm(root, { recursive: true });

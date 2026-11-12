@@ -124,13 +124,14 @@ function linuxDeleteObservation(operation) {
     const keys = ['version', 'purpose', 'keyId', 'context', 'binding', 'bindingHash', 'issuedAt', 'expiresAt', 'signature'];
     if (!observation || typeof observation !== 'object' || Array.isArray(observation) ||
         Object.keys(observation).length !== keys.length || keys.some((key) => !Object.hasOwn(observation, key)) ||
-        observation.version !== 1 || observation.purpose !== 'linux-target-inspect/v1' ||
+        ![1, 2].includes(observation.version) || observation.purpose !== `linux-target-inspect/v${observation.version}` ||
         typeof observation.keyId !== 'string' || !/^[a-f0-9]{64}$/.test(observation.keyId) ||
         typeof observation.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(observation.signature) ||
         operation?.primaryAction !== 'fs.delete' || operation?.executionClass !== 'host' ||
         operation?.target?.platform !== 'linux' || operation?.target?.kind !== 'filesystem_file') throw new Error('invalid observation');
     const context = observation.context;
-    canonicalLinuxTargetContext(context);
+    const normalizedContext = canonicalLinuxTargetContext(context);
+    if ((observation.version === 2) !== Object.hasOwn(normalizedContext, 'invocationId')) throw new Error('context version mismatch');
     if (context.sessionId !== operation.requestBinding?.sessionId || context.runId !== operation.requestBinding?.runId ||
         context.turnId !== operation.requestBinding?.turnId || context.requestId !== operation.requestBinding?.requestKey) throw new Error('context mismatch');
     const { path, ...snapshot } = observation.binding || {};

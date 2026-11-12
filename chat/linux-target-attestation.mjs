@@ -9,8 +9,8 @@ import { createHash, createPublicKey, sign, verify } from 'node:crypto';
 import { createLinuxTargetBinding, hashLinuxTargetBinding } from './linux-target-binding.mjs';
 
 export const LINUX_TARGET_ATTESTATION_TTL_MAX_MS = 5 * 60 * 1000;
-const PURPOSE = 'linux-target-inspect/v1';
 const CONTEXT_FIELDS = Object.freeze(['sessionId', 'runId', 'turnId', 'requestId']);
+const INSTANCE_CONTEXT_FIELDS = Object.freeze([...CONTEXT_FIELDS, 'launchAttempt', 'invocationId']);
 const ATTESTATION_FIELDS = Object.freeze(['version', 'purpose', 'keyId', 'context', 'binding', 'bindingHash', 'issuedAt', 'expiresAt', 'signature']);
 
 function invalid(message) {
@@ -25,7 +25,8 @@ function exactKeys(value, keys) {
 }
 
 export function canonicalLinuxTargetContext(context) {
-  if (!exactKeys(context, CONTEXT_FIELDS)) invalid('invalid target observation context');
+  const hasInstance = exactKeys(context, INSTANCE_CONTEXT_FIELDS);
+  if (!hasInstance && !exactKeys(context, CONTEXT_FIELDS)) invalid('invalid target observation context');
   const result = {};
   for (const field of CONTEXT_FIELDS) {
     const value = context[field];
@@ -35,6 +36,14 @@ export function canonicalLinuxTargetContext(context) {
       invalid('invalid target observation context');
     }
     result[field] = value;
+  }
+  if (hasInstance) {
+    if (!Number.isSafeInteger(context.launchAttempt) || context.launchAttempt < 0 || context.launchAttempt > 10000 ||
+        typeof context.invocationId !== 'string' || !/^[a-f0-9]{32}$/.test(context.invocationId) || /^0+$/.test(context.invocationId)) {
+      invalid('invalid target observation run instance');
+    }
+    result.launchAttempt = context.launchAttempt;
+    result.invocationId = context.invocationId;
   }
   return result;
 }
@@ -65,9 +74,11 @@ export function signLinuxTargetAttestation({ privateKey, context, path, snapshot
   try { issuedAt = new Date(now).toISOString(); expiresAt = new Date(now + ttlMs).toISOString(); }
   catch { invalid('invalid observation lifetime'); }
   const binding = createLinuxTargetBinding(path, snapshot);
+  const normalizedContext = canonicalLinuxTargetContext(context);
+  const version = Object.hasOwn(normalizedContext, 'invocationId') ? 2 : 1;
   const value = {
-    version: 1, purpose: PURPOSE, keyId: publicKeyId(createPublicKey(privateKey)),
-    context: canonicalLinuxTargetContext(context), binding,
+    version, purpose: `linux-target-inspect/v${version}`, keyId: publicKeyId(createPublicKey(privateKey)),
+    context: normalizedContext, binding,
     bindingHash: hashLinuxTargetBinding(path, snapshot), issuedAt, expiresAt,
   };
   return { ...value, signature: sign(null, Buffer.from(canonicalPayload(value)), privateKey).toString('base64url') };
@@ -75,11 +86,14 @@ export function signLinuxTargetAttestation({ privateKey, context, path, snapshot
 
 export function verifyLinuxTargetAttestation(attestation, { publicKey, expectedContext, expectedPath, now = Date.now() } = {}) {
   try {
-    if (!exactKeys(attestation, ATTESTATION_FIELDS) || attestation.version !== 1 || attestation.purpose !== PURPOSE ||
+    if (!exactKeys(attestation, ATTESTATION_FIELDS) || ![1, 2].includes(attestation.version) ||
+        attestation.purpose !== `linux-target-inspect/v${attestation.version}` ||
         !Number.isSafeInteger(now) || attestation.keyId !== publicKeyId(publicKey)) invalid('invalid target observation');
     const context = canonicalLinuxTargetContext(attestation.context);
     const expected = canonicalLinuxTargetContext(expectedContext);
-    if (CONTEXT_FIELDS.some((field) => context[field] !== expected[field])) invalid('target observation context mismatch');
+    if ((attestation.version === 2) !== Object.hasOwn(context, 'invocationId') ||
+        Object.keys(context).length !== Object.keys(expected).length ||
+        Object.keys(context).some((field) => context[field] !== expected[field])) invalid('target observation context mismatch');
     const binding = canonicalBinding(attestation.binding);
     if (binding.path !== expectedPath) invalid('target observation path mismatch');
     const { path, ...snapshot } = binding;

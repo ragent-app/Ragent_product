@@ -48,6 +48,10 @@ export function bindLinuxDeleteObservation({ decision, attestation, trustedPubli
     fail('semantic policy no longer permits owner review');
   }
   const context = { sessionId: request?.sessionId, runId: request?.runId, turnId: request?.turnId, requestId: request?.requestKey };
+  if (observation?.version === 2) {
+    context.launchAttempt = observation?.context?.launchAttempt;
+    context.invocationId = observation?.context?.invocationId;
+  }
   const verified = verifyLinuxTargetAttestation(observation, { publicKey: trustedPublicKey, expectedContext: context, expectedPath: path, now });
   if (!verified.ok) fail('target observation is not valid for this request');
   const facts = verified.binding;
