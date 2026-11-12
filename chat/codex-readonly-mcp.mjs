@@ -9,10 +9,10 @@ function contained(root, child) {
 
 /** Wrap each local account MCP in the same read-only boundary as the Run. */
 export async function prepareReadOnlyCodexMcp({ servers, cwd, workspace, hidePaths,
-  sandboxBuilder = buildSandboxedSpawn, requireSandbox = requireSandboxAvailability } = {}) {
+  sandboxBuilder = buildSandboxedSpawn, requireSandbox = requireSandboxAvailability, readOnly = true } = {}) {
   if (!servers || typeof servers !== 'object' || Array.isArray(servers)
       || ![cwd, workspace].every(path => typeof path === 'string' && isAbsolute(path) && !/[\0\r\n]/.test(path))
-      || !contained(workspace, cwd) || !Array.isArray(hidePaths) || !hidePaths.length
+      || typeof readOnly !== 'boolean' || !contained(workspace, cwd) || !Array.isArray(hidePaths) || !hidePaths.length
       || hidePaths.some(path => typeof path !== 'string' || !isAbsolute(path) || /[\0\r\n]/.test(path) || contained(path, cwd))) {
     throw new TypeError('Invalid read-only Codex MCP configuration');
   }
@@ -35,12 +35,17 @@ export async function prepareReadOnlyCodexMcp({ servers, cwd, workspace, hidePat
               || raw.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))))) {
           throw new TypeError('Invalid local Codex MCP server');
         }
-        const sandbox = sandboxBuilder({ command, args: raw.args || [], cwd, readOnly: true, hidePaths,
-          bindReadOnlyPaths: [workspace], readOnlyProviderFamily: 'codex' });
+        const sandbox = sandboxBuilder({ command, args: raw.args || [], cwd, readOnly, hidePaths,
+          bindReadOnlyPaths: readOnly ? [workspace] : [], readOnlyProviderFamily: readOnly ? 'codex' : '' });
         directories.push(sandbox.emptyDir);
         const separator = sandbox.args.indexOf('--');
         if (separator < 0) throw new Error('Invalid Codex MCP sandbox');
-        sandbox.args.splice(separator, 0, '--die-with-parent');
+        const privateHome = readOnly ? [] : ['--perms', '0700', '--dir', '/tmp/agentoc-executor',
+          '--perms', '0700', '--dir', '/tmp/agentoc-executor/home', '--perms', '0700', '--dir', '/tmp/agentoc-executor/codex',
+          '--setenv', 'HOME', '/tmp/agentoc-executor/home', '--setenv', 'CODEX_HOME', '/tmp/agentoc-executor/codex',
+          '--setenv', 'AGENTOC_CODEX_HOME_DIR', '/tmp/agentoc-executor/codex',
+          '--setenv', 'TMPDIR', '/tmp', '--setenv', 'TMP', '/tmp', '--setenv', 'TEMP', '/tmp'];
+        sandbox.args.splice(separator, 0, '--die-with-parent', ...privateHome);
         // config/read includes normalized defaults which cannot necessarily be
         // written back as TOML values. Override only the launch fields; Codex
         // merges the remaining account config (including environment) itself.
