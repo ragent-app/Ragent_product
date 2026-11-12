@@ -146,6 +146,12 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     verifyGoogleCredential: async () => ({}), resolveAccount: async () => ({}), signAssertion: async () => '' });
   const baselineBroker = brokerFor(store(false));
   const foreign = await seedPhone('acct_foreign_qa', 'google', 'adev_foreign_qa');
+  const workspaceMigrationDown = await readFile(new URL('../accounts/migrations/046_workspace_join_identity.down.sql', import.meta.url), 'utf8');
+  const workspaceMigrationUp = await readFile(new URL('../accounts/migrations/046_workspace_join_identity.up.sql', import.meta.url), 'utf8');
+  await pool.query(workspaceMigrationDown);
+  await assert.rejects(b.mutate(draft => { draft.accountJoinGrants.push({ workspaceGrantId: 'iag_workspace_fixture_001' }); }),
+    /Workspace join identity migration is required/);
+  await pool.query(workspaceMigrationUp);
   for (const broker of [f.broker, baselineBroker]) {
     await assert.rejects(broker.createAccountRendezvous(request, foreign.credential), { code: 'owner_auth_rendezvous_replay' });
     await assert.rejects(broker.createAccountRendezvous({ ...request, requestId: 'qa_foreign_bound_request_0001',
@@ -157,7 +163,16 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     const result = await broker.createAccountRendezvous({ ...request, requestId: `qa_shared_rendezvous_request_000${index}`,
       device: foreign.device }, foreign.credential);
     assert.equal(result.intent.instanceKeyFingerprint, f.instance.keyFingerprint);
+    const selected = JSON.parse(JSON.stringify(result.intent));
+    const proof = { intentId: selected.intentId, requestId: `qa_shared_authorize_request_000${index}`,
+      deviceId: selected.deviceId, devicePublicKeyFingerprint: selected.devicePublicKeyFingerprint,
+      nonce: selected.nonce, issuedAt: selected.issuedAt,
+      deviceSignature: foreign.signMessage(buildAccountJoinIntentMessage({ ...selected, audience: 'agentoc-account-join' })) };
+    await broker.authorizeAccountJoinIntent(proof, foreign.credential);
+    const retained = await pool.query('select workspace_grant_id from account_join_grants where intent_id = $1', [selected.intentId]);
+    assert.equal(retained.rows[0].workspace_grant_id, access.grant.grantId);
   }
+  await assert.rejects(pool.query(workspaceMigrationDown), /Cannot remove workspace join identities/);
   await b.mutate(draft => revokeInstanceAccessGrant(draft, { grantId: access.grant.grantId,
     ownerAccountId: 'acct_inbox_qa', now }));
   for (const [index, broker] of [f.broker, baselineBroker].entries()) {

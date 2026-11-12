@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
-import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protocol.mjs';
+import { createInstancePublicKeyFingerprint, buildAccountJoinIntentProofMessage } from '../lib/instance-proof-protocol.mjs';
 import { buildAccountSessionMessage, buildAccountJoinIntentMessage, createDevicePublicKeyFingerprint } from '../lib/device-auth-protocol.mjs';
 
 test('discovery exposes only workspaces with an active grant bound to the same owner', async () => {
@@ -18,6 +18,7 @@ test('discovery exposes only workspaces with an active grant bound to the same o
     instanceId, accountId: owner, instancePublicKey: computerKey,
     instanceKeyFingerprint: createInstancePublicKeyFingerprint(computerKey), boundAt: new Date(now).toISOString(),
   }] };
+  let signedClaims;
   const broker = createOwnerAuthBroker({ store: { mutate: async fn => {
     const result = await fn(draft);
     const saved = JSON.parse(JSON.stringify(draft));
@@ -27,7 +28,7 @@ test('discovery exposes only workspaces with an active grant bound to the same o
   } }, clock: () => now,
     verifyGoogleCredential: async () => ({ providerSubject: 'fixture-member' }),
     verifyNativeGoogleCredential: async () => ({ providerSubject: 'fixture-member' }),
-    resolveAccount: async () => ({ accountId: member }), signAssertion: async () => 'fixture' });
+    resolveAccount: async () => ({ accountId: member }), signAssertion: async claims => { signedClaims = claims; return 'fixture'; } });
   const input = { requestId: 'request_session_discovery_001', device: { deviceId, publicKey: phoneKey, platform: 'android' } };
   const challenge = await broker.createAccountSessionChallenge(input);
   const signature = sign('sha256', Buffer.from(buildAccountSessionMessage({ transactionId: challenge.transactionId,
@@ -52,7 +53,9 @@ test('discovery exposes only workspaces with an active grant bound to the same o
     devicePublicKeyFingerprint: 64, nonce: 16, issuedAt: 20, deviceSignature: 1 })) {
     assert.ok(typeof authorize[field] === 'string' && authorize[field].length >= min, `Missing ${field}`);
   }
-  assert.ok((await broker.authorizeAccountJoinIntent(authorize, credential)).accountJoinGrant);
+  const join = await broker.authorizeAccountJoinIntent(authorize, credential);
+  assert.ok(join.accountJoinGrant);
+  assert.equal(draft.accountJoinGrants.find(item => item.intentId === intent.intentId).workspaceGrantId, issued.grant.grantId);
   draft.bindingHistory = [{ instanceId, action: 'unbind' }, { instanceId, action: 'bind' }];
   assert.deepEqual((await discover()).instances, [], 'a rebind invalidates the old grant');
   await assert.rejects(broker.authorizeAccountJoinIntent({ ...authorize, requestId: 'request_workspace_authorize_002' }, credential),
@@ -61,9 +64,28 @@ test('discovery exposes only workspaces with an active grant bound to the same o
   draft.accounts[0].disabledAt = new Date(now).toISOString();
   assert.deepEqual((await discover()).instances, [], 'a disabled owner cannot share a workspace');
   delete draft.accounts[0].disabledAt;
+  const instance = { instanceId, publicKey: computerKey, keyFingerprint: createInstancePublicKeyFingerprint(computerKey) };
+  const issuedAt = new Date(now).toISOString(), audience = 'agentoc-account-join';
+  const instanceProof = buildAccountJoinIntentProofMessage({ instanceId, intentId: intent.intentId, deviceId,
+    devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint, nonce: intent.nonce, issuedAt, audience, publicEndpoint: '' });
+  const completion = { intentId: intent.intentId, requestId: 'request_workspace_completion_001', nonce: intent.nonce,
+    deviceIssuedAt: intent.issuedAt, device: { deviceId, devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint },
+    deviceSignature: authorize.deviceSignature, accountJoinGrant: join.accountJoinGrant, publicEndpoint: '', issuedAt, audience,
+    instance, signature: sign(null, Buffer.from(instanceProof), computerKeys.privateKey).toString('base64url') };
+  assert.equal((await broker.completeAccountJoinIntent(completion)).accountId, member);
+  assert.equal(draft.instanceBindings[0].accountId, owner, 'the existing owner binding is unchanged');
+  assert.deepEqual(signedClaims.workspaceAccess, { ownerAccountId: owner, grantId: issued.grant.grantId });
+  assert.equal(signedClaims.sub, member);
+  assert.equal((await broker.completeAccountJoinIntent(completion)).replayed, true);
   revokeInstanceAccessGrant(draft, { grantId: issued.grant.grantId, ownerAccountId: owner, now });
   assert.deepEqual((await discover()).instances, [], 'revocation removes it immediately');
   await assert.rejects(broker.createAccountRendezvous(rendezvousInput, credential), { code: 'owner_auth_binding_mismatch' });
-  await assert.rejects(broker.authorizeAccountJoinIntent({ ...authorize, requestId: 'request_workspace_authorize_003' }, credential),
-    { code: 'owner_auth_binding_mismatch' });
+  await assert.rejects(broker.completeAccountJoinIntent(completion), { code: 'owner_auth_binding_mismatch' });
+  issueInstanceAccessGrant(draft, { instanceId, ownerAccountId: owner, accountId: member,
+    requestId: 'request_access_discovery_002', now });
+  await assert.rejects(broker.completeAccountJoinIntent(completion), { code: 'owner_auth_binding_mismatch' },
+    'a new grant cannot revive a prior join');
+  draft.instanceBindings[0].accountId = member;
+  await assert.rejects(broker.completeAccountJoinIntent({ ...completion, accountJoinGrant: '', idToken: 'fixture' }),
+    { code: 'owner_auth_binding_mismatch' }, 'a later owner transfer cannot revive a shared join');
 });

@@ -618,6 +618,7 @@ function accountJoinGrantToRow(item) {
     grant_hash: String(item.grantHash), account_id: String(item.accountId), instance_id: String(item.instanceId),
     intent_id: String(item.intentId), device_id: String(item.deviceId), account_device_id: String(item.accountDeviceId), key_fingerprint: String(item.keyFingerprint),
     claim_instance: item.claimInstance === true, public_endpoint: iso(item.publicEndpoint),
+    workspace_grant_id: iso(item.workspaceGrantId),
     request_id: String(item.requestId), created_at: iso(item.createdAt), expires_at: iso(item.expiresAt), redeemed_at: iso(item.redeemedAt),
   };
 }
@@ -626,6 +627,7 @@ function rowToAccountJoinGrant(row) {
     grantHash: String(row.grant_hash), accountId: String(row.account_id), instanceId: String(row.instance_id), intentId: String(row.intent_id),
     deviceId: String(row.device_id), accountDeviceId: String(row.account_device_id), keyFingerprint: String(row.key_fingerprint),
     claimInstance: row.claim_instance === true, publicEndpoint: toIso(row.public_endpoint), requestId: String(row.request_id),
+    ...(row.workspace_grant_id ? { workspaceGrantId: String(row.workspace_grant_id) } : {}),
     createdAt: toIso(row.created_at), expiresAt: toIso(row.expires_at), redeemedAt: toIso(row.redeemed_at),
   };
 }
@@ -731,9 +733,11 @@ async function replaceRows(client, table, columns, rows, toRow) {
 
 async function instanceAccessGrantStorageVersion(client) {
   const result = await client.query(`select target is not null as available,
-    exists(select 1 from pg_catalog.pg_attribute where attrelid=target and attname='request_id' and not attisdropped) as replay_ready
+    exists(select 1 from pg_catalog.pg_attribute where attrelid=target and attname='request_id' and not attisdropped) as replay_ready,
+    exists(select 1 from pg_catalog.pg_attribute where attrelid=to_regclass(format('%I.%I', current_schema(), 'account_join_grants'))
+      and attname='workspace_grant_id' and not attisdropped) as workspace_join_ready
     from (select to_regclass(format('%I.%I', current_schema(), 'instance_access_grants')) as target) as storage`);
-  return result.rows[0]?.replay_ready ? 2 : result.rows[0]?.available ? 1 : 0;
+  return result.rows[0]?.replay_ready ? (result.rows[0]?.workspace_join_ready ? 3 : 2) : result.rows[0]?.available ? 1 : 0;
 }
 
 async function readSnapshot(client) {
@@ -841,6 +845,9 @@ async function writeSnapshot(client, snapshot, previousSnapshot) {
   const grantsStorageVersion = await instanceAccessGrantStorageVersion(client);
   if (grantsStorageVersion < 2 && JSON.stringify(snapshot.instanceAccessGrants || []) !== JSON.stringify(previousSnapshot.instanceAccessGrants || [])) {
     throw new Error('Instance access grants migration is required');
+  }
+  if (grantsStorageVersion < 3 && (snapshot.accountJoinGrants || []).some(grant => grant.workspaceGrantId)) {
+    throw new Error('Workspace join identity migration is required');
   }
   if (grantsStorageVersion >= 2) await client.query('delete from instance_access_grants');
   await client.query('delete from account_join_grants');
@@ -1010,7 +1017,8 @@ async function writeSnapshot(client, snapshot, previousSnapshot) {
   await replaceRows(
     client,
     'account_join_grants',
-    ['grant_hash', 'account_id', 'instance_id', 'intent_id', 'device_id', 'account_device_id', 'key_fingerprint', 'claim_instance', 'public_endpoint', 'request_id', 'created_at', 'expires_at', 'redeemed_at'],
+    ['grant_hash', 'account_id', 'instance_id', 'intent_id', 'device_id', 'account_device_id', 'key_fingerprint', 'claim_instance', 'public_endpoint', 'request_id', 'created_at', 'expires_at', 'redeemed_at',
+      ...(grantsStorageVersion >= 3 ? ['workspace_grant_id'] : [])],
     snapshot.accountJoinGrants || [],
     accountJoinGrantToRow,
   );

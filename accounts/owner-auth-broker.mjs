@@ -2557,6 +2557,7 @@ export function createOwnerAuthBroker({
         instanceId: intent.instanceId, intentId, deviceId, accountDeviceId: authenticated.device.deviceId,
         keyFingerprint: devicePublicKeyFingerprint,
         claimInstance: !binding || reenrolling,
+        ...(workspaceAccess ? { workspaceGrantId: workspaceAccess.grant.grantId } : {}),
         publicEndpoint: intent.publicEndpoint || '',
         requestId, createdAt: now, expiresAt, redeemedAt: '',
       });
@@ -2716,7 +2717,11 @@ export function createOwnerAuthBroker({
           binding = getInstanceBindings(draft).find((item) => item.instanceId === instance.instanceId);
         }
         if (binding.accountId !== accountId) {
-          throw createError('owner_auth_binding_mismatch', 'Account does not match the target instance.', 403);
+          const access = resolveInstanceWorkspaceAccess(draft, { instanceId: instance.instanceId, accountId });
+          if (!grant || grant.claimInstance || !access || access.kind !== 'workspace'
+            || grant.workspaceGrantId !== access.grant.grantId || binding.instanceKeyFingerprint !== instance.keyFingerprint) {
+            throw createError('owner_auth_binding_mismatch', 'Account does not match the target instance.', 403);
+          }
         }
         const now = nowIso(clock);
         if (grant) {
@@ -2764,6 +2769,26 @@ export function createOwnerAuthBroker({
         intent.completionRequestId = requestId;
         intent.completedAt = now;
       }
+      // A shared grant must still be the exact one used for this join, even on
+      // an idempotent replay. Revocation followed by a new grant never revives
+      // an already consumed authorization for another device session.
+      const finalBinding = getInstanceBindings(draft).find(item => item.instanceId === instance.instanceId && !item.revokedAt);
+      let workspace = null;
+      const recordedSharedGrant = getAccountJoinGrants(draft).find(item => item.intentId === intentId
+        && item.accountId === intent.accountId && item.redeemedAt && item.workspaceGrantId);
+      if (recordedSharedGrant || (finalBinding && finalBinding.accountId !== intent.accountId)) {
+        const access = resolveInstanceWorkspaceAccess(draft, { instanceId: instance.instanceId, accountId: intent.accountId });
+        const usedGrant = accountJoinGrant && getAccountJoinGrants(draft).find(item => item.grantHash === hashSecret(accountJoinGrant)
+          && item.intentId === intentId && item.accountId === intent.accountId && item.instanceId === instance.instanceId
+          && item.deviceId === intent.deviceId && item.keyFingerprint === intent.devicePublicKeyFingerprint && item.redeemedAt);
+        if (!access || access.kind !== 'workspace' || !usedGrant || usedGrant !== recordedSharedGrant
+          || usedGrant.workspaceGrantId !== access.grant.grantId || finalBinding?.instanceKeyFingerprint !== instance.keyFingerprint) {
+          throw createError('owner_auth_binding_mismatch', 'Account does not match the target instance.', 403);
+        }
+        workspace = access;
+      } else if (!finalBinding) {
+        throw createError('owner_auth_binding_revoked', 'This instance binding has been revoked.', 403);
+      }
       const nowSeconds = Math.floor(clock() / 1000);
       const claims = {
         iss: trimString(issuer) || 'agentoc-accounts',
@@ -2771,6 +2796,7 @@ export function createOwnerAuthBroker({
         sub: intent.accountId,
         ...entitlementClaims(draft, intent.accountId, clock(), 'phone', resolveEntitlement),
         purpose: 'account_join',
+        ...(workspace ? { workspaceAccess: { ownerAccountId: workspace.binding.accountId, grantId: workspace.grant.grantId } } : {}),
         tx: requestId,
         intentId,
         deviceId: intent.deviceId,
@@ -2781,8 +2807,9 @@ export function createOwnerAuthBroker({
       };
       return {
         claims, fresh: !wasCompleted,
-        completion: authorityCompletion('account_join', intentId, { instance, accountId: intent.accountId,
-          sourceNonce: [intent.nonceHash, requestId], deviceId: intent.deviceId, deviceFingerprint: intent.devicePublicKeyFingerprint }),
+        completion: authorityCompletion('account_join', intentId, { instance, accountId: workspace?.binding.accountId || intent.accountId,
+          sourceNonce: workspace ? [intent.nonceHash, requestId, intent.accountId, workspace.grant.grantId] : [intent.nonceHash, requestId],
+          deviceId: intent.deviceId, deviceFingerprint: intent.devicePublicKeyFingerprint }),
         response: { expiresAt: new Date((nowSeconds + 60) * 1000).toISOString(), deviceState: 'bound',
           deviceId: intent.deviceId, accountId: intent.accountId, lastSeenAt: intent.completedAt, replayed: wasCompleted },
       };
