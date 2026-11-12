@@ -42,7 +42,7 @@ import { getTurnConnectionLeases, resolveAccountEntitlement, effectiveDeviceKind
 import { prepareTurnHandoff, commitTurnHandoff, expireTurnHandoffs } from './turn-handoff-policy.mjs';
 import { issueTurnBrokerCapability } from '../lib/turn-broker-capability.mjs';
 import { assertAccountNotDeleting } from './account-deletion-policy.mjs';
-import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from './instance-access-grants.mjs';
+import { issueInstanceAccessGrant, resolveInstanceWorkspaceAccess, revokeInstanceAccessGrant } from './instance-access-grants.mjs';
 import { isTurnLeaseId, matchesTurnLeasePair, createTurnOperationRequestId, canAdmitTurnLeaseId, pruneTurnLeases,
   turnLeaseObservedAt, turnLeasePairClock } from '../lib/turn-lease-identity.mjs';
 import {
@@ -4205,7 +4205,8 @@ export function createOwnerAuthBroker({
       const bindings = getInstanceBindings(draft);
       const devices = getDevices(draft);
       const instances = bindings
-        .filter((binding) => binding.accountId === accountId && !binding.revokedAt)
+        .filter((binding) => !binding.revokedAt && (binding.accountId === accountId ||
+          resolveInstanceWorkspaceAccess(draft, { instanceId: binding.instanceId, accountId })?.kind === 'workspace'))
         .map((binding) => {
           const device = devices.find((entry) => entry.instanceId === binding.instanceId && entry.accountId === accountId);
           const rendezvousReady = hasRendezvousIdentity(binding);
