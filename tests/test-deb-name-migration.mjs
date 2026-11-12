@@ -23,6 +23,10 @@ fi
 exit 0
 EOF
 chmod +x /tmp/old/DEBIAN/preinst /tmp/old/DEBIAN/prerm /tmp/old/DEBIAN/postrm
+mkdir -p /run/systemd/system /tmp/fake-systemctl
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> /tmp/systemctl-events\nexit 0\n' > /tmp/fake-systemctl/systemctl
+chmod +x /tmp/fake-systemctl/systemctl
+PATH="/tmp/fake-systemctl:$PATH"; export PATH
 for p in old new; do dpkg-deb --build /tmp/$p /tmp/$p.deb >/dev/null; done
 dpkg -i /tmp/old.deb >/dev/null
 mkdir -p /var/lib/agentoc/config
@@ -32,11 +36,16 @@ touch /tmp/block-migration
 if dpkg --force-confold -i /tmp/new.deb >/tmp/blocked-output 2>&1; then echo 'guard was bypassed' >&2; exit 1; fi
 [ "$(cat /etc/ragent-qa/config)" = user-custom ]
 [ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' agentoc)" = 'ii ' ]
+[ ! -e /tmp/systemctl-events ]
 rm /tmp/block-migration
 dpkg --force-confold -i /tmp/new.deb >/dev/null
 [ "$(cat /etc/ragent-qa/config)" = user-custom ]
 [ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' ragent)" = 'ii ' ]
 [ "$(wc -l < /tmp/checks)" -eq 2 ]
+grep -Fxq 'stop agentoc.service' /tmp/systemctl-events
+if grep -Fxq 'stop agentoc-runners.slice' /tmp/systemctl-events; then echo 'migration stopped active detached runs' >&2; exit 1; fi
+/tmp/old/DEBIAN/prerm remove
+grep -Fxq 'stop agentoc-runners.slice' /tmp/systemctl-events
 mkdir -p /tmp/fakebin
 printf '#!/bin/sh\nprintf "%%s" "$REPLACEMENT_STATUS"\n' > /tmp/fakebin/dpkg-query
 chmod +x /tmp/fakebin/dpkg-query

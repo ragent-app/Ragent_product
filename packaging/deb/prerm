@@ -5,6 +5,7 @@ set -eu
 # Run the installed upgrade guard before stopping anything when the new Ragent
 # package replaces this transitional package. This guard must ship in an
 # AgentoC upgrade before the renamed package is installed.
+rename_migration=0
 if [ "${1:-}" = remove ] && [ "${2:-}" = in-favour ] && [ "${3:-}" = ragent ]; then
   installed_preinst=/var/lib/dpkg/info/agentoc.preinst
   if [ ! -x "$installed_preinst" ]; then
@@ -12,6 +13,7 @@ if [ "${1:-}" = remove ] && [ "${2:-}" = in-favour ] && [ "${3:-}" = ragent ]; t
     exit 1
   fi
   "$installed_preinst" upgrade
+  rename_migration=1
 fi
 
 # A removed executable must not leave its service or detached Runs alive.
@@ -43,7 +45,9 @@ if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
     stop_unit agentoc-runner-supervisor.service
     # Runs are detached transient units in this dedicated slice, so stopping
     # the brokers alone does not terminate active provider processes.
-    stop_unit agentoc-runners.slice
+    # Upgrade preparation has already verified independent active Runs. A
+    # package-name migration must not terminate those detached processes.
+    if [ "$rename_migration" -ne 1 ]; then stop_unit agentoc-runners.slice; fi
     stop_unit agentoc-privileged-executor.service
   fi
   if [ -x /usr/lib/agentoc/retire-legacy-cc-switch ]; then
