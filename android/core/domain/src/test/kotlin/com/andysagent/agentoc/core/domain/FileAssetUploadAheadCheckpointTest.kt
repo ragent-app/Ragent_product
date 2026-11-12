@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
+import java.io.IOException
 import java.security.MessageDigest
 import kotlin.test.*
 
@@ -16,11 +17,12 @@ class FileAssetUploadAheadCheckpointTest {
     private val input = FileUploadInput("ahead-request", "fixture.bin", "application/octet-stream", data.size.toLong(), sha)
     private val assetId = "fasset_${"a".repeat(24)}"
 
-    private inner class Fixture(val firstAck: Long = chunk.toLong() * 2) : AgentoCTransport {
+    private inner class Fixture(val firstAck: Long = chunk.toLong() * 2, val loseFirstReply: Boolean = false) : AgentoCTransport {
         override val invalidations = emptyFlow<InvalidationHint>()
         override val connectionState = MutableStateFlow<RuntimeConnectionState>(RuntimeConnectionState.Connected)
         val offsets = mutableListOf<Long>()
         var ready = false
+        var checkpointOffset = 0L
         private fun asset() = buildJsonObject {
             put("id", assetId); put("sessionId", "s"); put("originalName", input.originalName)
             put("mimeType", input.mimeType); put("sizeBytes", input.sizeBytes); put("sha256", input.sha256)
@@ -33,7 +35,7 @@ class FileAssetUploadAheadCheckpointTest {
         }.toString()
         override suspend fun execute(request: ApiRequest): ApiResponse = when {
             request.path == "/api/asset-upload-contract" -> ApiResponse(200, """{"version":1,"maximumBytes":1073741824,"requestIdMaximumLength":200,"sha256Required":true,"readonlyReceiptLookup":true}""")
-            request.path.endsWith("/upload-checkpoint") -> ApiResponse(200, checkpoint(0))
+            request.path.endsWith("/upload-checkpoint") -> ApiResponse(200, checkpoint(checkpointOffset))
             request.method == "GET" -> ApiResponse(404, """{"code":"FILE_ASSET_NOT_FOUND"}""")
             request.path == "/api/assets/upload-intents" -> ApiResponse(200, buildJsonObject {
                 put("uploadContractVersion", 1); put("asset", asset())
@@ -44,6 +46,8 @@ class FileAssetUploadAheadCheckpointTest {
                 val offset = request.headers.getValue("X-Agentoc-Upload-Offset").toLong()
                 offsets += offset
                 val next = if (offset == 0L) firstAck else offset + requireNotNull(request.bodyBytes).size
+                checkpointOffset = next
+                if (offset == 0L && loseFirstReply) throw IOException("fixture reply lost after commit")
                 ApiResponse(200, checkpoint(next))
             }
             request.path.endsWith("/finalize") -> { ready = true; ApiResponse(200, buildJsonObject { put("asset", asset()) }.toString()) }
@@ -51,6 +55,13 @@ class FileAssetUploadAheadCheckpointTest {
         }
         override fun connectInvalidationSocket() = Unit
         override suspend fun close() = Unit
+    }
+
+    @Test fun lostReplyRecoversWhenAnotherSenderHasAdvancedFurther() = runTest {
+        val fixture = Fixture(loseFirstReply = true)
+        val source = ApiRequestBodySource(input.sizeBytes, input.sha256) { data.inputStream() }
+        assertTrue(FileAssetUploadClient("pc", fixture).upload("s", input, source).ready)
+        assertEquals(listOf(0L, chunk.toLong() * 2, chunk.toLong() * 3), fixture.offsets)
     }
 
     @Test fun advancesToServerCheckpointAndHashesSkippedBytes() = runTest {
