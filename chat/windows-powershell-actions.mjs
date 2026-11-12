@@ -38,6 +38,7 @@ const BUILTIN_ALIASES = new Map([
   ['ren', 'rename-item'], ['rni', 'rename-item'],
   ['rm', 'remove-item'], ['del', 'remove-item'], ['ri', 'remove-item'],
   ['echo', 'write-output'], ['write', 'write-output'], ['sort', 'sort-object'], ['ft', 'format-table'], ['fl', 'format-list'],
+  ['where', 'where-object'], ['?', 'where-object'],
 ]);
 const FILTERS = new Set(['select-object', 'sort-object', 'format-table', 'format-list', 'measure-object', 'out-null', 'out-string', 'write-output', 'get-date', 'get-location', 'get-service', 'get-process', 'get-command']);
 const SAFE_FILTER_PARAMS = new Set(['first', 'last', 'skip', 'unique', 'property', 'descending', 'width', 'line', 'name', 'displayname', 'noenumerate', 'id', 'module', 'commandtype', 'all', 'listimported', 'includeusername', 'autosize']);
@@ -567,6 +568,18 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       }
       actions.push(...directoryActions, ...git.actions);
       continue;
+    }
+    if (program === 'where-object') {
+      // The comparison form only examines pipeline objects. Do not accept a
+      // script block, dynamic value, or abbreviated/unknown operator here.
+      const [, property, operator, value] = entry.elements;
+      const comparisons = /^(?:i|c)?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin)$/i;
+      if (entry.pipelineInput !== true || entry.elements.length !== 4 || property?.kind !== 'literal' ||
+          !/^[\w]+$/.test(property.value) || operator?.kind !== 'parameter' || operator.argumentType ||
+          !comparisons.test(operator.name || '') || value?.kind !== 'literal') {
+        return { complete: false, actions, reason: 'unsupported Where-Object predicate' };
+      }
+      actions.push({ kind: 'read', program, target: null }); continue;
     }
     if (FILTERS.has(program)) {
       const filterArgs = parseArguments(entry.elements, SAFE_FILTER_PARAMS, SAFE_FILTER_SWITCHES);
