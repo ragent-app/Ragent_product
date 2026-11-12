@@ -256,6 +256,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 - 已构建并安装 Windows 提交 `1a24428d`，公开版本 `0.0.1`、内部 MSI 版本 `0.0.73`，EXE SHA-256 `bbbac0d6b3f4e55f91f5f19df8ed296541c8f642bc6266c29e954a59f020adf5`；安装返回 0、owner 激活 ready，安装的 CLI 授权文件与源码提交一致。使用安装目录中的真实 CLI 客户端代码、替身授权和 HTTP 的 12 项测试通过，覆盖连接前错误有限重试及写请求不重放；未在真实系统中强制复现这两种原生错误。正式服务搭配真实 Codex 和本地模拟模型的 full-auto 冒烟中，会话外普通文件登记返回资产 ID，隔离敏感目录删除自动拒绝、文件完整，临时会话及 provider 已清理。该结果不能证明通道错误根因修复或估计生产审批率。
 - 当前 Linux 与 macOS 已安装的风险分类、风险策略、Claude 工具策略以及 Claude/Codex 适配器五个文件，与 `a270ecf7` 的 Git 对象一致；两端 sidecar 相同但与该提交不同，差异包含 Windows 专用桥、Ragent 环境变量别名和其他运行时变更，因此不把文件部分一致视为完整版本一致。此前两台真实实例分别通过两种 harness 和两种模式的指定普通读取/危险删除验收。
 
+- Windows PowerShell 现在可自动处理独立输出表达式中对当前运行时本地地址、项目目录和会话 ID 的字符串插值；任意环境变量、凭据、子表达式、用作命令参数的动态插值仍按原风险流程处理，后续命令和重定向继续逐项检查。一条历史普通上下文输出在 recommended/full-auto 的只读回放中均由拦截变为自动通过，未执行历史命令。PowerShell 策略回归通过，真实 Claude 和 Codex CLI 两种模式在本地模拟模型下输出隔离上下文并完成普通读取；未使用官方额度。该修改尚未部署，单条记录不能估计生产审批频率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)

@@ -133,7 +133,7 @@ let readCommand = readCase === 'conditional'
     ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(outsideReadRoot) + path.sep).replaceAll("'", "''")}' + '${path.basename(outsideReadRoot).replaceAll("'", "''")}')` : `'${outsideReadRoot.replaceAll("'", "''")}'`}; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
     : `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
   : readCase === 'conditional-write' ? `if (${process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? '-not (' : ''}Test-Path -LiteralPath '${(artifact + (process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? '.missing' : '')).replaceAll("'", "''")}'${process.env.AGENTOC_QA_TEST_PATH_TYPE === '1' ? ' -PathType Leaf' : ''}${process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? ')' : ''}) { Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
-  : readCase === 'stderr-null' ? `Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}' 2>$null`
+  : readCase === 'stderr-null' ? `${process.env.AGENTOC_QA_CONTEXT_OUTPUT === '1' ? '"context=$env:AGENTOC_SESSION_ID"; ' : ''}Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}' 2>$null`
   : readCase === 'select-string' ? `Select-String ${process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? path.join(outsideReadRoot, '*.md') : artifact).replaceAll("'", "''")}' -Pattern 'local read fixture'`
   : readCase === 'output-filters' ? `Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${artifact.replaceAll("'", "''")}' | Format-List Name,Length | Out-String`
   : readCase === 'where-filter' ? `Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like '*.md') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like '*.md' }" : "Name -like '*.md'"} | Select-Object Name | Out-String`
@@ -149,7 +149,7 @@ const guidanceAction = process.env.AGENTOC_QA_CLAUDE_ELEVATION_REGISTRY === '1'
 const guidanceScript = `${guidanceAction}; [System.IO.File]::WriteAllText('${guidanceMarker.replaceAll("'", "''")}', 'unexpected')`;
 const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(guidanceScript)}`;
 let requests = 0;
-let preflights = 0; let submissions = 0; let toolResultObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
+let preflights = 0; let submissions = 0; let toolResultObserved = false; let contextOutputObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
 let cliReads = 0;
 const server = createServer((req, res) => {
   if (phoneQueueCase && req.url.startsWith('/api/')) {
@@ -221,6 +221,7 @@ const server = createServer((req, res) => {
     const tool = requests === 1 || ((cwdChangeCase || taskFollowup) && requests === 2);
     const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || ['asset', 'create'].includes(cliReadCase) ? 'Bash' : 'Write');
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
+    if (!tool && process.env.AGENTOC_QA_CONTEXT_OUTPUT === '1') contextOutputObserved ||= JSON.stringify(request.messages || []).includes('context=fixture-context');
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('ragent_request_actions');
@@ -299,6 +300,7 @@ if (cliReadCase) {
   gateState.sessionControlReadAvailable = true; gateState.sessionControlReadRunId = run.id;
 }
 if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
+if (process.env.AGENTOC_QA_CONTEXT_OUTPUT === '1') env.AGENTOC_SESSION_ID = 'fixture-context';
 if (nativePowerShell) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
 if (guidanceCase) {
   gateState.windowsManagedActionChannel = true;
@@ -438,6 +440,7 @@ try {
     if (readCase === 'git-c-outside' && askAll) assert.equal(approvals, 1, 'ask rule must route the outside Git query through Ragent');
     if (readCase === 'relative-file-tool') assert.equal(approvals, 1, 'fixture must exercise the file-tool approval callback');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
+    if (process.env.AGENTOC_QA_CONTEXT_OUTPUT === '1') { assert.ok(contextOutputObserved, 'actual Claude receives the context output'); assert.equal(approvals, 1); }
     if (cwdChangeCase) assert.ok(process.platform === 'win32' ? cwdMarkerCount >= 1 && rootMarkerCount >= 1 : cwdMarkerCount >= 2,
       'both commands must succeed with the provider working-directory behavior');
     if (cwdChangeCase && process.platform !== 'win32') assert.equal(gateState.cwd, await realpath(path.join(root, 'child')));

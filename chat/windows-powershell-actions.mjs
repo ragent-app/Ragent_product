@@ -571,7 +571,7 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
       if (reason) return { complete: false, actions, reason };
       continue;
     }
-    if (!['StringConstantExpressionAst', 'ConstantExpressionAst'].includes(expression.expressionType)) return { complete: false, actions, reason: 'dynamic or unsupported expression' };
+    if (!['StringConstantExpressionAst', 'ConstantExpressionAst'].includes(expression.expressionType) && !(expression.expressionType === 'ExpandableStringExpressionAst' && expression.safeContextExpansion === true)) return { complete: false, actions, reason: 'dynamic or unsupported expression' };
     const reason = await appendRedirects(expression, 'literal');
     if (reason) return { complete: false, actions, reason };
     actions.push({ kind: 'read', program: 'literal', target: null });

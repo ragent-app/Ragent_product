@@ -129,6 +129,13 @@ for (const type of ['Any', 'Container', 'Leaf']) {
   assert.equal((await inspect(`if (Test-Path -LiteralPath 'readme.txt' -PathType ${type}) { Get-Item -LiteralPath 'readme.txt' | Select-Object Name | Format-List | Out-String }`)).decision, 'allow', `literal path type ${type}`);
 }
 assert.equal((await inspect("Test-Path -LiteralPath 'readme.txt' -PathType Unknown")).decision, 'review');
+for (const name of ['AGENTOC_CHAT_BASE_URL', 'AGENTOC_PROJECT_ROOT', 'AGENTOC_SESSION_ID', 'RAGENT_CHAT_BASE_URL', 'RAGENT_PROJECT_ROOT', 'RAGENT_SESSION_ID']) {
+  assert.equal((await inspect(`"value=$env:${name}"`)).decision, 'allow', `context output ${name}`);
+}
+for (const command of ['"value=$env:AGENTOC_SESSION_CONTROL_TOKEN"', '"$env:AGENTOC_SESSION_ID $env:SECRET"', '"value=$(Get-Content ..\\protected\\secret)"', 'Write-Output "$env:AGENTOC_SESSION_ID"', '"$env:AGENTOC_SESSION_ID"; Get-Content ..\\protected\\secret']) {
+  assert.equal((await inspect(command)).decision, 'review', `dynamic or sensitive use: ${command}`);
+}
+
 for (const op of ['-not', '!']) {
   assert.equal((await inspect(`if (${op} (Test-Path -LiteralPath 'missing.txt')) { New-Item -ItemType File -Path 'missing.txt' }`)).decision, 'allow', `logical negation ${op}`);
   assert.equal((await inspect(`if (${op} (Test-Path -LiteralPath 'readme.txt')) { Get-Content -LiteralPath '..\\protected\\secret' }`)).decision, 'review', 'protected branch remains gated');

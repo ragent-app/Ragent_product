@@ -134,6 +134,21 @@ function Test-InSafeWhereBlock($node) {
   }
   return $false
 }
+# Expansions are safe only as standalone output expressions and only for
+# non-secret context values supplied to the current agent process.
+function Test-SafeContextExpansion($node) {
+  if ($node -isnot [System.Management.Automation.Language.ExpandableStringExpressionAst] -or
+      $node.Parent -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
+      $node.Parent.Expression -ne $node -or @($node.NestedExpressions).Count -eq 0) { return $false }
+  foreach ($part in @($node.NestedExpressions)) {
+    if ($part -isnot [System.Management.Automation.Language.VariableExpressionAst] -or $part.Splatted -or
+        [string]$part.VariablePath.UserPath -inotmatch '^env:(?:AGENTOC|RAGENT)_(?:CHAT_BASE_URL|PROJECT_ROOT|SESSION_ID)$') { return $false }
+  }
+  return $true
+}
+function Test-InSafeContextExpansion($node) {
+  return $node -is [System.Management.Automation.Language.VariableExpressionAst] -and (Test-SafeContextExpansion $node.Parent)
+}
 # Resolve leading literal path assignments only. No variable is executed or
 # expanded here; later file policy still checks every substituted target.
 $boundPaths = @{}
@@ -222,11 +237,11 @@ $commands = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Lang
   @{ name = $command.GetCommandName(); elements = $elements; invocation = [string]$command.InvocationOperator; redirections = @($command.Redirections).Count; redirectFacts = $redirectFacts; pipelineInput = $hasPipelineInput }
 })
 $expressions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandExpressionAst] -and -not (Test-InSafeWhereBlock $n) -and -not (Test-InBoundAssignment $n) }, $true) | ForEach-Object {
-  @{ expressionType = $_.Expression.GetType().Name; safeLogicalNegation = ($_.Expression -is [System.Management.Automation.Language.UnaryExpressionAst] -and $_.Expression.TokenKind -in @('Not','Exclaim') -and $_.Expression.Child -is [System.Management.Automation.Language.ParenExpressionAst]); staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
+  @{ expressionType = $_.Expression.GetType().Name; safeContextExpansion = (Test-SafeContextExpansion $_.Expression); safeLogicalNegation = ($_.Expression -is [System.Management.Automation.Language.UnaryExpressionAst] -and $_.Expression.TokenKind -in @('Not','Exclaim') -and $_.Expression.Child -is [System.Management.Automation.Language.ParenExpressionAst]); staticFileCall = (Get-SafeStaticFileCall $_.Expression); redirections = @($_.Redirections).Count; redirectFacts = @(Get-RedirectionFacts $_) }
 })
 $dynamicNodes = @($ast.FindAll({ param($n)
   -not (Test-InSafeWhereBlock $n) -and (
-  (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n) -and -not (Test-NullRedirection $n) -and -not (Test-BoundPathVariable $n)) -or
+  (($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and -not (Test-ConfirmFalseArgument $n) -and -not (Test-NullRedirection $n) -and -not (Test-BoundPathVariable $n) -and -not (Test-InSafeContextExpansion $n)) -or
   ($n -is [System.Management.Automation.Language.SubExpressionAst]) -or
   ($n -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) -or
   (($n -is [System.Management.Automation.Language.AssignmentStatementAst]) -and -not $boundAssignmentOffsets.ContainsKey([int]$n.Extent.StartOffset)) -or
@@ -236,7 +251,7 @@ $dynamicNodes = @($ast.FindAll({ param($n)
   (($n.GetType().Name -eq 'MemberExpressionAst') -and
     -not ((Get-SafeStaticEncoding $n) -and $null -ne (Get-SafeStaticFileCall $n.Parent))) -or
   ($n.GetType().Name -in @('FunctionDefinitionAst','TypeDefinitionAst','IfStatementAst','ForStatementAst','ForEachStatementAst','WhileStatementAst','DoWhileStatementAst','DoUntilStatementAst','TryStatementAst','TrapStatementAst','UsingStatementAst','ExitStatementAst','ThrowStatementAst','DataStatementAst')) -or
-  ($n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and @($n.NestedExpressions).Count -gt 0))
+  ($n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and @($n.NestedExpressions).Count -gt 0 -and -not (Test-SafeContextExpansion $n)))
 }, $true) | ForEach-Object { $_.GetType().Name })
 $errorMessages = @($errors | ForEach-Object { $_.Message })
 @{ commands = $commands; expressions = $expressions; dynamicNodes = $dynamicNodes; errors = $errorMessages; chainOperators = $chainOperators; assignmentCount = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)).Count; psVersion = $PSVersionTable.PSVersion.ToString() } | ConvertTo-Json -Depth 12 -Compress
