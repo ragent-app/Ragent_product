@@ -26,7 +26,9 @@ const taskToolCase = process.env.AGENTOC_QA_CLAUDE_TASK_TOOL || '';
 if (taskToolCase && (!askAll || !['TaskList', 'TaskCreate', 'TaskGet', 'TaskUpdate'].includes(taskToolCase))) throw new Error('task fixture requires an explicit supported tool and command gate');
 const taskFollowup = ['TaskGet', 'TaskUpdate'].includes(taskToolCase);
 const cliReadCase = process.env.AGENTOC_QA_CLAUDE_CLI_READ || '';
-if (cliReadCase && (!askAll || !['list', 'session', 'source', 'help'].includes(cliReadCase))) throw new Error('invalid CLI read fixture');
+const assetPrefix = process.env.AGENTOC_QA_ASSET_PREFIX || 'msys';
+if (cliReadCase === 'asset' && !['agentoc', 'node', 'msys'].includes(assetPrefix)) throw new Error('invalid asset CLI prefix');
+if (cliReadCase && (!askAll || !['list', 'session', 'source', 'help', 'asset'].includes(cliReadCase))) throw new Error('invalid CLI read fixture');
 if (cliReadCase) process.env.CHAT_PORT = '18669';
 process.env.AGENTOC_INSTANCE_ROOT = instance;
 process.env.AGENTOC_CONFIG_DIR = path.join(instance, 'config');
@@ -76,7 +78,7 @@ if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDel
 if (readCase && (!['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'cd-rg', 'cwd-change', 'cwd-change-rg', 'relative-write', 'unconditional-file-delete', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-log-format', 'git-diff-file', 'git-c-outside', 'conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy'].includes(readCase) || (['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy'].includes(readCase) && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 const cwdChangeCase = ['cwd-change', 'cwd-change-rg'].includes(readCase);
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
-if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
+if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
 const safeDeleteHelper = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
 if (deleteCase && !path.isAbsolute(safeDeleteHelper || '')) throw new Error('absolute safe deletion helper required');
 const installCommand = `winget ${process.env.AGENTOC_QA_CLAUDE_INSTALL_ALIAS === '1' ? 'add' : 'install'} --${process.env.AGENTOC_QA_CLAUDE_INSTALL_QUERY === '1' ? 'query' : 'id'}=Vendor.App --source=winget --scope=user`;
@@ -88,7 +90,7 @@ const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-
 const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-file-')) : '';
 const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-git-')) : '';
 if (outsideGitRoot) { execFileSync('git', ['init', '-q'], { cwd: outsideGitRoot, windowsHide: true }); await writeFile(path.join(outsideGitRoot, 'fixture.md'), 'outside git fixture\n'); }
-const outsideReadRoot = readCase === 'relative-file-tool' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
+const outsideReadRoot = readCase === 'relative-file-tool' || cliReadCase === 'asset' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
 if (outsideReadRoot) await writeFile(path.join(outsideReadRoot, 'fixture.md'), 'local read fixture\n');
 const deleteTarget = path.join(outsideCase ? outsideRoot : protectedCase ? protectedRoot : root, unicodeFixture ? '构建 输出' : 'delete-fixture');
 const keepFile = path.join(root, 'keep-fixture.txt');
@@ -103,7 +105,8 @@ const bashTarget = deleteTarget.replace(/^([A-Za-z]):\\/, (_, drive) => `/${driv
 const deleteCommand = nativePowerShell
   ? `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`
   : `rm -rf '${bashTarget.replace(/'/g, "'\\''")}'`;
-const artifact = path.join(outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
+const artifact = path.join(cliReadCase === 'asset' ? outsideReadRoot : outsideFileCase ? outsideFileRoot : protectedCase ? protectedRoot : root, 'fixture.md');
+if (cliReadCase === 'asset') await writeFile(artifact, 'isolated asset fixture\n');
 const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
 if (readCase) await writeFile(artifact, readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
 if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); if (process.env.AGENTOC_QA_RG_HIDDEN === '1') await writeFile(path.join(root, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n'); }
@@ -185,6 +188,10 @@ const server = createServer((req, res) => {
   req.on('data', (chunk) => { body += chunk; if (body.length > 4_000_000) req.destroy(); });
   req.on('end', () => {
     let request; try { request = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
+    if (cliReadCase === 'asset' && req.method === 'POST' && req.url === '/api/sessions/claude-local-fixture/assets') {
+      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture' || request.localPath !== artifact) { res.writeHead(403).end(); return; }
+      cliReads++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ asset: { assetId: 'fixture-asset' } })); return;
+    }
     if (installCase && req.url === '/api/internal/approved-actions/propose' && req.method === 'POST') {
       if (req.headers['x-agentoc-approved-action-token'] !== 'fixture-token' || request.actions?.[0]?.command !== installCommand || request.runId !== run.id) { res.writeHead(400).end(); return; }
       if (request.autoInstallPreflight === true) { preflights++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ kind: 'automatic_install_preflight', ready: true })); }
@@ -203,14 +210,14 @@ const server = createServer((req, res) => {
       if (taskToolCase && requests > 1) process.stderr.write(`[fixture] task result: ${JSON.stringify((request.messages || []).flatMap(message => Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_result').map(block => block.content) : []))}\n`);
     }
     const tool = requests === 1 || ((cwdChangeCase || taskFollowup) && requests === 2);
-    const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase ? 'Bash' : 'Write');
+    const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset' ? 'Bash' : 'Write');
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('agentoc_request_actions');
     if (!tool && phoneQueueCase) phoneToolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item => item.type === 'tool_result'));
     if (!tool && cliReadCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item =>
-      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && JSON.stringify(item.content).includes(cliReadCase === 'help' ? 'agentoc trigger <command>' : 'fixture-trigger')));
+      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && JSON.stringify(item.content).includes(cliReadCase === 'help' ? 'agentoc trigger <command>' : cliReadCase === 'asset' ? 'fixture-asset' : 'fixture-trigger')));
     if (!tool && taskToolCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content)
       && message.content.some(item => item.type === 'tool_result' && item.tool_use_id === `toolu_fixture_${taskFollowup ? 2 : 1}` && item.is_error !== true
         && (!['TaskCreate', 'TaskGet'].includes(taskToolCase) || JSON.stringify(item.content).includes('Fixture task'))));
@@ -233,7 +240,7 @@ const server = createServer((req, res) => {
       const taskResult = taskFollowup && requests === 2 ? JSON.stringify(request.messages || []).match(/Task #(\d+) created successfully/) : null;
       if (taskFollowup && requests === 2 && !taskResult) { res.writeHead(400).end(); return; }
       const cliSuffix = cliReadCase === 'session' ? '--session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'source' ? '--source-session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'help' ? '--help' : '--json';
-      const input = JSON.stringify(cliReadCase ? { command: `node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
+      const input = JSON.stringify(cliReadCase === 'asset' ? { command: `${assetPrefix === 'agentoc' ? 'agentoc' : `${assetPrefix === 'msys' ? 'MSYS_NO_PATHCONV=1 ' : ''}node "$AGENTOC_PROJECT_ROOT/cli.js"`} api POST "/api/sessions/$AGENTOC_SESSION_ID/assets" --body ${bashQuote(JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }))}`, description: 'Publish isolated fixture' } : cliReadCase ? { command: `node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
         : toolName === 'TaskGet' ? { taskId: taskResult[1] } : toolName === 'TaskUpdate' ? { taskId: taskResult[1], status: 'completed' } : installCase ? { command: installCommand, description: 'Fixture installation' } : uninstallCase
         ? { command: 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact', description: 'Fixture uninstall' } : deleteCase
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
@@ -273,14 +280,15 @@ if (cliReadCase) {
   const source = process.env.AGENTOC_TEST_INSTALLED_PAYLOAD, helper = process.env.AGENTOC_TEST_CLI_READ_BINARY;
   if (!path.isAbsolute(source || '') || !path.isAbsolute(helper || '')) throw new Error('CLI fixture requires absolute isolated payload and helper inputs');
   const payload = path.join(root, 'cli-payload'); await mkdir(path.join(payload, 'bin'), { recursive: true });
-  await Promise.all(['node.exe', 'cli.js', 'package.json'].map(file => copyFile(path.join(source, file), path.join(payload, file))));
+  await copyFile(path.join(source, 'node.exe'), path.join(payload, 'node.exe'));
+  await Promise.all(['cli.js', 'package.json'].map(file => copyFile(path.join(source, file), path.join(payload, file))));
   await cp(path.join(source, 'lib'), path.join(payload, 'lib'), { recursive: true });
   cliReadHelperPath = path.join(payload, 'bin', 'agentoc-cli-read-bridge.exe'); await copyFile(helper, cliReadHelperPath);
   Object.assign(env, { AGENTOC_SESSION_ID: 'claude-local-fixture', AGENTOC_SESSION_CONTROL_SESSION_ID: 'claude-local-fixture',
     AGENTOC_SESSION_CONTROL_RUN_ID: run.id, AGENTOC_SESSION_CONTROL_TURN_ID: 'fixture-turn', AGENTOC_SESSION_CONTROL_TOKEN: 'fixture-token' });
   gateState.sessionControlReadAvailable = true; gateState.sessionControlReadRunId = run.id;
 }
-if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase) env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
+if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
 if (nativePowerShell) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
 if (guidanceCase) {
   gateState.windowsManagedActionChannel = true;
@@ -429,7 +437,7 @@ try {
   else if (readCase === 'git-status' && approvals > 0) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'a surfaced read-only Git request must be automatically approved');
   else if (!reviewCase && (!readCase || approvals) && readCase !== 'git-status') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'actual sidecar must persist the automatic decision');
   else if (reviewCase && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true), 'unattended protected write must be denied');
-  console.log(`claude-windows-local-gate: ${mode} real CLI${nativePowerShell ? ' native PowerShell' : ''} ${cliReadCase ? `trigger ${cliReadCase} completed` : taskToolCase ? `${taskToolCase} completed` : installCase ? 'controlled install reached mock service' : reviewCase ? 'dangerous operation denied' : deleteCase ? 'handle-bound fixture deletion completed' : guidanceCase ? 'managed executor guidance received' : readCase ? `${readCase} ${approvals ? 'approval observed' : 'read completed without approval request'}` : dotnetCase ? 'trusted PowerShell wrapped file write completed' : outsideFileCase ? 'outside-workspace file write completed' : 'file approval completed'}`);
+  console.log(`claude-windows-local-gate: ${mode} real CLI${nativePowerShell ? ' native PowerShell' : ''} ${cliReadCase ? `${cliReadCase === 'asset' ? 'asset publication' : `trigger ${cliReadCase}`} completed` : taskToolCase ? `${taskToolCase} completed` : installCase ? 'controlled install reached mock service' : reviewCase ? 'dangerous operation denied' : deleteCase ? 'handle-bound fixture deletion completed' : guidanceCase ? 'managed executor guidance received' : readCase ? `${readCase} ${approvals ? 'approval observed' : 'read completed without approval request'}` : dotnetCase ? 'trusted PowerShell wrapped file write completed' : outsideFileCase ? 'outside-workspace file write completed' : 'file approval completed'}`);
 } finally {
   child.kill(); output.close(); await new Promise((resolve) => server.close(resolve));
   const parent = path.resolve(os.tmpdir()).toLowerCase();

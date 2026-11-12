@@ -1,9 +1,11 @@
-// A fixed, non-elevated entry point for approved read-only AgentoC CLI calls.
+// A fixed, non-elevated entry point for approved scoped AgentoC CLI calls.
 // It does not evaluate shell text and launches the installed CLI with a
 // restricted environment so Node startup hooks cannot change the operation.
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -72,7 +74,42 @@ func childEnvironment(env []string, base string) ([]string, error) {
 }
 
 func run(args []string) error {
-	base, jsonOutput, err := readArguments(args)
+	asset := len(args) == 3 && args[0] == "asset-publish"
+	var body string
+	if asset {
+		decoded, err := base64.RawURLEncoding.DecodeString(args[2])
+		if err != nil || len(decoded) == 0 || len(decoded) > 8192 {
+			return errors.New("invalid asset payload")
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(decoded, &fields) != nil || fields == nil {
+			return errors.New("invalid asset payload")
+		}
+		for key, value := range fields {
+			if key != "localPath" && key != "originalName" && key != "mimeType" && key != "renderAs" && key != "text" {
+				return errors.New("unsupported asset field")
+			}
+			var text string
+			if json.Unmarshal(value, &text) != nil {
+				return errors.New("invalid asset field")
+			}
+			if key == "localPath" && (!filepath.IsAbs(text) || strings.HasPrefix(text, `\\`)) {
+				return errors.New("invalid asset path")
+			}
+			if key == "renderAs" && text != "file" {
+				return errors.New("unsupported asset rendering")
+			}
+		}
+		if _, ok := fields["localPath"]; !ok {
+			return errors.New("asset path required")
+		}
+		body = string(decoded)
+	}
+	readArgs := args
+	if asset {
+		readArgs = []string{"trigger-help", args[1]}
+	}
+	base, jsonOutput, err := readArguments(readArgs)
 	if err != nil {
 		return err
 	}
@@ -93,6 +130,13 @@ func run(args []string) error {
 		}
 	}
 	argv := []string{cli, "trigger", "list", "--base-url", base}
+	if asset {
+		session := os.Getenv("AGENTOC_SESSION_ID")
+		if session == "" || len(session) > 128 || strings.Trim(session, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
+			return errors.New("invalid session identity")
+		}
+		argv = []string{cli, "api", "POST", "/api/sessions/" + url.PathEscape(session) + "/assets", "--body", body, "--base-url", base}
+	}
 	if args[0] == "trigger-help" {
 		argv = append(argv, "--help")
 	}

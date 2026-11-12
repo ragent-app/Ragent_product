@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"os"
@@ -85,6 +86,38 @@ func TestExecutableUsesInstalledCliWithoutNodeStartupHooks(t *testing.T) {
 	}
 	if got.Hook != "" || got.Base != "http://127.0.0.1:7690" || strings.Join(got.Args, " ") != "trigger list --base-url http://127.0.0.1:7690 --json" {
 		t.Fatalf("unexpected child process: %+v", got)
+	}
+	body, _ := json.Marshal(map[string]string{"localPath": filepath.Join(root, "fixture.txt"), "text": "fixture"})
+	asset := exec.Command(helper, "asset-publish", "http://127.0.0.1:7690", base64.RawURLEncoding.EncodeToString(body))
+	asset.Env = cmd.Env
+	text, err = asset.CombinedOutput()
+	if err != nil {
+		t.Fatalf("asset helper: %v: %s", err, text)
+	}
+	if err := json.Unmarshal(text, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Hook != "" || len(got.Args) != 7 || got.Args[0] != "api" || got.Args[1] != "POST" ||
+		got.Args[2] != "/api/sessions/s/assets" || got.Args[3] != "--body" || got.Args[4] != string(body) ||
+		got.Args[5] != "--base-url" || got.Args[6] != "http://127.0.0.1:7690" {
+		t.Fatalf("unexpected asset arguments: %+v", got)
+	}
+	bad := exec.Command(helper, "asset-publish", "http://example.com:7690", base64.RawURLEncoding.EncodeToString(body))
+	bad.Env = cmd.Env
+	if err := bad.Run(); err == nil {
+		t.Fatal("remote endpoint unexpectedly accepted")
+	}
+	badBody, _ := json.Marshal(map[string]string{"localPath": filepath.Join(root, "fixture.txt"), "extra": "unexpected"})
+	bad = exec.Command(helper, "asset-publish", "http://127.0.0.1:7690", base64.RawURLEncoding.EncodeToString(badBody))
+	bad.Env = cmd.Env
+	if err := bad.Run(); err == nil {
+		t.Fatal("unknown asset field unexpectedly accepted")
+	}
+	badBody, _ = json.Marshal(map[string]string{"localPath": "relative.txt"})
+	bad = exec.Command(helper, "asset-publish", "http://127.0.0.1:7690", base64.RawURLEncoding.EncodeToString(badBody))
+	bad.Env = cmd.Env
+	if err := bad.Run(); err == nil {
+		t.Fatal("relative asset path unexpectedly accepted")
 	}
 }
 

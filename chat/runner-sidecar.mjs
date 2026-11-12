@@ -118,7 +118,7 @@ import { decideWindowsApproval } from './windows-approval-gate.mjs';
 import { buildClaudeWindowsRipgrepBridge } from './windows-ripgrep-bridge.mjs';
 import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
-import { buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
+import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
 import { verifyCodexWindowsInstallBridgeApproval } from './codex-windows-install-hook.mjs';
 import { createCodexManagedHookSetup } from './codex-managed-hook-setup.mjs';
@@ -3003,14 +3003,15 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   }
 
   const cliReadBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
-    ? await buildWindowsCliReadBridge({ approval, state, runId, port: Number(CHAT_PORT), helperPath: cliReadHelperPath }) : null;
+    ? await buildWindowsCliReadBridge({ approval, state, runId, port: Number(CHAT_PORT), helperPath: cliReadHelperPath })
+      || await buildWindowsCliAssetBridge({ approval, state, runId, port: Number(CHAT_PORT), helperPath: cliReadHelperPath }) : null;
   if (cliReadBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: cliReadBridge.updatedCommand } });
-    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled read response');
+    if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled CLI response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
       type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
-      autoApproved: true, reason: 'controlled read-only CLI operation',
+      autoApproved: true, reason: cliReadBridge.updatedCommand.includes(' asset-publish ') ? 'controlled current-session asset publication' : 'controlled read-only CLI operation',
     } });
     const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, gateDecision.risk));
     if (record) state.pendingApprovals.set(approval.approvalId, record);
