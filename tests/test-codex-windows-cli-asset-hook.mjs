@@ -41,6 +41,15 @@ try {
     assert.equal(await verifyCodexWindowsTriggerApproval({ approval: triggerApproval, state: current, runId, helperPath, port }), true);
     assert.equal(await verifyCodexWindowsTriggerApproval({ approval: { ...triggerApproval, params: { ...triggerApproval.params, turnId: 'other' } }, state: current, runId, helperPath, port }), false);
     assert.equal(await verifyCodexWindowsTriggerApproval({ approval: triggerApproval, state: { ...current, sessionControlReadAvailable: false }, runId, helperPath, port }), false);
+    for (const command of ['ragent trigger --help', 'agentoc trigger list --json']) {
+      const read = await buildCodexWindowsTriggerHookDecision({ event: { ...event, tool_input: { command } }, state: current, runId, helperPath, port });
+      assert.equal(read.hookSpecificOutput?.permissionDecision, 'allow');
+      const wrapper = [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', read.hookSpecificOutput.updatedInput.command].map(quote).join(' ');
+      const readApproval = { ...approval, params: { ...approval.params, command: wrapper } };
+      assert.equal(await verifyCodexWindowsTriggerApproval({ approval: readApproval, state: current, runId, helperPath, port }), true);
+      assert.equal(await verifyCodexWindowsTriggerApproval({ approval: { ...readApproval, params: { ...readApproval.params, command: wrapper + '; evil' } }, state: current, runId, helperPath, port }), false);
+    }
+
     assert.deepEqual(await buildCodexWindowsTriggerHookDecision({ event: { ...triggerEvent, tool_input: { command: triggerEvent.tool_input.command + ' --session other' } }, state: current, runId, helperPath, port }), {});
   }
   for (const changed of [

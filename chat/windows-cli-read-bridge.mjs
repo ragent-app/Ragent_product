@@ -96,13 +96,20 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
   if (typeof command !== 'string' || command.length > 8192) return null;
   if (params.tool_name === 'Bash') {
     const words = parseLiteralBashWords(command);
-    const args = words && ['agentoc', 'ragent'].includes(words[0]) ? staticTriggerCreate(words) : null;
-    let binary; try { binary = args && await inspect(helperPath); } catch { return null; }
-    if (!args || !binary?.isFile() || binary.isSymbolicLink()) return null;
+    const recognized = words && ['agentoc', 'ragent'].includes(words[0]);
+    const args = recognized ? staticTriggerCreate(words) : null;
+    const read = recognized && words[1] === 'trigger' && (words.length === 3 && ['--help', '-h'].includes(words[2]) || words[2] === 'list' && (words.length === 3 || words.length === 4 && ['--json', '--help', '-h'].includes(words[3])));
+    let binary; try { binary = (args || read) && await inspect(helperPath); } catch { return null; }
+    if ((!args && !read) || !binary?.isFile() || binary.isSymbolicLink()) return null;
+    const helper = helperPath.replaceAll('\\', '/').replace(/^([a-z]):/i, (_match, drive) => `/${drive.toLowerCase()}`);
+    const prefix = `'${helper.replaceAll("'", "'\\''")}'`;
+    if (read) {
+      const help = words.includes('--help') || words.includes('-h');
+      return { updatedCommand: `${prefix} ${help ? 'trigger-help' : 'trigger-list'} 'http://127.0.0.1:${port}'${words.includes('--json') ? ' --json' : ''}` };
+    }
     const encoded = Buffer.from(JSON.stringify(args), 'utf8').toString('base64url');
     if (encoded.length > 10924) return null;
-    const helper = helperPath.replaceAll('\\', '/').replace(/^([a-z]):/i, (_match, drive) => `/${drive.toLowerCase()}`);
-    return { updatedCommand: `'${helper.replaceAll("'", "'\\''")}' trigger-create 'http://127.0.0.1:${port}' '${encoded}'` };
+    return { updatedCommand: `${prefix} trigger-create 'http://127.0.0.1:${port}' '${encoded}'` };
   }
   // The documented fallback uses only these two Run-provided environment
   // variables. Replace the whole command with the fixed helper; do not pass
@@ -113,12 +120,14 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
   if (!binary?.isFile() || binary.isSymbolicLink() || ast.errors.length || (!fallback && ast.dynamicNodes.length) ||
       ast.expressions?.length || ![1, 2].includes(ast.commands.length)) return null;
   const first = ast.commands[0];
-  const originalWords = first.elements.map(element => element.kind === 'literal' ? String(element.value) : null);
+  const originalWords = first.elements.map(element => element.kind === 'literal' ? String(element.value) : element.kind === 'parameter' && String(element.name).toLowerCase() === 'h' && !element.argumentType && element.value == null ? '-h' : null);
   const words = originalWords.map(value => value?.toLowerCase() ?? null);
   const triggerCreate = !fallback && ['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0])
     && originalWords.every(value => value !== null) ? staticTriggerCreate(originalWords) : null;
+  const triggerHelp = !fallback && ['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) && words[1] === 'trigger' &&
+    (words.length === 3 && ['--help', '-h'].includes(words[2]) || words.length === 4 && words[2] === 'list' && ['--help', '-h'].includes(words[3]));
   if (!['unknown', 'ampersand'].includes(String(first.invocation).toLowerCase()) || first.pipelineInput ||
-      (!fallback && !triggerCreate && (!['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) || words[1] !== 'trigger' || words[2] !== 'list' ||
+      (!fallback && !triggerCreate && !triggerHelp && (!['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) || words[1] !== 'trigger' || words[2] !== 'list' ||
       ![3, 4].includes(words.length) || (words.length === 4 && words[3] !== '--json'))) ||
       (fallback && (!['node', 'node.exe'].includes(words[0]) || ast.dynamicNodes.some(node => !['VariableExpressionAst', 'ExpandableStringExpressionAst'].includes(node)))) ||
       first.redirections > 1 || first.redirectFacts?.length !== first.redirections ||
@@ -135,7 +144,7 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
     if (encoded.length > 10924) return null;
     return { updatedCommand: `& ${quoted} trigger-create 'http://127.0.0.1:${port}' '${encoded}'` };
   }
-  const option = fallback ? String(fallback[1] || '').toLowerCase() : words.length === 4 ? '--json' : '';
+  const option = triggerHelp ? '--help' : fallback ? String(fallback[1] || '').toLowerCase() : words.length === 4 ? '--json' : '';
   const action = option === '--help' ? 'trigger-help' : 'trigger-list';
   return { updatedCommand: `& ${quoted} ${action} 'http://127.0.0.1:${port}'${option === '--json' ? ' --json' : ''}` };
 }

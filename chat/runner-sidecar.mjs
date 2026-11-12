@@ -2802,7 +2802,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsWildcardNameApproval({ approval, state, helperPath: searchHelperPath });
   const gateDecision = controlledTrigger
-    ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session trigger creation' }
+    ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session trigger operation' }
     : controlledListing
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'pinned local directory name listing' }
     : controlledSearch

@@ -30,6 +30,14 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.ok(renamedFallback?.updatedCommand.includes(' trigger-list '));
   const help = await bridge('node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --help | Out-String', { state: { ...state, riskMode } });
   assert.equal(help?.updatedCommand, "& 'C:\\Program Files\\AgentoC\\bin\\agentoc-cli-read-bridge.exe' trigger-help 'http://127.0.0.1:7690'");
+  for (const command of ['agentoc trigger --help | Out-String', 'ragent trigger -h', 'ragent trigger list --help']) {
+    assert.equal((await bridge(command, { state: { ...state, riskMode } }))?.updatedCommand, help?.updatedCommand, command);
+  }
+  for (const [command, action] of [['agentoc trigger --help', 'trigger-help'], ['ragent trigger list --json', 'trigger-list']]) {
+    const result = await buildWindowsCliReadBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'Bash', input: { command } } }, state: { ...state, riskMode }, helperPath, port: 7690, runId: 'fixture-run' }, { inspect });
+    assert.ok(result?.updatedCommand.includes(` ${action} `), command);
+  }
+
 }
 assert.ok(await bridge('agentoc trigger list'));
 assert.ok(await bridge('ragent trigger list --json'));

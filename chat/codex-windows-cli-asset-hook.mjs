@@ -17,7 +17,7 @@ export async function buildCodexWindowsTriggerHookDecision({ event, state, runId
       typeof event.tool_input?.command !== 'string' || !/^[a-z]:[\\/]/i.test(event.cwd || '')) return {};
   const approval = { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: event.tool_input.command } } };
   const bridge = await buildWindowsCliReadBridge({ approval, state: { ...state, cwd: event.cwd, turnActive: true }, runId, helperPath, port });
-  return bridge?.updatedCommand.includes(' trigger-create ')
+  return / trigger-(?:create|list|help) /.test(bridge?.updatedCommand || '')
     ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { command: bridge.updatedCommand } } } : {};
 }
 
@@ -35,11 +35,18 @@ export async function verifyCodexWindowsTriggerApproval({ approval, state, runId
   const prefix = 'try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n';
   if (command.startsWith(prefix)) command = command.slice(prefix.length);
   const encoded = / trigger-create 'http:\/\/127\.0\.0\.1:\d+' '([A-Za-z0-9_-]+)'$/.exec(command)?.[1];
-  if (!encoded || encoded.length > 10924) return false;
-  let args;
-  try { args = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')); } catch { return false; }
-  if (!Array.isArray(args) || args.some(value => typeof value !== 'string')) return false;
-  const original = `ragent trigger create ${args.map(value => `'${value.replaceAll("'", "''")}'`).join(' ')}`;
+  let original;
+  if (encoded) {
+    if (encoded.length > 10924) return false;
+    let args;
+    try { args = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')); } catch { return false; }
+    if (!Array.isArray(args) || args.some(value => typeof value !== 'string')) return false;
+    original = `ragent trigger create ${args.map(value => `'${value.replaceAll("'", "''")}'`).join(' ')}`;
+  } else {
+    const read = / trigger-(list|help) 'http:\/\/127\.0\.0\.1:\d+'( --json)?$/.exec(command);
+    if (!read || (read[1] === 'help' && read[2])) return false;
+    original = read[1] === 'help' ? 'ragent trigger --help' : `ragent trigger list${read[2] || ''}`;
+  }
   const source = { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: original } } };
   const expected = await buildWindowsCliReadBridge({ approval: source, state: { ...state, cwd: params.cwd, turnActive: true }, runId, helperPath, port });
   return Boolean(expected && expected.updatedCommand === command);

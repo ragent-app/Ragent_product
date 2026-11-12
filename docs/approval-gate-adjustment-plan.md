@@ -239,6 +239,8 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - PowerShell 的 `-not (...)` 和 `!(...)` 现在可作为逻辑取反外层表达式分析，括号内命令及所有条件分支仍逐项检查；其他一元操作符不走此规则。两条历史文件创建请求只读回放由拦截变为自动通过，未执行历史命令。Windows PowerShell 动作回归通过，真实 Claude 和 Codex CLI 在两种模式中使用本地模拟模型执行隔离条件写入通过，未使用官方额度；尚未部署正式实例，也无法由这两条样本估算总体审批频率。
 
+- Windows 的 Claude 和 Codex 可将静态触发器帮助与当前会话列表调用改写为固定助手，Codex 在执行前独立核验实际线程、轮次、会话能力、命令和服务地址；两种模式使用相同标准。历史中一条 `agentoc trigger --help` 属于此前未覆盖的普通调用；真实 Claude 和 Codex CLI 使用本地模拟模型，在两个模式中均返回帮助信息，未使用官方额度。助手和 Hook 边界测试通过；源码尚未部署正式实例。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
