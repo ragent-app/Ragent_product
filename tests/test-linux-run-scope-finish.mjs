@@ -361,9 +361,17 @@ test('runner terminal write invalidates only its protected control binding',
         const peerId2 = 'run_peerboundfixture2';
         await createRun({ status: { id: peerId2, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
         await issueLinuxRunScopeGrant(peerId2, 0, { resultChannel: 'peer-v1' });
-        const { persistLinuxRunCancelIntent } = await import('../chat/linux-run-cancel-intent.mjs');
+        const { persistLinuxRunCancelIntent, persistLinuxRunExplicitCancellation } = await import('../chat/linux-run-cancel-intent.mjs');
         await persistLinuxRunCancelIntent(peerId2, 0);
         await persistLinuxRunCompletionReceipt(peerId2, 0);
+        const peerId3 = 'run_peerboundfixture3', peerId4 = 'run_peerboundfixture4', peerId6 = 'run_peerboundfixture6';
+        for (const id of [peerId3, peerId4, peerId6]) {
+          await createRun({ status: { id, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+          await issueLinuxRunScopeGrant(id, 0, { resultChannel: 'peer-v1' });
+          await persistLinuxRunCancelIntent(id, 0);
+          await persistLinuxRunCompletionReceipt(id, 0);
+        }
+        await persistLinuxRunExplicitCancellation(peerId4);
         const sessionManager = await import('../chat/session-manager.mjs');
         const session = await sessionManager.createSession(`${root}/workspace`, 'codex', 'Peer removal fixture');
         const sessionScope = { ...scope, sessionId: session.id };
@@ -377,6 +385,8 @@ test('runner terminal write invalidates only its protected control binding',
         await assert.rejects(sessionManager.deleteSession(session.id), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.ok(await sessionManager.getSession(session.id), 'failed cleanup keeps the session retryable');
         const calls = [];
+        const peerResult = { completedAt: '2026-11-12T00:00:00.000Z', exitCode: 0, signal: null };
+        const peerResults = new Map();
         const resultBroker = createUnixServer(socket => {
           let input = '';
           socket.on('error', () => {});
@@ -385,16 +395,56 @@ test('runner terminal write invalidates only its protected control binding',
             if (!input.endsWith('\n')) return;
             const request = JSON.parse(input);
             calls.push(request);
-            socket.end('{"ok":true,"value":{"discarded":true}}\n');
+            if (request.type === 'stage') peerResults.set(request.runId, request.result);
+            const value = request.type === 'read'
+              ? { version: 1, runId: request.runId, launchAttempt: request.launchAttempt,
+                sessionId: 's1', turnId: 't1', invocationId: 'a'.repeat(32), result: peerResults.get(request.runId) || peerResult }
+              : request.type === 'stage' ? { staged: true, duplicate: false } : { discarded: true };
+            socket.end(`${JSON.stringify({ ok: true, value })}\n`);
           });
         });
         try {
           await new Promise((resolve, reject) => { resultBroker.once('error', reject); resultBroker.listen(process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET, resolve); });
           await chmod(process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET, 0o666);
+          assert.deepEqual(await getRunResult(peerId3), peerResult);
+          assert.equal(JSON.parse(await readFile(runStatusPath(peerId3), 'utf8')).state, 'completed');
+          assert.deepEqual(await getRunResult(peerId3), peerResult);
+          assert.deepEqual(await writeRunResult(peerId3, peerResult), peerResult);
+          await assert.rejects(writeRunResult(peerId3, { ...peerResult, exitCode: 7 }), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          assert.equal(calls.filter(request => request.type === 'read' && request.runId === peerId3).length, 1);
+          // Simulate a control crash after the protected snapshot is durable
+          // but before the shared status is committed.
+          const { saveLinuxRunResultSnapshot } = await import('../chat/linux-run-result-snapshot.mjs');
+          await saveLinuxRunResultSnapshot(peerId6, 0, peerResult);
+          assert.deepEqual(await getRunResult(peerId6), peerResult);
+          assert.equal(JSON.parse(await readFile(runStatusPath(peerId6), 'utf8')).state, 'completed');
+          assert.equal(calls.filter(request => request.type === 'read' && request.runId === peerId6).length, 0);
+          await assert.rejects(getRunResult(peerId4), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+          assert.equal(JSON.parse(await readFile(runStatusPath(peerId4), 'utf8')).state, 'running');
+          const peerId5 = 'run_peerboundfixture5';
+          await createRun({ status: { id: peerId5, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+          await issueLinuxRunScopeGrant(peerId5, 0, { resultChannel: 'peer-v1' });
+          execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:rwx`, `${root}/spool/${peerId5}`]);
+          for (const filename of ['status.json', 'manifest.json'])
+            execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:r`, `${root}/spool/${peerId5}/${filename}`]);
+          const sidecar = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
+            process.execPath, '--input-type=module', '-e',
+            `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; await writeRunResult(${JSON.stringify(peerId5)}, ${JSON.stringify(peerResult)});`],
+          { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: base, AGENTOC_LINUX_PEER_RESULT_RUNNER: '1',
+            AGENTOC_LINUX_PEER_RESULT_SOCKET: process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET,
+            AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER }, stdio: ['ignore', 'ignore', 'pipe'] });
+          let sidecarError = ''; sidecar.stderr.on('data', chunk => { sidecarError += chunk; });
+          const sidecarExit = await new Promise((resolve, reject) => { sidecar.once('error', reject); sidecar.once('close', resolve); });
+          assert.equal(sidecarExit, 0, sidecarError);
+          assert.equal(JSON.parse(await readFile(runStatusPath(peerId5), 'utf8')).state, 'running');
+          await assert.rejects(readFile(runResultPath(peerId5), 'utf8'), { code: 'ENOENT' });
+          assert.deepEqual(await getRunResult(peerId5), peerResult);
+          assert.equal(JSON.parse(await readFile(runStatusPath(peerId5), 'utf8')).state, 'completed');
           const removed = await removeRunsForSession('s1');
-          assert.deepEqual(new Set(removed), new Set([peerId, peerId2]));
-          assert.deepEqual(new Set(calls.map(request => request.runId)), new Set([peerId, peerId2]));
-          assert.ok(calls.every(request => request.type === 'discard' && request.launchAttempt === 0));
+          assert.deepEqual(new Set(removed), new Set([peerId, peerId2, peerId3, peerId4, peerId5, peerId6]));
+          const discardCalls = calls.filter(request => request.type === 'discard');
+          assert.deepEqual(new Set(discardCalls.map(request => request.runId)), new Set([peerId, peerId2, peerId3, peerId4, peerId5, peerId6]));
+          assert.ok(discardCalls.every(request => request.launchAttempt === 0));
           await assert.rejects(readFile(runStatusPath(peerId), 'utf8'), { code: 'ENOENT' });
           await assert.rejects(readFile(runStatusPath(peerId2), 'utf8'), { code: 'ENOENT' });
           const deleted = await sessionManager.deleteSession(session.id);

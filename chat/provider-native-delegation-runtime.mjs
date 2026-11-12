@@ -582,6 +582,7 @@ export async function reconcileProviderNativeDelegationRun({
   appendRunSpoolRecord,
   updateRun,
   writeRunResult,
+  protectedResultHandoff = false,
 } = {}) {
   if (typeof getRun !== 'function' || typeof updateRun !== 'function'
     || (typeof readRunSpoolRecords !== 'function' && typeof streamRunSpoolRecords !== 'function')) {
@@ -653,6 +654,15 @@ export async function reconcileProviderNativeDelegationRun({
       ...(projected.reason === 'delegation_lost' ? { delegationLost: true } : {}),
     }
     : null;
+
+  // In protected mode the control service must publish terminal status from
+  // the authenticated root result; the task may not write that status first.
+  if (terminal && protectedResultHandoff) {
+    if (!providerExited) throw new Error('Protected delegation cannot finish before the provider exits');
+    if (typeof writeRunResult !== 'function') throw new Error('Protected delegation result handoff unavailable');
+    await writeRunResult(runId, terminalResult);
+    return { ...projected, run: current, result: terminalResult };
+  }
 
   const updated = await updateRun(runId, (latest) => {
     const next = {

@@ -137,6 +137,7 @@ import {
   flushRunSpool,
   getRun,
   getRunManifest,
+  isLinuxPeerResultRunner,
   readRunBrowserToken,
   readRunAuthRecoveryToken,
   readRunSessionControlToken,
@@ -279,6 +280,7 @@ function scheduleProviderNativeDelegationReconcile(runId, deps) {
       providerExited: false,
       nowMs: Date.now(),
       ...state.deps,
+      protectedResultHandoff: isLinuxPeerResultRunner(),
     })
       .catch((error) => logSidecarDiagnostic(runId, 'Provider-native delegation evidence reconciliation failed', {
         error: normalizeErrorMessage(error),
@@ -306,6 +308,7 @@ async function flushProviderNativeDelegationReconcile(runId) {
         providerExited: false,
         nowMs: Date.now(),
         ...state.deps,
+        protectedResultHandoff: isLinuxPeerResultRunner(),
       })
         .catch((error) => logSidecarDiagnostic(runId, 'Provider-native delegation evidence reconciliation failed', {
           error: normalizeErrorMessage(error),
@@ -1207,6 +1210,7 @@ async function persistRunTerminalState(runId, result, nextState, options = {}) {
       appendRunSpoolRecord,
       updateRun,
       writeRunResult,
+      protectedResultHandoff: isLinuxPeerResultRunner(),
     });
     if (delegated.handled) return delegated.run;
   } catch (error) {
@@ -1214,6 +1218,7 @@ async function persistRunTerminalState(runId, result, nextState, options = {}) {
       error: normalizeErrorMessage(error),
       nextState,
     });
+    if (isLinuxPeerResultRunner()) return;
     // A failure while reconciling a purported provider-native terminal must
     // never fall through as a successful parent Run.  Non-terminal callers
     // already use the ordinary failure state; only completed is rewritten.
@@ -1235,7 +1240,12 @@ async function persistRunTerminalState(runId, result, nextState, options = {}) {
       nextState,
       resultCompletedAt: result?.completedAt || null,
     });
+    if (isLinuxPeerResultRunner()) return;
   }
+
+  // The control process commits terminal state only after reading the
+  // authenticated, revoked peer result. Do not publish it from the runner.
+  if (isLinuxPeerResultRunner()) return;
 
   try {
     const current = await getRun(runId);

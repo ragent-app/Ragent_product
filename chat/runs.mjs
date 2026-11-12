@@ -1070,6 +1070,10 @@ function isolatedScopeRunner() {
     process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY === '1' && process.env.AGENTOC_LINUX_SCOPE_FINISH_ENABLED === '1';
 }
 
+export function isLinuxPeerResultRunner() {
+  return isolatedScopeRunner() && process.env.AGENTOC_LINUX_PEER_RESULT_RUNNER === '1';
+}
+
 function hasUnresolvedResultApproval(run, result) {
   return result?.cancelled !== true && Boolean(run?.approvedActionPending?.batchId &&
     run?.actionPause?.kind === 'approved_action' && run?.actionPause?.state === 'waiting_user');
@@ -1938,12 +1942,14 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // all suspendable reads and immediately before durable publication.
     if (beforeWrite) beforeWrite(next);
     if (isolatedScopeRunner() && isTerminalRunState(next.state) && !isTerminalRunState(latest.state)) {
+      if (isLinuxPeerResultRunner()) throw linuxScopeResultUnavailable();
       await requireRunnerScopeFinalization(next, await getRunManifestUnlocked(runId));
       if (authorizeWrite) await authorizeWrite(latest);
       if (beforeWrite) beforeWrite(next);
     }
     let protectedResultAttempt = null;
     let resultTransaction = false;
+    let peerBoundResult = false;
     if (process.platform === 'linux' && !isolatedScopeRunner() &&
         (scopeTracking || (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE)) &&
         isTerminalRunState(next.state) && next.result && typeof next.result === 'object' && !Array.isArray(next.result) &&
@@ -1957,8 +1963,19 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
         if (await hasLinuxRunControlBinding(runId, attempt)) {
           const { readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
-          if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1')
-            throw linuxScopeResultUnavailable(); // Terminal status adoption is not wired yet.
+          if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1') {
+            const { readLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+            const { hasLinuxPeerResultClearIntent } = await import('./linux-run-peer-result-clear.mjs');
+            const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
+            const snapshot = await readLinuxRunResultSnapshot(runId, attempt);
+            const state = snapshot?.cancelled === true ? 'cancelled'
+              : snapshot?.exitCode === 0 && !snapshot?.error ? 'completed' : 'failed';
+            if (!snapshot || await hasLinuxPeerResultClearIntent(runId, attempt) ||
+                !runFieldEqual(snapshot, next.result) || state !== next.state ||
+                ((next.cancelRequested === true || await hasLinuxRunExplicitCancellation(runId)) && snapshot.cancelled !== true))
+              throw linuxScopeResultUnavailable();
+            peerBoundResult = true;
+          }
           if (Buffer.byteLength(JSON.stringify(next.result), 'utf8') > 4 * 1024 * 1024 - 4096 ||
               !await confirmLinuxScopeCompletion(runId, next, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
           protectedResultAttempt = attempt;
@@ -1966,7 +1983,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
           if (beforeWrite) beforeWrite(next);
           // External admission callbacks can expire between two writes. Only
           // callback-free internal updates may commit a recoverable intent.
-          if (!authorizeWrite && !beforeWrite && !beforeCommit) {
+          if (!peerBoundResult && !authorizeWrite && !beforeWrite && !beforeCommit) {
             const { writeLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
             await writeLinuxRunResultTransaction(runId, attempt, latest, next);
             resultTransaction = true;
@@ -2231,9 +2248,36 @@ export async function getRunResult(runId) {
               const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
               if ((current.cancelRequested === true || await hasLinuxRunExplicitCancellation(runId)) && result.cancelled !== true)
                 throw linuxScopeResultUnavailable();
+              if (hasUnresolvedResultApproval(current, result)) return null;
+              if (typeof result.completedAt !== 'string' || !Number.isFinite(Date.parse(result.completedAt)))
+                throw linuxScopeResultUnavailable();
+              const terminalState = result.cancelled === true ? 'cancelled'
+                : result.exitCode === 0 && !result.error ? 'completed' : 'failed';
               if (isTerminalRunState(current.state) && current.result && !runFieldEqual(current.result, result))
                 throw linuxScopeResultUnavailable();
-              return clone(await saveLinuxRunResultSnapshot(runId, attempt, result));
+              if (isTerminalRunState(current.state) && current.state !== terminalState) throw linuxScopeResultUnavailable();
+              // The protected copy is durable before the runner-writable
+              // status is changed. Re-reading it repairs a crash between the
+              // two writes without trusting the shared status or result file.
+              const saved = await saveLinuxRunResultSnapshot(runId, attempt, result);
+              if (!runFieldEqual(saved, result)) throw linuxScopeResultUnavailable();
+              const next = { ...current, state: terminalState, completedAt: saved.completedAt, result: saved,
+                runnerLaunchAttempt: attempt, linuxScopeRevocationPending: false,
+                ...(terminalState === 'failed' && typeof saved.error === 'string' ? { failureReason: saved.error } : {}),
+                updatedAt: new Date().toISOString() };
+              const needsCommit = !isTerminalRunState(current.state) || !runFieldEqual(current.result, saved) ||
+                current.linuxScopeRevocationPending !== false || current.completedAt !== saved.completedAt ||
+                current.runnerLaunchAttempt !== attempt;
+              if (needsCommit) {
+                await writeJsonAtomic(runStatusPath(runId), next,
+                  await runFileWriteOptions(runId, { ...COMPACT_JSON_OPTIONS, durable: true }));
+                runStatusCache.set(runId, next);
+                await recordCacheMeta(runId, runStatusPath(runId), runStatusCacheMeta);
+              }
+              const committed = needsCommit ? next : current;
+              const previousIndex = runIndexById.get(runId);
+              if (runIndexSummaryChanged(previousIndex, runIndexSummary(committed))) await appendRunIndexRecord(committed);
+              return clone(saved);
             }
           }
         } catch { throw linuxScopeResultUnavailable(); }
@@ -2342,6 +2386,7 @@ export async function getRunResult(runId) {
 }
 
 export async function writeRunResult(runId, result) {
+  let protectedResult = null;
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     await ensureRunDirectory(runId);
     let staged = false;
@@ -2355,6 +2400,15 @@ export async function writeRunResult(runId, result) {
     if (isolatedScopeRunner()) {
       const run = await getRunUnlocked(runId);
       if (!run) throw new Error('Run unavailable');
+      if (isLinuxPeerResultRunner()) {
+        if (hasUnresolvedResultApproval(run, result)) throw linuxScopeResultUnavailable();
+        const { stageProtectedLinuxRunResult } = await import('./linux-run-peer-result-client.mjs');
+        await stageProtectedLinuxRunResult({ ...linuxPeerResultClientOptions(), runId,
+          launchAttempt: linuxScopeAttempt(run), result: result || {} });
+        await requireRunnerScopeFinalization(run, await getRunManifestUnlocked(runId));
+        protectedResult = result || {};
+        return;
+      }
       if (!hasUnresolvedResultApproval(run, result)) {
         const pending = { version: 1, runId, launchAttempt: Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0,
           publicationId: run.runPublication?.publicationId, result: result || {} };
@@ -2367,14 +2421,30 @@ export async function writeRunResult(runId, result) {
     } else if (process.platform === 'linux' && (process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' ||
         (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE))) {
       const run = await getRunUnlocked(runId);
+      if (run && hasUnresolvedResultApproval(run, result)) {
+        const attempt = linuxScopeAttempt(run);
+        const { hasLinuxRunControlBinding, readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
+        if (await hasLinuxRunControlBinding(runId, attempt) &&
+            (await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1') throw linuxScopeResultUnavailable();
+      }
       if (run && !hasUnresolvedResultApproval(run, result)) {
         try {
           const attempt = linuxScopeAttempt(run);
           const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
           if (await hasLinuxRunControlBinding(runId, attempt)) {
             const { readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
-            if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1')
-              throw linuxScopeResultUnavailable(); // Control-written results require a separate adoption path.
+            if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1') {
+              const { hasLinuxPeerResultClearIntent } = await import('./linux-run-peer-result-clear.mjs');
+              const { readLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+              if (await hasLinuxPeerResultClearIntent(runId, attempt)) throw linuxScopeResultUnavailable();
+              const saved = await readLinuxRunResultSnapshot(runId, attempt);
+              if (!saved || !runFieldEqual(saved, result || {})) throw linuxScopeResultUnavailable();
+              const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
+              if ((run.cancelRequested === true || await hasLinuxRunExplicitCancellation(runId)) && saved.cancelled !== true)
+                throw linuxScopeResultUnavailable();
+              protectedResult = saved;
+              return;
+            }
             const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
             if (await hasLinuxRunResultTransaction(runId, attempt)) throw linuxScopeResultUnavailable();
             if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
@@ -2389,7 +2459,7 @@ export async function writeRunResult(runId, result) {
     runResultCache.set(runId, result || {});
     await recordCacheMeta(runId, runResultPath(runId), runResultCacheMeta);
   }));
-  return getRunResultUnlocked(runId);
+  return protectedResult || getRunResultUnlocked(runId);
 }
 
 async function clearRunResultUnderLock(runId) {

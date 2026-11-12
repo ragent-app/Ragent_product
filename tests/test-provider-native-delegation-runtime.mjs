@@ -228,6 +228,21 @@ const claudeRun = {
 
 const codexRecords = await fixture('codex/native-delegations.jsonl');
 {
+  let run = { id: 'run_peer_delegation', sessionId: 'session_peer_delegation', provider: 'codex',
+    runtimeFamily: 'codex-app-server-json', state: 'running' };
+  let handedOff = null;
+  const options = { runId: run.id, terminalCandidate: { outcome: 'completed' }, nowMs: 8000,
+    getRun: async () => structuredClone(run), readRunSpoolRecords: async () => structuredClone(codexRecords),
+    appendRunSpoolRecord: async () => {}, updateRun: async (_id, updater) => { run = updater(structuredClone(run)); return run; },
+    writeRunResult: async (_id, result) => { handedOff = structuredClone(result); }, protectedResultHandoff: true };
+  await assert.rejects(reconcileProviderNativeDelegationRun({ ...options, providerExited: false }), /before the provider exits/);
+  assert.equal(handedOff, null);
+  await reconcileProviderNativeDelegationRun({ ...options, providerExited: true,
+    result: { completedAt: '1970-01-01T00:00:08.000Z', exitCode: 0, signal: null } });
+  assert.equal(handedOff.exitCode, 0);
+  assert.equal(run.state, 'running', 'only the control side publishes terminal state');
+}
+{
   const projected = projectProviderNativeDelegation({
     run: {
       id: 'run_runtime_codex',

@@ -46,6 +46,7 @@ const HOSTILE_PRODUCTION_ENV = {
   AGENTOC_RUNNER_LIFECYCLE_SOCKET: '/var/lib/agentoc/config/runner-lifecycle.sock',
   AGENTOC_LINUX_PEER_RESULT_SOCKET: '/run/agentoc-peer-result/result.sock',
   AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: '/usr/lib/agentoc/privileged-peercred',
+  AGENTOC_LINUX_PEER_RESULT_RUNNER: '1',
   AGENTOC_RUNNER_LIFECYCLE_REQUIRED: '1',
   AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '1',
   AGENTOC_PUBLIC_BASE_URL: 'https://example.com',
