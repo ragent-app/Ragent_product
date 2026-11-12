@@ -297,9 +297,8 @@ if [ ! -w "$NODE_CACHE_DIR" ]; then
   exit 1
 fi
 
-PACK_JSON_FILE="$WORK_DIR/npm-pack-result.json"
-(cd "$ROOT" && npm pack --json --pack-destination "$WORK_DIR" > "$PACK_JSON_FILE")
-PACK_FILE="$(node -e 'const value=JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(value[0].filename)' "$PACK_JSON_FILE")"
+PACK_JSON="$(cd "$ROOT" && npm pack --json --pack-destination "$WORK_DIR")"
+PACK_FILE="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value[0].filename)' "$PACK_JSON")"
 # Linux package staging: never let platform/scratch trees ride along even if a
 # future npm "files" glob widens. Excluded paths are not part of the shipped app.
 tar -xzf "$WORK_DIR/$PACK_FILE" -C "$APP_DIR" --strip-components=1 \
@@ -353,7 +352,6 @@ for name in main.cjs preload.cjs update-check.cjs wait.html; do
   install -m 0644 "$ROOT/desktop/$name" "$DESKTOP_APP/$name"
 done
 install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$DESKTOP_APP/assets/agentoc-android-logo.png"
-install -m 0644 "$ROOT/static/icon-512.png" "$DESKTOP_APP/assets/ragent-icon.png"
 DESKTOP_VERSION="$(node -p "require('$ROOT/desktop/package.json').version")"
 printf '{"name":"ragent-desktop-manager","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$DESKTOP_APP/package.json"
 # Chromium's setuid helper is installed root-owned by dpkg; the renderer still
@@ -375,7 +373,6 @@ ACTUAL_SHA="$(sha256sum "$NODE_CACHE_DIR/$NODE_TARBALL" | awk '{ print $1 }')"
 tar -xJf "$NODE_CACHE_DIR/$NODE_TARBALL" -C "$WORK_DIR"
 cp "$WORK_DIR/$NODE_DIST/bin/node" "$STAGE/opt/agentoc/runtime/node"
 chmod 0755 "$STAGE/opt/agentoc/runtime/node" "$APP_DIR/cli.js"
-bash "$ROOT/scripts/stage-posix-node-toolchain.sh" "$WORK_DIR/$NODE_DIST" "$STAGE/opt/agentoc/runtime"
 
 # Fetch the Codex launcher and target-native engine from the same official
 # release. A source checkout's vendored launcher may be older, and combining
