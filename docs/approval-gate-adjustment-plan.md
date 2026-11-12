@@ -241,6 +241,9 @@ Ragent 管理审批的 Run 继续使用 `approvalsReviewer="user"`，让尚未�
 
 - Windows 的 Claude 和 Codex 可将静态触发器帮助与当前会话列表调用改写为固定助手，Codex 在执行前独立核验实际线程、轮次、会话能力、命令和服务地址；两种模式使用相同标准。历史中一条 `agentoc trigger --help` 属于此前未覆盖的普通调用；真实 Claude 和 Codex CLI 使用本地模拟模型，在两个模式中均返回帮助信息，未使用官方额度。助手和 Hook 边界测试通过；源码尚未部署正式实例。
 
+- 2026-11-12 构建提交 `1633f09b` 的 Windows 安装候选，公开版本 `0.0.1`，内部 MSI 版本 `0.0.70`，EXE SHA-256 `51b5759e1570ba45f32f8341cb3212e80150e7c85cb8490666a82fd22755a687`。第一次静默升级因未指定既有 G 盘安装目录被升级准入拒绝（1603），原实例保持 ready；明确指定安装目录后，管理员通道等待超时，但 MSI 日志随后确认安装成功，正式实例 ready，五个关键审批文件与该提交一致。真实安装实例使用本地模拟模型，Claude 和 Codex 的 recommended/full-auto 四种组合均通过普通工作区外读取和隔离敏感目录删除的策略验收；Codex recommended 首次创建会话遇 `OBD_ENDPOINT_UNAVAILABLE`，重试通过。
+- 后续并行安装把正式实例更新至 `a7b22afd`，该提交包含 `1633f09b`，五个关键审批文件仍与后者一致。新实例上，额外的 PowerShell 逻辑取反及 PathType 条件读取在 Claude full-auto、Codex recommended 中自动通过，敏感目录删除分别自动拒绝和经审批拒绝；此前 Claude recommended 场景通过后被并行安装中断，遗留测试会话和 provider 已清理。最后 Codex full-auto 场景创建会话遇 `OBD_ENDPOINT_POLICY_INVALID`，实例随后健康端点不可用、日志出现 `OSV_STOPPED`，该场景未通过；临时 provider 的 API 清理遇 `OBC_TRANSPORT_FAILED`，尚待服务恢复后清理。服务重启或故障原因尚未查明，不据此推算生产通过率。
+
 ## 外部依据
 
 - [Codex 配置参考：approval_policy 与项目 trust_level](https://developers.openai.com/codex/config-reference/)
