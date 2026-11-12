@@ -194,8 +194,8 @@ function renderGoogleIdentityPage({ nonce, phoneState, googleWebClientId, creden
   return {
     cspNonce,
     body: `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf8ff" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#121318" media="(prefers-color-scheme: dark)"><title>继续 Google 登录</title><style>${styles.pageStyles}\n${styles.qrStyles}</style></head>
-<body class="qr-login-page"><main class="qr-login-shell card"><header class="qr-login-header"><h1>继续 Google 登录</h1><p>此操作仅确认 Ragent owner 身份，不会请求 Calendar、Drive 或 Gmail 权限。</p></header><section class="qr-login-body"><div id="google-button"></div>${demoEnabled ? '<form id="demo-login"><h2>Test account sign-in</h2><label>Username <input id="demo-username" name="username" autocomplete="username" required maxlength="80"></label><label>Password <input id="demo-password" name="password" type="password" autocomplete="current-password" required maxlength="256"></label><button type="submit">Sign in to this Ragent instance</button></form>' : ''}<p id="error" class="qr-login-status" role="status" aria-live="polite"></p></section></main>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf8ff" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#121318" media="(prefers-color-scheme: dark)"><title>登录 Ragent</title><style>${styles.pageStyles}\n${styles.qrStyles}\n.ragent-login-choice{display:inline-flex;align-items:center;justify-content:center;gap:10px;width:280px;max-width:100%;min-height:40px;margin-top:12px;border:1px solid #747775;border-radius:4px;background:#fff;color:#1f1f1f;font:500 14px Arial,sans-serif;cursor:pointer}.ragent-login-choice svg{width:22px;height:22px;flex:none}#demo-login{margin-top:18px}#demo-login[hidden]{display:none}</style></head>
+<body class="qr-login-page"><main class="qr-login-shell card"><header class="qr-login-header"><h1>登录 Ragent</h1><p>选择账号登录。Google 登录不会请求 Calendar、Drive 或 Gmail 权限。</p></header><section class="qr-login-body"><div id="google-button"></div>${demoEnabled ? '<button type="button" id="ragent-login-choice" class="ragent-login-choice" aria-expanded="false" aria-controls="demo-login"><svg viewBox="34 25 46 50" aria-hidden="true"><rect x="34" y="25" width="46" height="50" fill="#fff"/><path d="M40.9327 37.6602H67.0673V50.7504H60.568V44.2053H47.4778V70.3398H40.9327Z" fill="#0b0f17"/><path d="M68.3565 29.7956h6.5754v6.5754h-6.5754z" fill="#8ea8ff"/></svg><span>Ragent登录</span></button><form id="demo-login" hidden><h2>Ragent登录</h2><label>账号 <input id="demo-username" name="username" autocomplete="username" required maxlength="80"></label><label>密码 <input id="demo-password" name="password" type="password" autocomplete="current-password" required maxlength="256"></label><button type="submit">登录</button></form>' : ''}<p id="error" class="qr-login-status" role="status" aria-live="polite"></p></section></main>
 <script id="google-gsi-client" src="https://accounts.google.com/gsi/client" async></script>
 <script nonce="${cspNonce}">
 (function () {
@@ -225,6 +225,12 @@ function renderGoogleIdentityPage({ nonce, phoneState, googleWebClientId, creden
     } catch (err) { error.textContent = err.message || '认证未完成，请重试。'; }
   }
   const demoForm = document.getElementById('demo-login');
+  const ragentChoice = document.getElementById('ragent-login-choice');
+  if (ragentChoice && demoForm) {
+    const showRagentLogin = () => { demoForm.hidden = false; ragentChoice.setAttribute('aria-expanded', 'true'); };
+    ragentChoice.addEventListener('click', showRagentLogin);
+    if (location.hash === '#demo-login') showRagentLogin();
+  }
   if (demoForm) demoForm.addEventListener('submit', async function (event) {
     event.preventDefault();
     const button = demoForm.querySelector('button');
@@ -248,7 +254,7 @@ function renderGoogleIdentityPage({ nonce, phoneState, googleWebClientId, creden
     if (initialized) return;
     initialized = true;
     google.accounts.id.initialize({ client_id: ${safeClientId}, nonce: ${safeNonce}, callback: credential, auto_select: false });
-    google.accounts.id.renderButton(document.getElementById('google-button'), { theme: 'outline', size: 'large', text: 'continue_with' });
+    google.accounts.id.renderButton(document.getElementById('google-button'), { theme: 'outline', size: 'large', text: 'continue_with', width: 280 });
   }
   window.agentocGoogleIdentityReady = initialize;
   const googleScript = document.getElementById('google-gsi-client');

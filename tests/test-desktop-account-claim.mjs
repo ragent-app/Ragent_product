@@ -5,15 +5,21 @@ import { chromium } from '@playwright/test';
 const source = await readFile(new URL('../static/chat/cross-device-panel.js', import.meta.url), 'utf8');
 const qrSource = await readFile(new URL('../static/qr-creator.min.js', import.meta.url), 'utf8');
 const managerStyles = await readFile(new URL('../static/chat/desktop-manager.css', import.meta.url), 'utf8');
+const panelStyles = await readFile(new URL('../static/chat/cross-device-panel.css', import.meta.url), 'utf8');
+const ragentIcon = await readFile(new URL('../static/ragent-login-mark.svg', import.meta.url), 'utf8');
+const googleIcon = await readFile(new URL('../static/google-login-mark.svg', import.meta.url), 'utf8');
 const browser = await chromium.launch({ headless: true, ...(process.env.AGENTOC_TEST_BROWSER_CHANNEL ? { channel: process.env.AGENTOC_TEST_BROWSER_CHANNEL } : {}) });
 try {
   const page = await browser.newPage();
+  await page.route('http://localhost/ragent-login-mark.svg', (route) => route.fulfill({ contentType: 'image/svg+xml', body: ragentIcon }));
+  await page.route('http://localhost/google-login-mark.svg', (route) => route.fulfill({ contentType: 'image/svg+xml', body: googleIcon }));
   await page.setContent(`<body class="desktop-manager" data-desktop-manager-tab="account">
     <nav class="desktop-manager-nav"><button data-desktop-manager-tab="pairing">Pairing</button></nav>
     <div id="desktopManagerAccountStatus"></div><div id="desktopManagerGoogleAccountContent"></div>
     <div id="desktopManagerDevicesContent"></div>
     <div id="crossDeviceOverlay" hidden><section id="crossDeviceSheet"><div id="crossDeviceStatus"></div>
     <div data-cross-device-panel="register"><div id="crossDeviceRegisterContent"></div></div></section></div></body>`);
+  await page.addStyleTag({ content: panelStyles });
   await page.addStyleTag({ content: managerStyles });
   await page.evaluate(() => {
     window.agentocT = (key) => key;
@@ -41,19 +47,26 @@ try {
     return Boolean(qr.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
   assert.equal(order, true, 'QR must precede sign-in buttons');
-  const demoButton = page.getByRole('button', { name: 'Test account sign-in' });
-  await page.getByText('Test account sign-in has not been configured.').waitFor();
+  const demoButton = page.getByRole('button', { name: 'Sign in with Ragent' });
+  await page.getByText('Ragent sign-in has not been configured.').waitFor();
+  assert.equal(await demoButton.locator('img.desktop-manager-provider-mark').getAttribute('src'), 'http://localhost/ragent-login-mark.svg');
   assert.equal(await demoButton.isEnabled(), false);
   if (process.env.RAGENT_QA_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.RAGENT_QA_SCREENSHOT_DIR}/demo-unconfigured.png`, fullPage: true });
   await page.evaluate(() => { window.__demoStatus = 'unavailable'; window.AgentoCCrossDevicePanel.refreshManager(); });
-  await page.getByText('Test account sign-in is currently unavailable.').waitFor();
+  await page.getByText('Ragent sign-in is currently unavailable.').waitFor();
   assert.equal(await demoButton.isEnabled(), false);
   await page.evaluate(() => { window.__demoStatus = 'configured'; window.AgentoCCrossDevicePanel.refreshManager(); });
   await demoButton.waitFor({ state: 'visible' });
-  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === 'Test account sign-in' && !button.disabled));
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === 'Sign in with Ragent' && !button.disabled));
+  const sizes = await page.locator('.desktop-manager-provider-action').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+  assert.equal(sizes.length, 2);
+  assert.equal(sizes[0], sizes[1], 'both sign-in options should have equal visual weight');
   if (process.env.RAGENT_QA_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.RAGENT_QA_SCREENSHOT_DIR}/demo-configured.png`, fullPage: true });
-  await page.getByRole('button', { name: 'Test account sign-in' }).click();
+  await page.getByRole('button', { name: 'Sign in with Ragent' }).click();
   assert.match((await page.evaluate(() => window.__opened))[0], /\/api\/auth\/google\/bind\/redirect\?flow=demo$/);
+  await page.evaluate(() => { window.agentocGetActiveUiLanguage = () => 'zh-CN'; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await page.getByRole('button', { name: 'Ragent登录' }).waitFor();
+  await page.evaluate(() => { window.agentocGetActiveUiLanguage = () => 'en'; window.AgentoCCrossDevicePanel.refreshManager(); });
   await page.evaluate(() => { window.__bound = true; window.AgentoCCrossDevicePanel.refreshManager(); });
   await page.getByText('Account connected', { exact: true }).waitFor();
   assert.equal(await page.locator('.desktop-manager-claim-qr').count(), 0);

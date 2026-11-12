@@ -293,6 +293,25 @@ body.desktop-manager .desktop-manager-sign-in-actions {
   margin-top: 18px;
 }
 
+body.desktop-manager .desktop-manager-provider-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 210px;
+  min-height: 48px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+body.desktop-manager .desktop-manager-provider-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  flex: none;
+}
+
 body.desktop-manager .desktop-manager-account-group[hidden],
 body.desktop-manager .desktop-manager-devices-group[hidden] {
   display: none !important;

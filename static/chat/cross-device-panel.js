@@ -47,6 +47,12 @@
     ));
   }
 
+  function ragentLoginCopy(english, chinese) {
+    const language = typeof root.agentocGetActiveUiLanguage === "function"
+      ? root.agentocGetActiveUiLanguage() : document.documentElement.lang;
+    return String(language || "").toLowerCase().startsWith("zh") ? chinese : english;
+  }
+
   function make(tag, className = "", text = "") {
     const element = document.createElement(tag);
     if (className) element.className = className;
@@ -675,12 +681,25 @@
       if (flow === "demo") bindUrl.searchParams.set("flow", "demo");
       root.open(bindUrl.toString(), "_blank", "noopener");
     };
-    actions.appendChild(action(fallback("crossDevice.claim.google", "Sign in with Google"), () => openSignIn("google")));
-    const demoAction = action(fallback("crossDevice.claim.demo", "Test account sign-in"), () => openSignIn("demo"));
+    const googleAction = action(fallback("crossDevice.claim.google", "Sign in with Google"), () => openSignIn("google"));
+    googleAction.classList.add("desktop-manager-provider-action");
+    const googleMark = make("img", "desktop-manager-provider-mark");
+    googleMark.src = productPath("/google-login-mark.svg");
+    googleMark.alt = "";
+    googleMark.setAttribute("aria-hidden", "true");
+    googleAction.prepend(googleMark);
+    actions.appendChild(googleAction);
+    const demoAction = action(ragentLoginCopy("Sign in with Ragent", "Ragent登录"), () => openSignIn("demo"));
+    demoAction.classList.add("desktop-manager-provider-action");
+    const ragentMark = make("img", "desktop-manager-provider-mark");
+    ragentMark.src = productPath("/ragent-login-mark.svg");
+    ragentMark.alt = "";
+    ragentMark.setAttribute("aria-hidden", "true");
+    demoAction.prepend(ragentMark);
     demoAction.disabled = true;
     actions.appendChild(demoAction);
     body.appendChild(actions);
-    const demoStatus = make("p", "cross-device-helper", fallback("crossDevice.demo.checking", "Checking test account availability…"));
+    const demoStatus = make("p", "cross-device-helper", ragentLoginCopy("Checking Ragent sign-in availability…", "正在检查Ragent登录状态…"));
     body.appendChild(demoStatus);
     void (async () => {
       try {
@@ -691,11 +710,11 @@
           demoStatus.textContent = "";
         } else {
           demoStatus.textContent = result?.status === "unconfigured"
-            ? fallback("crossDevice.demo.unconfigured", "Test account sign-in has not been configured.")
-            : fallback("crossDevice.demo.unavailable", "Test account sign-in is currently unavailable.");
+            ? ragentLoginCopy("Ragent sign-in has not been configured.", "Ragent登录尚未配置。")
+            : ragentLoginCopy("Ragent sign-in is currently unavailable.", "Ragent登录暂时不可用。");
         }
       } catch {
-        if (card.isConnected) demoStatus.textContent = fallback("crossDevice.demo.unavailable", "Test account sign-in is currently unavailable.");
+        if (card.isConnected) demoStatus.textContent = ragentLoginCopy("Ragent sign-in is currently unavailable.", "Ragent登录暂时不可用。");
       }
     })();
     if (managerClaimTimer) root.clearTimeout(managerClaimTimer);

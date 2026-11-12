@@ -33,6 +33,8 @@ let state = {};
 const store = { mutate: async (mutator) => mutator(state) };
 const broker = createOwnerAuthBroker({
   store,
+  demoAccountAuth: { accountId: `acct_demo_${'a'.repeat(48)}`, instanceAccess: 'account', accessMode: 'full',
+    async verify() { throw new Error('Not used by this route test'); }, assertAccount() {} },
   allowInsecureReturnUrl: true,
   verifyGoogleCredential: async ({ idToken, nonce }) => {
     assert.equal(idToken, 'google-id-token');
@@ -164,6 +166,9 @@ try {
   check('GIS 失败页保留稳定 Accounts 拒绝码', phonePage.text.includes('owner_auth_account_invalid')
     && phonePage.text.includes('owner_auth_csrf_invalid')
     && phonePage.text.includes('credentialErrorMessage'));
+  check('手机登录页将 Ragent 账号与 Google 并列并显示品牌标志', phonePage.text.includes('id="ragent-login-choice"')
+    && phonePage.text.includes('Ragent登录') && phonePage.text.includes('viewBox="34 25 46 50"')
+    && phonePage.text.includes('id="demo-login" hidden') && !phonePage.text.includes('Test account sign-in'));
 
   const phoneReplayWithoutCookie = await request(port, 'GET', `${phoneUrl.pathname}${phoneUrl.search}`);
   check('同一手机授权链接在 cookie 尚未落地时仍可幂等恢复', phoneReplayWithoutCookie.status === 200
