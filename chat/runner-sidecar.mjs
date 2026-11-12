@@ -4086,7 +4086,7 @@ async function main() {
         if (browserMcpRequested) {
           requiredServers.push({
             name: serverNamesByKind.get('browser'),
-            requiredToolNames: ['agentoc_browser_navigate'],
+            requiredToolNames: ['ragent_browser_navigate'],
           });
         }
         runtimeState.mcpRequired = true;

@@ -9,7 +9,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
-const SERVER_NAME = 'agentoc-browser';
+const SERVER_NAME = 'ragent-browser';
 const SERVER_VERSION = '1.0.0';
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_RESULT_BYTES = 48 * 1024;
@@ -44,7 +44,7 @@ function toolResult(value, isError = false, extraContent = []) {
 function browserTools() {
   return [
     {
-      name: 'agentoc_browser_navigate',
+      name: 'ragent_browser_navigate',
       description: 'Open an http(s) URL in the run-scoped browser. javascript:, data:, file:, and local-control URLs are rejected.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -53,12 +53,12 @@ function browserTools() {
       },
     },
     {
-      name: 'agentoc_browser_snapshot',
+      name: 'ragent_browser_snapshot',
       description: 'Read the current page URL, title, and bounded visible text.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
     },
     {
-      name: 'agentoc_browser_click',
+      name: 'ragent_browser_click',
       description: 'Click a page element after the owner approves the exact selector and action.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -71,7 +71,7 @@ function browserTools() {
       },
     },
     {
-      name: 'agentoc_browser_fill',
+      name: 'ragent_browser_fill',
       description: 'Fill a page field after the owner approves the exact selector. Field values are never included in the approval text or logs.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -83,7 +83,7 @@ function browserTools() {
       },
     },
     {
-      name: 'agentoc_browser_press',
+      name: 'ragent_browser_press',
       description: 'Press a key on a page element after the owner approves the exact selector and key.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -95,7 +95,7 @@ function browserTools() {
       },
     },
     {
-      name: 'agentoc_browser_select_option',
+      name: 'ragent_browser_select_option',
       description: 'Select an option after the owner approves the exact selector and values.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -107,12 +107,12 @@ function browserTools() {
       },
     },
     {
-      name: 'agentoc_browser_screenshot',
+      name: 'ragent_browser_screenshot',
       description: 'Capture the current page as a run artifact and return a visual preview.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
     },
     {
-      name: 'agentoc_browser_download',
+      name: 'ragent_browser_download',
       description: 'Click an approved export/download control and save the downloaded file as a run artifact.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -277,19 +277,19 @@ async function loadBrowser(config, state) {
 async function callBrowserTool(name, args, config, state) {
   const page = await loadBrowser(config, state);
   const input = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
-  if (name === 'agentoc_browser_navigate') {
+  if (name === 'ragent_browser_navigate') {
     const url = safeUrl(input.url);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     return { url: page.url(), title: await page.title() };
   }
-  if (name === 'agentoc_browser_snapshot') {
+  if (name === 'ragent_browser_snapshot') {
     return {
       url: page.url(),
       title: await page.title(),
       text: bounded(await page.locator('body').innerText({ timeout: 10_000 }).catch(() => '')),
     };
   }
-  if (name === 'agentoc_browser_screenshot') {
+  if (name === 'ragent_browser_screenshot') {
     const artifactDir = await ensureArtifactDir(config);
     const path = join(artifactDir, `browser-${Date.now()}.png`);
     const buffer = await page.screenshot({ path, type: 'png', fullPage: false });
@@ -299,7 +299,7 @@ async function callBrowserTool(name, args, config, state) {
       : [];
     return { value: info, extraContent };
   }
-  if (name === 'agentoc_browser_click') {
+  if (name === 'ragent_browser_click') {
     await requestApproval(config, 'browser.click', input);
     await page.locator(text(input.selector)).click({
       ...(text(input.button) ? { button: text(input.button) } : {}),
@@ -307,23 +307,23 @@ async function callBrowserTool(name, args, config, state) {
     });
     return { clicked: text(input.selector), url: page.url() };
   }
-  if (name === 'agentoc_browser_fill') {
+  if (name === 'ragent_browser_fill') {
     await requestApproval(config, 'browser.fill', input);
     await page.locator(text(input.selector)).fill(typeof input.value === 'string' ? input.value : '');
     return { filled: text(input.selector) };
   }
-  if (name === 'agentoc_browser_press') {
+  if (name === 'ragent_browser_press') {
     await requestApproval(config, 'browser.press', input);
     await page.locator(text(input.selector)).press(text(input.key));
     return { pressed: text(input.key), selector: text(input.selector) };
   }
-  if (name === 'agentoc_browser_select_option') {
+  if (name === 'ragent_browser_select_option') {
     const values = Array.isArray(input.values) ? input.values.map(text).filter(Boolean) : [];
     await requestApproval(config, 'browser.select_option', { ...input, values });
     await page.locator(text(input.selector)).selectOption(values);
     return { selected: values, selector: text(input.selector) };
   }
-  if (name === 'agentoc_browser_download') {
+  if (name === 'ragent_browser_download') {
     await requestApproval(config, 'browser.download', input);
     const artifactDir = await ensureArtifactDir(config);
     const downloadPromise = page.waitForEvent('download', { timeout: 30_000 });
@@ -350,7 +350,8 @@ async function handleRequest(request, config, state) {
     return jsonRpcResult(id, { tools: config.enabled && config.token && config.sessionId && config.runId && config.turnId ? browserTools() : [] });
   }
   if (request.method === 'tools/call') {
-    const name = text(request.params?.name);
+    // Accept calls already issued using a cached pre-migration tool list.
+    const name = text(request.params?.name).replace(/^agentoc_browser_/, 'ragent_browser_');
     if (!browserTools().some((tool) => tool.name === name)) return jsonRpcResult(id, toolResult(`Unknown or unavailable browser tool: ${name}`, true));
     try {
       const result = await callBrowserTool(name, request.params?.arguments || {}, config, state);

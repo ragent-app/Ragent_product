@@ -188,36 +188,38 @@ async function testBrowserMcp() {
   const request = readResponses(child);
   try {
     const initialized = await request(1, 'initialize');
-    assert.equal(initialized.result.serverInfo.name, 'agentoc-browser');
+    assert.equal(initialized.result.serverInfo.name, 'ragent-browser');
     const listed = await request(2, 'tools/list');
-    assert.ok(listed.result.tools.some((tool) => tool.name === 'agentoc_browser_click'));
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'ragent_browser_click'));
 
     const navigated = await request(3, 'tools/call', {
-      name: 'agentoc_browser_navigate',
+      name: 'ragent_browser_navigate',
       arguments: { url: `http://127.0.0.1:${pagePort}/fixture` },
     });
     assert.equal(navigated.result.isError, false);
     const snapshot = await request(4, 'tools/call', {
-      name: 'agentoc_browser_snapshot', arguments: {},
+      name: 'ragent_browser_snapshot', arguments: {},
     });
     assert.match(snapshot.result.content[0].text, /Browser fixture/);
+    const legacySnapshot = await request(40, 'tools/call', { name: 'agentoc_browser_snapshot', arguments: {} });
+    assert.match(legacySnapshot.result.content[0].text, /Browser fixture/);
     const filled = await request(5, 'tools/call', {
-      name: 'agentoc_browser_fill',
+      name: 'ragent_browser_fill',
       arguments: { selector: '#name', value: 'secret-value' },
     });
     assert.equal(filled.result.isError, false);
     const filledAgain = await request(6, 'tools/call', {
-      name: 'agentoc_browser_fill',
+      name: 'ragent_browser_fill',
       arguments: { selector: '#name', value: 'different-secret' },
     });
     assert.equal(filledAgain.result.isError, false);
     const clicked = await request(7, 'tools/call', {
-      name: 'agentoc_browser_click',
+      name: 'ragent_browser_click',
       arguments: { selector: '#submit' },
     });
     assert.equal(clicked.result.isError, false);
     const screenshot = await request(8, 'tools/call', {
-      name: 'agentoc_browser_screenshot', arguments: {},
+      name: 'ragent_browser_screenshot', arguments: {},
     });
     assert.equal(screenshot.result.isError, false);
     const screenshotInfo = JSON.parse(screenshot.result.content[0].text);
