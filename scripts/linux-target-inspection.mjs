@@ -126,7 +126,7 @@ export function classifyLinuxDeleteNativeResult(result = {}) {
  * a trusted caller must verify policy, owner capability, run liveness, and
  * durably consume a one-shot nonce before invoking it. Not exposed by Ragent.
  */
-export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, binding } = {}) {
+export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, binding, beforeExecute } = {}) {
   let normalized;
   try {
     if (!binding || typeof binding !== 'object' || Array.isArray(binding) || !Object.hasOwn(binding, 'path')) {
@@ -138,6 +138,11 @@ export async function removeVerifiedLinuxTarget({ helperPath, expectedSha256, bi
   let invoked = false;
   try {
     return await withVerifiedHelper(helperPath, expectedSha256, async (fd) => {
+      if (beforeExecute !== undefined) {
+        let allowed = false;
+        try { allowed = typeof beforeExecute === 'function' && await beforeExecute() === true; } catch { /* fail closed */ }
+        if (!allowed) return { state: 'rejected', code: 'EXECUTION_PRECONDITION_FAILED' };
+      }
       invoked = true;
       const result = await runNative(fd, ['--remove', normalized.path, ...SNAPSHOT_FIELDS.map((field) => normalized[field])]);
       return classifyLinuxDeleteNativeResult(result);

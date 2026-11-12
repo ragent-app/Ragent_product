@@ -17,6 +17,7 @@ export async function verifyLinuxDeleteCapability({
     const saved = JSON.parse(JSON.stringify(capability));
     if (process.platform !== 'linux' || process.geteuid?.() !== 0 ||
         saved?.adapter !== SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1 ||
+        Date.parse(saved.issuedAt) > Date.now() ||
         !verifySemanticCapability(saved, { publicKey: servicePublicKey }).ok ||
         !Array.isArray(saved.operations) || saved.operations.length !== 1) return rejected;
     const entry = saved.operations[0];
@@ -30,7 +31,7 @@ export async function verifyLinuxDeleteCapability({
       boundDecision, expectedSelectionHash: saved.selectionManifestHash, expectedContext,
       trustedContext, trustedProtectedRoots, rootPublicKey, rootPrivateKey, helperPath, expectedHelperSha256,
     });
-    if (!revalidated.ok || !verifySemanticCapability(saved, { publicKey: servicePublicKey }).ok) return rejected;
+    if (!revalidated.ok || Date.parse(saved.issuedAt) > Date.now() || !verifySemanticCapability(saved, { publicKey: servicePublicKey }).ok) return rejected;
     // This return value is not an execution grant. In particular, the caller
     // must durably consume capability.nonce before acting and must check run
     // liveness again immediately before execution.

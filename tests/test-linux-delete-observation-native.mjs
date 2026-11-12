@@ -10,6 +10,8 @@ import { authorizeSemanticApproval } from '../chat/semantic-approval.mjs';
 import { computeSemanticManifestHash } from '../chat/semantic-operation.mjs';
 import { revalidateLinuxDeleteSelection } from '../scripts/linux-delete-revalidation.mjs';
 import { verifyLinuxDeleteCapability } from '../scripts/linux-delete-capability.mjs';
+import { createLinuxDeleteExecutor } from '../scripts/linux-delete-execution.mjs';
+import { claimLinuxDeleteNonce } from '../scripts/linux-delete-ledger.mjs';
 import { handleSemanticRequest } from '../scripts/privileged-executor.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.argv[2]) throw new Error('requires Linux root and native helper');
@@ -97,10 +99,63 @@ process.stdout.write(JSON.stringify(result.projection));`;
   assert.equal((await verifyLinuxDeleteCapability({ ...capabilityInput, capability: forgedCapability })).ok, false);
   assert.equal((await handleSemanticRequest({ id: 'fixture', capability })).code, 'SEMANTIC_CAPABILITY_ADAPTER_DENIED');
   assert.equal(await readFile(target, 'utf8'), 'fixture');
-  await writeFile(target, 'changed');
+  const ledgerDirectory = `${root}/ledger`;
+  await mkdir(ledgerDirectory, { mode: 0o700 });
+  const trustedRun = { expectedContext: context, trustedContext: revalidation.trustedContext, trustedProtectedRoots: revalidation.trustedProtectedRoots };
+  const executorConfig = { servicePublicKey: serviceKeys.publicKey, rootPublicKey: keys.publicKey, rootPrivateKey: keys.privateKey,
+    helperPath: helper, expectedHelperSha256: digest, ledgerDirectory, resolveTrustedRun: async () => trustedRun };
+  let livenessChecks = 0;
+  const stoppingExecutor = createLinuxDeleteExecutor({ ...executorConfig, isRunActive: async () => ++livenessChecks < 3 });
+  assert.deepEqual(await stoppingExecutor(capability), { state: 'rejected', code: 'EXECUTION_PRECONDITION_FAILED' });
+  assert.equal(await readFile(target, 'utf8'), 'fixture');
+  const unsignedAgain = await authorizeSemanticApproval({
+    prepared: { binding: { sessionId: 's1', runId: 'r1', turnId: 't1', requestKey: 'q1' }, projection: { decisions: [bound] } },
+    selectedOperationIds: [bound.operationId], proofToken: 'fixture-proof-2', credentialId: 'fixture-owner',
+    kid: 'fixture-service', adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1,
+    consumeOwnerProof: async (proof) => proof.manifestHash === selection.selectionManifestHash,
+  });
+  const secondCapability = signSemanticCapability(unsignedAgain, serviceKeys.privateKey);
+  const activeExecutor = createLinuxDeleteExecutor({ ...executorConfig, isRunActive: async () => true });
+  const concurrent = await Promise.all([activeExecutor(secondCapability), activeExecutor(secondCapability)]);
+  assert.equal(concurrent.filter((result) => result.state === 'completed').length, 1);
+  assert.equal(concurrent.filter((result) => result.code === 'LINUX_DELETE_NONCE_CONSUMED').length, 1);
+  await assert.rejects(readFile(target), { code: 'ENOENT' });
+  const nonceDigest = createHash('sha256').update(secondCapability.nonce).digest('hex');
+  const outcome = JSON.parse(await readFile(`${ledgerDirectory}/${nonceDigest}.result.json`, 'utf8'));
+  assert.equal(outcome.resultState, 'completed');
+  await writeFile(target, 'changed', { mode: 0o600 });
   assert.equal((await revalidateLinuxDeleteSelection(revalidation)).ok, false);
   assert.equal((await verifyLinuxDeleteCapability(capabilityInput)).ok, false);
   assert.equal(await readFile(target, 'utf8'), 'changed');
+  // Simulate a result-ledger failure after the helper starts. The operation
+  // may have occurred, so the caller must see unknown and the nonce stays used.
+  const nextChild = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(request), root],
+    { uid: sourceStat.uid, gid: sourceStat.gid, encoding: 'utf8', maxBuffer: 1024 * 1024,
+      env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, AGENTOC_CONFIG_DIR: `${testHome}/config` } });
+  assert.equal(nextChild.status, 0, nextChild.stderr);
+  const nextProjection = JSON.parse(nextChild.stdout);
+  const nextAttestation = await inspectAndAttestLinuxTarget({ helperPath: helper, expectedSha256: digest, privateKey: keys.privateKey, targetPath: target, context });
+  const nextBound = bindLinuxDeleteObservation({ decision: nextProjection.decisions[0], attestation: nextAttestation, trustedPublicKey: keys.publicKey });
+  const nextSelection = buildSemanticCapabilitySelection([nextBound]);
+  const nextUnsigned = await authorizeSemanticApproval({
+    prepared: { binding: { sessionId: 's1', runId: 'r1', turnId: 't1', requestKey: 'q1' }, projection: { decisions: [nextBound] } },
+    selectedOperationIds: [nextBound.operationId], proofToken: 'fixture-proof-3', credentialId: 'fixture-owner',
+    kid: 'fixture-service', adapter: SEMANTIC_ADAPTER_LINUX_FILE_DELETE_V1,
+    consumeOwnerProof: async (proof) => proof.manifestHash === nextSelection.selectionManifestHash,
+  });
+  const auditFailureCapability = signSemanticCapability(nextUnsigned, serviceKeys.privateKey);
+  let auditChecks = 0;
+  const auditFailureExecutor = createLinuxDeleteExecutor({ ...executorConfig, isRunActive: async () => {
+    if (++auditChecks === 3) await chmod(ledgerDirectory, 0o755);
+    return true;
+  } });
+  const uncertain = await auditFailureExecutor(auditFailureCapability);
+  await chmod(ledgerDirectory, 0o700);
+  assert.deepEqual(uncertain, { state: 'unknown', code: 'LINUX_DELETE_RESULT_UNKNOWN' });
+  await assert.rejects(readFile(target), { code: 'ENOENT' });
+  assert.equal((await claimLinuxDeleteNonce({ directory: ledgerDirectory, nonce: auditFailureCapability.nonce,
+    capabilityId: auditFailureCapability.capabilityId, runId: auditFailureCapability.runId,
+    selectionHash: auditFailureCapability.selectionManifestHash })).state, 'consumed');
   console.log('linux delete observation: native, resolver and root revalidation checks passed');
 } finally {
   await rm(root, { recursive: true });

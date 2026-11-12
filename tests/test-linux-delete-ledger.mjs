@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { claimLinuxDeleteNonce } from '../scripts/linux-delete-ledger.mjs';
+import { claimLinuxDeleteNonce, recordLinuxDeletePhase } from '../scripts/linux-delete-ledger.mjs';
 
 if (process.platform !== 'linux' || process.geteuid?.() !== 0) throw new Error('requires Linux root');
 const root = await mkdtemp('/var/lib/ragent-delete-ledger-');
@@ -36,6 +36,16 @@ try {
   assert.equal(record.nonceDigest, digest);
   assert.equal(Object.hasOwn(record, 'nonce'), false);
   assert.equal((await childClaim(input)).state, 'consumed');
+  assert.equal((await recordLinuxDeletePhase({ ...input, phase: 'result', resultState: 'completed' })).state, 'unavailable');
+  assert.equal((await recordLinuxDeletePhase({ ...input, capabilityId: 'other', phase: 'started' })).state, 'unavailable');
+  const starts = await Promise.all(Array.from({ length: 4 }, () => recordLinuxDeletePhase({ ...input, phase: 'started' })));
+  assert.equal(starts.filter((entry) => entry.state === 'recorded').length, 1);
+  assert.equal(starts.filter((entry) => entry.state === 'already-recorded').length, 3);
+  assert.equal((await recordLinuxDeletePhase({ ...input, phase: 'result', resultState: 'completed' })).state, 'recorded');
+  assert.equal((await recordLinuxDeletePhase({ ...input, phase: 'result', resultState: 'completed' })).state, 'already-recorded');
+  const resultRecord = JSON.parse(await readFile(`${directory}/${digest}.result.json`, 'utf8'));
+  assert.equal(resultRecord.resultState, 'completed');
+  assert.equal(Object.hasOwn(resultRecord, 'nonce'), false);
 
   const crossProcess = { ...input, nonce: 'B'.repeat(32) };
   const children = await Promise.all(Array.from({ length: 6 }, () => childClaim(crossProcess)));
@@ -48,6 +58,7 @@ try {
   await writeFile(partialMarker, '{', { mode: 0o600 });
   assert.equal((await claimLinuxDeleteNonce(partial)).state, 'consumed');
   assert.equal((await childClaim(partial)).state, 'consumed');
+  assert.equal((await recordLinuxDeletePhase({ ...partial, phase: 'started' })).state, 'unavailable');
   const invalid = { ...input, nonce: 'short' };
   assert.equal((await claimLinuxDeleteNonce(invalid)).state, 'unavailable');
   const fresh = { ...input, nonce: 'D'.repeat(32) };

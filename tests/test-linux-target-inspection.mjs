@@ -59,6 +59,9 @@ try {
   const fresh = await inspectAndAttestLinuxTarget(input);
   const current = verifyLinuxTargetAttestation(fresh, { publicKey: trusted.publicKey, expectedContext: context, expectedPath: target });
   assert.equal(current.ok, true);
+  assert.deepEqual(await removeVerifiedLinuxTarget({ helperPath: helper, expectedSha256: digest, binding: current.binding, beforeExecute: async () => false }),
+    { state: 'rejected', code: 'EXECUTION_PRECONDITION_FAILED' });
+  assert.equal(await readFile(target, 'utf8'), 'changed');
   assert.deepEqual(await removeVerifiedLinuxTarget({ helperPath: helper, expectedSha256: digest, binding: current.binding }), { state: 'completed' });
   await assert.rejects(readFile(target), { code: 'ENOENT' });
   console.log('linux target inspection: pinned helper, snapshot and removal checks passed');
