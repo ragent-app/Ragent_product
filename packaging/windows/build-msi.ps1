@@ -152,7 +152,7 @@ try {
     } finally { Pop-Location }
     $desktopPayloadRoot = Join-Path $payloadRoot 'Desktop'
     & $node.Source (Join-Path $desktopBuildRoot 'stage-windows.mjs') $desktopPayloadRoot $brandRoot $Version $buildInputRoot '--move-staged-electron'
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $desktopPayloadRoot 'AgentoC.exe') -PathType Leaf)) {
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $desktopPayloadRoot 'Ragent.exe') -PathType Leaf)) {
         throw 'Branded, unelevated Electron runtime staging failed.'
     }
     Assert-BuildFreeSpace 'after desktop staging'

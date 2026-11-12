@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 
 assert.equal(process.platform,'win32');
 const exec=promisify(execFile), root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-uninstall-desktop-'));
-const ownDir=join(root,'installed'),otherDir=join(root,'other'),own=join(ownDir,'AgentoC.exe'),other=join(otherDir,'AgentoC.exe');
+const ownDir=join(root,'installed'),otherDir=join(root,'other'),own=join(ownDir,'Ragent.exe'),other=join(otherDir,'Ragent.exe');
 const csc='C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe',runner=join(root,'shutdown-fixture.exe');
 let owned,unrelated;
 try{

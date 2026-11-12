@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
 
 const [executable, reportPath, mode = 'close'] = process.argv.slice(2);
-assert.ok(executable, 'Usage: node tests/windows-desktop-manager-live.mjs <AgentoC.exe> <report.json> [close|keep-open]');
+assert.ok(executable, 'Usage: node tests/windows-desktop-manager-live.mjs <Ragent.exe> <report.json> [close|keep-open]');
 assert.ok(reportPath, 'A report path is required');
 assert.ok(['close', 'keep-open', 'wait'].includes(mode), 'Mode must be close, keep-open, or wait');
 
@@ -24,7 +24,7 @@ const getPort = async () => new Promise((resolve, reject) => {
 const waitForEndpoint = async (url, child, timeoutMs = 90000) => {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
-    if (child.exitCode !== null) throw new Error(`AgentoC.exe exited before opening its manager window (${child.exitCode})`);
+    if (child.exitCode !== null) throw new Error(`Ragent.exe exited before opening its manager window (${child.exitCode})`);
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1200) });
       if (response.ok) return;
@@ -36,7 +36,7 @@ const waitForEndpoint = async (url, child, timeoutMs = 90000) => {
 const waitForExit = async (child, timeoutMs = 20000) => {
   if (child.exitCode !== null) return child.exitCode;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('AgentoC.exe did not exit after the manager window was closed')), timeoutMs);
+    const timer = setTimeout(() => reject(new Error('Ragent.exe did not exit after the manager window was closed')), timeoutMs);
     child.once('exit', (code) => {
       clearTimeout(timer);
       resolve(code);
@@ -55,7 +55,7 @@ try {
     detached: mode === 'keep-open',
     stdio: 'ignore',
   });
-  appProcess.once('error', (error) => report.failures.push(`Could not launch AgentoC.exe: ${error.message}`));
+  appProcess.once('error', (error) => report.failures.push(`Could not launch Ragent.exe: ${error.message}`));
   const endpoint = `http://127.0.0.1:${port}`;
   await waitForEndpoint(`${endpoint}/json/version`, appProcess);
   browser = await chromium.connectOverCDP(endpoint);

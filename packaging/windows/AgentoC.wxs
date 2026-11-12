@@ -9,9 +9,9 @@
     <Property Id="AGENTOC_INSTALLFOLDER" Secure="yes" />
     <Property Id="AGENTOC_LAUNCH" Secure="yes" />
     <CustomAction Id="SetSelectedInstallFolder" Directory="INSTALLFOLDER" Value="[AGENTOC_INSTALLFOLDER]" />
-    <CustomAction Id="SetAgentoCLaunchTarget" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\AgentoC.exe" />
+    <CustomAction Id="SetAgentoCLaunchTarget" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\Ragent.exe" />
     <CustomAction Id="LaunchAgentoC" BinaryRef="Wix4UtilCA_X64" DllEntry="WixUnelevatedShellExec" Execute="immediate" Return="ignore" />
-    <util:CloseApplication Id="CloseAgentoCManager" Target="AgentoC.exe" CloseMessage="yes" PromptToContinue="yes" Description="AgentoC is still open. Close it to continue setup or removal." Timeout="15" />
+    <util:CloseApplication Id="CloseAgentoCManager" Target="Ragent.exe" CloseMessage="yes" PromptToContinue="yes" Description="Ragent is still open. Close it to continue setup or removal." Timeout="15" />
     <UI>
       <EmbeddedUI Id="AgentoCMsiEmbeddedUI" SourceFile="!(bindpath.InstallUi)\AgentoC.MsiEmbeddedUI.dll" SupportBasicUI="yes">
         <EmbeddedUIResource Id="AgentoCEmbeddedLogo" Name="agentoc-android-logo.png" SourceFile="!(bindpath.InstallUi)\agentoc-android-logo.png" />
@@ -47,7 +47,7 @@
       <Directory Id="ApplicationProgramsFolder" Name="AgentoC" />
     </StandardDirectory>
     <Component Id="StartMenuShortcutComponent" Directory="ApplicationProgramsFolder" Guid="*">
-      <Shortcut Id="AgentoCStartMenuShortcut" Name="AgentoC" Target="[INSTALLFOLDER]payload\Desktop\AgentoC.exe" WorkingDirectory="INSTALLFOLDER" Icon="AgentoCIcon" IconIndex="0" Advertise="no" />
+      <Shortcut Id="AgentoCStartMenuShortcut" Name="Ragent" Target="[INSTALLFOLDER]payload\Desktop\Ragent.exe" WorkingDirectory="INSTALLFOLDER" Icon="AgentoCIcon" IconIndex="0" Advertise="no" />
       <RemoveFolder Id="RemoveAgentoCProgramMenuFolder" On="uninstall" />
       <RegistryValue Root="HKCU" Key="Software\AgentoC\DesktopManager" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>

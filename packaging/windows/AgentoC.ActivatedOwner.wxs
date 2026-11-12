@@ -30,7 +30,7 @@
     <Property Id="AGENTOC_RECOVERY_SOURCE" Secure="yes" />
     <Property Id="AGENTOC_LAUNCH" Secure="yes" />
     <CustomAction Id="SetSelectedInstallFolder" Directory="INSTALLFOLDER" Value="[AGENTOC_INSTALLFOLDER]" />
-    <CustomAction Id="SetAgentoCLaunchTarget" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\AgentoC.exe" />
+    <CustomAction Id="SetAgentoCLaunchTarget" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\Ragent.exe" />
     <WixVariable Id="WixUIBannerBmp" Value="!(bindpath.BrandAsset)\wix-banner.bmp" />
     <WixVariable Id="WixUIDialogBmp" Value="!(bindpath.BrandAsset)\wix-dialog.bmp" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
@@ -67,7 +67,7 @@
           <EmbeddedUIResource Id="AgentoCMingwThreadRuntime" Name="libwinpthread-1.dll" SourceFile="!(bindpath.InstallUi)\libwinpthread-1.dll" />
         <?endif ?>
       </EmbeddedUI>
-      <Publish Dialog="ExitDialog" Control="Finish" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\AgentoC.exe" Order="1" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\Ragent.exe" Order="1" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchAgentoC" Order="2" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
     </UI>
 
@@ -271,7 +271,7 @@
     <StandardDirectory Id="ProgramMenuFolder"><Directory Id="ApplicationProgramsFolder" Name="Ragent" /></StandardDirectory>
 
     <Component Id="ManagedStartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
-      <Shortcut Id="AgentoCStartMenuShortcut" Name="Ragent" Target="[INSTALLFOLDER]payload\Desktop\AgentoC.exe" WorkingDirectory="INSTALLFOLDER" Icon="AgentoCIcon" IconIndex="0" Advertise="no" />
+      <Shortcut Id="AgentoCStartMenuShortcut" Name="Ragent" Target="[INSTALLFOLDER]payload\Desktop\Ragent.exe" WorkingDirectory="INSTALLFOLDER" Icon="AgentoCIcon" IconIndex="0" Advertise="no" />
       <RemoveFolder Id="RemoveAgentoCProgramMenuFolder" On="uninstall" />
       <RegistryValue Root="HKCU" Key="Software\AgentoC\DesktopManager" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>

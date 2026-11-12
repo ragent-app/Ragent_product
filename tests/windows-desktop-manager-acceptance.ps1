@@ -234,7 +234,7 @@ function Assert-OwnerSessionPersistence([string]$Stage, [Net.CookieContainer]$Co
 }
 
 function Invoke-ManagerSmoke([string]$Stage, [string]$Mode) {
-    $exe = Join-Path $qaProduct 'payload\Desktop\AgentoC.exe'
+    $exe = Join-Path $qaProduct 'payload\Desktop\Ragent.exe'
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'DESKTOP_MSI_APP_MISSING' }
     $reportPath = Join-Path $qaRoot ($Stage + '.json')
     $helper = Join-Path $env:GITHUB_WORKSPACE 'tests\windows-desktop-manager-live.mjs'
@@ -260,7 +260,7 @@ function Invoke-ManagerSmoke([string]$Stage, [string]$Mode) {
 }
 
 function Invoke-WaitRetryManagerSmoke {
-    $exe = Join-Path $qaProduct 'payload\Desktop\AgentoC.exe'
+    $exe = Join-Path $qaProduct 'payload\Desktop\Ragent.exe'
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'DESKTOP_MSI_APP_MISSING' }
     $controlService = Get-Service -Name 'AgentoC-ControlPlane' -ErrorAction Stop
     if ($controlService.Status -ne 'Running') { throw 'DESKTOP_MSI_CONTROL_PLANE_NOT_RUNNING_BEFORE_WAIT_TEST' }
@@ -394,7 +394,7 @@ try {
     if (-not $shortcut) { throw 'DESKTOP_MSI_START_MENU_SHORTCUT_MISSING' }
     $shell = New-Object -ComObject WScript.Shell
     $target = $shell.CreateShortcut($shortcut.FullName).TargetPath
-    if ([IO.Path]::GetFullPath($target) -cne [IO.Path]::GetFullPath((Join-Path $qaProduct 'payload\Desktop\AgentoC.exe'))) { throw 'DESKTOP_MSI_START_MENU_SHORTCUT_TARGET_MISMATCH' }
+    if ([IO.Path]::GetFullPath($target) -cne [IO.Path]::GetFullPath((Join-Path $qaProduct 'payload\Desktop\Ragent.exe'))) { throw 'DESKTOP_MSI_START_MENU_SHORTCUT_TARGET_MISMATCH' }
     $report.probes += @{stage='shortcut'; path=$shortcut.FullName; target=$target; passed=$true}
 
     $beforeWindow = Save-ServiceSnapshot 'services-before-manager'

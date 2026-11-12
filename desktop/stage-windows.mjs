@@ -52,7 +52,7 @@ if (process.argv[6] === '--move-staged-electron') {
   await cp(distRoot, destination, { recursive: true });
 }
 const originalExe = join(destination, 'electron.exe');
-const brandedExe = join(destination, 'AgentoC.exe');
+const brandedExe = join(destination, 'Ragent.exe');
 await rename(originalExe, brandedExe);
 
 const appRoot = join(destination, 'resources', 'app');
@@ -64,7 +64,7 @@ for (const name of ['main.cjs', 'preload.cjs', 'update-check.cjs', 'wait.html'])
 await cp(join(repositoryRoot, 'static', 'desktop', 'agentoc-android-logo.png'), join(assetsRoot, 'agentoc-android-logo.png'));
 await cp(join(repositoryRoot, 'static', 'icon-512.png'), join(assetsRoot, 'ragent-icon.png'));
 await writeFile(join(appRoot, 'package.json'), `${JSON.stringify({
-  name: 'agentoc-desktop-manager',
+  name: 'ragent-desktop-manager',
   version,
   private: true,
   main: 'main.cjs',
@@ -78,8 +78,8 @@ await rcedit(brandedExe, {
   'version-string': {
     CompanyName: 'Ragent',
     FileDescription: 'Ragent Desktop Manager',
-    InternalName: 'AgentoC',
-    OriginalFilename: 'AgentoC.exe',
+    InternalName: 'Ragent',
+    OriginalFilename: 'Ragent.exe',
     ProductName: 'Ragent',
   },
 });

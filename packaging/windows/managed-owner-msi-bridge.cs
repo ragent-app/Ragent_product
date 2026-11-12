@@ -84,12 +84,13 @@ static class ManagedOwnerMsiBridge {
  static void CloseInstalledDesktop(){
   Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_CLOSE_SYSTEM_REQUIRED");
   ValidateProductRoot();if(ActiveLayout())ActiveAdmission();else RemoveCheck(true);
-  string expected=Path.GetFullPath(Path.Combine(Product,"payload","Desktop","AgentoC.exe"));
-  CloseProcessesForPath(expected,false);
+  foreach(string name in new[]{"Ragent.exe","AgentoC.exe"})
+   CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop",name)),false);
  }
  static void CloseCurrentUserDesktop(){
   ValidateProductRoot();if(ActiveLayout())ActiveAdmission();else RemoveCheck(true);
-  CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop","AgentoC.exe")),true);
+  foreach(string name in new[]{"Ragent.exe","AgentoC.exe"})
+   CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop",name)),true);
  }
  static bool HasWindow(Process process){try{return process.MainWindowHandle!=IntPtr.Zero;}catch{return false;}}
  static bool MatchesDesktopImage(IntPtr handle,int pid,string image,string expected){
