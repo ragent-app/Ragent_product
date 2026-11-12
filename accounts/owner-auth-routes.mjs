@@ -526,6 +526,7 @@ export async function handleOwnerAuthRoutes({
   const isDemoStatusApi = path === '/v1/owner-auth/demo-status';
   const isDiscoveryApi = path === '/v1/owner-auth/discovery';
   const isBindingAuthorityApi = path === '/v1/owner-auth/instances/authority';
+  const isWorkspaceAuthorityApi = path === '/v1/owner-auth/instances/workspace-authority';
   const isInstanceAccessGrantApi = path === '/v1/owner-auth/instances/access-grants';
   const isTurnConnectionApi = ['/v1/owner-auth/turn/connections/reserve', '/v1/owner-auth/turn/connections/release', '/v1/owner-auth/turn/connections/handoff/commit'].includes(path);
   const isProviderSyncApi = path === '/v1/owner-auth/provider-sync/authorize';
@@ -540,7 +541,7 @@ export async function handleOwnerAuthRoutes({
     '/v1/owner-auth/account/turn/connections/release'].includes(path)
     || /^\/v1\/owner-auth\/account\/devices\/[^/]+\/(rename|revoke)$/.test(path);
   const isAccountFileUploadQuotaApi = /^\/v1\/owner-auth\/instances\/uploads\/(policy|reserve|complete|release)$/.test(path);
-  if (!trimString(googleWebClientId) && !isNativeApi && !isDemoStatusApi && !isDiscoveryApi && !isBindingAuthorityApi && !isInstanceAccessGrantApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi && !isAccountFileUploadQuotaApi) return false;
+  if (!trimString(googleWebClientId) && !isNativeApi && !isDemoStatusApi && !isDiscoveryApi && !isBindingAuthorityApi && !isWorkspaceAuthorityApi && !isInstanceAccessGrantApi && !isTurnConnectionApi && !isAccountJoinApi && !isAccountRendezvousApi && !isProviderSyncApi && !isAccountSyncCatalogApi && !isAccountDirectoryApi && !isAccountFileUploadQuotaApi) return false;
 
   try {
     if (isDemoStatusApi && req.method === 'GET') {
@@ -549,6 +550,11 @@ export async function handleOwnerAuthRoutes({
     }
     if (isBindingAuthorityApi && req.method === 'POST') {
       const result = await broker.readBindingAuthority(await readJsonBody(req));
+      jsonResponse(res, 200, result);
+      return true;
+    }
+    if (isWorkspaceAuthorityApi && req.method === 'POST') {
+      const result = await broker.readWorkspaceAuthority(await readJsonBody(req));
       jsonResponse(res, 200, result);
       return true;
     }

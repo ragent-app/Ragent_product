@@ -666,7 +666,9 @@ export async function startAccountsServer(options = {}) {
   const inboxPath = '/v1/owner-auth/rendezvous/inbox';
   const inboxPaths = new Set([inboxPath, ...(basePath && basePath !== '/' ? [`${basePath}${inboxPath}`] : [])]);
   const authorityPath = '/v1/owner-auth/instances/authority';
-  const authorityPaths = new Set([authorityPath, ...(basePath && basePath !== '/' ? [`${basePath}${authorityPath}`] : [])]);
+  const workspaceAuthorityPath = '/v1/owner-auth/instances/workspace-authority';
+  const authorityPaths = new Set([authorityPath, workspaceAuthorityPath,
+    ...(basePath && basePath !== '/' ? [`${basePath}${authorityPath}`, `${basePath}${workspaceAuthorityPath}`] : [])]);
   const mount = (method, max, path = '/*') =>
     fastify[method](path, { config: { rateLimit: { max: method === 'post' && path === '/*'
       ? request => authorityPaths.has(String(request.url).split(/[?#]/, 1)[0]) ? rateLimits.authorityMax : max

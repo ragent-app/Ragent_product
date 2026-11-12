@@ -4,8 +4,9 @@ import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from '
 import { readdir, readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { createPostgresStore } from '../accounts/store/postgres.mjs';
+import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
-import { createInstancePublicKeyFingerprint, buildAccountJoinIntentProofMessage } from '../lib/instance-proof-protocol.mjs';
+import { createInstancePublicKeyFingerprint, buildAccountJoinIntentProofMessage, buildWorkspaceAuthorityProofMessage } from '../lib/instance-proof-protocol.mjs';
 import { normalizeDevicePublicKey, createDevicePublicKeyFingerprint, buildAccountJoinIntentMessage } from '../lib/device-auth-protocol.mjs';
 import { inboxWaitFixture } from './fixtures/rendezvous-inbox-wait.mjs';
 
@@ -62,7 +63,20 @@ test('PostgreSQL shared join keeps owner authority and rejects revoked or replac
   assert.equal((await fixture.broker.completeAccountJoinIntent(completion)).accountId, accountId);
   assert.equal((await fixture.broker.completeAccountJoinIntent(completion)).replayed, true);
   assert.equal((await pool.query('select account_id from instance_bindings where instance_id=$1', [instance.instanceId])).rows[0].account_id, 'acct_inbox_qa');
+  const statusBroker = createOwnerAuthBroker({ store, clock: () => now, issuer: 'https://ragent.agentoncloud.com',
+    verifyGoogleCredential: async () => ({}), resolveAccount: async () => ({}), signAssertion: async claims => JSON.stringify(claims) });
+  const statusFields = { instanceId: instance.instanceId, keyFingerprint: instance.keyFingerprint, ownerAccountId: 'acct_inbox_qa',
+    accountId, grantId: access.grant.grantId, requestId: 'qa_workspace_status_request_001', nonce: randomBytes(32).toString('base64url'),
+    issuedAt: at, audience: 'ragent-workspace-authority' };
+  const statusRequest = { ...statusFields, instance,
+    signature: sign(null, Buffer.from(buildWorkspaceAuthorityProofMessage(statusFields)), hostKeys.privateKey).toString('base64url') };
+  const status = async () => JSON.parse((await statusBroker.readWorkspaceAuthority(statusRequest)).assertion);
+  const initialStatus = await status();
+  assert.equal(initialStatus.workspaceAuthorityState, 'active');
   await store.mutate(draft => revokeInstanceAccessGrant(draft, { grantId: access.grant.grantId, ownerAccountId: 'acct_inbox_qa', now }));
+  const revokedStatus = await status();
+  assert.equal(revokedStatus.workspaceAuthorityState, 'inactive');
+  assert.ok(BigInt(revokedStatus.bindingAuthorityRevision) > BigInt(initialStatus.bindingAuthorityRevision));
   await assert.rejects(fixture.broker.completeAccountJoinIntent(completion), { code: 'owner_auth_binding_mismatch' });
   const replacement = await store.mutate(draft => issueInstanceAccessGrant(draft, { instanceId: instance.instanceId, ownerAccountId: 'acct_inbox_qa',
     accountId, requestId: 'qa_shared_pg_access_request_002', now }));

@@ -60,13 +60,14 @@ test('binding authority refresh has a bounded budget independent of account cont
     const post = async path => (await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status;
     const control = '/accounts/v1/owner-auth/transactions';
     const inbox = '/accounts/v1/owner-auth/rendezvous/inbox';
-    const authority = ['/accounts/v1/owner-auth/instances/authority', '/v1/owner-auth/instances/authority'];
+    const authority = ['/accounts/v1/owner-auth/instances/authority', '/v1/owner-auth/instances/authority',
+      '/accounts/v1/owner-auth/instances/workspace-authority', '/v1/owner-auth/instances/workspace-authority'];
     for (let i = 0; i < 3; i++) assert.notEqual(await post(control), 429);
     assert.equal(await post(control), 429);
     for (let i = 0; i < 3; i++) assert.notEqual(await post(inbox), 429);
     assert.equal(await post(inbox), 429);
-    for (let i = 0; i < 3; i++) assert.notEqual(await post(authority[i % 2]), 429);
-    assert.equal(await post(authority[0]), 429, 'authority requests remain bounded across both aliases');
+    for (let i = 0; i < 3; i++) assert.notEqual(await post(authority[i]), 429);
+    assert.equal(await post(authority[3]), 429, 'authority requests remain bounded across both routes and aliases');
   } finally {
     if (app) await app.close();
     await rm(dir, { recursive: true, force: true });

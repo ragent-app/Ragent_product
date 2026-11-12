@@ -1368,6 +1368,37 @@ export function createPostgresStore({
     accountDeletionContext() { return Object.freeze({ pool, schema }); },
     // Account ASR has its own request/usage tables and never enters the global snapshot writer.
     accountAsrContext() { return Object.freeze({ pool, schema }); },
+    /** A single MVCC view for an exact member grant and its owner revision. */
+    async readWorkspaceAuthority({ instanceId, accountId, grantId }) {
+      if (![instanceId, accountId].every(value => typeof value === 'string' && /^[A-Za-z0-9_-]{8,160}$/.test(value))
+        || typeof grantId !== 'string' || !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId)) {
+        throw new TypeError('An exact workspace authority identity is required');
+      }
+      return withClient(async client => {
+        await client.query('begin isolation level repeatable read read only');
+        try {
+          await scope(client);
+          await client.query('select set_config($1, $2, true)', ['statement_timeout', '5000ms']);
+          const authority = await readAuthority(client, instanceId);
+          const draft = { accounts: [], instanceBindings: authority.binding ? [authority.binding] : [],
+            instanceAccessGrants: [], bindingHistory: [] };
+          if (authority.binding) {
+            const accounts = await client.query('select * from accounts where account_id = any($1::text[])',
+              [[authority.binding.accountId, accountId]]);
+            draft.accounts = accounts.rows.map(rowToAccount);
+            const grants = await client.query('select * from instance_access_grants where grant_id = $1 and instance_id = $2 and account_id = $3 limit 1',
+              [grantId, instanceId, accountId]);
+            draft.instanceAccessGrants = grants.rows.map(rowToInstanceAccessGrant);
+            if (grants.rows.length) {
+              const history = await client.query('select * from binding_history where instance_id = $1 order by occurred_at, instance_id', [instanceId]);
+              draft.bindingHistory = history.rows.map(rowToHistory);
+            }
+          }
+          await client.query('commit');
+          return { authority, draft };
+        } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+      });
+    },
     /** Fixed account/request view; never enters the snapshot writer queue. */
     async readAccountRendezvousSnapshot({ tokenHash, requestId }) {
       if (!/^[a-f0-9]{64}$/.test(tokenHash || '')

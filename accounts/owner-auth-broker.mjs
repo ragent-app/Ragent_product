@@ -13,6 +13,7 @@ import {
   buildNativeOwnerAuthMessage,
   buildNativeOwnerAuthRollbackMessage,
   buildBindingAuthorityProofMessage,
+  buildWorkspaceAuthorityProofMessage,
   buildAccountFileUploadQuotaMessage,
   buildTargetRuntimeAuthorizationMessage,
   buildOwnerAuthPollMessage,
@@ -1043,6 +1044,58 @@ export function createOwnerAuthBroker({
     if (authority) await authority.cacheOwnerPollAssertion({ ...pending.cache, assertion });
     else getTransactions(legacyDraft).find(item => item.id === pending.cache.transactionId).pollAssertion = assertion;
     return { assertion, ...pending.response };
+  }
+
+  async function readWorkspaceAuthority(input) {
+    const instanceId = trimString(input?.instance?.instanceId), publicKey = trimString(input?.instance?.publicKey),
+      keyFingerprint = trimString(input?.instance?.keyFingerprint), ownerAccountId = trimString(input?.ownerAccountId),
+      accountId = trimString(input?.accountId), grantId = trimString(input?.grantId), requestId = trimString(input?.requestId),
+      nonce = trimString(input?.nonce), issuedAt = trimString(input?.issuedAt), audience = trimString(input?.audience);
+    if (![instanceId, ownerAccountId, accountId].every(value => /^[A-Za-z0-9_-]{8,160}$/.test(value))
+      || ownerAccountId === accountId || !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId)
+      || !/^[A-Za-z0-9_-]{16,160}$/.test(requestId) || !/^[A-Za-z0-9_-]{24,128}$/.test(nonce)
+      || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !publicKey || publicKey.length > 4096
+      || audience !== 'ragent-workspace-authority' || !isProtocolField(issuedAt, { min: 20, max: 64 })
+      || !Number.isFinite(Date.parse(issuedAt))) {
+      throw createError('workspace_authority_request_invalid', 'Invalid workspace authority request.', 400);
+    }
+    if (Math.abs(clock() - Date.parse(issuedAt)) > OWNER_AUTH_PROOF_SKEW_MS)
+      throw createError('owner_auth_proof_expired', 'Workspace authority proof is expired.', 401);
+    let keyMatches = false;
+    try { keyMatches = createInstancePublicKeyFingerprint(publicKey) === keyFingerprint; } catch {}
+    const fields = { instanceId, keyFingerprint, ownerAccountId, accountId, grantId, requestId, nonce, issuedAt, audience };
+    if (!keyMatches || !verifyInstanceProofSignature({ publicKey, message: buildWorkspaceAuthorityProofMessage(fields), signature: input?.signature }))
+      throw createError('owner_auth_proof_invalid', 'Invalid workspace authority proof.', 401);
+    if (typeof store.readWorkspaceAuthority !== 'function')
+      throw createError('owner_auth_authority_unavailable', 'Durable workspace authority is unavailable.', 503);
+    const { authority, draft } = await store.readWorkspaceAuthority({ instanceId, accountId, grantId });
+    const revision = authority?.revision, binding = authority?.binding;
+    if (authority?.instanceId !== instanceId || (binding && binding.instanceId !== instanceId)
+      || typeof revision !== 'string' || !/^(0|[1-9][0-9]{0,18})$/.test(revision)
+      || BigInt(revision) > 9223372036854775807n || (binding && revision === '0')) {
+      throw createError('owner_auth_authority_unavailable', 'Durable binding revision is unavailable.', 503);
+    }
+    const access = binding?.accountId === ownerAccountId && binding.instanceKeyFingerprint === keyFingerprint
+      ? resolveInstanceWorkspaceAccess(draft, { instanceId, accountId }) : null;
+    let active = access?.kind === 'workspace' && access.grant.grantId === grantId;
+    if (active) {
+      try { assertDemoAccount(draft, ownerAccountId, instanceId); assertDemoAccount(draft, accountId, instanceId); }
+      catch (error) {
+        if (!['owner_auth_demo_unavailable', 'account_deletion_pending'].includes(error?.code)) throw error;
+        active = false;
+      }
+    }
+    if (Math.abs(clock() - Date.parse(issuedAt)) > OWNER_AUTH_PROOF_SKEW_MS)
+      throw createError('owner_auth_proof_expired', 'Workspace authority proof expired.', 401);
+    const nowSeconds = Math.floor(clock() / 1000);
+    const claims = { iss: trimString(issuer) || 'agentoc-accounts', aud: instanceId, sub: accountId,
+      purpose: 'workspace_authority', tx: requestId, nonce, ownerAccountId, workspaceGrantId: grantId,
+      instanceKeyFingerprint: keyFingerprint, bindingAuthorityRevision: revision,
+      workspaceAuthorityState: active ? 'active' : 'inactive', authorityProtocol: 1, iat: nowSeconds, exp: nowSeconds + 30 };
+    const assertion = await signAssertion(claims);
+    if (clock() >= (nowSeconds + 30) * 1000)
+      throw createError('owner_auth_authority_unavailable', 'Workspace authority expired before delivery.', 503);
+    return { assertion, expiresAt: new Date((nowSeconds + 30) * 1000).toISOString() };
   }
 
   async function readBindingAuthority(input) {
@@ -4326,6 +4379,7 @@ export function createOwnerAuthBroker({
       : demoAccountAuth.instanceAccess === 'account' ? 'configured' : 'unavailable',
     start,
     readBindingAuthority,
+    readWorkspaceAuthority,
     beginBrowser,
     beginDesktop,
     beginPhone,

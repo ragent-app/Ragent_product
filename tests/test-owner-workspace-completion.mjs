@@ -17,7 +17,8 @@ test('verified shared completion retains the local owner binding', async () => {
   const keys = generateKeyPairSync('ed25519'), kid = 'shared-completion-fixture';
   const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid };
   const identity = await (await import('../lib/instance-identity.mjs')).loadOrCreateInstanceIdentity();
-  const { completeOwnerAccountJoinIntent } = await import('../lib/owner-account-auth.mjs');
+  const { completeOwnerAccountJoinIntent, queryWorkspaceAccountAuthority } = await import('../lib/owner-account-auth.mjs');
+  const { buildWorkspaceAuthorityProofMessage, verifyInstanceProofSignature } = await import('../lib/instance-proof-protocol.mjs');
   const now = Date.now(), requestId = 'request_shared_completion_001';
   const intent = { intentId: 'intent_shared_completion_001', deviceId: 'device_shared_completion_001',
     devicePublicKeyFingerprint: 'a'.repeat(64), nonce: 'nonce_shared_completion_001',
@@ -47,5 +48,27 @@ test('verified shared completion retains the local owner binding', async () => {
     assert.deepEqual(completed.workspaceAccess, { ownerAccountId: owner, grantId });
     const binding = JSON.parse(await readFile(file, 'utf8'));
     assert.equal(binding.accountId, owner); assert.equal(binding.plan, 'plus'); assert.equal(binding.bindingAuthorityRevision, '2');
+    let requests = 0;
+    const authorityFetch = async (url, options = {}) => {
+      if (new URL(url).pathname.endsWith('/.well-known/jwks.json')) return { ok: true, json: async () => ({ keys: [jwk] }) };
+      requests++;
+      const body = JSON.parse(options.body);
+      assert.equal(body.ownerAccountId, owner); assert.equal(body.accountId, member); assert.equal(body.grantId, grantId);
+      assert.equal(verifyInstanceProofSignature({ publicKey: body.instance.publicKey,
+        message: buildWorkspaceAuthorityProofMessage({ ...body, instanceId: body.instance.instanceId,
+          keyFingerprint: body.instance.keyFingerprint }), signature: body.signature }), true);
+      const claims = { iss: 'https://accounts.example.test', aud: identity.instanceId, sub: member,
+        ownerAccountId: owner, workspaceGrantId: grantId, instanceKeyFingerprint: identity.keyFingerprint,
+        purpose: 'workspace_authority', tx: body.requestId, nonce: body.nonce, bindingAuthorityRevision: '2',
+        workspaceAuthorityState: 'active', authorityProtocol: 1, iat: Math.floor(now / 1000), exp: Math.floor(now / 1000) + 30 };
+      const message = [Buffer.from(JSON.stringify({ alg: 'EdDSA', kid })).toString('base64url'),
+        Buffer.from(JSON.stringify(claims)).toString('base64url')].join('.');
+      return { ok: true, json: async () => ({ assertion: `${message}.${sign(null, Buffer.from(message), keys.privateKey).toString('base64url')}` }) };
+    };
+    const authority = await queryWorkspaceAccountAuthority({ ownerAccountId: owner, accountId: member, grantId, fetchImpl: authorityFetch, clock: () => now });
+    assert.equal(authority.state, 'active'); assert.equal(authority.revision, '2');
+    await assert.rejects(queryWorkspaceAccountAuthority({ ownerAccountId: 'acct_other_owner', accountId: member,
+      grantId, fetchImpl: authorityFetch, clock: () => now }), { code: 'owner_auth_not_bound' });
+    assert.equal(requests, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
