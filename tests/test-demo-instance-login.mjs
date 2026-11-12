@@ -29,7 +29,7 @@ for(let i=0;i<2;i++){
  assert.equal(state.instanceBindings.find(x=>x.instanceId===instance.instanceId).accountId,policy.accountId);
  await assert.rejects(broker.completePhoneDemoCredential({transactionId,phoneState,username,password}),{code:'owner_auth_transaction_replayed'});
  await broker.redeem({...proof,grant:desktop.deliveryGrant});
- assert.equal(claims.at(-1).limits.unlimited,true,'unlimited policy reaches the signed instance credential');
+ assert.equal(claims.at(-1).limits.unlimited,undefined,'legacy review policy does not override ordinary entitlement');
 }
 assert.equal(state.instanceBindings.length,2);
 assert.ok(state.instanceBindings.every(binding=>binding.provider==='demo'));

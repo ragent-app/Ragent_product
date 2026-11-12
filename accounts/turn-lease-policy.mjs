@@ -55,13 +55,10 @@ export function activeTurnConnectionState(draft, accountId, nowMs, { excludeConn
     activeInstanceIds: [...new Set(active.map((lease) => lease.instanceId).filter(Boolean))] };
 }
 
-/** Only operator policy may waive connection quotas; identity checks remain mandatory. */
+/** All account providers use the same stored entitlement and quota policy. */
 export function createAccountEntitlementResolver(demoAccountAuth = null) {
   return (draft, accountId, nowMs) => {
-    const stored = resolveAccountEntitlement(draft, accountId, nowMs);
-    if (demoAccountAuth?.accountId !== accountId || !demoAccountAuth.unlimitedConnections) return stored;
-    demoAccountAuth.assertAccount(draft, accountId);
-    return { ...stored, status: 'active', source: 'review-policy', expiresAt: '',
-      limits: { phones: 2147483647, computers: 2147483647, unlimited: true } };
+    if (demoAccountAuth?.accountId === accountId) demoAccountAuth.assertAccount(draft, accountId);
+    return resolveAccountEntitlement(draft, accountId, nowMs);
   };
 }

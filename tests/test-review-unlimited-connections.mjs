@@ -6,20 +6,19 @@ const policy=await createDemoAccountPolicy({username:'review-fixture',password:'
 const draft={accounts:[{accountId:policy.accountId,provider:'demo'}]};
 const resolve=createAccountEntitlementResolver(createDemoAccountAuth(policy));
 const entitlement=resolve(draft,policy.accountId,Date.now());
-assert.equal(entitlement.limits.unlimited,true);
+const ordinary=resolve(draft,'acct_google_fixture',Date.now());
+assert.deepEqual(entitlement, ordinary, 'legacy review flag must not override ordinary entitlements');
 const args={accountId:policy.accountId,instanceId:'inst_fixture',deviceId:'adev_fixture',deviceKind:'phone',
  activePhones:2147483647,activeComputers:2147483647,limits:entitlement.limits};
-const result=evaluateTurnConnectionAuthorization(args);
-assert.equal(result.authorized,true,'unlimited is a policy, not a larger numeric cap');
-assert.equal(publicTurnAuthorization(result).limits.unlimited,true);
+assert.equal(evaluateTurnConnectionAuthorization(args).status,'quota-exceeded');
+assert.equal(publicTurnAuthorization(evaluateTurnConnectionAuthorization(args)).limits.unlimited,undefined);
 assert.equal(evaluateTurnConnectionAuthorization({...args,accountMatches:false}).authorized,false);
 assert.equal(evaluateTurnConnectionAuthorization({...args,accountId:''}).authorized,false);
 assert.equal(evaluateTurnConnectionAuthorization({...args,deviceId:''}).authorized,false);
-const ordinary=resolve(draft,'acct_google_fixture',Date.now());
-assert.equal(ordinary.limits.unlimited,undefined);
-assert.equal(evaluateTurnConnectionAuthorization({...args,limits:ordinary.limits}).status,'quota-exceeded');
 const normalDemo=createAccountEntitlementResolver(createDemoAccountAuth({...policy,unlimitedConnections:false}));
-assert.equal(normalDemo(draft,policy.accountId,Date.now()).limits.unlimited,undefined);
+assert.deepEqual(normalDemo(draft,policy.accountId,Date.now()), ordinary);
+draft.accountEntitlements = [{ accountId: policy.accountId, plan: 'pro', source: 'purchase' }];
+assert.equal(resolve(draft,policy.accountId,Date.now()).source,'purchase','ordinary purchased entitlement still applies');
 assert.throws(()=>createDemoAccountAuth({...policy,unlimitedConnections:'true'}));
 assert.throws(()=>resolve({...draft,accounts:[{...draft.accounts[0],disabledAt:new Date().toISOString()}]},policy.accountId,Date.now()));
-console.log('PASS operator unlimited policy, beyond numeric cap, unchanged ordinary quotas, signed projection, identity and disabled-account checks');
+console.log('PASS account providers share stored entitlements; legacy unlimited flag cannot override quotas');
