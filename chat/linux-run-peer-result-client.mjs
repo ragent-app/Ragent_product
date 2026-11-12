@@ -90,6 +90,27 @@ export async function stageProtectedLinuxRunResult({ runId, launchAttempt, resul
   return value;
 }
 
+// Registration follows systemd accepting the unit. Wait before invoking any
+// provider so short Runs cannot finish before root has bound their identity.
+export async function waitForProtectedLinuxRunReady({ runId, launchAttempt, maxWaitMs = 15000, ...options } = {}) {
+  if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs < 100 || maxWaitMs > 60000) throw unavailable();
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    if (remaining < 100) break;
+    try {
+      const value = await requestProtectedResult({ type: 'ready', runId, launchAttempt },
+        { ...options, timeoutMs: Math.min(2000, remaining) });
+      if (!value || Object.keys(value).join(',') !== 'ready' || value.ready !== true) throw unavailable();
+      return;
+    } catch {
+      const delay = Math.min(100, deadline - Date.now());
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw unavailable();
+}
+
 export async function readProtectedLinuxRunResult({ runId, launchAttempt, ...options } = {}) {
   const value = await requestProtectedResult({ type: 'read', runId, launchAttempt }, options);
   if (value === null) return null;

@@ -9,6 +9,7 @@ import { TextDecoder } from 'node:util';
 import { assertLinuxRootControlledDirectory } from '../chat/linux-target-key-store.mjs';
 import { stageLinuxRunPeerResult, readRevokedLinuxRunPeerResult, discardRevokedLinuxRunPeerResult } from './linux-run-peer-result-store.mjs';
 import { loadLinuxServiceKeyPin } from './linux-service-key-pin.mjs';
+import { withLinuxRunPeerContext } from './linux-run-context-store.mjs';
 
 const MAX_REQUEST = 4 * 1024 * 1024;
 const MAX_CLIENTS = 32;
@@ -54,7 +55,7 @@ function decodeRequest(buffer) {
       !Number.isSafeInteger(request.launchAttempt) || request.launchAttempt < 0 || request.launchAttempt > 10000) fail();
   const keys = Object.keys(request).sort().join(',');
   if ((request.type === 'stage' && keys === 'launchAttempt,result,runId,type') ||
-      (['read', 'discard'].includes(request.type) && keys === 'launchAttempt,runId,type')) return request;
+      (['ready', 'read', 'discard'].includes(request.type) && keys === 'launchAttempt,runId,type')) return request;
   fail();
 }
 
@@ -106,7 +107,10 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
         const request = decodeRequest(Buffer.concat(chunks, total).subarray(0, total - 1));
         const peer = await peerCredentials(socket, peerHelper);
         let value;
-        if (request.type === 'stage') {
+        if (request.type === 'ready') {
+          value = await withLinuxRunPeerContext({ directory, pinDirectory, runId: request.runId,
+            launchAttempt: request.launchAttempt, peer }, async () => ({ ready: true }));
+        } else if (request.type === 'stage') {
           value = await stageLinuxRunPeerResult({ directory, pinDirectory, resultDirectory,
             runId: request.runId, launchAttempt: request.launchAttempt, peer, result: request.result });
         } else {
