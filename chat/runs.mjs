@@ -362,6 +362,7 @@ function runIndexSummary(run) {
     updatedAt: normalizeRunIndexValue(run?.updatedAt, 64),
     completedAt: normalizeRunIndexValue(run?.completedAt, 64),
     cancelRequested: run?.cancelRequested === true,
+    linuxScopeRevocationPending: run?.linuxScopeRevocationPending === true,
     ...(run?.appApiMessageVersion === 1 ? { appApiMessageVersion: 1,
       appApiMessageQueue: run.appApiMessageQueue === true } : {}),
     runnerProcessId: Number.isInteger(run?.runnerProcessId) ? run.runnerProcessId : null,
@@ -1329,6 +1330,12 @@ function mergeRunRecords(current, proposed) {
   merged.runnerSupervisorSocket = pickDefined(proposed?.runnerSupervisorSocket, current?.runnerSupervisorSocket);
   merged.toolProcessId = pickDefined(proposed?.toolProcessId, current?.toolProcessId);
   merged.runnerLaunchAttempt = pickMaxInt(current?.runnerLaunchAttempt, proposed?.runnerLaunchAttempt, 0);
+  if (current?.cancelRequested === true && Object.hasOwn(current, 'linuxScopeRevocationPending') &&
+      merged.runnerLaunchAttempt !== (Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0)) {
+    // A concurrent restart can advance the generation after an earlier one
+    // was revoked. Keep the new generation in the durable retry queue too.
+    merged.linuxScopeRevocationPending = true;
+  }
   if (proposed?.__clearRunnerBinding === true) {
     merged.runnerProcessId = null;
     merged.runnerUnitName = null;
@@ -2584,18 +2591,55 @@ export async function materializeRunSpoolLine(runId, record) {
 }
 
 export async function requestRunCancel(runId, { beforeWrite = null, authorizeWrite = null } = {}) {
+  const trackRevocation = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
   const updated = await updateRun(runId, (run) => ({
     ...run,
     cancelRequested: true,
     cancelRequestedAt: new Date().toISOString(),
+    ...(trackRevocation ? { linuxScopeRevocationPending: true } : {}),
   }), { beforeWrite, authorizeWrite });
-  if (updated && process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1') {
-    try {
-      const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
-      if ((await revokeLinuxRunScope(updated)).state !== 'revoked') console.warn(`[runs] privileged Run scope revocation unavailable for ${runId}`);
-    } catch { console.warn(`[runs] privileged Run scope revocation unavailable for ${runId}`); }
+  if (updated && trackRevocation && !await retryLinuxRunScopeRevocation(updated)) {
+    console.warn(`[runs] privileged Run scope revocation pending for ${runId}`);
   }
   return updated;
+}
+
+async function retryLinuxRunScopeRevocation(run) {
+  if (!run?.cancelRequested || run.linuxScopeRevocationPending !== true) return false;
+  const attempt = Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
+  try {
+    const { revokeLinuxRunScope } = await import('./linux-run-scope-lifecycle.mjs');
+    if ((await revokeLinuxRunScope(run)).state !== 'revoked') return false;
+    await updateRun(run.id, (current) => {
+      const currentAttempt = Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0;
+      if (!current.cancelRequested || !current.linuxScopeRevocationPending || currentAttempt !== attempt) return current;
+      return { ...current, linuxScopeRevocationPending: false };
+    });
+    return true;
+  } catch { return false; }
+}
+
+// The startup scan reads status files even when the index is stale: a process
+// may stop after publishing cancellation but before appending its index entry.
+// Routine retries then use the compact pending flag. This is recovery, not a
+// claim that a cancellation already reached the root executor.
+export async function recoverLinuxRunScopeRevocations({ scanAll = false, limit = 50 } = {}) {
+  if (process.platform !== 'linux' || process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS !== '1') return { attempted: 0, revoked: 0 };
+  const entries = await listRunIndexEntries();
+  let attempted = 0, revoked = 0;
+  for (const entry of entries) {
+    if (!scanAll && entry.linuxScopeRevocationPending !== true) continue;
+    const run = await getRunAcceptanceEvidence(entry.id).catch(() => null);
+    if (!run?.cancelRequested || run.linuxScopeRevocationPending !== true) continue;
+    if (scanAll && entry.linuxScopeRevocationPending !== true) await appendRunIndexRecord(run);
+    if (attempted >= limit) {
+      if (scanAll) continue;
+      break;
+    }
+    attempted += 1;
+    if (await retryLinuxRunScopeRevocation(run)) revoked += 1;
+  }
+  return { attempted, revoked };
 }
 
 export async function listRunIds() {

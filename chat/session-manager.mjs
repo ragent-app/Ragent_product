@@ -270,6 +270,7 @@ import {
   scanRunSpoolRecords,
   streamRunSpoolRecords,
   requestRunCancel,
+  recoverLinuxRunScopeRevocations,
   removeRunsForSession,
   runDir,
   updateRun,
@@ -605,6 +606,8 @@ const privilegedCategoryApprovalQueue = createKeyedTaskQueue();
 let totalObservedRuns = 0;
 let orphanRunSweepPromise = null;
 let orphanRunSweepTimer = null;
+let linuxRunScopeRecoveryTimer = null;
+let linuxRunScopeRecoveryPromise = null;
 
 // Memory registry (DS-06): active detached-run watchers.
 registerCache('observedRuns', {
@@ -9602,6 +9605,17 @@ export async function startDetachedRunObservers() {
   }
   await reconcileOrphanDetachedRuns();
   await drainQueuedAgyRuns();
+  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeRecoveryTimer) {
+    const recover = (scanAll = false) => {
+      if (linuxRunScopeRecoveryPromise) return;
+      linuxRunScopeRecoveryPromise = recoverLinuxRunScopeRevocations({ scanAll })
+        .catch((error) => console.error(`[runs] privileged scope recovery failed: ${error.message}`))
+        .finally(() => { linuxRunScopeRecoveryPromise = null; });
+    };
+    recover(true);
+    linuxRunScopeRecoveryTimer = setInterval(() => recover(false), 15_000);
+    linuxRunScopeRecoveryTimer.unref?.();
+  }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {
       void reconcileOrphanDetachedRuns().catch((error) => {

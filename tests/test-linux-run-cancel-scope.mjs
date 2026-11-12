@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 
 test('persisted Run cancellation notifies the root lifecycle broker',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
@@ -17,7 +18,7 @@ test('persisted Run cancellation notifies the root lifecycle broker',
       process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
       process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
       const { createRunnerLifecycleServer } = await import('../scripts/runner-lifecycle-broker.mjs');
-      const { createRun, requestRunCancel } = await import('../chat/runs.mjs');
+      const { createRun, getRunAcceptanceEvidence, requestRunCancel, recoverLinuxRunScopeRevocations, runIndexPath, updateRun } = await import('../chat/runs.mjs');
       const broker = await createRunnerLifecycleServer({ socketPath: process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET,
         serviceUser: 'root', serviceGroup: 'root', controlUser: 'root', controlGroup: 'root', chownImpl: async () => {},
         runScopeRegistration: { directory: contextDirectory, pinDirectory: `${root}/unused` } });
@@ -35,6 +36,39 @@ test('persisted Run cancellation notifies the root lifecycle broker',
         await assert.rejects(requestRunCancel(deniedId, { beforeWrite: () => { throw new Error('cancel denied'); } }));
         const deniedName = `${createHash('sha256').update(deniedId).digest('hex')}-0.revoked`;
         await assert.rejects(lstat(`${contextDirectory}/${deniedName}`), { code: 'ENOENT' });
+        const delayedId = 'run_delayedfixture1';
+        await createRun({ status: { id: delayedId, sessionId: 's1', requestId: 't3', state: 'running', runnerLaunchAttempt: 1 },
+          manifest: { sessionId: 's1', requestId: 't3' } });
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
+        await requestRunCancel(delayedId);
+        assert.equal((await getRunAcceptanceEvidence(delayedId)).linuxScopeRevocationPending, true);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        assert.equal((await recoverLinuxRunScopeRevocations({ scanAll: true })).revoked, 1);
+        assert.equal((await getRunAcceptanceEvidence(delayedId)).linuxScopeRevocationPending, false);
+        await updateRun(delayedId, (run) => ({ ...run, runnerLaunchAttempt: 2 }));
+        assert.equal((await getRunAcceptanceEvidence(delayedId)).linuxScopeRevocationPending, true);
+        assert.equal((await recoverLinuxRunScopeRevocations()).revoked, 1);
+        const delayedName = `${createHash('sha256').update(delayedId).digest('hex')}-2.revoked`;
+        assert.equal((await lstat(`${contextDirectory}/${delayedName}`)).mode & 0o777, 0o600);
+        const staleId = 'run_stalefixture1';
+        await createRun({ status: { id: staleId, sessionId: 's1', requestId: 't4', state: 'running' },
+          manifest: { sessionId: 's1', requestId: 't4' } });
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
+        await requestRunCancel(staleId);
+        // Emulate a crash after status replacement but before the index append.
+        await appendFile(runIndexPath(), `${JSON.stringify({ kind: 'entry', op: 'put', id: staleId,
+          sessionId: 's1', requestId: 't4', state: 'running', cancelRequested: false })}\n`);
+        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        const moduleUrl = new URL('../chat/runs.mjs', import.meta.url).href;
+        const child = spawn(process.execPath, ['--input-type=module', '-e',
+          `import {recoverLinuxRunScopeRevocations} from ${JSON.stringify(moduleUrl)}; await recoverLinuxRunScopeRevocations({scanAll:true});`],
+        { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+        let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });
+        const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+        assert.equal(code, 0, stderr);
+        assert.equal((await getRunAcceptanceEvidence(staleId)).linuxScopeRevocationPending, false);
+        const staleName = `${createHash('sha256').update(staleId).digest('hex')}-0.revoked`;
+        assert.equal((await lstat(`${contextDirectory}/${staleName}`)).mode & 0o777, 0o600);
       } finally { await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });
