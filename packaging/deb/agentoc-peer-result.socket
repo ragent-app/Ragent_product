@@ -1,0 +1,14 @@
+[Unit]
+Description=Ragent protected Run result socket (opt-in)
+
+[Socket]
+ListenStream=/run/agentoc-peer-result/result.sock
+DirectoryMode=0755
+SocketUser=root
+SocketGroup=root
+SocketMode=0666
+FileDescriptorName=agentoc-peer-result
+Service=agentoc-peer-result.service
+
+[Install]
+WantedBy=sockets.target

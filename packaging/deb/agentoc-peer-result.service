@@ -1,0 +1,23 @@
+[Unit]
+Description=Ragent protected Run result broker (opt-in)
+Requires=agentoc-peer-result.socket
+After=agentoc-peer-result.socket
+
+[Service]
+Type=simple
+User=root
+Group=root
+Sockets=agentoc-peer-result.socket
+WorkingDirectory=/opt/agentoc/app
+EnvironmentFile=/etc/agentoc/agentoc.env
+ExecStart=/opt/agentoc/runtime/node /opt/agentoc/app/scripts/linux-run-peer-result-broker.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX
+UMask=0077

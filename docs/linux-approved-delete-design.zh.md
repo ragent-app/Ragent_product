@@ -477,6 +477,14 @@ Ubuntu 真机夹具中，systemd 任务通过客户端写入，独立控制 UID 
 另以 root 建立 socket 后降权监听并发送伪造响应，客户端拒绝该服务。客户端
 目前尚未接入 sidecar 或控制服务，也不负责校验控制服务采纳结果时的取消意图。
 
+增加独立的 systemd socket 激活入口：由 systemd 持有监听端点，broker 仅
+接受预期名称的单个继承描述符，并从 root 管理的服务用户名解析控制 UID。
+Ubuntu 真机通过 `systemd-socket-activate` 和独立控制 UID 验证继承 socket
+读回，broker 退出时不删除该 socket；此测试不是 systemd 单元重启或安装包
+验收。Debian 构建脚本安装对应单元但不启用；所需 root 目录和签名上下文
+仍须在完整接入方案中配置，不能由普通任务选择。sidecar、控制端采纳、
+异常重启、升级和最终包均未完成验收。
+
 同一物理机对 systemd 管理目录作了补充试验：动态用户可在自己的
 `RuntimeDirectory` 中读写，而控制用的 0600 凭据源文件不能被该 UID 直接
 读取；单元通过 `LoadCredential` 获得该测试凭据。正常停止或向单元主进程

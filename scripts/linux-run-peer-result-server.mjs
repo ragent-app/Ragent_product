@@ -59,9 +59,10 @@ function decodeRequest(buffer) {
 }
 
 export async function createLinuxRunPeerResultServer({ socketPath, directory, pinDirectory, resultDirectory,
-  controlUid, peerHelper = '/usr/lib/agentoc/privileged-peercred' } = {}) {
+  controlUid, peerHelper = '/usr/lib/agentoc/privileged-peercred', inheritFd = null } = {}) {
   if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !validAbsolute(socketPath) ||
-      !Number.isSafeInteger(controlUid) || controlUid <= 0 || controlUid > 0xfffffffe) fail();
+      !Number.isSafeInteger(controlUid) || controlUid <= 0 || controlUid > 0xfffffffe ||
+      (inheritFd !== null && (!Number.isSafeInteger(inheritFd) || inheritFd < 3))) fail();
   await assertLinuxRootControlledDirectory(path.dirname(socketPath));
   for (const folder of [directory, resultDirectory]) {
     if (!validAbsolute(folder)) fail();
@@ -72,8 +73,14 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
   }
   await loadLinuxServiceKeyPin(pinDirectory);
   await assertPeerHelper(peerHelper);
-  // Never unlink an existing path: it could be another active instance.
-  try { await lstat(socketPath); fail(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  // An inherited endpoint is owned by systemd. Otherwise never unlink an
+  // existing path: it could be another active instance.
+  if (inheritFd === null) {
+    try { await lstat(socketPath); fail(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  } else {
+    const info = await lstat(socketPath);
+    if (!info.isSocket() || info.uid !== 0 || info.gid !== 0 || (info.mode & 0o7777) !== 0o666) fail();
+  }
   const sockets = new Set(), pending = new Set();
   let closing = false;
   const server = createServer(socket => {
@@ -116,7 +123,7 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
   await new Promise((resolve, reject) => {
     const onError = error => reject(error);
     server.once('error', onError);
-    server.listen(socketPath, () => { server.off('error', onError); resolve(); });
+    server.listen(inheritFd === null ? socketPath : { fd: inheritFd }, () => { server.off('error', onError); resolve(); });
   });
   // Connection-level failures are returned to clients; prevent a later server
   // error from terminating the host process unexpectedly.
@@ -125,14 +132,14 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
   try {
     identity = await lstat(socketPath);
     if (!identity.isSocket() || identity.uid !== 0 || identity.gid !== 0) fail();
-    await chmod(socketPath, 0o666);
+    if (inheritFd === null) await chmod(socketPath, 0o666);
     const current = await lstat(socketPath);
     if (!current.isSocket() || current.dev !== identity.dev || current.ino !== identity.ino ||
         current.uid !== 0 || current.gid !== 0 || (current.mode & 0o7777) !== 0o666) fail();
   } catch (error) {
     await new Promise(resolve => server.close(resolve));
     const current = await lstat(socketPath).catch(() => null);
-    if (identity && current?.isSocket() && current.dev === identity.dev && current.ino === identity.ino) await unlink(socketPath);
+    if (inheritFd === null && identity && current?.isSocket() && current.dev === identity.dev && current.ino === identity.ino) await unlink(socketPath);
     throw error;
   }
   return {
@@ -143,7 +150,7 @@ export async function createLinuxRunPeerResultServer({ socketPath, directory, pi
       await new Promise(resolve => server.close(resolve));
       await Promise.allSettled([...pending]);
       const current = await lstat(socketPath).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
-      if (current && current.isSocket() && current.dev === identity.dev && current.ino === identity.ino) await unlink(socketPath);
+      if (inheritFd === null && current && current.isSocket() && current.dev === identity.dev && current.ino === identity.ino) await unlink(socketPath);
     },
   };
 }

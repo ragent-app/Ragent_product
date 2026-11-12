@@ -185,6 +185,32 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
         '/usr/bin/node', '--input-type=module', '-e', readClient, inboxPath, helper,
         new URL('../chat/linux-run-peer-result-client.mjs', import.meta.url).href], { timeout: 5000 });
       assert.deepEqual(JSON.parse(clientResult.stdout), result);
+      const activatedPath = `${root}/activated.sock`;
+      const activationCode = 'const {startProtectedResultBroker}=await import(process.argv[1]);const {createLinuxRunPeerResultServer}=await import(process.argv[2]);const server=await startProtectedResultBroker({readUser:async()=>"nobody",createServer:opts=>createLinuxRunPeerResultServer({...opts,socketPath:process.argv[3],resultDirectory:process.argv[4],peerHelper:process.argv[5]})});process.on("SIGTERM",async()=>{await server.close();process.exit(0)});';
+      const activation = spawn('/usr/bin/systemd-socket-activate', [`--listen=${activatedPath}`, '--fdname=agentoc-peer-result',
+        `--setenv=AGENTOC_LINUX_RUN_CONTEXT_DIR=${directory}`, `--setenv=AGENTOC_LINUX_SERVICE_PIN_DIR=${pinDirectory}`,
+        '/usr/bin/node', '--input-type=module', '-e', activationCode,
+        new URL('../scripts/linux-run-peer-result-broker.mjs', import.meta.url).href,
+        new URL('../scripts/linux-run-peer-result-server.mjs', import.meta.url).href,
+        activatedPath, resultDirectory, helper], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let activationErrors = '';
+      activation.stderr.on('data', chunk => { activationErrors += chunk.toString(); });
+      try {
+        for (let i = 0; i < 100; i++) {
+          try { if ((await stat(activatedPath)).isSocket()) break; } catch {}
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.ok((await stat(activatedPath)).isSocket(), activationErrors);
+        await chmod(activatedPath, 0o666);
+        const activated = await execAsync('/usr/bin/setpriv', ['--reuid', String(controlUid), '--regid', String(controlGid), '--clear-groups',
+          '/usr/bin/node', '--input-type=module', '-e', readClient, activatedPath, helper,
+          new URL('../chat/linux-run-peer-result-client.mjs', import.meta.url).href], { timeout: 5000 });
+        assert.deepEqual(JSON.parse(activated.stdout), result);
+      } finally {
+        activation.kill('SIGTERM');
+        if (activation.exitCode === null && activation.signalCode === null) await new Promise(resolve => activation.once('exit', resolve));
+      }
+      assert.ok((await stat(activatedPath)).isSocket(), 'the activated socket belongs to the socket manager');
       // A root-owned socket pathname alone does not authenticate its listener:
       // bind as root, then drop identity before listening and sending a forged reply.
       const fakePath = `${root}/fake.sock`;

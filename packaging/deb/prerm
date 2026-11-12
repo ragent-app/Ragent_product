@@ -41,6 +41,9 @@ if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
     # Stop socket activation before stopping the brokers, otherwise a request
     # can bring either service back while the package is being removed.
     systemctl disable agentoc-runner-lifecycle.socket agentoc-runner-supervisor.socket >/dev/null 2>&1 || true
+    systemctl disable agentoc-peer-result.socket >/dev/null 2>&1 || true
+    stop_unit agentoc-peer-result.socket
+    stop_unit agentoc-peer-result.service
     stop_unit agentoc-runner-lifecycle.socket
     stop_unit agentoc-runner-supervisor.socket
     stop_unit agentoc-runner-lifecycle.service

@@ -527,6 +527,9 @@ install -m 0644 "$ROOT/packaging/deb/agentoc-runner-supervisor.service" "$STAGE/
 # P2-C: systemd socket-activation units for the runner services.
 install -m 0644 "$ROOT/packaging/deb/agentoc-runner-lifecycle.socket" "$STAGE/lib/systemd/system/agentoc-runner-lifecycle.socket"
 install -m 0644 "$ROOT/packaging/deb/agentoc-runner-supervisor.socket" "$STAGE/lib/systemd/system/agentoc-runner-supervisor.socket"
+# Installed for later integration, but deliberately not enabled by postinst.
+install -m 0644 "$ROOT/packaging/deb/agentoc-peer-result.socket" "$STAGE/lib/systemd/system/agentoc-peer-result.socket"
+install -m 0644 "$ROOT/packaging/deb/agentoc-peer-result.service" "$STAGE/lib/systemd/system/agentoc-peer-result.service"
 install -m 0644 "$ROOT/packaging/deb/agentoc-privileged-executor.service" "$STAGE/lib/systemd/system/agentoc-privileged-executor.service"
 install -m 0644 "$ROOT/packaging/deb/agentoc-storage-gc.service" "$STAGE/lib/systemd/system/agentoc-storage-gc.service"
 install -m 0644 "$ROOT/packaging/deb/agentoc-storage-gc.timer" "$STAGE/lib/systemd/system/agentoc-storage-gc.timer"
