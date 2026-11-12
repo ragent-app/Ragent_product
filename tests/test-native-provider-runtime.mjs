@@ -13,6 +13,7 @@ import { createHash } from 'crypto';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { createServer } from 'node:net';
 
 const root = mkdtempSync(join(tmpdir(), 'agentoc-native-provider-runtime-'));
 
@@ -22,6 +23,7 @@ const {
   validateAuthProfile,
 } = await import('../lib/provider-runtime/registry.mjs');
 const { createSecretStore } = await import('../lib/provider-runtime/secret-store.mjs');
+const { codexAppServerBrokerSocketPath } = await import('../chat/codex-app-server-broker.mjs');
 const {
   resolveRuntimeConfig,
   sanitizeRuntimeEnvironment,
@@ -689,6 +691,33 @@ try {
   const externallyUpdatedOAuth = await secretStore.resolveSecret('cred-oauth');
   assert.equal(externallyUpdatedOAuth.tokens.access_token, 'at-3');
   assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.access_token, 'at-3');
+
+  // A concurrent refresh of the old account must not replace a newly logged
+  // in different account, even when the old token has a later expiry.
+  writeFileSync(oauthAuthPath, JSON.stringify({ OPENAI_API_KEY: null,
+    tokens: { access_token: 'at-old-refresh', refresh_token: 'rt-old-refresh', account_id: 'account-a', expiresAt: 4000 } }) + '\n');
+  await secretStore.writeSecret('cred-oauth', { authType: 'oauth',
+    tokens: { access_token: 'at-new-account', refresh_token: 'rt-new-account', account_id: 'account-other', expiresAt: 3000 } });
+  const brokerSocket = codexAppServerBrokerSocketPath(oauthCodexHome);
+  const fakeLiveBroker = createServer(socket => socket.once('data', () => {
+    socket.end(JSON.stringify({ type:'agentoc-codex-broker-pong', ready:true }) + '\n');
+  }));
+  await new Promise((resolve, reject) => fakeLiveBroker.once('error', reject).listen(brokerSocket, resolve));
+  try {
+    const blocked = await prepareNativeRunProviderHome('run_active_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+      { configDir, providerHomesRoot:oauthHomeRoot });
+    assert.equal(blocked.reason, 'codex-broker-account-changed');
+    assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.account_id, 'account-a');
+  } finally { await new Promise(resolve => fakeLiveBroker.close(resolve)); }
+  const switchedAccount = await prepareNativeRunProviderHome('run_account_switch', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+    { configDir, providerHomesRoot:oauthHomeRoot });
+  assert.equal(switchedAccount.ok, true, switchedAccount.error || switchedAccount.reason);
+  assert.equal((await secretStore.resolveSecret('cred-oauth')).tokens.access_token, 'at-new-account');
+  assert.equal(JSON.parse(readFileSync(oauthAuthPath, 'utf8')).tokens.account_id, 'account-other');
+  await secretStore.writeSecret('cred-oauth', { authType: 'oauth',
+    tokens: { access_token: 'at-3', refresh_token: 'rt-3', account_id: 'account-a', expiresAt: 3000 } });
+  await prepareNativeRunProviderHome('run_account_restore', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
+    { configDir, providerHomesRoot:oauthHomeRoot });
 
   if (process.platform === 'linux' && process.getuid?.() === 0) {
     let migrationCall = null;
