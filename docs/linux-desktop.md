@@ -35,10 +35,14 @@ The systemd runner currently refuses accounts that belong to restricted
 system groups such as `sudo` or `docker`: systemd automatically inherits
 those memberships even when they are omitted from supplementary group settings.
 The check compares numeric group IDs as well as names to catch aliases.
-The separate unprivileged runner configuration also has an unresolved input
-access issue: on a physical Ubuntu 24.04 test host, the runner could not read
-the control user's mode-0600 Run publication files. Do not consider that
-configuration release-ready until the Run input boundary is fixed and tested.
+For a separate unprivileged runner, set `AGENTOC_RUNNER_SAME_USER=0`,
+`AGENTOC_RUNNER_USER` and `AGENTOC_RUNNER_GROUP` in the root-controlled
+environment, then restart the lifecycle broker and service. Run publication
+files and capability tokens use file ACLs for the designated runner; older
+versions of those files are repaired on launch.
+On a physical Ubuntu 24.04 x86-64 host, an OAuth Codex Run completed after
+the managed Codex home was migrated from the previous runner identity. Other
+providers, upgrades and security boundaries still need release acceptance.
 An experimental launcher can be enabled with `AGENTOC_RUNNER_DROP_GROUPS=1`
 in the lifecycle broker's root-controlled environment. It uses the trusted
 `/usr/bin/setpriv` to drop to the configured non-root identity and explicit
