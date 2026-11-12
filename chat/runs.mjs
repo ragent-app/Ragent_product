@@ -1949,6 +1949,9 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
         }
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
         if (await hasLinuxRunControlBinding(runId, attempt)) {
+          const { readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
+          if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1')
+            throw linuxScopeResultUnavailable(); // Terminal status adoption is not wired yet.
           if (Buffer.byteLength(JSON.stringify(next.result), 'utf8') > 4 * 1024 * 1024 - 4096 ||
               !await confirmLinuxScopeCompletion(runId, next, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
           protectedResultAttempt = attempt;
@@ -2151,6 +2154,8 @@ export async function getRunResult(runId) {
     try {
       const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
       if ((await findLinuxRunResultTransactionAttempts(runId)).length) recoverPending = true;
+      const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
+      if ((await listLinuxRunControlBindings(runId)).some(binding => binding.resultChannel === 'peer-v1')) recoverPending = true;
     } catch { throw linuxScopeResultUnavailable(); }
   }
   if (process.platform === 'linux' && !recoverPending && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
@@ -2177,6 +2182,53 @@ export async function getRunResult(runId) {
   if (recoverPending) {
     return runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
       const current = await getRunAcceptanceEvidence(runId);
+      if (checkTransactions) {
+        try {
+          const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
+          const bindings = await listLinuxRunControlBindings(runId);
+          if (bindings.some(binding => binding.resultChannel === 'peer-v1')) {
+            const latest = bindings.at(-1);
+            if (!current || latest.resultChannel !== 'peer-v1' || linuxScopeAttempt(current) !== latest.launchAttempt)
+              throw linuxScopeResultUnavailable();
+          }
+        } catch { throw linuxScopeResultUnavailable(); }
+      }
+      // Transport is fixed in the control-owned binding, not a mutable
+      // environment flag or runner-writable status. Never fall back to the
+      // shared spool for an attempt assigned to the protected peer channel.
+      if (current) {
+        try {
+          const attempt = linuxScopeAttempt(current);
+          const { hasLinuxRunControlBinding, readLinuxRunControlBindingRecord, matchesLinuxRunControlBinding } =
+            await import('./linux-run-control-binding.mjs');
+          if (await hasLinuxRunControlBinding(runId, attempt)) {
+            const binding = await readLinuxRunControlBindingRecord(runId, attempt);
+            if (binding.resultChannel === 'peer-v1') {
+              const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
+              if ((await findLinuxRunResultTransactionAttempts(runId)).length) throw linuxScopeResultUnavailable();
+              const manifest = await getRunManifestUnlocked(runId);
+              const { hasLinuxRunCompletionReceipt } = await import('./linux-run-completion-receipt.mjs');
+              if (!await matchesLinuxRunControlBinding({ run: current, manifest, launchAttempt: attempt }) ||
+                  !await hasLinuxRunCompletionReceipt(runId, attempt)) throw linuxScopeResultUnavailable();
+              const { readLinuxRunResultSnapshot, saveLinuxRunResultSnapshot } = await import('./linux-run-result-snapshot.mjs');
+              let result = await readLinuxRunResultSnapshot(runId, attempt);
+              if (!result) {
+                const { readProtectedLinuxRunResult } = await import('./linux-run-peer-result-client.mjs');
+                const record = await readProtectedLinuxRunResult({ socketPath: '/run/agentoc-peer-result/result.sock', runId, launchAttempt: attempt });
+                if (!record) return null;
+                if (record.sessionId !== binding.sessionId || record.turnId !== binding.turnId) throw linuxScopeResultUnavailable();
+                result = record.result;
+              }
+              const { hasLinuxRunExplicitCancellation } = await import('./linux-run-cancel-intent.mjs');
+              if ((current.cancelRequested === true || await hasLinuxRunExplicitCancellation(runId)) && result.cancelled !== true)
+                throw linuxScopeResultUnavailable();
+              if (isTerminalRunState(current.state) && current.result && !runFieldEqual(current.result, result))
+                throw linuxScopeResultUnavailable();
+              return clone(await saveLinuxRunResultSnapshot(runId, attempt, result));
+            }
+          }
+        } catch { throw linuxScopeResultUnavailable(); }
+      }
       if (checkTransactions) {
         try {
           const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
@@ -2311,6 +2363,9 @@ export async function writeRunResult(runId, result) {
           const attempt = linuxScopeAttempt(run);
           const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
           if (await hasLinuxRunControlBinding(runId, attempt)) {
+            const { readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
+            if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1')
+              throw linuxScopeResultUnavailable(); // Control-written results require a separate adoption path.
             const { hasLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
             if (await hasLinuxRunResultTransaction(runId, attempt)) throw linuxScopeResultUnavailable();
             if (!await confirmLinuxScopeCompletion(runId, run, await getRunManifestUnlocked(runId), attempt)) throw linuxScopeResultUnavailable();
@@ -2343,7 +2398,12 @@ export async function clearRunResult(runId) {
       if (run) {
         const attempt = linuxScopeAttempt(run);
         const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
-        if (await hasLinuxRunControlBinding(runId, attempt)) protectedAttempt = attempt;
+        if (await hasLinuxRunControlBinding(runId, attempt)) {
+          const { readLinuxRunControlBindingRecord } = await import('./linux-run-control-binding.mjs');
+          if ((await readLinuxRunControlBindingRecord(runId, attempt)).resultChannel === 'peer-v1')
+            throw linuxScopeResultUnavailable(); // Root copy needs an acknowledged removal protocol first.
+          protectedAttempt = attempt;
+        }
       }
     }
     if (protectedAttempt !== null) {
@@ -3003,6 +3063,14 @@ export async function removeRunsForSession(sessionId) {
   // authority before removal so a stale/legacy index entry cannot delete a Run
   // that was rebound by an external repair.
   const indexedCandidates = await listRunIndexEntries({ sessionId: normalizedSessionId });
+  if (process.platform === 'linux') {
+    const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
+    for (const indexed of indexedCandidates) {
+      if (/^run_[A-Za-z0-9_-]{8,128}$/.test(indexed?.id || '') &&
+          (await listLinuxRunControlBindings(indexed.id)).some(binding => binding.resultChannel === 'peer-v1'))
+        throw linuxScopeResultUnavailable(); // Root-held results cannot yet be removed safely.
+    }
+  }
   for (const indexed of indexedCandidates) {
     const runId = indexed?.id;
     if (!runId) continue;
@@ -3010,6 +3078,9 @@ export async function removeRunsForSession(sessionId) {
     if (run?.sessionId !== normalizedSessionId) continue;
     await runMutationQueue(runId, async () => {
       if (process.platform === 'linux' && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+        const { listLinuxRunControlBindings } = await import('./linux-run-control-binding.mjs');
+        if ((await listLinuxRunControlBindings(runId)).some(binding => binding.resultChannel === 'peer-v1'))
+          throw linuxScopeResultUnavailable();
         const { removeLinuxRunResultSnapshots } = await import('./linux-run-result-snapshot.mjs');
         await removeLinuxRunResultSnapshots(runId);
       }

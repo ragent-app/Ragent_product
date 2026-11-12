@@ -12,9 +12,10 @@ export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
   enabled = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1', platform = process.platform,
   readBoundary = assertRunLaunchBoundary, loadKeys = loadOrCreatePrivilegedSigningKeys,
   getKey = getActivePrivilegedSigningKey, ensureIntentStore = ensureLinuxRunCancelIntentStore,
-  hasIntent = hasLinuxRunCancelIntent, persistBinding = persistLinuxRunControlBinding,
+  hasIntent = hasLinuxRunCancelIntent, persistBinding = persistLinuxRunControlBinding, resultChannel = 'legacy',
 } = {}) {
   if (!enabled || platform !== 'linux') return null;
+  if (!['legacy', 'peer-v1'].includes(resultChannel)) throw new Error('Invalid Linux result channel');
   const { run, manifest } = await readBoundary(runId);
   // Legacy/unscoped Runs and Runs without the approved-action channel retain
   // ordinary execution; they cannot use the registered privileged adapter.
@@ -29,6 +30,6 @@ export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
   const key = getKey();
   if (!key?.privateKey) throw Object.assign(new Error('Linux Run scope signing key is unavailable'), { code: 'LINUX_RUN_SCOPE_KEY_UNAVAILABLE' });
   const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt, privateKey: key.privateKey });
-  await persistBinding({ run, manifest, launchAttempt });
+  await persistBinding({ run, manifest, launchAttempt, ...(resultChannel === 'peer-v1' ? { resultChannel } : {}) });
   return grant;
 }

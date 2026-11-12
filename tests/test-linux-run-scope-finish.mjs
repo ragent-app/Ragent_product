@@ -319,6 +319,33 @@ test('runner terminal write invalidates only its protected control binding',
         await removeRunsForSession('s1');
         await assert.rejects(readFile(snapshot, 'utf8'), { code: 'ENOENT' });
         await assert.rejects(readFile(abandonedTemporary, 'utf8'), { code: 'ENOENT' });
+        const peerId = 'run_peerboundfixture1';
+        await createRun({ status: { id: peerId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
+        await issueLinuxRunScopeGrant(peerId, 0, { resultChannel: 'peer-v1' });
+        const { readLinuxRunControlBindingRecord } = await import('../chat/linux-run-control-binding.mjs');
+        assert.equal((await readLinuxRunControlBindingRecord(peerId, 0)).resultChannel, 'peer-v1');
+        await assert.rejects(issueLinuxRunScopeGrant(peerId, 0), { code: 'LINUX_RUN_CONTROL_BINDING_INVALID' });
+        await writeFile(runResultPath(peerId), JSON.stringify({ exitCode: 0, error: 'untrusted-shared-result' }));
+        await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await assert.rejects(writeRunResult(peerId, { exitCode: 0 }), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await assert.rejects(updateRun(peerId, { state: 'completed', result: { exitCode: 0 } }), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await assert.rejects(clearRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        // Turning the configuration off cannot make a peer-bound Run fall
+        // back to an untrusted shared result after a control restart.
+        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '0';
+        await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        const peerStatus = await readFile(runStatusPath(peerId), 'utf8');
+        await writeFile(runStatusPath(peerId), JSON.stringify({ ...JSON.parse(peerStatus), runnerLaunchAttempt: 1 }));
+        await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await rm(runStatusPath(peerId));
+        await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        await writeFile(runStatusPath(peerId), peerStatus);
+        const { persistLinuxRunCompletionReceipt } = await import('../chat/linux-run-completion-receipt.mjs');
+        await persistLinuxRunCompletionReceipt(peerId, 0);
+        await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+        await assert.rejects(removeRunsForSession('s1'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
+        assert.ok(await readFile(runStatusPath(peerId), 'utf8'));
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }
   });

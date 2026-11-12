@@ -2,7 +2,7 @@
 // It contains a token hash, never the bearer token. The configured control
 // directory must be inaccessible to the distinct runner identity.
 import { constants } from 'node:fs';
-import { lstat, open } from 'node:fs/promises';
+import { lstat, open, readdir } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { CONFIG_DIR } from '../lib/config.mjs';
@@ -43,11 +43,13 @@ async function syncDirectory() {
 }
 function validBindingShape(binding) {
   const keys = ['version', 'runId', 'sessionId', 'turnId', 'launchAttempt', 'tokenHash', 'publicationId', 'scopeDigest'];
-  return binding && typeof binding === 'object' && !Array.isArray(binding) && Object.keys(binding).length === keys.length &&
+  const peerResult = binding?.resultChannel === 'peer-v1';
+  return binding && typeof binding === 'object' && !Array.isArray(binding) && Object.keys(binding).length === keys.length + (peerResult ? 1 : 0) &&
     keys.every((key) => Object.hasOwn(binding, key)) && binding.version === 1 &&
     typeof binding.tokenHash === 'string' && /^[a-f0-9]{64}$/.test(binding.tokenHash);
 }
-export async function persistLinuxRunControlBinding({ run, manifest, launchAttempt } = {}) {
+export async function persistLinuxRunControlBinding({ run, manifest, launchAttempt, resultChannel = 'legacy' } = {}) {
+  if (!['legacy', 'peer-v1'].includes(resultChannel)) invalid();
   await ensureLinuxRunCancelIntentStore();
   const filename = pathFor(run?.id, launchAttempt), channel = manifest?.options?.approvedActionChannel;
   const digest = hashToken(channel?.token);
@@ -55,7 +57,7 @@ export async function persistLinuxRunControlBinding({ run, manifest, launchAttem
       manifest?.requestId !== run.requestId || channel?.turnId !== run.requestId) invalid();
   const binding = { version: 1, runId: run.id, sessionId: identity(run.sessionId), turnId: identity(run.requestId),
     launchAttempt, tokenHash: digest, publicationId: identity(run?.runPublication?.publicationId),
-    scopeDigest: identity(manifest?.executionScopeDigest) };
+    scopeDigest: identity(manifest?.executionScopeDigest), ...(resultChannel === 'peer-v1' ? { resultChannel } : {}) };
   let file;
   try {
     try { file = await open(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); }
@@ -109,4 +111,21 @@ export async function readLinuxRunControlBindingRecord(runId, launchAttempt) {
   const binding = await readBinding(pathFor(runId, launchAttempt));
   if (!validBindingShape(binding) || binding.runId !== runId || binding.launchAttempt !== launchAttempt) invalid();
   return binding;
+}
+
+// Recover transport policy independently of runner-writable status.json. A
+// missing or changed launch attempt must not hide an earlier peer binding.
+export async function listLinuxRunControlBindings(runId) {
+  pathFor(runId, 0);
+  try { await lstat(DIRECTORY); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  await ensureLinuxRunCancelIntentStore();
+  const prefix = `${createHash('sha256').update(runId, 'utf8').digest('hex')}-`;
+  const bindings = [];
+  for (const name of await readdir(DIRECTORY)) {
+    if (!name.startsWith(prefix) || !name.endsWith('.binding.json')) continue;
+    const attempt = name.slice(prefix.length, -'.binding.json'.length);
+    if (!/^(0|[1-9][0-9]{0,4})$/.test(attempt) || Number(attempt) > 10000) invalid();
+    bindings.push(await readLinuxRunControlBindingRecord(runId, Number(attempt)));
+  }
+  return bindings.sort((a, b) => a.launchAttempt - b.launchAttempt);
 }
