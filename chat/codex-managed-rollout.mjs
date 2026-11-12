@@ -1,7 +1,7 @@
 // Locate a legacy thread only inside the caller's already-authorized managed
 // Codex home. Never accept a rollout pathname from the client or follow links.
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
-import { join, relative, isAbsolute } from 'node:path';
+import { lstat, open, readFile, readdir, realpath } from 'node:fs/promises';
+import { join, relative, isAbsolute, resolve } from 'node:path';
 
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Session metadata can contain long developer instructions. Bound the read,
@@ -77,4 +77,47 @@ export async function findManagedCodexRollout(home, id) {
   }
   if (found.length > 1) throw Object.assign(new Error('Multiple managed Codex rollouts match this thread'), { code: 'CODEX_ROLLOUT_AMBIGUOUS' });
   return found[0] || null;
+}
+
+// The roots must come from the account-home registry, never from a client.
+// Recheck auth at lookup time: a provider home may have been relogged since it
+// was recorded, in which case its history belongs to the newly selected owner.
+export async function findAccountCodexRollout(homeRoots, accountId, threadId) {
+  const expected = typeof accountId === 'string' ? accountId.trim() : '';
+  if (!expected || !Array.isArray(homeRoots)) {
+    throw Object.assign(new Error('Verified account rollout sources are required'), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED' });
+  }
+  const matches = new Set();
+  for (const root of new Set(homeRoots)) {
+    if (typeof root !== 'string' || !isAbsolute(root)) {
+      throw Object.assign(new Error('Invalid account rollout source'), { code: 'CODEX_ROLLOUT_SOURCE_INVALID' });
+    }
+    const home = join(root, 'codex');
+    const authPath = join(home, 'auth.json');
+    let auth;
+    try {
+      const rootStat = await lstat(root);
+      const homeStat = await lstat(home);
+      const canonicalRoot = await realpath(root);
+      const sameRoot = process.platform === 'win32'
+        ? canonicalRoot.toLowerCase() === resolve(root).toLowerCase()
+        : canonicalRoot === resolve(root);
+      if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || !homeStat.isDirectory() || homeStat.isSymbolicLink() || !sameRoot) throw new Error('Invalid account home');
+      const stat = await lstat(authPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Invalid auth file');
+      auth = JSON.parse(await readFile(authPath, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw Object.assign(new Error('Could not verify the account of a rollout source'), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED', cause: error });
+    }
+    const tokens = auth?.tokens || {};
+    const actual = ['account_id', 'accountId', 'account_uuid', 'accountUuid', 'user_id', 'userId']
+      .map((key) => typeof tokens[key] === 'string' ? tokens[key].trim() : '').find(Boolean) || '';
+    if (!actual) throw Object.assign(new Error('Could not verify the account of a rollout source'), { code: 'CODEX_ROLLOUT_ACCOUNT_UNVERIFIED' });
+    if (actual !== expected) continue;
+    const found = await findManagedCodexRollout(home, threadId);
+    if (found) matches.add(found);
+  }
+  if (matches.size > 1) throw Object.assign(new Error('Multiple account rollouts match this thread'), { code: 'CODEX_ROLLOUT_AMBIGUOUS' });
+  return matches.values().next().value || null;
 }
