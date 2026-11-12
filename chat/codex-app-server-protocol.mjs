@@ -47,6 +47,14 @@ function resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode
   }) || {};
 }
 
+function normalizeNamedPermissionProfile(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(value)) {
+    throw new TypeError('Invalid Codex named permission profile');
+  }
+  return value;
+}
+
 export function isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode, platform = process.platform } = {}) {
   const selectedRiskMode = String(riskMode || '').trim();
   const selectedPermissionMode = String(permissionMode || '').trim();
@@ -115,8 +123,15 @@ export function buildCodexAppServerThreadOptions({
   agentocApprovalGate,
   threadMcpConfig,
   threadShellEnvironment,
+  namedPermissionProfile,
+  namedPermissionConfig,
 } = {}) {
   const permissionPolicy = resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode });
+  const namedProfile = normalizeNamedPermissionProfile(namedPermissionProfile);
+  if (namedPermissionConfig !== undefined && (!namedProfile || !namedPermissionConfig
+      || typeof namedPermissionConfig !== 'object' || Array.isArray(namedPermissionConfig))) {
+    throw new TypeError('Codex named permission configuration requires a named profile');
+  }
   const projectRoot = typeof cwd === 'string' ? cwd.trim() : '';
   const scopedProjectTrust = agentocApprovalGate === true && projectRoot
     && (isAbsolute(projectRoot) || win32.isAbsolute(projectRoot))
@@ -127,8 +142,9 @@ export function buildCodexAppServerThreadOptions({
     ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
     ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
     ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
-    sandbox: permissionPolicy.sandbox || 'danger-full-access',
+    ...(namedProfile ? { permissions: namedProfile } : { sandbox: permissionPolicy.sandbox || 'danger-full-access' }),
     config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
+      ...(namedPermissionConfig ? { [`permissions.${namedProfile}`]: namedPermissionConfig } : {}),
       ...(threadMcpConfig?.mcp_servers ? { mcp_servers: threadMcpConfig.mcp_servers } : {}),
       ...(threadShellEnvironment ? { shell_environment_policy: { set: threadShellEnvironment } } : {}) },
     ...(typeof developerInstructions === 'string' && developerInstructions.trim()
@@ -276,8 +292,10 @@ export function buildCodexAppServerTurnStartMessage({
   interactionMode,
   permissionMode,
   agentocApprovalGate,
+  namedPermissionProfile,
 } = {}) {
   const permissionPolicy = resolveCodexAppServerPermissionPolicy({ interactionMode, permissionMode });
+  const namedProfile = normalizeNamedPermissionProfile(namedPermissionProfile);
   return {
     method: 'turn/start',
     id: CODEX_APP_SERVER_REQUEST_IDS.turn,
@@ -290,7 +308,10 @@ export function buildCodexAppServerTurnStartMessage({
       ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
       ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
       ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
-      sandboxPolicy: permissionPolicy.sandboxPolicy?.type === 'workspaceWrite'
+      // A thread-local profile is inherited by turn/start. Selecting its
+      // name again makes Codex 0.150 reload global configuration, where the
+      // dynamically defined thread profile does not exist.
+      ...(namedProfile ? {} : { sandboxPolicy: permissionPolicy.sandboxPolicy?.type === 'workspaceWrite'
         ? {
           ...permissionPolicy.sandboxPolicy,
           // turn/start carries an explicit policy: an empty roots list does
@@ -300,7 +321,7 @@ export function buildCodexAppServerTurnStartMessage({
             ? [cwd.trim()]
             : [],
         }
-        : (permissionPolicy.sandboxPolicy || { type: 'dangerFullAccess' }),
+        : (permissionPolicy.sandboxPolicy || { type: 'dangerFullAccess' }) }),
       ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
       ...(typeof reasoningEffort === 'string' && reasoningEffort.trim() ? { effort: reasoningEffort.trim() } : {}),
     },
