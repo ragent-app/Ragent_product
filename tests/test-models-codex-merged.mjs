@@ -79,7 +79,7 @@ const providers = [
   {
     id: 'codex-official', displayName: 'person-5@example.test', protocol: 'openai-responses',
     baseUrl: 'https://chatgpt.com/backend-api/codex', authType: 'oauth',
-    modelPolicy: { defaultModel: 'gpt-5.6-luna' },
+    modelPolicy: { defaultModel: '' },
   },
   {
     id: 'deepseek-v4-flash-codex', displayName: 'deepseek-v4-flash-codex', protocol: 'openai-chat',

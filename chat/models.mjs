@@ -1054,6 +1054,7 @@ async function discoverOfficialCodexCatalog(provider) {
       providerHomesRoot: dirname(CODEX_MANAGED_HOME_DIR),
       externalOAuthOwnership: false,
       holdNativeOAuthLock: false,
+      allowModelLessCodexOAuthCatalog: true,
     });
   } catch (cause) {
     throw Object.assign(new Error('Official Codex provider preparation failed', { cause }), { discoveryStage: 'PREPARE' });
