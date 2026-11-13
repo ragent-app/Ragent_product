@@ -1,8 +1,11 @@
 package com.andysagent.agentoc.feature.organization.data
 
+import android.net.Uri
 import com.andysagent.agentoc.core.network.AgentoCTransport
 import com.andysagent.agentoc.core.network.ApiRequest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 
 interface OrganizationApi {
     suspend fun getProjection(organizationId: String, version: Int = 2, sinceEventId: Long = 0L): Result<OrganizationProjectionDto>
@@ -23,23 +26,30 @@ class RealOrganizationApi(
         version: Int,
         sinceEventId: Long,
     ): Result<OrganizationProjectionDto> = runCatching {
-        val path = "/api/organizations/$organizationId/projection?version=$version&sinceEventId=$sinceEventId"
+        val path = "/api/organizations/${Uri.encode(organizationId)}/projection?version=$version&sinceEventId=$sinceEventId"
         val response = transport.execute(ApiRequest(method = "GET", path = path))
         if (!response.isSuccessful) {
             error("Failed to load organization projection: ${response.statusCode}")
         }
-        json.decodeFromString<OrganizationProjectionDto>(response.body)
+        decodeProjection(response.body)
     }
 
     override suspend fun getSessionOrganization(
         sessionId: String,
     ): Result<OrganizationProjectionDto?> = runCatching {
-        val path = "/api/sessions/$sessionId/organization/projection"
+        val path = "/api/sessions/${Uri.encode(sessionId)}/organization/projection"
         val response = transport.execute(ApiRequest(method = "GET", path = path))
         if (response.statusCode == 404) return@runCatching null
         if (!response.isSuccessful) {
             error("Failed to load session organization projection: ${response.statusCode}")
         }
-        json.decodeFromString<OrganizationProjectionDto>(response.body)
+        decodeProjection(response.body)
+    }
+
+    private fun decodeProjection(body: String): OrganizationProjectionDto {
+        val value = json.parseToJsonElement(body)
+        // Current servers wrap projections; accept the older direct form too.
+        val projection = value.jsonObject["projection"] ?: value
+        return json.decodeFromJsonElement(projection)
     }
 }
