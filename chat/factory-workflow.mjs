@@ -13,6 +13,16 @@ const FORMULAS = Object.freeze({
       {key:'integration',kind:'integration',role:'writer',criteria:['integration-recorded'],dependsOn:{key:'review',milestone:'accepted'}},
     ],
   }),
+  'agentoc-reviewed-change@2': Object.freeze({
+    id:'agentoc-reviewed-change', version:2,
+    source:'docs/factory-runtime/phase-4-delivery.zh.md',
+    roles:['writer','reviewer'], capabilities:['read','write','review'],
+    rules:[
+      {key:'implementation',kind:'execution',role:'writer',criteria:['candidate-frozen'],independentReview:true},
+      {key:'review',kind:'review',role:'reviewer',criteria:['review-recorded'],dependsOn:{key:'implementation',milestone:'candidate_ready'}},
+      {key:'integration',kind:'integration',role:'writer',criteria:['integration-recorded'],dependsOn:{key:'review',milestone:'accepted'}},
+    ],
+  }),
 });
 function invalid(message) { throw factoryError('FACTORY_INVALID',message,400); }
 function string(v,name) { if (typeof v!=='string'||!v.trim()||v.length>1024) invalid(`${name} is required`); return v.trim(); }
@@ -23,7 +33,7 @@ export function compileFactoryWorkflow({templateId,templateVersion=1,organizatio
   const formula=getFactoryFormula(templateId,templateVersion); string(organizationId,'organizationId'); string(projectId,'projectId'); string(objective,'objective'); safeBranch(targetBranch); if (!Array.isArray(allowedPaths)||!allowedPaths.length) invalid('allowedPaths are required'); allowedPaths.forEach(safePath); safePath(candidateScope); if (!allowedPaths.some(path=>candidateScope===path || candidateScope.startsWith(path+'/'))) invalid('candidateScope must be within an allowed path'); if (!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>10) invalid('maxAttempts must be between 1 and 10'); if (!Number.isFinite(maxCost)||maxCost<=0) invalid('A positive cost budget is required');
   const reservationCost=maxCost/(formula.rules.length*maxAttempts); if (!Number.isFinite(reservationCost)||reservationCost<=0) invalid('Cost budget is too small to reserve');
   const input={organizationId,projectId,objective,targetBranch,allowedPaths:[...allowedPaths],candidateScope,maxAttempts,maxCost};
-  return {schemaVersion:1,templateId:formula.id,templateVersion:formula.version,templateDigest:formula.digest,inputDigest:digest(input),goal:{organizationId,projectId,objective},resources:{roles:formula.roles,capabilities:formula.capabilities,maxAttempts,maxCost},workItems:formula.rules.map(rule=>({key:rule.key,kind:rule.kind,requiredRole:rule.role,contract:{objective,requiredRole:rule.role,acceptanceCriteria:rule.criteria.map(id=>({id,...(id==='integration-recorded'?{}:{method:'manual'})})),allowedPaths:[...allowedPaths],accessMode:rule.kind==='review'?'read':'write',targetBranch,candidateScope,retry:{maxAttempts},budget:{maxCost},budgetReservation:{cost:reservationCost}},dependencies:rule.dependsOn?[{predecessorKey:rule.dependsOn.key,milestone:rule.dependsOn.milestone}]:[]}))};
+  return {schemaVersion:1,templateId:formula.id,templateVersion:formula.version,templateDigest:formula.digest,inputDigest:digest(input),goal:{organizationId,projectId,objective},resources:{roles:formula.roles,capabilities:formula.capabilities,maxAttempts,maxCost},workItems:formula.rules.map(rule=>({key:rule.key,kind:rule.kind,requiredRole:rule.role,contract:{objective,requiredRole:rule.role,...(rule.independentReview?{independentReview:true}:{}),acceptanceCriteria:rule.criteria.map(id=>({id,...(id==='integration-recorded'?{}:{method:'manual'})})),allowedPaths:[...allowedPaths],accessMode:rule.kind==='review'?'read':'write',targetBranch,candidateScope,retry:{maxAttempts},budget:{maxCost},budgetReservation:{cost:reservationCost}},dependencies:rule.dependsOn?[{predecessorKey:rule.dependsOn.key,milestone:rule.dependsOn.milestone}]:[]}))};
 }
 
 // The proposal is regenerated on the server and all graph facts are committed

@@ -44,7 +44,9 @@ const OPERATIONS = Object.freeze([
   'session.assistant_message.publish',
 ]);
 const NODE_MESSAGE_OPERATIONS = Object.freeze(['organization.message.ack', 'organization.message.reply']);
-const OPERATION_SET = new Set([...OPERATIONS, ...NODE_MESSAGE_OPERATIONS]);
+const REVIEW_OPERATION = 'factory.review.submit';
+const NODE_OPERATIONS = Object.freeze([...NODE_MESSAGE_OPERATIONS, REVIEW_OPERATION]);
+const OPERATION_SET = new Set([...OPERATIONS, ...NODE_OPERATIONS]);
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 
 export const SESSION_CONTROL_ERROR_CODES = Object.freeze({
@@ -59,6 +61,7 @@ function text(value) {
 }
 function validMessageScope(scope) {
   if (!scope || scope.kind !== 'organization_message' || !text(scope.organizationId) || !text(scope.nodeId) || !Number.isInteger(scope.bindingGeneration) || scope.bindingGeneration < 1 || !Number.isInteger(scope.organizationRevision) || scope.organizationRevision < 0) return false;
+  if (scope.reviewOpinionAllowed === true && (!text(scope.workItemId) || !text(scope.reviewCandidate?.workItemId) || !/^[a-f0-9]{64}$/.test(scope.reviewCandidate?.digest || '') || !Number.isInteger(scope.reviewCandidate?.contractRevision) || scope.reviewCandidate.contractRevision < 1 || !Number.isInteger(scope.reviewCandidate?.executionEpoch) || scope.reviewCandidate.executionEpoch < 1)) return false;
   if (scope.workItemId || scope.managedSessionId || scope.attemptId || scope.executionEpoch !== undefined) {
     return !!text(scope.workItemId) && !!text(scope.managedSessionId) && !!text(scope.attemptId) && Number.isInteger(scope.executionEpoch) && scope.executionEpoch > 0;
   }
@@ -153,7 +156,7 @@ function hasFullKnownOperationSet(payload) {
 function capabilityPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, scope }) {
   return {
     version: SESSION_CONTROL_CAPABILITY_VERSION,
-    operations: scope ? [...NODE_MESSAGE_OPERATIONS] : [...OPERATIONS],
+    operations: scope ? [...NODE_MESSAGE_OPERATIONS, ...(scope.reviewOpinionAllowed === true && scope.workItemId ? [REVIEW_OPERATION] : [])] : [...OPERATIONS],
     ...(scope ? { organizationMessageScope: scope } : {}),
     resource: { type: 'session_tree', id: sessionId },
     selection: { runId, turnId },
@@ -179,6 +182,7 @@ function renewalPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, sco
 export function sessionControlOperation(pathname, method) {
   const parts = String(pathname || '').split('/').filter(Boolean);
   const normalizedMethod = text(method).toUpperCase();
+  if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'factory' && parts[4] === 'review-opinion' && normalizedMethod === 'POST') return REVIEW_OPERATION;
   if (parts.length === 7 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'organization' && parts[4] === 'messages' && normalizedMethod === 'POST') {
     if (parts[6] === 'ack') return 'organization.message.ack';
     if (parts[6] === 'reply') return 'organization.message.reply';
@@ -391,9 +395,10 @@ async function authenticateSessionControlDetailed(req, {
 
   const parts = String(pathname || '').split('/').filter(Boolean);
   let targetSessionId = rootSessionId;
-  if (NODE_MESSAGE_OPERATIONS.includes(operation)) {
+  if (NODE_OPERATIONS.includes(operation)) {
     if (decodeURIComponent(parts[2] || '') !== rootSessionId || !validMessageScope(payload.organizationMessageScope)
-        || JSON.stringify(channel.scope) !== JSON.stringify(payload.organizationMessageScope)) return invalidResult();
+        || JSON.stringify(channel.scope) !== JSON.stringify(payload.organizationMessageScope)
+        || (operation === REVIEW_OPERATION && payload.organizationMessageScope.reviewOpinionAllowed !== true)) return invalidResult();
   } else if (operation === 'session.delegate' || operation === 'session.process.create') {
     if (decodeURIComponent(parts[2] || '') !== rootSessionId) return invalidResult();
   } else if ([
@@ -431,7 +436,7 @@ async function authenticateSessionControlDetailed(req, {
       capabilityOperation: operation,
       resourceType: 'session_tree',
       capabilityVersion: payload.version,
-      ...(NODE_MESSAGE_OPERATIONS.includes(operation) ? { organizationMessageScope: payload.organizationMessageScope } : {}),
+      ...(NODE_OPERATIONS.includes(operation) ? { organizationMessageScope: payload.organizationMessageScope } : {}),
     }),
     errorCode: '',
     attempted: true,

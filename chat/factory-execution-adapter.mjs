@@ -55,12 +55,15 @@ function profileAllows(db, org, node) {
 // fences scheduling, while binding, authorization and reservation facts fence
 // the task; none of these facts claim to terminate a previous process.
 export async function assertFactoryExecutionFence(context) {
+  const managedSession = context?.managedSessionId && await getSession(context.managedSessionId);
+  if (!managedSession || managedSession.tool !== context.runtimeTool) refuse('Factory managed session runtime changed');
   return withDatabase((db) => {
     const item = db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(context?.workItemId, context?.organizationId);
     const binding = db.prepare('SELECT * FROM factory_execution_bindings WHERE dispatch_key=? AND work_item_id=?').get(context?.dispatchKey, context?.workItemId);
     const org = db.prepare('SELECT * FROM organizations WHERE id=?').get(context?.organizationId);
     const node = item && db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assignee_node_id, context.organizationId);
     const lease = db.prepare('SELECT * FROM factory_scheduler_leases WHERE organization_id=?').get(context?.organizationId);
+    const runtimeIdentity = binding && db.prepare('SELECT * FROM factory_binding_runtime_identity WHERE binding_id=?').get(binding.id);
     if (!item || !binding || !org || !node || !lease || lease.expires_at <= new Date().toISOString()
         || lease.owner_token !== context.leaseOwnerToken || lease.generation !== context.leaseGeneration
         || item.ownership !== 'active' || item.control_state !== 'none' || item.state !== 'claimed'
@@ -70,7 +73,9 @@ export async function assertFactoryExecutionFence(context) {
         || binding.binding_generation !== context.bindingGeneration || node.binding_generation !== context.bindingGeneration
         || node.current_session_id !== context.managedSessionId || node.retired_revision !== null
         || ['archived', 'lifecycle_pending'].includes(org.state)
-        || org.current_revision !== context.organizationRevision || !profileAllows(db, org, node)) refuse('Factory dispatch fence or current authorization changed');
+        || org.current_revision !== context.organizationRevision || !profileAllows(db, org, node)
+        || !runtimeIdentity || runtimeIdentity.session_id !== context.managedSessionId
+        || runtimeIdentity.tool !== context.runtimeTool) refuse('Factory dispatch fence or current authorization changed');
     const contractRow = db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?')
       .get(item.id, context.contractRevision);
     let contract, grant;
@@ -171,7 +176,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       executionEpoch: binding.executionEpoch, bindingGeneration: binding.bindingGeneration,
       dispatchKey: binding.dispatchKey, managedSessionId: node.currentSessionId,
       organizationRevision: item.contract.organizationRevision, budgetKey,
-      leaseOwnerToken: lease.ownerToken, leaseGeneration: lease.generation,
+      leaseOwnerToken: lease.ownerToken, leaseGeneration: lease.generation, runtimeTool: session.tool,
       ...(validationWorkspace ? { validationWorkspace } : {}) };
     await assertFactoryExecutionFence(context);
     const role = text(node.nodeRole).toLowerCase() === 'reviewer' ? 'reviewer' : 'specialist';

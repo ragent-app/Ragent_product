@@ -447,6 +447,13 @@ switch (command) {
     break;
   }
 
+  case 'review-opinion': {
+    const { runReviewOpinionCommand } = await import(modulePath('lib/review-opinion-command.mjs'));
+    try { process.exitCode = await runReviewOpinionCommand(args); }
+    catch (error) { console.error(error.message || String(error)); process.exitCode = 1; }
+    break;
+  }
+
   case 'consult': {
     const { createAgentoCHttpClient } = await import(modulePath('lib/agentoc-http-client.mjs'));
 

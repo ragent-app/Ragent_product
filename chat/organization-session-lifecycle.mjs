@@ -179,7 +179,7 @@ export async function getFactoryMessageScope(sessionId, requestId) {
     let policy; try { policy = JSON.parse(rows[0].policy_json || '{}'); } catch { return null; }
     const f = policy.factoryExecution;
     if (!f || !f.organizationId || !f.workItemId || !f.managedSessionId || !Number.isInteger(f.executionEpoch) || !Number.isInteger(f.bindingGeneration)) return null;
-    const row = db.prepare(`SELECT n.id FROM factory_work_items w JOIN factory_execution_bindings b ON b.work_item_id=w.id
+    const row = db.prepare(`SELECT n.id,w.kind AS work_kind FROM factory_work_items w JOIN factory_execution_bindings b ON b.work_item_id=w.id
       JOIN organization_nodes n ON n.id=w.assignee_node_id AND n.organization_id=w.organization_id
       JOIN organizations o ON o.id=w.organization_id
       WHERE w.id=? AND w.organization_id=? AND w.execution_epoch=? AND w.binding_generation=?
@@ -187,8 +187,16 @@ export async function getFactoryMessageScope(sessionId, requestId) {
         AND w.state IN ('claimed','running') AND w.control_state='none' AND b.status IN ('intent','running')
         AND n.current_session_id=? AND n.binding_generation=w.binding_generation AND n.retired_revision IS NULL AND o.state<>'archived' AND o.current_revision=?`).get(f.workItemId,f.organizationId,f.executionEpoch,f.bindingGeneration,f.dispatchKey,f.managedSessionId,f.organizationRevision);
     if (!row) return null;
+    let reviewCandidate;
+    if (row.work_kind === 'review') {
+      const candidates=db.prepare(`SELECT p.id,p.candidate_digest,p.contract_revision,p.execution_epoch FROM factory_dependencies d
+        JOIN factory_work_items p ON p.id=d.predecessor_id AND p.organization_id=?
+        WHERE d.successor_id=? AND d.milestone='candidate_ready' AND d.candidate_digest=p.candidate_digest AND p.candidate_digest IS NOT NULL`).all(f.organizationId,f.workItemId);
+      if (candidates.length === 1) { const c=candidates[0]; reviewCandidate={workItemId:c.id,digest:c.candidate_digest,contractRevision:c.contract_revision,executionEpoch:c.execution_epoch}; }
+    }
     return { kind:'organization_message', organizationId:f.organizationId, nodeId:row.id, bindingGeneration:f.bindingGeneration, organizationRevision:f.organizationRevision,
-      managedSessionId:f.managedSessionId, workItemId:f.workItemId, executionEpoch:f.executionEpoch, attemptId:rows[0].attempt_id };
+      managedSessionId:f.managedSessionId, workItemId:f.workItemId, executionEpoch:f.executionEpoch, attemptId:rows[0].attempt_id,
+      ...(reviewCandidate ? { reviewOpinionAllowed:true, reviewCandidate } : {}) };
   });
 }
 

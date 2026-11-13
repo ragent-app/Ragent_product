@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getNode } from './organization-store.mjs';
+import { getSession } from './session-manager.mjs';
+import { factoryReconciliationDue, recordFactoryReconciliationFailure, clearFactoryReconciliationFailure } from './factory-reconciliation.mjs';
 import {
   acquireFactorySchedulerLease, renewFactorySchedulerLease, releaseFactorySchedulerLease,
   claimFactoryWork, listFactoryWorkItems, listFactoryReadyWork,
@@ -33,9 +35,17 @@ export function createFactoryScheduler({ organizationId, actor, adapter, observe
       const page = await listFactoryWorkItems(organizationId, { cursor, limit }, actor);
       cursor = page.nextCursor || null;
       // Reconciliation never relies on a lease expiring as proof of termination.
-      for (const item of page.items.filter((entry) => ['claimed', 'running', 'blocked', 'review'].includes(entry.state))) {
+      for (const item of page.items.filter((entry) => ['claimed', 'running', 'blocked', 'review', 'completed'].includes(entry.state))) {
         if (stopped) break;
-        await adapter.reconcile(item, null, lease ? { ownerToken, generation: lease.generation } : null).catch(onError);
+        try {
+          if (!['cancel_requested','pause_requested'].includes(item.controlState)
+              && !await factoryReconciliationDue(organizationId,item,actor)) continue;
+          await adapter.reconcile(item, null, lease ? { ownerToken, generation: lease.generation } : null);
+          await clearFactoryReconciliationFailure(organizationId,item,actor);
+        } catch (error) {
+          await recordFactoryReconciliationFailure(organizationId,item,error,actor).catch(onError);
+          onError(error);
+        }
       }
       if (!lease) return;
       const ready = (await listFactoryReadyWork(organizationId, { limit }, actor)).items;
@@ -47,9 +57,12 @@ export function createFactoryScheduler({ organizationId, actor, adapter, observe
           lease = await renewFactorySchedulerLease({ organizationId, ownerToken, generation: lease.generation }, actor);
           const node = await getNode(item.assigneeNodeId);
           if (!node || node.organizationId !== organizationId) continue;
+          const session = await getSession(node.currentSessionId);
+          if (!session?.tool) continue;
           const dispatchKey = `factory:${item.id}:${item.contractRevision}:${item.executionEpoch + 1}:${node.bindingGeneration}`;
           const claim = await claimFactoryWork({ organizationId, workItemId: item.id, expectedVersion: item.rowVersion,
-            bindingGeneration: node.bindingGeneration, dispatchKey, leaseOwnerToken: ownerToken, leaseGeneration: lease.generation }, actor);
+            bindingGeneration: node.bindingGeneration, dispatchKey, leaseOwnerToken: ownerToken, leaseGeneration: lease.generation,
+            managedSessionId: node.currentSessionId, runtimeTool: session.tool }, actor);
           await adapter.dispatch(claim, { ownerToken, generation: lease.generation });
         } catch (error) { onError(error); }
       }

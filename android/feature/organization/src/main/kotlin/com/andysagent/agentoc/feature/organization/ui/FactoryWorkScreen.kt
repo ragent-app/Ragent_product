@@ -65,6 +65,27 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, onBac
             Text("${selected["contract"]?.jsonObject?.get("objective") ?: selected["id"]}")
             Text("State ${selected["state"]}; control ${selected["controlState"]}; priority ${selected["priority"]}; version ${selected["rowVersion"]}")
             listOf("contract", "dependencies", "bindings", "candidates", "decisions").forEach { Text("$it: ${selected[it] ?: "[]"}") }
+            Text("Delivery evidence")
+            val candidates = selected["candidates"] as? JsonArray ?: JsonArray(emptyList())
+            if (candidates.isEmpty()) Text("Candidate: unverified")
+            candidates.forEach { entry ->
+                val fact = entry.jsonObject
+                Text("Candidate ${fact["digest"] ?: "unverified"} · contract ${fact["contractRevision"]} · execution ${fact["executionEpoch"]}")
+            }
+            val decisions = selected["decisions"] as? JsonArray ?: JsonArray(emptyList())
+            if (decisions.isEmpty()) Text("Acceptance and checks: unverified")
+            decisions.forEach { entry ->
+                val fact = entry.jsonObject
+                Text("Acceptance ${fact["criterionId"]}: ${fact["decision"]} · candidate ${fact["candidateDigest"]}. Evidence: ${fact["evidence"] ?: "not provided"}")
+            }
+            val milestones = selected["milestones"] as? JsonArray ?: JsonArray(emptyList())
+            milestones.forEach { entry ->
+                val fact = entry.jsonObject
+                val evidence = fact["evidence"] as? JsonObject
+                Text("${fact["milestone"]} · candidate ${fact["candidateDigest"]} · commit ${evidence?.get("commit") ?: "unverified"} · target ${fact["target"] ?: "unknown"}")
+            }
+            if (milestones.none { (it as? JsonObject)?.get("milestone")?.jsonPrimitive?.contentOrNull == "integrated" }) Text("Integrated commit: unverified")
+            Text("Package availability and publication: unverified unless supported by a recorded delivery operation.")
             fun command(type: String, payload: JsonObject = buildJsonObject { }): JsonObject {
                 val id = UUID.randomUUID().toString()
                 return buildJsonObject { put("commandId", id); put("idempotencyKey", id); put("type", type); put("targetId", selected["id"]!!); put("expectedVersion", selected["rowVersion"]!!); put("payload", payload) }

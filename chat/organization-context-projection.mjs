@@ -79,6 +79,7 @@ export async function buildOrganizationContextProjection({
   // Only the target node receives its own bounded inbox, referenced back to
   // durable message records. Projection does not acknowledge delivery.
   let inbox = [];
+  let reviewCandidate = null;
   if (target && session.id) {
     const bound = await getLiveOrganizationSessionReference(session.id);
     const direct = bound?.kind === 'node' && bound.organizationId === projection.organizationId && bound.nodeId === target.id;
@@ -86,6 +87,7 @@ export async function buildOrganizationContextProjection({
     if (direct || (factory?.organizationId === projection.organizationId && factory.nodeId === target.id)) {
       inbox = await listTeamMessages(projection.organizationId, target.id, 20);
       if (factory) inbox = inbox.filter(message => !message.workItemId || message.workItemId === factory.workItemId);
+      if (factory?.reviewOpinionAllowed === true) reviewCandidate = factory.reviewCandidate;
     }
   }
   const pendingMessages = [];
@@ -97,6 +99,7 @@ export async function buildOrganizationContextProjection({
   return {
     ...context,
     pendingMessages,
+    ...(reviewCandidate ? { reviewCandidate } : {}),
     organizationStatus: projection.state,
     projectionDigest: projection.digest,
   };
@@ -110,6 +113,7 @@ export function renderOrganizationContextProjection(context) {
     JSON.stringify(context),
     '</organization-status-projection>',
     ...(context.pendingMessages?.length ? ['For an inbox message included above, use `ragent team-message ack <messageId>` to acknowledge it, or `ragent team-message reply <messageId> --text <reply> --idempotency-key <stable-key>` to answer. Acknowledgment alone is not an answer.'] : []),
+    ...(context.reviewCandidate ? ['To submit a review opinion for the exact reviewCandidate above, use `ragent review-opinion --candidate-work-item <workItemId> --candidate-digest <digest> --contract-revision <contractRevision> --execution-epoch <executionEpoch> --verdict <pass|needs_changes|blocked> --reason <reason> --idempotency-key <stable-key>`. If the Run binding is not ready, retry the same request with the same key. A recorded opinion remains pending until the Run and ResultPacket are verified; it is not a test result.'] : []),
   ].join('\n');
 }
 

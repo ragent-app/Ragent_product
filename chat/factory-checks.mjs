@@ -17,7 +17,7 @@ CREATE TRIGGER IF NOT EXISTS factory_check_evidence_immutable BEFORE UPDATE ON f
 CREATE TRIGGER IF NOT EXISTS factory_check_no_delete BEFORE DELETE ON factory_check_operations BEGIN SELECT RAISE(ABORT,'immutable check evidence'); END;`); }
 function relativePath(path) { if (typeof path!=='string'||!path||isAbsolute(path)||path.split(/[\\/]/).some(p=>!p||p==='.'||p==='..')) fail('Invalid validation path'); return path.replace(/\\/g,'/'); }
 function inside(root,path) { const r=relative(root,path); return r===''||(!isAbsolute(r)&&r!=='..'&&!r.startsWith(`..${sep}`)); }
-async function checkWorkspace(record) {
+export async function checkWorkspace(record) {
   const root=await realpath(record.cwd), expected=decode(record.input_manifest_json,[]), outputs=decode(record.output_paths_json,[]).map(relativePath);
   if (!Array.isArray(expected)||expected.length>1000||!Array.isArray(outputs)) fail('Invalid validation workspace manifest');
   const expectedMap=new Map(expected.map(e=>[relativePath(e.path),e.digest])); if(expectedMap.size!==expected.length||expected.some(e=>!/^[a-f0-9]{64}$/.test(e.digest||''))||[...expectedMap.keys()].some(path=>outputs.some(out=>path===out||path.startsWith(out+'/')))) fail('Invalid or overlapping validation input and output paths');

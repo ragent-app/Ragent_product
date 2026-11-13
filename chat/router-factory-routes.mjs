@@ -12,6 +12,8 @@ import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryR
 import { setPositionProfile, addTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
 import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
+import { requestFactoryReconciliation, getFactoryReconciliation } from './factory-reconciliation.mjs';
+import { submitFactoryReviewOpinion, reconcileFactoryReviewOpinion } from './factory-review-opinions.mjs';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
 
@@ -39,6 +41,9 @@ function mutationSourceAllowed(req) {
 
 export async function handleFactoryRoutes({ req, res, pathname, authSession, writeJson }) {
   const response = /^\/api\/sessions\/([^/]+)\/organization\/messages\/([^/]+)\/(ack|reply)$/.exec(String(pathname || ''));
+  const reviewOpinion = /^\/api\/sessions\/([^/]+)\/factory\/review-opinion$/.exec(String(pathname || ''));
+  const reconcile = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
+  const reviewReconcile = /^\/api\/organizations\/([^/]+)\/factory\/review-opinions\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
   const acceptance = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/manual-acceptance$/.exec(String(pathname || ''));
   const lifecycle = /^\/api\/organizations\/([^/]+)\/factory\/lifecycle(?:\/([^/]+)\/(finalize|cancel))?$/.exec(String(pathname || ''));
   const nodeRebind = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/rebind(?:\/([^/]+)\/(cancel))?$/.exec(String(pathname || ''));
@@ -50,7 +55,17 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !response && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts) return false;
+  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reviewReconcile && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts) return false;
+  if (reviewOpinion) {
+    if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
+    if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+    try {
+      const raw=await readBody(req,16*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      const {candidateWorkItemId,candidateDigest,contractRevision,executionEpoch,verdict,reason,idempotencyKey}=body || {};
+      writeJson(res,200,await submitFactoryReviewOpinion({candidateWorkItemId,candidateDigest,contractRevision,executionEpoch,verdict,reason,idempotencyKey},authSession));
+    } catch(error) { writeJson(res,error?.code==='BODY_TOO_LARGE'?413:(error?.statusCode || 400),{error:error?.message || 'Review opinion failed',...(error?.code?{code:error.code}:{})}); }
+    return true;
+  }
   if (response) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== `organization.message.${response[3]}` || decodeURIComponent(response[1]) !== authSession.sessionId) {
       writeJson(res, 403, { error: 'Scoped message capability required' }); return true;
@@ -68,6 +83,21 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, 403, { error: 'Owner access required' }); return true;
   }
   try {
+    if (reviewReconcile) {
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      writeJson(res,200,await reconcileFactoryReviewOpinion({organizationId:decodeURIComponent(reviewReconcile[1]),opinionId:decodeURIComponent(reviewReconcile[2])},actor)); return true;
+    }
+    if (reconcile) {
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const organizationId=decodeURIComponent(reconcile[1]),workItemId=decodeURIComponent(reconcile[2]);
+      if (req.method==='GET') { writeJson(res,200,await getFactoryReconciliation({organizationId,workItemId},actor)); return true; }
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,8192); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      writeJson(res,200,await requestFactoryReconciliation({organizationId,workItemId,expectedVersion:body?.expectedVersion,executionEpoch:body?.executionEpoch,commandId:body?.commandId},actor)); return true;
+    }
     if (shadowAttempts) {
       if (req.method!=='GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};

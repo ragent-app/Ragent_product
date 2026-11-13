@@ -801,7 +801,22 @@
           for (const [label, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', item.candidates], ['Decisions', item.decisions]]) {
             add(content, 'h4', label); add(content, 'pre', JSON.stringify(value || [], null, 2));
           }
+          add(content, 'h4', 'Delivery evidence');
+          for (const candidate of item.candidates || []) add(content, 'p', `Candidate ${candidate.digest || 'unverified'} · contract ${candidate.contractRevision} · execution ${candidate.executionEpoch}`);
+          if (!item.candidates?.length) add(content, 'p', 'Candidate: unverified');
+          for (const decision of item.decisions || []) add(content, 'p', `Acceptance ${decision.criterionId}: ${decision.decision} · candidate ${decision.candidateDigest}. Evidence: ${JSON.stringify(decision.evidence || [])}`);
+          if (!item.decisions?.length) add(content, 'p', 'Acceptance and checks: unverified');
+          for (const milestone of item.milestones || []) add(content, 'p', `${milestone.milestone} · candidate ${milestone.candidateDigest} · commit ${milestone.evidence?.commit || 'unverified'} · target ${milestone.target || 'unknown'}`);
+          if (!item.milestones?.some(m => m.milestone === 'integrated')) add(content, 'p', 'Integrated commit: unverified');
+          add(content, 'p', 'Package availability and publication: unverified unless supported by a recorded delivery operation.');
+          const reconcileStatus = add(content, 'p', 'Loading reconciliation state…');
+          try { const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`); reconcileStatus.textContent = `Reconciliation: ${state.state || 'unknown'}; observation continues: ${state.observationContinues ?? 'unknown'}; ${state.errorCode || ''}`; }
+          catch (error) { reconcileStatus.textContent = `Reconciliation state unavailable: ${error.message}`; }
           const receipt = add(content, 'p', '');
+          button(content, 'Request reconciliation', () => {
+            const body = { commandId:root.crypto.randomUUID(), expectedVersion:item.rowVersion, executionEpoch:item.executionEpoch };
+            const submit = async () => { try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); receipt.textContent=`Reconciliation request ${result.requested ? 'recorded' : 'not confirmed'}; refresh for observed facts.`; } catch(error) { receipt.textContent=`Reconciliation not confirmed: ${error.message}`; button(content,'Retry same reconciliation request',submit); } }; submit();
+          });
           const send = (type, payload = {}) => {
             const token = root.crypto.randomUUID();
             const command = { commandId: token, idempotencyKey: token, type, targetId: item.id, expectedVersion: item.rowVersion, payload };
