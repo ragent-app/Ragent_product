@@ -13,6 +13,7 @@ import com.andysagent.agentoc.core.agentui.PermissionRequestUiState
 import com.andysagent.agentoc.core.agentui.composerSlashQuery
 import com.andysagent.agentoc.core.domain.RefreshResult
 import com.andysagent.agentoc.core.domain.AttachmentUploadProgress
+import com.andysagent.agentoc.core.domain.ApprovalRecoveryResult
 import com.andysagent.agentoc.core.domain.ApprovalResolutionCoordinator
 import com.andysagent.agentoc.core.domain.OutboundAttachment
 import com.andysagent.agentoc.core.domain.ProjectFolder
@@ -708,8 +709,9 @@ class ChatViewModel(
     private var selectedRepository: SessionRepository? = null
     /** An open tablet detail is dismissed only by an explicit navigation action. */
     var preserveSelectedSessionOnRefresh: Boolean = false
-    private val stopRequests = mutableMapOf<Pair<SessionRepository, String>, PendingStopRequest>()
-    private val uncertainApprovals = mutableMapOf<Pair<SessionRepository, String>, String>()
+    private val stopRequests = mutableMapOf<Triple<SessionRepository, String, String>, PendingStopRequest>()
+    private val approvalRunIds = mutableMapOf<Triple<SessionRepository, String, String>, String>()
+    private val uncertainApprovals = mutableMapOf<Pair<SessionRepository, String>, MutableSet<String>>()
     private val approvalResolutionLock = Any()
     private val sessionDrafts = mutableMapOf<Pair<SessionRepository, String>, String>()
     // A local echo belongs to one target repository and one session, including
@@ -860,10 +862,6 @@ class ChatViewModel(
             scopedSessions().collectLatest { (fixed, sessions) ->
                 if (fixed !== activeRepository()) return@collectLatest
                 knownSessions = sessions
-                if (fixed != null) sessions.filter {
-                    it.status !in setOf(SessionStatus.Working, SessionStatus.WaitingApproval) &&
-                        (it.id != mutableState.value.sessionId || activeRunActivityStatus(mutableState.value.serverRunActivity) == null)
-                }.forEach { stopRequests.remove(fixed to it.id) }
                 knownSessionsRepository = fixed
                 val currentId = mutableState.value.sessionId
                 val currentState = mutableState.value
@@ -1891,11 +1889,10 @@ class ChatViewModel(
 
     private fun submitDecision(questionId: String) {
         val currentDecision = mutableState.value.activeDecision ?: return
-        if (currentDecision.id != questionId || currentDecision.isSubmitted || currentDecision.isSubmitting ||
-            mutableState.value.approvalOutcomeUnknownId != null) return
+        if (currentDecision.id != questionId || currentDecision.isSubmitted || currentDecision.isSubmitting) return
         val sessionId = mutableState.value.sessionId ?: return
         val fixed = selectedRepository ?: return
-        if (fixed !== activeRepository()) return
+        if (fixed !== activeRepository() || currentDecision.approvalId in uncertainApprovals[fixed to sessionId].orEmpty()) return
         val generation = sessionGeneration
 
         if (currentDecision.questionGroups.size > 1 || currentDecision.questionGroups.any { it.isMultiSelect }) {
@@ -1913,7 +1910,7 @@ class ChatViewModel(
                     coordinator.resolveMultiChoiceQuestions(sessionId, currentDecision.approvalId, selections, answers)
                 else coordinator.resolveQuestionsApproval(sessionId, currentDecision.approvalId, choices, customAnswers = answers)
                 if (outcome is ApprovalResolutionCoordinator.Outcome.Failed && outcome.outcomeUnknown) {
-                    uncertainApprovals[fixed to sessionId] = currentDecision.approvalId
+                    uncertainApprovals.getOrPut(fixed to sessionId) { mutableSetOf() }.add(currentDecision.approvalId)
                 }
                 if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation) || mutableState.value.activeDecision?.id != questionId) return@launch
                 when (outcome) {
@@ -2020,7 +2017,7 @@ class ChatViewModel(
                     return@launch
                 }
                 if (error.isAmbiguousApprovalSubmission() || isRecoverableConnectionError(error)) {
-                    uncertainApprovals[fixed to sessionId] = currentDecision.approvalId
+                    uncertainApprovals.getOrPut(fixed to sessionId) { mutableSetOf() }.add(currentDecision.approvalId)
                     if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
                         updateState { copy(approvalOutcomeUnknownId = currentDecision.approvalId, error = null) }
                         launch { refreshSession(sessionId, generation) }
@@ -2249,7 +2246,7 @@ class ChatViewModel(
                 historyLoading = !initialTurnVisible,
                 approval = null,
                 resolvingApprovalId = null,
-                approvalOutcomeUnknownId = uncertainApprovals[fixed to sessionId],
+                approvalOutcomeUnknownId = uncertainApprovals[fixed to sessionId]?.firstOrNull(),
                 approvalRechecking = false,
                 error = null,
                 queuedMessages = selectedSession?.queuedMessages?.map(::toQueuedMessageUiState).orEmpty(),
@@ -2402,14 +2399,17 @@ class ChatViewModel(
                 fixed.observePendingApprovals(sessionId).collectLatest { receivedApprovals ->
                     if (!isCurrentSession(sessionId, generation)) return@collectLatest
                     val approvals = com.andysagent.agentoc.core.model.withoutBatchApprovalShadows(receivedApprovals)
+                    approvalRunIds.keys.removeAll { it.first === fixed && it.second == sessionId }
+                    approvals.forEach { approval ->
+                        approval.runId?.takeIf { it.isNotBlank() }?.let { approvalRunIds[Triple(fixed, sessionId, approval.id)] = it }
+                    }
                     val key = fixed to sessionId
                     val retainedIds = fixed.pendingApprovalIds(sessionId, approvals.map { it.id })
                     if (!isCurrentSession(sessionId, generation)) return@collectLatest
-                    if (uncertainApprovals[key] == null) {
-                        approvals.firstOrNull { it.id in retainedIds }?.let { uncertainApprovals[key] = it.id }
-                    }
-                    val uncertainId = uncertainApprovals[key]
-                    if (uncertainId != null && approvals.none { it.id == uncertainId }) uncertainApprovals.remove(key)
+                    val uncertainIds = uncertainApprovals.getOrPut(key) { mutableSetOf() }
+                    uncertainIds.addAll(retainedIds)
+                    uncertainIds.retainAll(approvals.map { it.id }.toSet())
+                    if (uncertainIds.isEmpty()) uncertainApprovals.remove(key)
                     val decisionApproval = approvals.firstOrNull { it.toDecisionQuestionUiState() != null }
                     val approval = approvals.firstOrNull { it.id != decisionApproval?.id }?.toUiState()
                     val decision = decisionApproval?.toDecisionQuestionUiState()
@@ -2425,10 +2425,12 @@ class ChatViewModel(
                                         selectedByQuestion = it.selectedByQuestion, multiSelectedByQuestion = it.multiSelectedByQuestion, customByQuestion = it.customByQuestion,
                                         isSubmitted = it.isSubmitted, isSubmitting = it.isSubmitting, submissionError = it.submissionError)
                                 } ?: next
-                                if (uncertainApprovals[key] == next.approvalId) merged.copy(isSubmitting = true) else merged
+                                if (next.approvalId in uncertainIds) merged.copy(isSubmitting = true) else merged
                             },
                             resolvingApprovalId = resolvingApprovalId?.takeIf { it == approval?.id },
-                            approvalOutcomeUnknownId = uncertainApprovals[key],
+                            approvalOutcomeUnknownId = approval?.id?.takeIf { it in uncertainIds }
+                                ?: decision?.approvalId?.takeIf { it in uncertainIds }
+                                ?: uncertainIds.firstOrNull(),
                         )
                     }
                 }
@@ -2536,6 +2538,10 @@ class ChatViewModel(
             try {
                 if (!isCurrentSession(sessionId, generation)) return@launch
                 val projection = fixed.loadRunProjection(runId)
+                if (projection.stringValue("state")?.lowercase() in setOf("completed", "finished", "succeeded", "success", "failed", "error", "interrupted", "cancelled", "canceled")) {
+                    stopRequests.remove(Triple(fixed, sessionId, runId))
+                    if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) updateState { this }
+                }
                 val state = mutableState.value
                 val activeRunId = state.serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
                 if (isCurrentSession(sessionId, generation) && (activeRunId ?: latestTimelineRunId(state.timelineItems)) == runId) {
@@ -3035,14 +3041,19 @@ class ChatViewModel(
         if (fixed !== selectedRepository || current.connection != AgentConnectionStatus.Connected ||
             (current.runStatus !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) &&
                 current.approval == null && current.activeDecision?.isSubmitted != false)) return
-        val key = fixed to sessionId
+        val runId = currentStopRunId(current, fixed, sessionId)
+        if (runId == null) {
+            updateState { copy(error = "The active run could not be identified. Refresh and try again.") }
+            return
+        }
+        val key = Triple(fixed, sessionId, runId)
         if (key in stopRequests) return
         val pending = PendingStopRequest(StopRequestState.AwaitingConfirmation)
         stopRequests[key] = pending
         updateState { this }
         viewModelScope.launch {
             try {
-                fixed.cancelSession(sessionId)
+                fixed.cancelRun(sessionId, runId)
                 // Refresh the captured computer, even if the user navigates
                 // elsewhere. Only its authoritative task state ends waiting.
                 fixed.refreshSessions()
@@ -3055,8 +3066,15 @@ class ChatViewModel(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Throwable) {
-                if (stopRequests[key] === pending) stopRequests[key] = PendingStopRequest(StopRequestState.OutcomeUnknown)
+            } catch (error: Throwable) {
+                if (error is SessionRepositoryException && !error.retryable && error.statusCode in 400..499) {
+                    if (stopRequests[key] === pending) stopRequests.remove(key)
+                    if (selectedRepository === fixed && mutableState.value.sessionId == sessionId) {
+                        showError(error, "The run could not be stopped")
+                    }
+                } else if (stopRequests[key] === pending) {
+                    stopRequests[key] = PendingStopRequest(StopRequestState.OutcomeUnknown)
+                }
             } finally {
                 if (selectedRepository === fixed && mutableState.value.sessionId == sessionId) updateState { this }
             }
@@ -3084,7 +3102,7 @@ class ChatViewModel(
         val generation = sessionGeneration
         val accepted = synchronized(approvalResolutionLock) {
             val current = mutableState.value
-            if (current.resolvingApprovalId != null || current.approvalOutcomeUnknownId != null ||
+            if (current.resolvingApprovalId != null || approvalId in uncertainApprovals[fixed to sessionId].orEmpty() ||
                 (current.approval?.id != approvalId && current.activeDecision?.id != approvalId)) {
                 false
             } else {
@@ -3154,7 +3172,7 @@ class ChatViewModel(
                         "Managed administrator execution is not available on this Mac"
                     }
                     val visibleApproval = mutableState.value.approval
-                    val categoryActions = pending.actions.groupBy { action ->
+                    val categoryActions = pending.actions.filter { it.state in setOf("proposed", "classified", "waiting_user") }.groupBy { action ->
                         action.category?.takeIf { it.isNotBlank() } ?: "privileged_other"
                     }.filterKeys { it == "privileged_other" || it == "destructive_delete" }
                     if (categoryActions.isEmpty()) {
@@ -3243,7 +3261,7 @@ class ChatViewModel(
                     return@launch
                 }
                 if (decisionSent && (error.isAmbiguousApprovalSubmission() || isRecoverableConnectionError(error))) {
-                    uncertainApprovals[fixed to sessionId] = approvalId
+                    uncertainApprovals.getOrPut(fixed to sessionId) { mutableSetOf() }.add(approvalId)
                     if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
                         updateState { copy(approvalOutcomeUnknownId = approvalId, error = null) }
                         launch { refreshSession(sessionId, generation) }
@@ -3277,16 +3295,60 @@ class ChatViewModel(
         updateState { copy(error = null, approvalRechecking = hasUncertainApproval) }
         viewModelScope.launch {
             try {
-                val uncertainId = sessionId?.let { uncertainApprovals[fixed to it] }
-                if (sessionId != null && uncertainId != null) {
-                    val acknowledged = fixed.resumePendingApproval(sessionId, uncertainId)
-                    if (acknowledged > 0) {
-                        uncertainApprovals.remove(fixed to sessionId)
-                        if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
-                            updateState { copy(approvalOutcomeUnknownId = null,
+                if (sessionId != null) {
+                    val key = fixed to sessionId
+                    val cleared = mutableSetOf<String>()
+                    for (uncertainId in uncertainApprovals[key]?.toList().orEmpty()) {
+                        when (fixed.recoverPendingApproval(sessionId, uncertainId)) {
+                            ApprovalRecoveryResult.Submitted -> {
+                                fixed.retireStaleApproval(sessionId, uncertainId)
+                                uncertainApprovals[key]?.remove(uncertainId)
+                                cleared.add(uncertainId)
+                            }
+                            ApprovalRecoveryResult.Stale -> {
+                                fixed.retireStaleApproval(sessionId, uncertainId)
+                                uncertainApprovals[key]?.remove(uncertainId)
+                                cleared.add(uncertainId)
+                            }
+                            ApprovalRecoveryResult.Partial -> {
+                                // A privileged batch can contain further unresolved categories.
+                                if (fixed.refreshEvents(sessionId) is RefreshResult.Applied) {
+                                    fixed.refreshSessionDetail(sessionId)
+                                    uncertainApprovals[key]?.remove(uncertainId)
+                                    cleared.add(uncertainId)
+                                }
+                            }
+                            ApprovalRecoveryResult.Rejected -> {
+                                // A definite client rejection did not accept the retained decision.
+                                // Refresh first so a request resolved elsewhere is not offered again.
+                                if (fixed.refreshEvents(sessionId) is RefreshResult.Applied) {
+                                    fixed.refreshSessionDetail(sessionId)
+                                    uncertainApprovals[key]?.remove(uncertainId)
+                                    cleared.add(uncertainId)
+                                }
+                            }
+                            ApprovalRecoveryResult.Missing -> {
+                                // Absence of a local operation says nothing about server acceptance.
+                                if (fixed.refreshEvents(sessionId) is RefreshResult.Applied) {
+                                    fixed.refreshSessionDetail(sessionId)
+                                    if (fixed.findPendingApproval(sessionId, uncertainId)?.status != "pending") {
+                                        uncertainApprovals[key]?.remove(uncertainId)
+                                        cleared.add(uncertainId)
+                                    }
+                                }
+                            }
+                            ApprovalRecoveryResult.Sending, ApprovalRecoveryResult.Unknown -> Unit
+                        }
+                    }
+                    if (uncertainApprovals[key].isNullOrEmpty()) uncertainApprovals.remove(key)
+                    if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                        updateState {
+                            val remaining = uncertainApprovals[key].orEmpty()
+                            copy(approvalOutcomeUnknownId = approval?.id?.takeIf { it in remaining }
+                                ?: activeDecision?.approvalId?.takeIf { it in remaining } ?: remaining.firstOrNull(),
                                 activeDecision = activeDecision?.let { decision ->
-                                    if (decision.approvalId == uncertainId) decision.copy(isSubmitting = false, isSubmitted = true) else decision
-                                }) }
+                                    if (decision.approvalId in cleared) decision.copy(isSubmitting = false) else decision
+                                })
                         }
                     }
                 }
@@ -3295,8 +3357,13 @@ class ChatViewModel(
                 // a task that the computer still reports as running. It never
                 // replays either the original message or the stop command.
                 sessionId?.let { id ->
-                    val key = fixed to id
-                    if (stopRequests[key]?.state == StopRequestState.OutcomeUnknown) stopRequests.remove(key)
+                    val unknownRuns = stopRequests.filter { (key, value) ->
+                        key.first === fixed && key.second == id && value.state == StopRequestState.OutcomeUnknown
+                    }.keys.toList()
+                    for (key in unknownRuns) {
+                        fixed.loadRunProjection(key.third)
+                        if (stopRequests[key]?.state == StopRequestState.OutcomeUnknown) stopRequests.remove(key)
+                    }
                     if (selectedRepository === fixed && isCurrentSession(id, generation)) {
                         updateState { this }
                         refreshSession(id, generation)
@@ -3377,11 +3444,19 @@ class ChatViewModel(
         }
     }
 
+    private fun currentStopRunId(state: ChatUiState, fixed: SessionRepository, sessionId: String): String? {
+        val approvalId = state.activeDecision?.takeUnless { it.isSubmitted }?.approvalId ?: state.approval?.id
+        return if (approvalId != null) approvalRunIds[Triple(fixed, sessionId, approvalId)]
+        else state.serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+    }
+
     private fun updateState(transform: ChatUiState.() -> ChatUiState) {
         val previous = mutableState.value
         val transformed = previous.transform()
         val next = transformed.copy(stopRequest = transformed.sessionId?.let { id ->
-            selectedRepository?.let { stopRequests[it to id]?.state }
+            selectedRepository?.let { fixed ->
+                currentStopRunId(transformed, fixed, id)?.let { runId -> stopRequests[Triple(fixed, id, runId)]?.state }
+            }
         } ?: StopRequestState.None)
         // A normal error must never inherit the auto-dismiss behavior of an
         // earlier connectivity error merely because an intermediate action

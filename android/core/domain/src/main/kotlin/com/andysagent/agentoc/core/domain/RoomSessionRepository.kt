@@ -2498,6 +2498,12 @@ class RoomSessionRepository(
         }
     }
 
+    override suspend fun cancelRun(sessionId: String, runId: String) {
+        require(sessionId.isNotBlank() && runId.isNotBlank()) { "Run identity is required" }
+        val requestId = newRequestId()
+        execute(ApiRequest("POST", "/api/runs/${encode(runId)}/cancel", "{}", requestId, requestId))
+    }
+
     override suspend fun decideConfirmation(sessionId: String, confirmationId: String, decision: String, requestId: String) {
         val body = codec.encode(serializer<ConfirmationDecisionRequestDto>(), ConfirmationDecisionRequestDto(decision, requestId))
         val path = "/api/sessions/${encode(sessionId)}/confirmations/${encode(confirmationId)}"
@@ -2756,7 +2762,7 @@ class RoomSessionRepository(
         return root["run"]?.jsonObject ?: root
     }
 
-    override suspend fun resumePendingOperations(): Int = resumePendingOperationsMatching { true }
+    override suspend fun resumePendingOperations(): Int = resumePendingOperationsMatching({ true })
 
     private suspend fun approvalOperationMatcher(sessionId: String, approvalId: String): (PendingOperationEntity) -> Boolean {
         val approval = dao.getApproval(sessionId, approvalId) ?: return { false }
@@ -2775,7 +2781,7 @@ class RoomSessionRepository(
     }
 
     override suspend fun pendingApprovalIds(sessionId: String, approvalIds: List<String>): Set<String> {
-        val operations = dao.pendingOperations()
+        val operations = dao.pendingOperations() + dao.acknowledgedOperations()
         return approvalIds.filterTo(mutableSetOf()) { approvalId ->
             val matches = approvalOperationMatcher(sessionId, approvalId)
             operations.any(matches)
@@ -2785,7 +2791,34 @@ class RoomSessionRepository(
     override suspend fun resumePendingApproval(sessionId: String, approvalId: String): Int =
         resumePendingOperationsMatching(approvalOperationMatcher(sessionId, approvalId))
 
-    private suspend fun resumePendingOperationsMatching(matches: (PendingOperationEntity) -> Boolean): Int {
+    override suspend fun recoverPendingApproval(sessionId: String, approvalId: String): ApprovalRecoveryResult {
+        val matches = approvalOperationMatcher(sessionId, approvalId)
+        val acknowledged = dao.acknowledgedOperations().filter(matches)
+        if (acknowledged.isNotEmpty()) return if (acknowledged.any { it.kind == "privileged_category" })
+            ApprovalRecoveryResult.Partial else ApprovalRecoveryResult.Submitted
+        val retained = dao.pendingOperations().filter(matches)
+        if (retained.isEmpty()) return ApprovalRecoveryResult.Missing
+        if (retained.any { it.requestId in activePendingOperationIds }) return ApprovalRecoveryResult.Sending
+        var terminalFailure = false
+        val completed = resumePendingOperationsMatching(matches) { error ->
+            if (error.isTerminalApprovalFailure()) terminalFailure = true
+        }
+        val remaining = retained.mapNotNull { dao.getPendingOperation(it.requestId) }
+        return when {
+            remaining.any { it.requestId in activePendingOperationIds } -> ApprovalRecoveryResult.Sending
+            remaining.any { it.state == "pending" || it.state == "sending" } -> ApprovalRecoveryResult.Unknown
+            terminalFailure -> ApprovalRecoveryResult.Stale
+            remaining.any { it.state == "failed" } -> ApprovalRecoveryResult.Rejected
+            completed > 0 && retained.any { it.kind == "privileged_category" } -> ApprovalRecoveryResult.Partial
+            completed > 0 -> ApprovalRecoveryResult.Submitted
+            else -> ApprovalRecoveryResult.Missing
+        }
+    }
+
+    private suspend fun resumePendingOperationsMatching(
+        matches: (PendingOperationEntity) -> Boolean,
+        onFailure: (Throwable) -> Unit = {},
+    ): Int {
         var completed = 0
         for (snapshot in dao.pendingOperations()) {
             if (!matches(snapshot)) continue
@@ -2851,6 +2884,9 @@ class RoomSessionRepository(
                     if (operation.kind == "send_message" || operation.kind == "send_message_with_attachments") {
                         markFirstTurnAccepted(sessionIdFromPath(operation.path))
                     }
+                    if (operation.kind in setOf("approved_actions", "privileged_category")) {
+                        acknowledgeBatchOperation(operation)
+                    }
                     database.withTransaction {
                         if (operation.kind == "runtime_approval") {
                             val parts = operation.path.substringBefore('?').split('/').filter(String::isNotBlank)
@@ -2877,10 +2913,13 @@ class RoomSessionRepository(
                                 }
                             }
                         }
-                        dao.deleteOperation(operation.requestId)
+                        if (operation.kind !in setOf("approved_actions", "privileged_category")) {
+                            dao.deleteOperation(operation.requestId)
+                        }
                     }
                     completed += 1
                 } catch (error: Throwable) {
+                    onFailure(error)
                     val recoverable = dao.getPendingOperation(operation.requestId) ?: operation
                     dao.upsertOperation(recoverable.copy(
                         state = if (isPermanentClientFailure(error)) "failed" else "pending",
@@ -2972,7 +3011,8 @@ class RoomSessionRepository(
         try {
             val response = action()
             if (kind == "send_message") markFirstTurnAccepted(scope)
-            dao.deleteOperation(requestId)
+            if (kind in setOf("approved_actions", "privileged_category")) acknowledgeBatchOperation(operation)
+            else dao.deleteOperation(requestId)
             response
         } catch (error: Throwable) {
             dao.upsertOperation(operation.copy(
@@ -2981,6 +3021,40 @@ class RoomSessionRepository(
                 lastError = error.message,
             ))
             throw error
+        }
+    }
+
+    /** Persist the accepted batch decision before dropping its replay identity. */
+    private suspend fun acknowledgeBatchOperation(operation: PendingOperationEntity) {
+        val parts = operation.path.substringBefore('?').split('/').filter(String::isNotBlank)
+        val runId = parts.getOrNull(2)?.let(android.net.Uri::decode)
+        val batchId = parts.getOrNull(4)?.let(android.net.Uri::decode)
+        val category = parts.getOrNull(6)?.let(android.net.Uri::decode)
+        database.withTransaction {
+            val candidates = if (runId != null && batchId != null) dao.getPendingApprovalsForBatch(runId, batchId) else emptyList()
+            if (candidates.isEmpty()) {
+                // Persist the server acknowledgement without replaying it while
+                // the matching history request has not yet been materialized.
+                dao.upsertOperation(operation.copy(state = "acknowledged", updatedAt = System.currentTimeMillis()))
+                return@withTransaction
+            }
+            var applied = false
+            for (candidate in candidates) {
+                val current = dao.getApproval(candidate.sessionId, candidate.id) ?: continue
+                if (current.status != "pending" || current.runId != runId || current.batchId != batchId) continue
+                if (operation.kind == "approved_actions" && current.kind != "approved_action_batch_request") continue
+                if (operation.kind == "privileged_category" && current.kind != "privileged_batch_request") continue
+                val next = if (operation.kind == "approved_actions") {
+                    current.copy(status = "resolved", updatedAt = System.currentTimeMillis())
+                } else if (category != null) {
+                    current.withPrivilegedCategoryResponse(SessionEventDto(category = category))
+                } else continue
+                if (next == current) continue
+                dao.upsertApprovals(listOf(next))
+                applied = true
+            }
+            if (applied) dao.deleteOperation(operation.requestId)
+            else dao.upsertOperation(operation.copy(state = "acknowledged", updatedAt = System.currentTimeMillis()))
         }
     }
 
@@ -3276,9 +3350,9 @@ private class RoomEventSink(
             && event.installAuto.isNotEmpty()
         if (isApprovalRequest && !isServerManagedInstallOnly) {
             val approvalId = event.approvalId ?: event.batchId ?: requestId
-            val details = buildApprovalDetails(event)
-            val priorStatus = dao.getApproval(scope, approvalId)?.takeIf { it.runId == event.runId }
-                ?.status?.lowercase()?.takeIf {
+            val prior = dao.getApproval(scope, approvalId)?.takeIf { it.runId == event.runId && it.kind == type }
+            val details = preserveResolvedBatchActions(buildApprovalDetails(event), prior?.detailsJson, type)
+            val priorStatus = prior?.status?.lowercase()?.takeIf {
                     it in setOf("resolved", "approved", "denied", "declined", "cancelled", "canceled", "completed", "failed", "expired")
                 }
             dao.upsertApprovals(listOf(ApprovalEntity(
@@ -3299,6 +3373,34 @@ private class RoomEventSink(
                 denyLabel = event.denyLabel ?: "Deny",
                 updatedAt = System.currentTimeMillis(),
             )))
+            // A successful replay can precede the first history projection.
+            // Consume its durable acknowledgement in this same transaction.
+            if (type == "approved_action_batch_request" || type == "privileged_batch_request") {
+                val runId = event.runId
+                val batchId = event.batchId
+                if (!runId.isNullOrBlank() && !batchId.isNullOrBlank()) {
+                    var projected = dao.getApproval(scope, approvalId)
+                    for (operation in dao.acknowledgedOperations()) {
+                        val parts = operation.path.substringBefore('?').split('/').filter(String::isNotBlank)
+                        if (parts.getOrNull(2)?.let(android.net.Uri::decode) != runId ||
+                            parts.getOrNull(4)?.let(android.net.Uri::decode) != batchId) continue
+                        val current = projected ?: continue
+                        val next = when {
+                            type == "approved_action_batch_request" && operation.kind == "approved_actions" ->
+                                current.copy(status = "resolved", updatedAt = System.currentTimeMillis())
+                            type == "privileged_batch_request" && operation.kind == "privileged_category" -> {
+                                val category = parts.getOrNull(6)?.let(android.net.Uri::decode) ?: continue
+                                current.withPrivilegedCategoryResponse(SessionEventDto(category = category))
+                            }
+                            else -> continue
+                        }
+                        if (next == current) continue
+                        dao.upsertApprovals(listOf(next))
+                        projected = next
+                        dao.deleteOperation(operation.requestId)
+                    }
+                }
+            }
         } else if (type == "privileged_batch_response") {
             val batchId = event.batchId ?: return
             val existing = dao.getApproval(scope, event.approvalId ?: batchId) ?: dao.getApprovalByBatchId(scope, batchId) ?: return
@@ -3393,6 +3495,32 @@ private fun ApprovalEntity.requestIdFromDetails(): String? = runCatching {
 }.getOrNull()
 
 private val terminalApprovedActionStates = setOf("denied", "cancelled", "expired", "completed", "failed")
+
+private fun preserveResolvedBatchActions(incoming: String?, previous: String?, kind: String): String? {
+    if (kind !in setOf("privileged_batch_request", "approved_action_batch_request") || incoming == null || previous == null) return incoming
+    return runCatching {
+        val next = AgentocProtocol.json.parseToJsonElement(incoming).jsonObject
+        val prior = AgentocProtocol.json.parseToJsonElement(previous).jsonObject
+        val priorActions = prior["actions"]?.jsonArray.orEmpty().mapNotNull { element ->
+            val action = element.jsonObject
+            val id = action["actionId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val state = action["state"]?.jsonPrimitive?.contentOrNull
+            if (state in setOf("approved", "denied", "resolved", "cancelled", "expired", "completed", "failed")) id to action else null
+        }.toMap()
+        val actions = next["actions"]?.jsonArray ?: return@runCatching incoming
+        JsonObject(next.toMutableMap().apply {
+            put("actions", buildJsonArray {
+                actions.forEach { element ->
+                    val action = element.jsonObject
+                    val old = priorActions[action["actionId"]?.jsonPrimitive?.contentOrNull]
+                    add(if (old == null) element else JsonObject(action.toMutableMap().apply {
+                        old["state"]?.let { put("state", it) }
+                    }))
+                }
+            })
+        }).toString()
+    }.getOrDefault(incoming)
+}
 
 private fun ApprovalEntity.withPrivilegedCategoryResponse(event: SessionEventDto): ApprovalEntity {
     val category = when (event.category) {

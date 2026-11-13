@@ -339,6 +339,7 @@ interface SessionRepository {
         serviceTier: String,
     ) {}
     suspend fun cancelSession(sessionId: String)
+    suspend fun cancelRun(sessionId: String, runId: String) { error("Run cancellation is not supported") }
     suspend fun decideConfirmation(sessionId: String, confirmationId: String, decision: String, requestId: String = newRequestId())
     suspend fun resolveApproval(runId: String, batchId: String, decisionsJson: String, requestId: String = newRequestId())
     suspend fun resolveApprovedActions(
@@ -461,7 +462,13 @@ interface SessionRepository {
     suspend fun pendingApprovalIds(sessionId: String, approvalIds: List<String>): Set<String> = emptySet()
     /** Retry only the retained decision for this approval, with its original request identity. */
     suspend fun resumePendingApproval(sessionId: String, approvalId: String): Int = 0
+    suspend fun recoverPendingApproval(sessionId: String, approvalId: String): ApprovalRecoveryResult =
+        if (resumePendingApproval(sessionId, approvalId) > 0) ApprovalRecoveryResult.Submitted
+        else ApprovalRecoveryResult.Unknown
 }
+
+enum class ApprovalRecoveryResult { Submitted, Partial, Stale, Rejected, Missing, Sending, Unknown }
+
 
 sealed interface RefreshResult {
     data class Applied(val count: Int, val latestSeq: Long) : RefreshResult

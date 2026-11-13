@@ -172,6 +172,7 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
     override suspend fun loadGlobalRuntimeSelection(): RuntimeSelection? = current().loadGlobalRuntimeSelection()
     override suspend fun saveGlobalRuntimeSelection(selection: RuntimeSelection) = current().saveGlobalRuntimeSelection(selection)
     override suspend fun cancelSession(sessionId: String) = current().cancelSession(sessionId)
+    override suspend fun cancelRun(sessionId: String, runId: String) = current().cancelRun(sessionId, runId)
     override suspend fun decideConfirmation(sessionId: String, confirmationId: String, decision: String, requestId: String) = current().decideConfirmation(sessionId, confirmationId, decision, requestId)
     override suspend fun resolveApproval(runId: String, batchId: String, decisionsJson: String, requestId: String) = current().resolveApproval(runId, batchId, decisionsJson, requestId)
     override suspend fun resolveApprovedActions(sessionId: String, runId: String, batchId: String, approve: Boolean, requestId: String) = current().resolveApprovedActions(sessionId, runId, batchId, approve, requestId)
@@ -197,6 +198,8 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         current().pendingApprovalIds(sessionId, approvalIds)
     override suspend fun resumePendingApproval(sessionId: String, approvalId: String): Int =
         current().resumePendingApproval(sessionId, approvalId)
+    override suspend fun recoverPendingApproval(sessionId: String, approvalId: String): ApprovalRecoveryResult =
+        current().recoverPendingApproval(sessionId, approvalId)
 
     private fun current(): SessionRepository = mutableDelegate.value
         ?: error("No remote computer target is selected")

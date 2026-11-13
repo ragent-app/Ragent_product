@@ -1847,7 +1847,9 @@ private fun ChatSurface(
                 && viewport.lastVisibleItemEnd <= viewport.viewportEndOffset
             olderTimelineAnchor = OlderTimelineAnchor(
                 itemId = entry.id,
-                offset = visible.offset,
+                // scrollToItem's offset moves the item upwards from the
+                // padded content start; visible.offset uses viewport coordinates.
+                offset = listState.layoutInfo.beforeContentPadding - visible.offset,
                 keepAtBottom = contentUnderfillsViewport,
                 userScrollGeneration = userScrollGeneration - if (readerDragging) 1 else 0,
             )
@@ -1900,11 +1902,16 @@ private fun ChatSurface(
     }
 
     var imeSettling by remember { mutableStateOf(false) }
+    var readerScrollInProgress by remember(state.sessionId) { mutableStateOf(false) }
 
     LaunchedEffect(readerDragging, isAtBottom, listState.isScrollInProgress, imeSettling, programmaticDockScroll, turnDock, turnDockDetached) {
+        if (readerDragging) readerScrollInProgress = true
         // IME resize/padding changes also drive LazyColumn scrolling. Do not treat
         // that system animation as the user detaching from the conversation tail.
-        if (imeSettling) return@LaunchedEffect
+        if (imeSettling) {
+            if (!readerDragging && !listState.isScrollInProgress) readerScrollInProgress = false
+            return@LaunchedEffect
+        }
         if (programmaticDockScroll) return@LaunchedEffect
         if (turnDock != null) {
             // 停靠期间滚动只可能是用户发起（程序性滚动已被上面吞掉）。滚走 =
@@ -1915,6 +1922,7 @@ private fun ChatSurface(
             } else if (!listState.isScrollInProgress && isAtBottom && turnDockDetached) {
                 turnDockDetached = false
             }
+            if (!readerDragging && !listState.isScrollInProgress) readerScrollInProgress = false
             return@LaunchedEffect
         }
         if (readerDragging) {
@@ -1922,9 +1930,11 @@ private fun ChatSurface(
                 scrollMode = ChatScrollMode.Detached
             }
         } else {
-            if (isAtBottom && scrollMode != ChatScrollMode.Returning && scrollMode != ChatScrollMode.Detached) {
+            if (isAtBottom && scrollMode != ChatScrollMode.Returning &&
+                (scrollMode != ChatScrollMode.Detached || readerScrollInProgress)) {
                 scrollMode = ChatScrollMode.Following
             }
+            if (!listState.isScrollInProgress) readerScrollInProgress = false
         }
     }
 

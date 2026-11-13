@@ -3,6 +3,7 @@ package com.andysagent.agentoc.feature.workbench
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.andysagent.agentoc.core.domain.ApprovalRecoveryResult
 import com.andysagent.agentoc.core.domain.ApprovalResolutionCoordinator
 import com.andysagent.agentoc.core.domain.SessionRepository
 import com.andysagent.agentoc.core.domain.SwitchingSessionRepository
@@ -79,6 +80,7 @@ class AttentionCenterViewModel(
 
     private val visibleSessionId = MutableStateFlow<String?>(null)
     private val brokerApprovals = MutableStateFlow<List<Approval>>(emptyList())
+    private val awaitingApprovals = mutableSetOf<Triple<SessionRepository, String, String>>()
 
     init {
         // Live timeline events are an ephemeral projection; approval cards
@@ -200,6 +202,7 @@ class AttentionCenterViewModel(
         if (approval.kind != "approved_action_batch_request" || event.approvalIntent !in setOf("approve", "deny")) return
         val switching = repository as? SwitchingSessionRepository
         val fixed = if (switching != null) switching.delegate.value ?: return else repository
+        if (Triple(fixed, item.sessionId, approval.id) in awaitingApprovals) return
         mutableState.update { it.copy(resolvingItemId = event.itemId, error = null) }
         viewModelScope.launch {
             var attempted = false
@@ -229,7 +232,10 @@ class AttentionCenterViewModel(
                 if (switching != null && switching.delegate.value !== fixed) error("The connected computer changed")
                 attempted = true
                 fixed.resolveApprovedActionBatchWithProof(item.sessionId, runId, batchId, decisions, event.approvalIntent, proof, requestId)
-                consumeResolution(event.itemId, ApprovalResolutionCoordinator.Outcome.Submitted)
+                try { fixed.retireStaleApproval(item.sessionId, approval.id) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Throwable) { /* Server acknowledgement remains authoritative. */ }
+                consumeResolutionForRepository(fixed, event.itemId, ApprovalResolutionCoordinator.Outcome.Submitted)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
@@ -248,22 +254,37 @@ class AttentionCenterViewModel(
     }
 
     private suspend fun awaitActionBatch(fixed: SessionRepository, switching: SwitchingSessionRepository?, sessionId: String, approvalId: String, itemId: String) {
-        mutableState.update { it.copy(error = "Approval submitted; waiting to confirm the result.") }
-        while (true) {
+        val key = Triple(fixed, sessionId, approvalId)
+        awaitingApprovals.add(key)
+        mutableState.update { if (it.resolvingItemId == itemId) it.copy(resolvingItemId = null, error = "Approval submitted; waiting to confirm the result.") else it }
+        try { while (true) {
             delay(2_000)
             if (switching != null && switching.delegate.value !== fixed) return
             if (mutableState.value.items.none { it.id == itemId }) return
             try {
+                when (fixed.recoverPendingApproval(sessionId, approvalId)) {
+                    ApprovalRecoveryResult.Submitted, ApprovalRecoveryResult.Stale -> {
+                        fixed.retireStaleApproval(sessionId, approvalId)
+                        consumeResolutionForRepository(fixed, itemId, ApprovalResolutionCoordinator.Outcome.Submitted)
+                        return
+                    }
+                    ApprovalRecoveryResult.Rejected -> {
+                        fixed.refreshEvents(sessionId)
+                        mutableState.update { it.copy(error = "Approval was rejected. Review the request before trying again.") }
+                        return
+                    }
+                    else -> Unit
+                }
                 if (fixed.refreshEvents(sessionId) is RefreshResult.Applied) {
                     val pending = fixed.findPendingApproval(sessionId, approvalId)
                     if (pending == null || pending.status != "pending" || pending.actions.none { it.state in setOf("proposed", "classified", "waiting_user") }) {
-                        consumeResolution(itemId, ApprovalResolutionCoordinator.Outcome.Submitted)
+                        consumeResolutionForRepository(fixed, itemId, ApprovalResolutionCoordinator.Outcome.Submitted)
                         return
                     }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Wait for the authoritative result before enabling another decision. */ }
-        }
+        } } finally { awaitingApprovals.remove(key) }
     }
 
     private fun resolvePrivilegedCategory(event: AttentionEvent.ResolvePrivilegedCategory) {
@@ -274,6 +295,7 @@ class AttentionCenterViewModel(
         if (original.kind != "privileged_batch_request") return
         val switching = repository as? SwitchingSessionRepository
         val fixed = if (switching != null) switching.delegate.value ?: return else repository
+        if (Triple(fixed, item.sessionId, original.id) in awaitingApprovals) return
         mutableState.update { it.copy(resolvingItemId = event.itemId, error = null) }
         viewModelScope.launch {
             var attempted = false
@@ -334,19 +356,34 @@ class AttentionCenterViewModel(
 
     private suspend fun awaitPrivilegedCategory(fixed: SessionRepository, switching: SwitchingSessionRepository?,
         sessionId: String, approvalId: String, event: AttentionEvent.ResolvePrivilegedCategory) {
-        mutableState.update { it.copy(error = "Approval submitted; waiting to confirm the result.") }
-        while (true) {
+        val key = Triple(fixed, sessionId, approvalId)
+        awaitingApprovals.add(key)
+        mutableState.update { if (it.resolvingItemId == event.itemId) it.copy(resolvingItemId = null, error = "Approval submitted; waiting to confirm the result.") else it }
+        try { while (true) {
             delay(2_000)
             if (switching != null && switching.delegate.value !== fixed) return
             if (mutableState.value.items.none { it.id == event.itemId }) return
             try {
+                when (fixed.recoverPendingApproval(sessionId, approvalId)) {
+                    ApprovalRecoveryResult.Stale -> {
+                        fixed.retireStaleApproval(sessionId, approvalId)
+                        consumeResolutionForRepository(fixed, event.itemId, ApprovalResolutionCoordinator.Outcome.Stale)
+                        return
+                    }
+                    ApprovalRecoveryResult.Rejected -> {
+                        fixed.refreshEvents(sessionId)
+                        mutableState.update { it.copy(error = "Approval was rejected. Review the request before trying again.") }
+                        return
+                    }
+                    else -> Unit
+                }
                 if (refreshPrivilegedCategory(fixed, sessionId, approvalId, event.category)) {
-                    mutableState.update { it.copy(resolvingItemId = null, error = null) }
+                    mutableState.update { if (it.resolvingItemId == event.itemId) it.copy(resolvingItemId = null, error = null) else it }
                     return
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Keep the decision locked until an authoritative result arrives. */ }
-        }
+        } } finally { awaitingApprovals.remove(key) }
     }
 
     private fun resolveQuestion(event: AttentionEvent.ResolveQuestion) {
@@ -420,7 +457,7 @@ class AttentionCenterViewModel(
                     // queue; drop the presentation immediately so the same
                     // approval cannot be submitted twice.
                     state.copy(
-                        resolvingItemId = null,
+                        resolvingItemId = state.resolvingItemId?.takeUnless { it == itemId },
                         dismissedItemIds = state.dismissedItemIds + itemId,
                         items = state.items.filterNot { it.id == itemId },
                         activeItemId = if (state.activeItemId == itemId) state.items.firstOrNull { it.id != itemId }?.id else state.activeItemId,

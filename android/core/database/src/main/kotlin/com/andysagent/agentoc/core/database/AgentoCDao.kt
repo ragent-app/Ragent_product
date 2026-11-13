@@ -116,6 +116,9 @@ interface AgentoCDao {
     @Query("SELECT * FROM approvals WHERE sessionId = :sessionId AND status = 'pending' ORDER BY updatedAt ASC")
     suspend fun getPendingApprovals(sessionId: String): List<ApprovalEntity>
 
+    @Query("SELECT * FROM approvals WHERE status = 'pending' AND runId = :runId AND batchId = :batchId")
+    suspend fun getPendingApprovalsForBatch(runId: String, batchId: String): List<ApprovalEntity>
+
     /** Global pending approvals across every cached session of one computer. */
     @Query("SELECT * FROM approvals WHERE status = 'pending' ORDER BY updatedAt ASC")
     fun observeAllPendingApprovals(): Flow<List<ApprovalEntity>>
@@ -167,6 +170,9 @@ interface AgentoCDao {
 
     @Query("SELECT * FROM pending_operations WHERE state IN ('pending', 'sending') ORDER BY createdAt ASC")
     suspend fun pendingOperations(): List<PendingOperationEntity>
+
+    @Query("SELECT * FROM pending_operations WHERE state = 'acknowledged' ORDER BY createdAt ASC")
+    suspend fun acknowledgedOperations(): List<PendingOperationEntity>
 
     @Query("SELECT * FROM pending_operations WHERE requestId = :requestId LIMIT 1")
     suspend fun getPendingOperation(requestId: String): PendingOperationEntity?

@@ -1275,7 +1275,9 @@ class MainActivity : ComponentActivity() {
                     initialTurnEntry = chatState.initialTurnEntry,
                     selectedAgentId = chatState.selectedAgentId,
                     approval = chatState.approval,
-                    approvalResolving = chatState.resolvingApprovalId != null || chatState.approvalOutcomeUnknownId != null,
+                    approvalResolving = chatState.approval?.id?.let { id ->
+                        chatState.resolvingApprovalId == id || chatState.approvalOutcomeUnknownId == id
+                    } == true,
                     approvalOutcomeUnknown = chatState.approvalOutcomeUnknownId != null,
                     approvalRechecking = chatState.approvalRechecking,
                     runtimeTool = chatState.runtimeTool,
