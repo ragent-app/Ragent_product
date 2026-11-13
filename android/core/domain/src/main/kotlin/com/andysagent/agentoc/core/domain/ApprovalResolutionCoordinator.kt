@@ -323,7 +323,7 @@ fun Throwable.isTerminalApprovalFailure(): Boolean {
         is SessionRepositoryException -> statusCode
         else -> null
     }
-    return code in TERMINAL_APPROVAL_FAILURE_CODES || (status != null && status in setOf(404, 409, 410))
+    return code in TERMINAL_APPROVAL_FAILURE_CODES || (status != null && status in setOf(404, 410))
 }
 
 private val TERMINAL_APPROVAL_FAILURE_CODES = setOf(
