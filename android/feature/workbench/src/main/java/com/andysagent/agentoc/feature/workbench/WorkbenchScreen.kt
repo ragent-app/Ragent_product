@@ -699,6 +699,9 @@ fun WorkbenchScreen(
                         connection = state.chatConnection ?: state.connection,
                         activeRemoteTargetId = state.chatTargetId ?: state.activeRemoteTargetId,
                         selectedProjectId = state.selectedProjectId.takeIf { state.chatTargetId == state.activeRemoteTargetId },
+                        projects = state.projects.takeIf { state.chatTargetId == state.activeRemoteTargetId }.orEmpty(),
+                        sessions = state.sessions.takeIf { state.chatTargetId == state.activeRemoteTargetId }.orEmpty(),
+                        projectName = state.projectName.takeIf { state.chatTargetId == state.activeRemoteTargetId }.orEmpty(),
                     ),
                     parityState = parityState,
                     onParityEvent = parityEvent,
@@ -2047,8 +2050,18 @@ private fun ChatSurface(
             listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > scrollThresholdPx
         }
     }
-    val currentProjectName = remember(state.projects, state.selectedProjectId, state.projectName) {
-        state.projects.find { it.id == state.selectedProjectId }?.name ?: state.projectName.takeIf { it.isNotBlank() }
+    val currentProjectName = remember(state.projects, state.sessions, state.sessionId, state.chatTargetId,
+        state.activeRemoteTargetId, state.selectedProjectId, state.projectName) {
+        if (state.sessionId != null) {
+            // The browsed project can differ from the open conversation. The
+            // project catalog belongs to the active computer, so do not use it
+            // to label a split-view conversation on a different computer.
+            if (state.chatTargetId != state.activeRemoteTargetId) null
+            else state.sessions.firstOrNull { it.id == state.sessionId }?.projectId
+                ?.let { id -> state.projects.firstOrNull { it.id == id }?.name }
+        } else {
+            state.projects.find { it.id == state.selectedProjectId }?.name ?: state.projectName.takeIf { it.isNotBlank() }
+        }
     }
     val currentDeviceName = remember(state.computers, state.remoteTargets, state.activeRemoteTargetId) {
         state.remoteTargets.firstOrNull { it.instanceId == state.activeRemoteTargetId }?.label
