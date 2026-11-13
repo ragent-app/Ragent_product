@@ -50,10 +50,8 @@ git -C "$REPO" archive --format=tar "$REV" package.json packaging/proot docs/and
   scripts/stage-proot-snapshot.mjs scripts/stage-runtime-payload.mjs scripts/verify-runtime-payload.mjs \
   scripts/build-proot-release.sh scripts/build-proot-p2p-host.sh scripts/archive-proot.py \
   scripts/write-proot-identity.py scripts/stage-posix-node-toolchain.sh | tar -xf - -C "$BUILD_INPUT"
-test "$(git -C "$REPO" rev-parse HEAD)" = "$REV"
-node "$BUILD_INPUT/scripts/stage-proot-snapshot.mjs" "$REPO" "$BUILD_INPUT/app" git-objects
-test "$(git -C "$REPO" rev-parse HEAD)" = "$REV"
+node "$BUILD_INPUT/scripts/stage-proot-snapshot.mjs" "$REPO" "$BUILD_INPUT/app" git-objects "$REV"
 RAGENT_PROOT_SNAPSHOT="$BUILD_INPUT/app" bash "$BUILD_INPUT/scripts/build-proot-release.sh"
 ```
 
-The source manifest records the commit, source mode, whether the surrounding checkout was dirty, and staged file hashes. `git-objects` mode reads the commit itself even when unrelated working-tree files are dirty; a dirty **checkout-mode** snapshot is not a formal release. The builder verifies the official Node distribution checksum and produces an archive and SHA-256 file. Authenticate the release distribution separately: a checksum downloaded alongside an archive is not a signature. The distinct asset name is not a Linux desktop `.deb` update asset.
+The source manifest records the commit, source mode, whether the surrounding checkout was dirty, and staged file hashes. `git-objects` mode reads the specified full commit SHA even when HEAD moves or unrelated working-tree files are dirty; a dirty **checkout-mode** snapshot is not a formal release. If builder scripts come from a different commit, record that commit separately. The builder verifies the official Node distribution checksum and produces an archive and SHA-256 file. Authenticate the release distribution separately: a checksum downloaded alongside an archive is not a signature. The distinct asset name is not a Linux desktop `.deb` update asset.

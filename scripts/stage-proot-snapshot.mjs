@@ -8,11 +8,12 @@ import { dirname, join, resolve } from 'node:path';
 import { scanRuntimePayload } from './verify-runtime-payload.mjs';
 import { createGitBlobReader } from './stage-runtime-payload.mjs';
 
-const [sourceArg, outputArg, sourceMode = 'checkout'] = process.argv.slice(2);
-if (!sourceArg || !outputArg || !['checkout', 'git-objects'].includes(sourceMode)) throw new Error('Usage: stage-proot-snapshot.mjs SOURCE EMPTY_DESTINATION [checkout|git-objects]');
+const [sourceArg, outputArg, sourceMode = 'checkout', requestedRevision] = process.argv.slice(2);
+if (!sourceArg || !outputArg || !['checkout', 'git-objects'].includes(sourceMode) || (requestedRevision !== undefined && sourceMode !== 'git-objects')) throw new Error('Usage: stage-proot-snapshot.mjs SOURCE EMPTY_DESTINATION [checkout|git-objects] [COMMIT]');
 const source = resolve(sourceArg), output = resolve(outputArg);
 const git = (...args) => execFileSync('git', ['--no-optional-locks', ...args], { cwd: source, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
-const head = git('rev-parse', 'HEAD').trim();
+if (requestedRevision !== undefined && (!/^[0-9a-f]{40}$/.test(requestedRevision) || git('cat-file', '-t', requestedRevision).trim() !== 'commit')) throw new Error('COMMIT must be a full commit SHA');
+const head = git('rev-parse', '--verify', `${requestedRevision || 'HEAD'}^{commit}`).trim();
 const dirty = Boolean(git('status', '--porcelain=v1', '--untracked-files=all'));
 const tree = new Map(git('ls-tree', '-r', '-z', head).split('\0').filter(Boolean).map(row => {
   const tab = row.indexOf('\t');
@@ -60,7 +61,7 @@ for (const name of [...selected].sort()) {
   await writeFile(target, bytes, { flag: 'wx', mode });
   files.push({ path: name, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, mode });
 }
-if (git('rev-parse', 'HEAD').trim() !== head) throw new Error('Source revision changed while staging');
+if (!reader && git('rev-parse', 'HEAD').trim() !== head) throw new Error('Source revision changed while staging');
 const scan = await scanRuntimePayload(output);
 if (!scan.ok) throw new Error(`Snapshot security scan failed: ${JSON.stringify(scan.findings)}`);
 if (!reader) for (const file of files) {
