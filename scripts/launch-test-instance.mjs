@@ -181,6 +181,7 @@ export function buildChildEnvironment(instance, inherited = process.env) {
   env.AGENTOC_MEMORY_DIR = instance.memoryDir;
   env.AGENTOC_RUN_SPOOL_DIR = instance.spoolDir;
   env.AGENTOC_PROVIDER_HOMES_DIR = instance.providerHomesDir;
+  env.AGENTOC_HARNESS_ROOT = join(instance.instanceDir, 'harnesses');
   env.AGENTOC_PLATFORM_SKILLS_DIR = join(instance.instanceDir, 'platform-skills');
   env.AGENTOC_SHARED_TOOLS_DIR = join(instance.instanceDir, 'shared-tools');
   env.AGENTOC_SOURCE_PROJECT_ROOT = repoRoot;

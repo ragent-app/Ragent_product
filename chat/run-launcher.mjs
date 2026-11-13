@@ -1029,9 +1029,12 @@ export function createDetachedRunnerSpawner({
       }
     }
     if (isWindowsManagedRunnerPlatform(platform)) {
-      throw new Error(
+      const error = new Error(
         'Windows managed runner requires an available runner lifecycle or supervisor broker; refusing detached-process fallback',
       );
+      error.code = 'WINDOWS_RUNNER_BROKER_REQUIRED';
+      error.launchDefinitelyNotSubmitted = true;
+      throw error;
     }
     const scope = getScopeImpl();
     if (shouldUseSystemdDetachedRunner({ scope })) {
