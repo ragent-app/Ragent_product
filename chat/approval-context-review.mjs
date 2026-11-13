@@ -38,7 +38,7 @@ export async function reviewApprovalContext({ run, manifest, request, fetchImpl 
     if (protocol === 'anthropic-messages') {
       endpoint = `${base}${/\/v1$/i.test(base) ? '' : '/v1'}/messages`;
       headers = { 'x-api-key': credential.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
-      body = { model, max_tokens: 1024, system: INSTRUCTIONS, messages: [{ role: 'user', content: input }] };
+      body = { model, max_tokens: 4096, system: INSTRUCTIONS, messages: [{ role: 'user', content: input }] };
     } else if (protocol === 'openai-responses') {
       endpoint = `${base}/responses`;
       headers = { authorization: `Bearer ${credential.apiKey}`, 'content-type': 'application/json' };
@@ -60,20 +60,38 @@ export async function reviewApprovalContext({ run, manifest, request, fetchImpl 
     const text = await response.text();
     if (Buffer.byteLength(text) > 64 * 1024) return unknown('provider_response_too_large');
     const data = JSON.parse(text);
-    const content = protocol === 'anthropic-messages' ? data.content?.find(x => x.type === 'text')?.text
+    const content = protocol === 'anthropic-messages' ? (Array.isArray(data.content)
+      ? data.content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('') : '')
       : protocol === 'openai-chat' ? data.choices?.[0]?.message?.content
         : data.output?.flatMap(x => x.content || []).find(x => x.type === 'output_text')?.text;
     const usage = data.usage && typeof data.usage === 'object' ? {
       inputTokens: Number(data.usage.input_tokens ?? data.usage.prompt_tokens) || 0,
       outputTokens: Number(data.usage.output_tokens ?? data.usage.completion_tokens) || 0,
     } : null;
+    let diagnostics = null;
+    if (protocol === 'anthropic-messages') {
+      const allowedStops = new Set(['end_turn', 'max_tokens', 'stop_sequence', 'tool_use', 'pause_turn', 'refusal', 'model_context_window_exceeded']);
+      const allowedBlocks = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use', 'server_tool_use']);
+      const blocks = Array.isArray(data.content) ? data.content : [];
+      const blockTypes = {};
+      for (const block of blocks) {
+        const type = allowedBlocks.has(block?.type) ? block.type : 'other';
+        blockTypes[type] = (blockTypes[type] || 0) + 1;
+      }
+      const textBlocks = blocks.filter(block => block?.type === 'text' && typeof block.text === 'string');
+      diagnostics = { stopReason: allowedStops.has(data.stop_reason) ? data.stop_reason : 'unknown',
+        blockTypes, textBlocks: textBlocks.length, textLength: textBlocks.reduce((sum, block) => sum + block.text.length, 0) };
+      if (diagnostics.stopReason === 'max_tokens' || diagnostics.stopReason === 'model_context_window_exceeded')
+        return { ...unknown('provider_output_truncated'), adapter: protocol, usage, diagnostics };
+      if (typeof content !== 'string' || !content.trim()) return { ...unknown('provider_no_text'), adapter: protocol, usage, diagnostics };
+    }
     let result;
     try { result = JSON.parse(content); }
-    catch { return { ...unknown('provider_invalid_json'), adapter: protocol, usage }; }
+    catch { return { ...unknown('provider_invalid_json'), adapter: protocol, usage, diagnostics }; }
     if (!result || !['allow', 'ask', 'deny'].includes(result.verdict)
       || typeof result.reasonCode !== 'string' || !/^[a-z0-9_]{1,64}$/.test(result.reasonCode)
-      || typeof result.reason !== 'string' || result.reason.length > 300) return { ...unknown('provider_response_invalid'), adapter: protocol, usage };
-    return { verdict: result.verdict, reasonCode: result.reasonCode, reason: result.reason, adapter: protocol, usage };
+      || typeof result.reason !== 'string' || result.reason.length > 300) return { ...unknown('provider_response_invalid'), adapter: protocol, usage, diagnostics };
+    return { verdict: result.verdict, reasonCode: result.reasonCode, reason: result.reason, adapter: protocol, usage, diagnostics };
   } catch (error) { return unknown(error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'provider_timeout'
     : error instanceof SyntaxError ? 'provider_invalid_json' : 'provider_unavailable'); }
 }

@@ -2836,7 +2836,8 @@ async function recordGateDecision(runId, state, approval, provider, gateDecision
     action: gateDecision.action || (allowed ? 'approved' : unattended ? 'denied' : 'prompted'),
     unattended, reviewStatus: gateDecision.reviewStatus || 'not_requested',
     ...(gateDecision.reviewStatus ? { reviewAdapter: gateDecision.reviewAdapter || '', reviewReasonCode: gateDecision.reviewReasonCode || '',
-      reviewInitialReasonCode: gateDecision.reviewInitialReasonCode || gateDecision.reasonCode || '', reviewUsage: gateDecision.reviewUsage || null } : {}),
+      reviewInitialReasonCode: gateDecision.reviewInitialReasonCode || gateDecision.reasonCode || '', reviewUsage: gateDecision.reviewUsage || null,
+      reviewDiagnostics: gateDecision.reviewDiagnostics || null } : {}),
   } });
 }
 
@@ -2911,8 +2912,17 @@ async function reviewRunGate(runId, state, approval, gate) {
     const safeReason = typeof result.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(result.reason) ? result.reason : '';
     if (!response.ok) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: bound && safeReason ? safeReason : `review_http_${response.status}` };
     if (!bound || !['allow', 'ask', 'deny', 'unknown'].includes(result.verdict)) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_response_binding_invalid' };
+    const d = result.diagnostics;
+    const stops = new Set(['end_turn', 'max_tokens', 'stop_sequence', 'tool_use', 'pause_turn', 'refusal', 'model_context_window_exceeded', 'unknown']);
+    const blocks = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use', 'server_tool_use', 'other']);
+    const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 65536;
+    const reviewDiagnostics = d && typeof d === 'object' && stops.has(d.stopReason) && d.blockTypes
+      && typeof d.blockTypes === 'object' && !Array.isArray(d.blockTypes)
+      && Object.entries(d.blockTypes).every(([key, value]) => blocks.has(key) && count(value))
+      && count(d.textBlocks) && count(d.textLength)
+      ? { stopReason: d.stopReason, blockTypes: d.blockTypes, textBlocks: d.textBlocks, textLength: d.textLength } : null;
     const reviewAudit = { reviewStatus: result.verdict, reviewAdapter: result.adapter || '',
-      reviewReasonCode: result.reasonCode || result.reason || '', reviewInitialReasonCode: gate.reasonCode, reviewUsage: result.usage || null };
+      reviewReasonCode: result.reasonCode || result.reason || '', reviewInitialReasonCode: gate.reasonCode, reviewUsage: result.usage || null, reviewDiagnostics };
     if (result.verdict === 'allow') return { ...gate, ...reviewAudit, decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
       decisionClass: 'allow', needsContextReview: false, reasonCode: 'context_review_allow', reason: 'context review allowed operation' };
     if (result.verdict === 'deny') return { ...gate, ...reviewAudit, decisionClass: 'ask',
