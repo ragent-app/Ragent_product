@@ -108,7 +108,7 @@ export async function assertFactoryExecutionFence(context) {
   });
 }
 
-async function executionAuthorityRevoked(organizationId, item, binding) {
+export async function executionAuthorityRevoked(organizationId, item, binding) {
   return withDatabase((db) => {
     const org = db.prepare('SELECT * FROM organizations WHERE id=?').get(organizationId);
     const node = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assigneeNodeId, organizationId);

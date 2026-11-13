@@ -122,6 +122,7 @@ export function buildCodexAppServerThreadOptions({
   agentocApprovalGate,
   threadMcpConfig,
   threadShellEnvironment,
+  providerReadOnly = false,
   namedPermissionProfile,
   namedPermissionConfig,
 } = {}) {
@@ -140,9 +141,9 @@ export function buildCodexAppServerThreadOptions({
     ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
     ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
     ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
-    ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
+    ...(agentocApprovalGate === true || providerReadOnly ? { approvalsReviewer: 'user' } : {}),
     ...(namedProfile ? { permissions: namedProfile } : { sandbox: permissionPolicy.sandbox || 'danger-full-access' }),
-    config: { ...buildCodexAppServerConfig(interactionMode), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
+    config: { ...buildCodexAppServerConfig(interactionMode), ...(providerReadOnly ? { features: { apps: false } } : {}), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
       ...(namedPermissionConfig ? { [`permissions.${namedProfile}`]: namedPermissionConfig } : {}),
       ...(threadMcpConfig?.mcp_servers && Object.keys(threadMcpConfig.mcp_servers).length
         ? { mcp_servers: threadMcpConfig.mcp_servers } : {}),

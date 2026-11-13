@@ -93,6 +93,10 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, onBac
             val priority = selected["priority"]?.jsonPrimitive?.intOrNull ?: 0
             TextButton(onClick = { scope.launch { submit(command("ChangePriority", buildJsonObject { put("priority", priority + 1) })) } }) { Text("Increase priority") }
             TextButton(onClick = { scope.launch { submit(command("RequestPause")) } }) { Text("Request pause") }
+            if (selected["controlState"]?.jsonPrimitive?.contentOrNull == "paused") {
+                TextButton(onClick = { scope.launch { submit(command("ResumeWork")) } }) { Text("Release pause") }
+                Text("Releasing a pause does not start work. A stopped task may also need an authorized retry.")
+            }
             TextButton(onClick = { scope.launch { submit(command("RequestCancel")) } }) { Text("Request cancel") }
         }
     }

@@ -85,6 +85,13 @@ export function resolveRuntimeReadOnlyCapability({
       return normalizeCapability(entry.capability, { toolId, runnerId });
     }
   }
+  // This is a conditional provider capability. The sidecar must validate the
+  // actual shared-broker thread response and tool inventory before any turn.
+  if (platform === 'win32' && trimString(toolId) === 'codex'
+      && process.env.AGENTOC_CODEX_PROVIDER_READONLY === '1') {
+    return { runtimeId: 'codex_shared_provider_readonly', supportsReadOnlyFilesystem: true,
+      enforcement: 'provider-negotiated', note: 'requires verified shared app-server thread before turn' };
+  }
   // S12: the certified read-only reviewer runtime is a built-in capability
   // while REVIEWER_ENABLED is on. REVIEWER_RUNTIME_ID is the identity of the
   // read-only bubblewrap sandbox runtime, so a matching context is certified;

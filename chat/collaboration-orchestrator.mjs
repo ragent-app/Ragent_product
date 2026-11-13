@@ -934,7 +934,7 @@ export function createCollaborationOrchestrator(options = {}) {
         // (and bwrap present) before the reviewer run is dispatched. A failure
         // refuses the reviewer run — the orchestrator never downgrades to an
         // unsandboxed execution.
-        if (reviewerReadOnlyRequired && typeof deps.buildReviewerSandbox === 'function') {
+        if (reviewerReadOnlyRequired && capability.enforcement !== 'provider-negotiated' && typeof deps.buildReviewerSandbox === 'function') {
           try {
             await deps.buildReviewerSandbox({
               command: childTool,

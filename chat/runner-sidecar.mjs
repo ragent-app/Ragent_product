@@ -1962,6 +1962,11 @@ function writeInitialCodexAppServerMessages(proc, state) {
 export function writeCodexAppServerThreadStart(proc, state) {
   if (!state || state.threadRequestSent || state.terminalSeen || state.hadError
       || state.startupCancelled || state.needsAccountModelCatalog) return false;
+  if (state.providerReadOnly && (state.executionEnvironment || Object.keys(state.threadMcpConfig?.mcp_servers || {}).length)) {
+    markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_SCOPE_UNVERIFIED', message: 'Read-only thread cannot add an external environment or MCP server' } });
+    proc.stdin?.end();
+    return false;
+  }
   state.providerStage = state.useResume ? 'thread_resume_sent' : 'thread_start_sent';
   const written = writeCodexAppServerMessage(proc, buildCodexAppServerThreadMessage({
     id: state.threadRequestId,
@@ -1976,6 +1981,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     permissionMode: state.permissionMode,
     agentocApprovalGate: state.agentocApprovalGate,
     threadMcpConfig: state.threadMcpConfig,
+    providerReadOnly: state.providerReadOnly === true,
     threadShellEnvironment: state.threadShellEnvironment,
     executionEnvironment: state.executionEnvironment,
   }));
@@ -2273,6 +2279,12 @@ async function consumeCodexAppServerMcpStatusList(runId, state, proc, parsed, te
   state.mcpStatusRequestId = null;
   state.mcpStatusRequestAfterReady = false;
   if (!state.mcpRequired) {
+    if (state.providerReadOnly && (parsed?.error || !Array.isArray(parsed?.result?.data)
+        || parsed.result.data.length !== 0 || !Object.hasOwn(parsed.result, 'nextCursor') || parsed.result.nextCursor !== null)) {
+      markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_MCP_UNVERIFIED', message: 'Read-only thread has unverified MCP servers' } });
+      await terminate?.();
+      return true;
+    }
     state.mcpToolDefinitions = !parsed?.error && Array.isArray(parsed?.result?.data) ? parsed.result.data : [];
     state.mcpOptionalInventoryDone = true;
     if (state.mcpOptionalInventoryTimer) clearTimeout(state.mcpOptionalInventoryTimer);
@@ -2418,6 +2430,20 @@ function recoverCodexAppServerFromStaleResume(proc, state) {
   state.mcpStatusRequestId = null;
   state.mcpStatusRequestAfterReady = false;
   state.mcpDiscoveryStarted = false;
+  if (state.providerReadOnly) {
+    state.mcpOptionalInventoryDone = false;
+    if (state.mcpOptionalInventoryTimer) clearTimeout(state.mcpOptionalInventoryTimer);
+    if (state.providerReadOnlyAppsTimer) clearTimeout(state.providerReadOnlyAppsTimer);
+    state.mcpOptionalInventoryTimer = null;
+    state.providerReadOnlyAppsTimer = null;
+    state.providerReadOnlyAppsRequestId = null;
+    state.providerReadOnlyAppsThreadId = null;
+    state.providerReadOnlyAppsVerified = false;
+    if (state.providerReadOnlyReadinessTimer) clearTimeout(state.providerReadOnlyReadinessTimer);
+    state.providerReadOnlyReadinessTimer = null;
+    state.providerReadOnlyReadinessRequestId = null;
+    state.providerReadOnlyReady = false;
+  }
   state.mcpInventory = null;
   state.mcpReadyStatusObserved = false;
   state.mcpReady = false;
@@ -2533,12 +2559,23 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
       || state.startupCancelled || state.needsAccountModelCatalog || !state.threadRequestSent) return false;
   const threadId = readCodexAppServerThreadId(parsed);
   if (!threadId) return false;
+  if (state.providerReadOnly && state.threadId && state.threadId !== threadId) {
+    markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_SCOPE_UNVERIFIED', message: 'Read-only thread identity changed' } });
+    proc.stdin?.end();
+    return false;
+  }
   state.threadId = threadId;
-  if (state.agentocApprovalGate && state.approvalPolicyVerified !== true) {
+  if ((state.agentocApprovalGate || state.providerReadOnly) && state.approvalPolicyVerified !== true) {
     state.providerStage = 'verifying_approval_policy';
     return false;
   }
   state.providerStage = 'thread_started';
+
+  if (state.providerReadOnly && (state.mcpRequired || state.executionEnvironment || state.permissionMode !== 'never-read-only')) {
+    markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_SCOPE_UNVERIFIED', message: 'Read-only thread configuration changed' } });
+    proc.stdin?.end();
+    return false;
+  }
 
   // MCP timing fix: Do not start turn until startup and the required tool
   // inventory have both been verified. The readiness object is authoritative;
@@ -2555,10 +2592,14 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
     state.mcpReady = true;
   } else {
     if (!state.mcpOptionalInventoryDone) {
-      if (!state.mcpDiscoveryStarted && !requestCodexAppServerMcpStatusList(proc, state)) state.mcpOptionalInventoryDone = true;
+      if (!state.mcpDiscoveryStarted && !requestCodexAppServerMcpStatusList(proc, state)) {
+        if (state.providerReadOnly) { markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_MCP_UNVERIFIED', message: 'Cannot inspect thread MCP servers' } }); proc.stdin?.end(); return false; }
+        state.mcpOptionalInventoryDone = true;
+      }
       if (!state.mcpOptionalInventoryDone && !state.mcpOptionalInventoryTimer) {
         state.mcpOptionalInventoryTimer = setTimeout(() => {
           state.mcpOptionalInventoryTimer = null;
+          if (state.providerReadOnly) { markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_MCP_UNVERIFIED', message: 'Thread MCP inventory timed out' } }); proc.stdin?.end(); return; }
           state.mcpOptionalInventoryDone = true;
           if (state.threadId && !state.startedTurn && !state.terminalSeen && !state.hadError)
             maybeStartCodexAppServerTurn(proc, state, { method: 'thread/started', params: { thread: { id: state.threadId } } });
@@ -2567,6 +2608,42 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
       }
       if (!state.mcpOptionalInventoryDone) return false;
     }
+  }
+
+  if (state.providerReadOnly && !state.providerReadOnlyReady) {
+    if (!state.providerReadOnlyReadinessRequestId) {
+      state.providerReadOnlyReadinessRequestId = state.nextControlRequestId++;
+      if (!writeCodexAppServerMessage(proc, { id: state.providerReadOnlyReadinessRequestId, method: 'windowsSandbox/readiness', params: {} })) {
+        markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_SANDBOX_UNAVAILABLE', message: 'Cannot inspect Windows sandbox readiness' } });
+        proc.stdin?.end();
+      } else {
+        state.providerReadOnlyReadinessTimer = setTimeout(() => {
+          if (state.providerReadOnlyReady || state.terminalSeen) return;
+          markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_SANDBOX_UNAVAILABLE', message: 'Windows sandbox readiness timed out' } });
+          proc.stdin?.end();
+        }, 5000);
+        state.providerReadOnlyReadinessTimer.unref?.();
+      }
+    }
+    return false;
+  }
+  if (state.providerReadOnly && !state.providerReadOnlyAppsVerified) {
+    if (!state.providerReadOnlyAppsRequestId) {
+      state.providerReadOnlyAppsRequestId = state.nextControlRequestId++;
+      state.providerReadOnlyAppsThreadId = threadId;
+      if (!writeCodexAppServerMessage(proc, { id: state.providerReadOnlyAppsRequestId, method: 'app/installed', params: { threadId, forceRefresh: false } })) {
+        markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_APPS_UNVERIFIED', message: 'Cannot inspect thread apps' } });
+        proc.stdin?.end();
+      } else {
+        state.providerReadOnlyAppsTimer = setTimeout(() => {
+          if (state.providerReadOnlyAppsVerified || state.terminalSeen) return;
+          markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_APPS_UNVERIFIED', message: 'Thread app inventory timed out' } });
+          proc.stdin?.end();
+        }, 5000);
+        state.providerReadOnlyAppsTimer.unref?.();
+      }
+    }
+    return false;
   }
 
   // Apply the goal intent before turn/start so codex tracks it for this turn.
@@ -2666,6 +2743,30 @@ async function markCodexAppServerSteerSent(runId, steerId) {
   }));
 }
 
+async function recordFactorySteerReceipt(runId, steerId, receipt) {
+  await updateRun(runId, current => ({ ...current,
+    appServerSteerQueue: (current.appServerSteerQueue || []).map(entry =>
+      entry.id === steerId && entry.factorySteer === true
+        ? { ...entry, state: 'sent', providerReceipt: receipt } : entry),
+  }));
+}
+
+async function consumeFactorySteerResponse(runId, state, parsed) {
+  const pending = state.factorySteerRequests?.get(parsed?.id);
+  if (!pending || (!Object.hasOwn(parsed, 'result') && !Object.hasOwn(parsed, 'error'))) return false;
+  state.factorySteerRequests.delete(parsed.id);
+  const returnedTurn = parsed.result?.turnId;
+  const validTurn = !returnedTurn || returnedTurn === pending.turnId;
+  const accepted = validTurn && (parsed.result?.accepted === true || returnedTurn === pending.turnId);
+  const rejected = !!parsed.error || !validTurn || parsed.result?.accepted === false;
+  const receipt = rejected
+    ? { state: 'rejected', reason: validTurn ? 'Provider rejected the request' : 'Provider response did not match the turn', at: nowIso() }
+    : accepted ? { state: 'accepted', threadId: pending.threadId, turnId: pending.turnId, at: nowIso() }
+      : { state: 'sent_unknown', at: nowIso() };
+  await recordFactorySteerReceipt(runId, pending.id, receipt);
+  return true;
+}
+
 async function flushCodexAppServerSteerQueue(proc, state, run) {
   if (!state || !state.threadId || !state.turnId || state.terminalSeen) return;
   const queue = Array.isArray(run?.appServerSteerQueue) ? run.appServerSteerQueue : [];
@@ -2674,6 +2775,35 @@ async function flushCodexAppServerSteerQueue(proc, state, run) {
     if (!steerId || state.sentSteerIds.has(steerId) || entry?.state === 'sent') continue;
     const text = typeof entry?.text === 'string' ? entry.text : '';
     if (!text.trim()) continue;
+    if (entry.factorySteer === true) {
+      try {
+        const { assertFactorySteerDispatch } = await import('./factory-steering.mjs');
+        await assertFactorySteerDispatch(steerId, run.id, run.sessionId);
+      } catch {
+        await recordFactorySteerReceipt(run.id, steerId, { state: 'blocked', reason: 'Execution or authorization changed', at: nowIso() });
+        state.sentSteerIds.add(steerId);
+        continue;
+      }
+      // Persist the send intent before writing to the shared broker. An interrupted
+      // write remains unknown and must never be automatically sent again.
+      await markCodexAppServerSteerSent(run.id, steerId);
+      state.sentSteerIds.add(steerId);
+      try {
+        const { assertFactorySteerDispatch } = await import('./factory-steering.mjs');
+        await assertFactorySteerDispatch(steerId, run.id, run.sessionId);
+      } catch {
+        await recordFactorySteerReceipt(run.id, steerId, { state: 'blocked', reason: 'Execution or authorization changed', at: nowIso() });
+        continue;
+      }
+      const requestId = state.nextControlRequestId++;
+      state.factorySteerRequests ||= new Map();
+      state.factorySteerRequests.set(requestId, { id: steerId, threadId: state.threadId, turnId: state.turnId });
+      if (!writeCodexAppServerMessage(proc, buildCodexAppServerTurnSteerMessage({
+        id: requestId, threadId: state.threadId, turnId: state.turnId, text,
+        clientUserMessageId: typeof entry.requestId === 'string' ? entry.requestId : '',
+      }))) state.factorySteerRequests.delete(requestId);
+      continue;
+    }
     const requestId = state.nextControlRequestId;
     state.nextControlRequestId += 1;
     if (writeCodexAppServerMessage(proc, buildCodexAppServerTurnSteerMessage({
@@ -4089,6 +4219,9 @@ async function main() {
   // then fails with a self-describing channel error.
   const readOnlyRequested = manifest.executionScope?.accessMode === 'read'
     || manifest.options?.readOnlyRequired === true;
+  const providerReadOnly = process.platform === 'win32' && readOnlyRequested
+    && isCodexAppServerFamily && manifest.tool === 'codex'
+    && process.env.AGENTOC_CODEX_PROVIDER_READONLY === '1';
   if (readOnlyRequested) {
     for (const key of Object.keys(spawnEnv)) {
       if (key.startsWith('AGENTOC_APPROVED_ACTIONS_') || key.startsWith('AGENTOC_BROWSER_')) delete spawnEnv[key];
@@ -4167,8 +4300,8 @@ async function main() {
     // tree here adds substantial startup latency without a useful baseline.
     captureRunBaseline: !readOnlyRequested,
   });
-  const appServerManifest = isCodexAppServerFamily && permissionMode
-    ? { ...manifest, options: { ...(manifest.options || {}), permissionMode } }
+  const appServerManifest = isCodexAppServerFamily && (permissionMode || providerReadOnly)
+    ? { ...manifest, options: { ...(manifest.options || {}), permissionMode: providerReadOnly ? 'never-read-only' : permissionMode } }
     : manifest;
   const appServerState = isCodexAppServerFamily
     ? await createCodexAppServerRunState({
@@ -4180,6 +4313,7 @@ async function main() {
       forceFreshRecovery: forceFreshCodexRecovery,
     })
     : null;
+  if (appServerState && providerReadOnly) appServerState.providerReadOnly = true;
   if (appServerState?.agentocApprovalGate && (appServerState.permissionMode === 'untrusted' || appServerState.permissionMode.startsWith('untrusted-'))) {
     // Direct process launches still need this override. The shared broker
     // uses the equivalent thread-scoped trust configuration instead.
@@ -4588,7 +4722,13 @@ async function main() {
   // preference. Consult only the trusted sidecar environment and never launch
   // a provider unsandboxed if the platform or sandbox setup cannot support it.
   const readOnlyWorkspace = readOnlyWorkspaceForRun(manifest, resolvedFolder.cwd);
-  const sandboxRequired = requireSandboxAvailability({ required: Boolean(readOnlyWorkspace) });
+  if (providerReadOnly && resolvedFolder.cwd !== manifest.executionScope?.cwd?.realPath) {
+    throw Object.assign(new Error('Provider read-only working directory differs from the bound execution scope'), { code: 'READ_ONLY_RUNTIME_REFUSED' });
+  }
+  if (providerReadOnly) {
+    await updateRun(runId, (current) => ({ ...current, providerReadOnlyEvidence: null }));
+  }
+  const sandboxRequired = requireSandboxAvailability({ required: Boolean(readOnlyWorkspace) && !providerReadOnly });
   const sharedSandboxCodex = Boolean(process.platform === 'linux' && sandboxRequired
     && appServerState && codexOAuthRuntime);
   let resolvedCommand = await resolveCommandSpawnSpec(initialCommand, args, {
@@ -4695,6 +4835,9 @@ async function main() {
     throw Object.assign(new Error('This managed-permissions workbench requires the shared Codex broker'), {
       code: 'WORKBENCH_CODEX_BROKER_REQUIRED',
     });
+  }
+  if (providerReadOnly && !codexAppServerBrokered) {
+    throw Object.assign(new Error('Provider read-only requires the shared Codex app-server broker'), { code: 'READ_ONLY_RUNTIME_UNAVAILABLE' });
   }
 
   // The remaining exclusive path is a per-Run MCP/sandbox invocation.
@@ -5464,6 +5607,7 @@ async function main() {
         return;
       }
     }
+    if (appServerState && parsed && await consumeFactorySteerResponse(runId, appServerState, parsed)) return;
     if (appServerState && parsed && await maybeConsumeCodexAppServerGoalResponse(runId, appServerState, parsed)) {
       return;
     }
@@ -5517,6 +5661,9 @@ async function main() {
         return;
       }
       if (recoverCodexAppServerFromStaleResume(proc, appServerState)) {
+        if (appServerState.providerReadOnly) {
+          await updateRun(runId, (current) => ({ ...current, providerReadOnlyEvidence: null }));
+        }
         await logSidecarDiagnostic(runId, 'Codex thread resume target was unavailable; started a fresh thread', {
           staleThreadId,
           recovery: 'thread-start',
@@ -5699,11 +5846,16 @@ async function main() {
       runPatch.staleResumeProvider = 'claude';
     }
     if (appServerState && parsed) {
+      if (appServerState.providerReadOnly && ['mcpServer/startupStatus/updated', 'app/list/updated'].includes(parsed.method)) {
+        markCodexAppServerFailure(appServerState, { error: { code: 'CODEX_READONLY_SCOPE_UNVERIFIED', message: 'Thread tool configuration changed' } });
+        await terminateManagedProcess();
+        return;
+      }
       const threadStartResult = parsed.id === appServerState.threadRequestId
         && parsed.result?.thread
         ? parsed.result
         : null;
-      if (appServerState.agentocApprovalGate && threadStartResult) {
+      if ((appServerState.agentocApprovalGate || appServerState.providerReadOnly) && threadStartResult) {
         const approvalContext = validateCodexAppServerApprovalContext({
           response: threadStartResult,
           cwd: appServerState.cwd,
@@ -5728,6 +5880,38 @@ async function main() {
           return;
         }
         appServerState.approvalPolicyVerified = true;
+      }
+      if (appServerState.providerReadOnly && Number.isInteger(appServerState.providerReadOnlyReadinessRequestId)
+          && parsed.id === appServerState.providerReadOnlyReadinessRequestId) {
+        if (appServerState.providerReadOnlyReadinessTimer) clearTimeout(appServerState.providerReadOnlyReadinessTimer);
+        if (parsed.error || parsed.result?.status !== 'ready') {
+          markCodexAppServerFailure(appServerState, { error: { code: 'CODEX_READONLY_SANDBOX_UNAVAILABLE', message: 'Windows sandbox is not ready' } });
+          await terminateManagedProcess();
+          return;
+        }
+        appServerState.providerReadOnlyReady = true;
+        maybeStartCodexAppServerTurn(proc, appServerState, { method: 'thread/started', params: { thread: { id: appServerState.threadId } } });
+      }
+      if (appServerState.providerReadOnly && Number.isInteger(appServerState.providerReadOnlyAppsRequestId)
+          && parsed.id === appServerState.providerReadOnlyAppsRequestId) {
+        if (appServerState.providerReadOnlyAppsTimer) clearTimeout(appServerState.providerReadOnlyAppsTimer);
+        const apps = parsed.result?.apps;
+        if (parsed.error || !Array.isArray(apps) || apps.some((app) => app?.callable !== false)
+            || !appServerState.threadId || appServerState.providerReadOnlyAppsThreadId !== appServerState.threadId
+            || appServerState.approvalPolicyVerified !== true || appServerState.mcpOptionalInventoryDone !== true
+            || appServerState.providerReadOnlyReady !== true || appServerState.hadError || appServerState.terminalSeen) {
+          markCodexAppServerFailure(appServerState, { error: { code: 'CODEX_READONLY_APPS_UNVERIFIED', message: 'Thread has callable or unverified apps' } });
+          await terminateManagedProcess();
+          return;
+        }
+        await updateRun(runId, (current) => ({ ...current, providerReadOnlyEvidence: {
+          version: 1, runtimeFamily: 'codex-app-server-json', enforcement: 'provider-negotiated',
+          runId, threadId: appServerState.threadId, cwd: appServerState.cwd,
+          executionScopeDigest: manifest.executionScopeDigest, sandbox: 'readOnly', networkAccess: false,
+          windowsSandboxReadiness: 'ready', mcpServers: 0, callableApps: 0, recordedAt: nowIso(),
+        } }));
+        appServerState.providerReadOnlyAppsVerified = true;
+        maybeStartCodexAppServerTurn(proc, appServerState, { method: 'thread/started', params: { thread: { id: appServerState.threadId } } });
       }
       if (maybeStartCodexAppServerTurn(proc, appServerState, parsed)) {
         runPatch.appServerThreadId = appServerState.threadId;

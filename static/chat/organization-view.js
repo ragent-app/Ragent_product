@@ -832,7 +832,21 @@
           };
           button(content, 'Increase priority', () => send('ChangePriority', { priority: item.priority + 1 }));
           button(content, 'Request pause', () => send('RequestPause'));
+          if (item.controlState === 'paused') {
+            button(content, 'Release pause', () => send('ResumeWork'));
+            add(content, 'p', 'Releasing a pause does not start work. A stopped task may also need an authorized retry.');
+          }
           button(content, 'Request cancel', () => send('RequestCancel'));
+          if (item.state === 'running' && item.controlState === 'none') {
+            add(content, 'p', 'Direct steering targets the current supported execution only. Other runtimes return next-turn guidance without scheduling a message.');
+            const steeringText = document.createElement('textarea'); steeringText.maxLength = 4000; steeringText.setAttribute('aria-label', 'Steering instruction'); content.appendChild(steeringText);
+            button(content, 'Send steering instruction', () => {
+              const body={commandId:root.crypto.randomUUID(),expectedVersion:item.rowVersion,executionEpoch:item.executionEpoch,bindingGeneration:item.bindingGeneration,text:steeringText.value};
+              const show = result => { receipt.textContent=`Steering ${result.commandId}: ${result.state}. ${result.state==='unsupported'?'Not sent or scheduled; use the next turn.':result.state==='accepted'?'Provider acknowledged the request; task outcome is not yet known.':''}`; };
+              const submit = async () => { try { show(await request(`/work-items/${encodeURIComponent(item.id)}/steer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})); button(content,'Refresh steering receipt',async()=>{try {show(await request(`/steer-commands/${encodeURIComponent(body.commandId)}`));} catch(error) {receipt.textContent=`Receipt unavailable: ${error.message}`;}}); } catch(error) {receipt.textContent=`Steering not confirmed: ${error.message}`; button(content,'Retry same steering request',submit);} };
+              submit();
+            });
+          }
           button(content, 'Create task handoff', () => {
             const payload={commandId:root.crypto.randomUUID(),expectedVersion:item.rowVersion};
             const submit=async () => { try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/handoffs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); receipt.textContent=`Handoff ${result.id} as of ${result.asOf}; stale: ${result.stale}.`; add(content,'pre',JSON.stringify(result.facts,null,2)); } catch(error) { receipt.textContent=`Handoff not confirmed: ${error.message}`; button(content,'Retry same handoff',submit); } }; submit();
