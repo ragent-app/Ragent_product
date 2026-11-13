@@ -1801,6 +1801,44 @@ function writeInitialClaudeBidiMessages(proc, state) {
   writeClaudeBidiMessage(proc, buildClaudeBidiInitializeMessage(state.initializeRequestId));
 }
 
+// Resolve a refresh at the stdout reader, independently of the ordered approval
+// queue that is waiting for it. Only the matching native control response is used.
+function consumeClaudeMcpRefresh(state, parsed) {
+  const pending = state?.mcpRefresh;
+  const control = pending && readClaudeBidiControlResponse(parsed);
+  if (!control || control.requestId !== pending.requestId) return false;
+  const servers = control.response?.response?.mcpServers;
+  if (control.success && Array.isArray(servers)) state.claudeMcpInventory = servers.map(server => ({
+    name: server?.name, status: server?.status, serverInfo: server?.serverInfo,
+    tools: Array.isArray(server?.tools) ? server.tools.map(tool => ({ name: tool?.name, description: tool?.description })) : null,
+  }));
+  pending.finish();
+  return true;
+}
+
+function refreshClaudeMcpInventory(proc, state) {
+  if (!state?.turnActive || state.terminalSeen || state.interruptSent || !proc?.stdin?.writable) return Promise.resolve();
+  if (state.mcpRefresh) return state.mcpRefresh.promise;
+  const requestId = nextClaudeBidiControlRequestId(state);
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  const pending = { requestId, promise, finish: null, turnSequence: state.approvalTurnSequence };
+  const finish = () => {
+    if (state.mcpRefresh !== pending) return;
+    state.mcpRefresh = null;
+    clearTimeout(timer);
+    proc.removeListener('close', finish);
+    resolve();
+  };
+  pending.finish = finish;
+  const timer = setTimeout(finish, 5000);
+  state.mcpRefresh = pending;
+  proc.once('close', finish);
+  if (!writeClaudeBidiMessage(proc, { type: 'control_request', request_id: requestId,
+    request: { subtype: 'mcp_status' } })) finish();
+  return promise;
+}
+
 function handleClaudeBidiControlResponse(proc, state, parsed) {
   const control = readClaudeBidiControlResponse(parsed);
   if (!control) return false;
@@ -2822,7 +2860,7 @@ async function reviewRunGate(runId, state, approval, gate) {
   const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
   try {
     const token = (await readFile(runReviewCapabilityPath(runId), 'utf8')).trim();
-    if (!token) return gate;
+    if (!token) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_empty' };
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
       type: 'agentoc.approval_review_request', runId, approvalId: approval.approvalId,
       requestId: state.requestId, requestHash, reasonCode: gate.reasonCode,
@@ -2834,9 +2872,10 @@ async function reviewRunGate(runId, state, approval, gate) {
       body: JSON.stringify({ ...request, requestHash }), signal: AbortSignal.timeout(50000), redirect: 'error',
     });
     const result = await response.json();
-    if (!response.ok) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_request_rejected' };
-    if (result.approvalId !== approval.approvalId || result.requestHash !== requestHash
-        || !['allow', 'ask', 'deny', 'unknown'].includes(result.verdict)) return { ...gate, reviewStatus: 'unknown' };
+    const bound = result.approvalId === approval.approvalId && result.requestHash === requestHash;
+    const safeReason = typeof result.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(result.reason) ? result.reason : '';
+    if (!response.ok) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: bound && safeReason ? safeReason : `review_http_${response.status}` };
+    if (!bound || !['allow', 'ask', 'deny', 'unknown'].includes(result.verdict)) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_response_binding_invalid' };
     const reviewAudit = { reviewStatus: result.verdict, reviewAdapter: result.adapter || '',
       reviewReasonCode: result.reasonCode || result.reason || '', reviewInitialReasonCode: gate.reasonCode, reviewUsage: result.usage || null };
     if (result.verdict === 'allow') return { ...gate, ...reviewAudit, decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
@@ -2846,7 +2885,10 @@ async function reviewRunGate(runId, state, approval, gate) {
     if (result.verdict === 'ask') return { ...gate, ...reviewAudit, decisionClass: 'ask',
       needsContextReview: false, reasonCode: 'context_review_ask', reason: 'context review requests owner approval' };
     return { ...gate, ...reviewAudit };
-  } catch { return { ...gate, reviewStatus: 'unknown' }; }
+  } catch (error) { return { ...gate, reviewStatus: 'unknown', reviewReasonCode:
+    error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'review_transport_timeout'
+      : error instanceof SyntaxError ? 'review_response_invalid_json'
+        : error?.code === 'ENOENT' ? 'review_capability_missing' : 'review_transport_error' }; }
 }
 
 function bindCodexMcpFacts(approval, state) {
@@ -3375,12 +3417,22 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   }
 
   if (isMcpTool && gateDecision.reasonCode === 'mcp_tool_facts_missing') {
-    const mcpFacts = bindClaudeMcpFacts(approval, state);
+    let mcpFacts = bindClaudeMcpFacts(approval, state);
+    if (!mcpFacts) {
+      await refreshClaudeMcpInventory(proc, state);
+      if (!state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+          || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
+      mcpFacts = bindClaudeMcpFacts(approval, state);
+    }
     if (mcpFacts) gateDecision = { ...gateDecision, decisionClass: 'review_needed', needsContextReview: true,
       reasonCode: 'mcp_semantics_unknown', mcpFacts };
   }
   gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
+  if (!state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+      || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
   await recordGateDecision(runId, state, approval, 'claude', gateDecision);
+  if (!state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+      || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
   if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
     return denyUnattendedPermissionRequest(runId, state, approval, proc, 'claude', gateDecision);
@@ -4960,6 +5012,8 @@ async function main() {
       }
       if (!current?.cancelRequested || cancelSent) return;
       cancelSent = true;
+      if (claudeBidiState) claudeBidiState.mcpRefreshCancelled = true;
+      claudeBidiState?.mcpRefresh?.finish();
       if (appServerState) appServerState.startupCancelled = true;
       appServerState?.accountModelCatalog?.cancel();
       if (appServerState && maybeInterruptCodexAppServerTurn(proc, appServerState)) {
@@ -5508,7 +5562,10 @@ async function main() {
       await trackCodexAppServerApprovalRequest(runId, appServerState, parsed, proc);
     }
     if (claudeBidiState && parsed) {
-      await trackClaudeBidiApprovalRequest(runId, claudeBidiState, parsed, proc);
+      const isApproval = Boolean(readClaudeBidiApprovalRequest(parsed)?.approvalId);
+      if (isApproval) claudeBidiState.processingApprovalTurnSequence = claudeBidiState.approvalTurnSequence;
+      try { await trackClaudeBidiApprovalRequest(runId, claudeBidiState, parsed, proc); }
+      finally { if (isApproval) claudeBidiState.processingApprovalTurnSequence = null; }
     }
     if (foreignCodexThreadEvent) {
       parsed = { ...parsed, agentoc_intermediate: true };
@@ -6373,6 +6430,15 @@ async function main() {
   providerStdoutStream.on('error', handleProviderStdoutError);
   if (earlyStdoutError) handleProviderStdoutError(earlyStdoutError);
   providerStdoutInput.on('line', (line) => {
+    if (claudeBidiState?.mcpRefresh || Number.isInteger(claudeBidiState?.processingApprovalTurnSequence)) {
+      try {
+        const parsed = JSON.parse(line);
+        if (isClaudeBidiTurnTerminal(parsed)) {
+          claudeBidiState.mcpRefreshTerminatedTurnSequence = claudeBidiState.processingApprovalTurnSequence;
+          claudeBidiState.mcpRefresh?.finish();
+        } else if (consumeClaudeMcpRefresh(claudeBidiState, parsed)) return;
+      } catch {}
+    }
     void enqueueStdoutLine(line);
   });
   const handleProviderStderrError = (error) => {
