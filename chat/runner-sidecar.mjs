@@ -1609,6 +1609,9 @@ export async function createCodexAppServerRunState({
       : String(prompt || ''),
     requestId: typeof manifest?.requestId === 'string' ? manifest.requestId : '',
     reviewChannel: options.runReviewChannel || null,
+    approvalReviewTask: manifest?.approvalReviewTask || null,
+    approvalReviewSteers: [],
+    approvalReviewSteerRevision: 0,
     cwd,
     // The replacement sidecar must not reconstruct the resume target that
     // the parent has already proved unavailable.
@@ -1729,6 +1732,9 @@ function createClaudeBidiRunState({ prompt, manifest, cwd } = {}) {
     prompt: typeof prompt === 'string' ? prompt : '',
     requestId: typeof manifest?.requestId === 'string' ? manifest.requestId : '',
     reviewChannel: options.runReviewChannel || null,
+    approvalReviewTask: manifest?.approvalReviewTask || null,
+    approvalReviewSteers: [],
+    approvalReviewSteerRevision: 0,
     claudeSessionId: typeof options.claudeSessionId === 'string' ? options.claudeSessionId : '',
     cwd: typeof cwd === 'string' ? cwd : '',
     privilegedMode: options.privilegedMode === true,
@@ -1922,8 +1928,12 @@ async function flushClaudeBidiSteerQueue(proc, state, run) {
       return;
     }
     if (startClaudeBidiTurn(proc, state, text)) {
+      state.approvalReviewSteers.push({ id: steerId, requestId: entry.requestId || '', text });
+      state.approvalReviewSteerRevision += 1;
+      state.approvalReviewSteerUnconfirmed = true;
       state.sentSteerIds.add(steerId);
       await markClaudeBidiSteerSent(run.id, steerId);
+      state.approvalReviewSteerUnconfirmed = false;
     }
     return;
   }
@@ -2673,8 +2683,12 @@ async function flushCodexAppServerSteerQueue(proc, state, run) {
       text,
       clientUserMessageId: typeof entry?.requestId === 'string' ? entry.requestId : '',
     }))) {
+      state.approvalReviewSteers.push({ id: steerId, requestId: entry.requestId || '', text });
+      state.approvalReviewSteerRevision += 1;
+      state.approvalReviewSteerUnconfirmed = true;
       state.sentSteerIds.add(steerId);
       await markCodexAppServerSteerSent(run.id, steerId);
+      state.approvalReviewSteerUnconfirmed = false;
     }
   }
 }
@@ -2856,14 +2870,22 @@ async function reviewRunGate(runId, state, approval, gate) {
   if (!state.reviewChannel) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_unavailable' };
   // Do not transmit common credential-bearing commands or user input. The
   // reviewer receives only the operation, task and already-attested scope.
-  const task = typeof state.prompt === 'string' ? state.prompt : '';
+  const taskBinding = state.approvalReviewTask;
+  if (!taskBinding || taskBinding.version !== 1 || taskBinding.requestId !== state.requestId
+      || typeof taskBinding.text !== 'string' || taskBinding.additionalContextOmitted !== true) return unknown('review_task_binding_invalid');
+  if (state.steerAwaitingTurnEnd || state.approvalReviewSteerUnconfirmed) return unknown('review_task_changed');
+  const steers = state.approvalReviewSteers;
+  if (!Array.isArray(steers) || steers.some(entry => typeof entry.id !== 'string' || !entry.id || typeof entry.requestId !== 'string' || !entry.requestId
+      || typeof entry.text !== 'string' || !entry.text.trim())) return unknown('review_task_binding_invalid');
+  const taskRevision = state.approvalReviewSteerRevision;
+  const task = [taskBinding.text, ...steers.map(entry => `User follow-up:\n${entry.text}`)].join('\n\n');
   const command = mcpFacts ? JSON.stringify(mcpFacts) : unknownTool ? JSON.stringify({ tool: approval.params.tool_name, input: approval.params.input }) : gate.command;
   if (!task) return unknown('review_task_missing');
   if (task.length > 12000 || command.length > 12000) return unknown('review_context_too_large');
   if (/(?:api[_-]?key|access[_-]?token|password|secret)['"]?\s*[:=]\s*['"]?[^\s'";,}]{4,}|authorization['"]?\s*:\s*['"]?\S+\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(`${task}\n${command}`)) return unknown('review_context_sensitive');
   const channel = state.reviewChannel;
   if (channel.runId !== runId || channel.turnId !== state.requestId || !channel.sessionId) return unknown('review_channel_binding_invalid');
-  const context = { task, command, workspace: state.riskContext.trustedWorkspaceRoot,
+  const context = { task, taskSteerIds: steers.map(entry => entry.id), additionalContextOmitted: true, command, workspace: state.riskContext.trustedWorkspaceRoot,
     cwd: state.cwd, riskTier: reviewRisk?.tier || 'unknown', targetScope: reviewRisk?.signals?.targetScope || 'unknown',
     platform: reviewRisk?.platform || process.platform, ruleReasonCode: gate.reasonCode,
     syntaxFacts: gate.syntaxFacts || null, providerMethod: approval.providerMethod || '',
@@ -2884,6 +2906,7 @@ async function reviewRunGate(runId, state, approval, gate) {
       body: JSON.stringify({ ...request, requestHash }), signal: AbortSignal.timeout(50000), redirect: 'error',
     });
     const result = await response.json();
+    if (state.approvalReviewSteerRevision !== taskRevision || state.steerAwaitingTurnEnd || state.approvalReviewSteerUnconfirmed) return unknown('review_task_changed');
     const bound = result.approvalId === approval.approvalId && result.requestHash === requestHash;
     const safeReason = typeof result.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(result.reason) ? result.reason : '';
     if (!response.ok) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: bound && safeReason ? safeReason : `review_http_${response.status}` };

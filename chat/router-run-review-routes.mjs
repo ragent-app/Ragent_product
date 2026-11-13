@@ -9,6 +9,23 @@ import { assertRunPublication } from './run-publication-contract.mjs';
 const usedReviews = new Map();
 const activeReviews = new Set();
 
+// The model sees only user messages bound to this Run. Unsent steering may
+// change authority, so an in-flight review cannot outlive a queue change.
+function reviewTaskMatchesRun(run, manifest, context, turnId) {
+  const original = manifest?.approvalReviewTask;
+  if (!run || run.cancelRequested === true || ['completed', 'failed', 'cancelled'].includes(run.state)) return false;
+  if (!original || original.version !== 1 || original.requestId !== turnId
+      || typeof original.text !== 'string' || original.additionalContextOmitted !== true
+      || context?.additionalContextOmitted !== true || !Array.isArray(context.taskSteerIds)) return false;
+  const queue = Array.isArray(run?.appServerSteerQueue) ? run.appServerSteerQueue : [];
+  if (queue.some(entry => entry?.state !== 'sent')) return false;
+  if (queue.some(entry => typeof entry.id !== 'string' || !entry.id || typeof entry.requestId !== 'string'
+      || !entry.requestId || typeof entry.text !== 'string' || !entry.text.trim())) return false;
+  const ids = queue.map(entry => entry.id);
+  const task = [original.text, ...queue.map(entry => `User follow-up:\n${entry.text}`)].join('\n\n');
+  return JSON.stringify(ids) === JSON.stringify(context.taskSteerIds) && context.task === task;
+}
+
 export async function handleRunReviewRoute({ req, res, pathname, writeJson, authenticate, getRun, getRunManifest }) {
   if (pathname !== RUN_REVIEW_ENDPOINT) return false;
   if (req.method !== 'POST' || !isStrictLoopbackRequest(req)) { writeJson(res, 403, { verdict: 'unknown', reason: 'review_loopback_required' }); return true; }
@@ -49,7 +66,14 @@ export async function handleRunReviewRoute({ req, res, pathname, writeJson, auth
         || baseline?.runPublication?.publicationId !== manifest?.runPublication?.publicationId) {
         writeJson(res, 409, { verdict: 'unknown', reason: 'review_run_binding_invalid', ...binding }); return true;
       }
+      if (!reviewTaskMatchesRun(run, manifest, context, principal.turnId)) {
+        writeJson(res, 409, { verdict: 'unknown', reason: 'review_task_binding_invalid', ...binding }); return true;
+      }
       result = await reviewApprovalContext({ run, manifest, request: context });
+      const latestRun = await getRun(principal.runId);
+      if (!reviewTaskMatchesRun(latestRun, manifest, context, principal.turnId)) {
+        writeJson(res, 409, { verdict: 'unknown', reason: 'review_task_changed', ...binding }); return true;
+      }
     }
     finally { activeReviews.delete(reviewKey); }
     // Check liveness again after the network operation before returning a signal.

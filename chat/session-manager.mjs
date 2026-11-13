@@ -13935,6 +13935,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     providerResumeReason: resumeState.reason,
     ...(effectivePermissionMode ? { permissionMode: effectivePermissionMode } : {}),
     prompt: promptEnvelope.prompt,
+    approvalReviewTask: { version: 1, requestId, text: normalizedText, additionalContextOmitted: true },
     contextRenderer: promptEnvelope.metadata || null,
     ...(promptEnvelope.metadata?.rendererVersion ? { contextRendererVersion: promptEnvelope.metadata.rendererVersion } : {}),
     ...(promptEnvelope.metadata?.contextResumeMode ? { contextResumeMode: promptEnvelope.metadata.contextResumeMode } : {}),
@@ -14728,6 +14729,7 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
       ? { permissionMode: permissionContract.effectivePermissionMode }
       : {}),
     prompt: promptEnvelope.prompt,
+    approvalReviewTask: { version: 1, requestId, text: editedText, additionalContextOmitted: true },
     contextRenderer: promptEnvelope.metadata || null,
     ...(promptEnvelope.metadata?.rendererVersion ? { contextRendererVersion: promptEnvelope.metadata.rendererVersion } : {}),
     ...(promptEnvelope.metadata?.contextResumeMode ? { contextResumeMode: promptEnvelope.metadata.contextResumeMode } : {}),
