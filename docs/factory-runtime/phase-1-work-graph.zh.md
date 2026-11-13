@@ -1,5 +1,7 @@
 # 阶段 1：持久 Work Graph 与权威控制协议
 
+
+2026-11-14 补充：Work Graph 与分页来源映射已有源码；跨库对账源码已提交，真实组织业务回执尚未验收。
 状态：方案部分已落地，缺项与验证状态见 [实施状态](implementation-status.zh.md)。日期：2026-11-13。上位：[总方案](00-master-plan.zh.md)。前置：[阶段 0](phase-0-baseline.zh.md) 的事实边界；后续：[阶段 2](phase-2-execution.zh.md)。
 
 ## 1. 目标与范围

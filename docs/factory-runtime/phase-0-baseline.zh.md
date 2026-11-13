@@ -1,5 +1,7 @@
 # 阶段 0：现状收敛与执行底座前置修复
 
+
+2026-11-14 补充：隔离基础服务健康和静态检查证据见实施状态；真实 Harness、权限和重启尚未验证。
 状态：方案部分已落地，缺项与验证状态见 [实施状态](implementation-status.zh.md)。日期：2026-11-13。依据：[总方案](00-master-plan.zh.md)、[现状证据 E01–E18](current-state-evidence.zh.md)。后续：[阶段 1](phase-1-work-graph.zh.md)、[阶段 2](phase-2-execution.zh.md)。
 
 ## 1. 阶段目标

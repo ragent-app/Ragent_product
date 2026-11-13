@@ -1,5 +1,7 @@
 # 阶段 3：长期团队、动态指挥与 Web / Android
 
+
+2026-11-14 补充：受控 Steering 源码已提交，非支持 provider 为 unsupported；Android 编译证据不代表真机或重连验收。
 状态：方案部分已落地，缺项与验证状态见 [实施状态](implementation-status.zh.md)。日期：2026-11-13。上位：[总方案](00-master-plan.zh.md)。前置：[阶段 2](phase-2-execution.zh.md) 的真实状态与受控执行。后续：[阶段 4](phase-4-delivery.zh.md)。
 
 ## 1. 目标
