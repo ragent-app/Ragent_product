@@ -19,6 +19,7 @@
 // NOT EXISTS) and lives in the same Collaboration SQLite file; existing
 // collaboration tables and column semantics are untouched.
 import { createSerialTaskQueue } from './fs-utils.mjs';
+import { createHash } from 'crypto';
 import { openDatabase as openCollaborationDatabase } from './collaboration-store.mjs';
 import {
   advanceGateGeneration,
@@ -138,6 +139,8 @@ export async function decideGate({
   decidedByNodeId = '',
   packetId = '',
   acceptance = [],
+  idempotencyKey = '',
+  intentContext = null,
 } = {}) {
   const normalizedOrg = trimString(organizationId);
   const normalizedPhase = trimString(phaseId);
@@ -148,6 +151,31 @@ export async function decideGate({
   if (!GATE_DECISIONS.includes(normalizedDecision)) {
     throw gateError('BAD_REQUEST', `decision must be 'passed' or 'needs_changes'`, 400);
   }
+  const key = trimString(idempotencyKey);
+  const intentDigest = createHash('sha256').update(JSON.stringify({
+    organizationId: normalizedOrg, phaseId: normalizedPhase, fromGeneration,
+    decision: normalizedDecision, decidedByNodeId: trimString(decidedByNodeId),
+    packetId: trimString(packetId), acceptance: Array.isArray(acceptance) ? acceptance : [],
+    intentContext,
+  })).digest('hex');
+  const findReplay = async () => {
+    if (!key) return null;
+    const db = openCollaborationDatabase();
+    try {
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_org_gate_decision_idempotency
+        ON organization_gates(json_extract(decision_json, '$.idempotencyKey'))
+        WHERE json_extract(decision_json, '$.idempotencyKey') IS NOT NULL`);
+      const row = db.prepare(`SELECT generation, decision_json FROM organization_gates
+        WHERE json_extract(decision_json, '$.idempotencyKey') = ? LIMIT 1`).get(key);
+      if (!row) return null;
+      if (parseJson(row.decision_json, {})?.intentDigest !== intentDigest) {
+        throw gateError('GATE_IDEMPOTENCY_CONFLICT', 'Gate idempotency key is bound to another decision', 409);
+      }
+      return getGate(normalizedOrg, normalizedPhase, row.generation);
+    } finally { db.close(); }
+  };
+  const replay = await findReplay();
+  if (replay) return replay;
   let from = fromGeneration;
   if (from === null || from === undefined) {
     const latest = await getGate(normalizedOrg, normalizedPhase);
@@ -160,6 +188,7 @@ export async function decideGate({
       decision: {
         decision: normalizedDecision,
         acceptance: Array.isArray(acceptance) ? acceptance : [],
+        ...(key ? { idempotencyKey: key, intentDigest } : {}),
       },
       decidedByNodeId: trimString(decidedByNodeId),
       packetId: trimString(packetId),
@@ -167,6 +196,10 @@ export async function decideGate({
     publishOrganizationInvalidation({ organizationId: normalizedOrg });
     return gate;
   } catch (error) {
+    if (key) {
+      const recovered = await findReplay();
+      if (recovered) return recovered;
+    }
     throw withStatus(error);
   }
 }
