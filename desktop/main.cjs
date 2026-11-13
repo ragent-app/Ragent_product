@@ -127,7 +127,7 @@ async function installUpdate() {
       const downloaded = await autoUpdate.downloadPackage(updateState, { cacheRoot: path.join(app.getPath("userData"), "ragent-update-cache"), onProgress: (bytes, total) => publishUpdate({ status: "downloading", progress: total ? Math.floor(bytes * 100 / total) : null }) });
       publishUpdate({ status: "waiting" });
       const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
-      const appRoot = process.platform === "darwin" ? path.resolve(metadataDir, "../..") : metadataDir;
+      const appRoot = process.platform === "darwin" ? path.resolve(metadataDir, "../../..") : metadataDir;
       resultFile = path.join(app.getPath("userData"), "ragent-update-result.json");
       await fs.writeFile(resultFile, '{"status":"pending"}\n', { mode: 0o600 });
       const result = await autoUpdate.startInstaller({ ...downloaded, appRoot, executable: process.execPath, resultFile, packageSha256: updateState.packageSha256, servicePort: Number(configuredPort),
