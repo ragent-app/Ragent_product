@@ -1,3 +1,4 @@
+import { isProotRuntime, authenticateProotRequest } from '../lib/proot-local-pairing.mjs';
 import { WebSocketServer } from 'ws';
 import { createP2PSignaling } from '../p2p/signaling-server.mjs';
 import { isAuthenticated, getAuthSession, authenticateBearerToken, authenticateAccountCookie } from '../lib/auth.mjs';
@@ -98,6 +99,11 @@ export function attachWebSocket(server, { authorizeP2PJoin = configuredBrowserSi
   wss.once('close', () => p2pSignaling.close());
 
   server.on('upgrade', async (req, socket, head) => {
+    if (isProotRuntime && (req.url !== '/ws' || (!(await authenticateProotRequest(req)) && !(await authenticateBearerToken(req))))) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === '/signal') {
       p2pSignaling.handleUpgrade(req, socket, head);

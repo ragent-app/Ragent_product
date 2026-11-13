@@ -12,7 +12,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Small synchronous, per-record encrypted journal primitive; all records bind their logical AAD. */
-internal class AndroidTemporaryEncryptedStore(
+class AndroidTemporaryEncryptedStore(
     context: Context,
     name: String,
     private val alias: String,

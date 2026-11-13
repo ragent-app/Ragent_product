@@ -29,6 +29,17 @@ function unavailable() {
  */
 export function assertRunManifestExecutionBoundary(manifest) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw unavailable();
+  if (process.env.AGENTOC_RUNTIME_MODE === 'proot'
+      && !['safe', 'recommended', 'conservative-auto', 'full-auto'].includes(manifest.options?.riskMode)) {
+    const error = new Error('PRoot execution requires an explicit supported risk mode');
+    error.code = RESTRICTED_EXECUTION_UNAVAILABLE;
+    throw error;
+  }
+  if (process.env.AGENTOC_RUNTIME_MODE === 'proot' && manifest.options?.privilegedMode === true) {
+    const error = new Error('Privileged execution requires an OS isolation boundary unavailable in PRoot');
+    error.code = RESTRICTED_EXECUTION_UNAVAILABLE;
+    throw error;
+  }
   const binding = Object.hasOwn(manifest, 'appApiMessage') ? parseMessageRunBinding(manifest.appApiMessage) : null;
   const control = manifest.options?.temporaryControlAuthority;
   if (control && (!validControlAuthority(control) || manifest.options?.authenticatedPrincipalKind !== 'temporary_device')) throw unavailable();

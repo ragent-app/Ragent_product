@@ -30,6 +30,7 @@ internal class TargetRuntime(
     private val scope: CoroutineScope,
     private val relay: AttachmentRelayTransport? = null,
     private val disposeStorage: () -> Unit = {},
+    val localRuntime: Boolean = false,
 ) : TargetConnectionResource {
     internal fun ownsJob(candidate: Job?): Boolean = isWithinJobTree(scope.coroutineContext[Job], candidate)
 

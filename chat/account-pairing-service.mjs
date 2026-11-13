@@ -1,3 +1,4 @@
+import { readProotAccountLink } from '../lib/proot-account-link-state.mjs';
 import { buildDesktopAccountSessionAuthorization } from '../lib/device-auth-protocol.mjs';
 import { signWithInstanceIdentity } from '../lib/instance-identity.mjs';
 import { accountPairingError } from '../lib/account-pairing-client.mjs';
@@ -7,12 +8,17 @@ export class AccountPairingService {
     Object.assign(this, { identity, client, binding, createInvitation, getInvitation, consumeInvitation, listPendingInvitations, clock });
     this.operations = new Map();
   }
-  async create() {
+  async create(localLink = null) {
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot' && readProotAccountLink().state === 'signed_out') throw accountPairingError('account_pairing_source_signed_out', 409);
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot' && readProotAccountLink().state === 'login_pending' && !localLink) throw accountPairingError('account_pairing_source_changed', 409);
     const binding = await this.binding();
     if (!binding?.accountId) throw accountPairingError('account_pairing_source_unbound', 409);
     // Creating this short-lived QR is the Owner consent to authorize its scanner.
     // Persist that consent only for this account and this particular invitation.
-    const invitation = await this.createInvitation({ ttlMs: 120_000, accountHandoffAccountId: binding.accountId });
+    const generation = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
+    const invitation = await this.createInvitation({ ttlMs: 120_000, accountHandoffAccountId: binding.accountId,
+      ...(generation !== null ? { localLinkGeneration: generation } : {}),
+      ...(localLink ? { localLinkId: localLink.linkId, localLinkGeneration: localLink.generation, localDeviceFingerprint: localLink.fingerprint } : {}) });
     const local = await this.getInvitation(invitation.id);
     try { await this.client.request('register', invitation.id, { tokenHash: local.tokenHash, expiresAt: Date.parse(invitation.expiresAt) }); }
     catch (error) { await this.consumeInvitation(invitation.id); throw error; }
@@ -29,6 +35,7 @@ export class AccountPairingService {
   }
   approve(id) { return this.serialize(id, () => this.approveClaim(id)); }
   async approveClaim(id) {
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot' && readProotAccountLink().state === 'signed_out') throw accountPairingError('account_pairing_source_signed_out', 409);
     const current = await this.status(id);
     if (current.status === 'APPROVED') { await this.consumeInvitation(id); return current; }
     if (!current.claim || current.status !== 'CLAIMED') throw accountPairingError('account_pairing_not_claimed', 409);
@@ -39,6 +46,18 @@ export class AccountPairingService {
       throw accountPairingError('account_pairing_source_changed', 409);
     }
     const claim = current.claim;
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+      const link = readProotAccountLink();
+      if (!Number.isSafeInteger(local?.localLinkGeneration) || link.generation !== local.localLinkGeneration
+          || link.state === 'signed_out' || (link.state === 'login_pending' && !local.localLinkId))
+        throw accountPairingError('account_pairing_source_changed', 409);
+    }
+    if (local?.localLinkId) {
+      const link = readProotAccountLink();
+      if (link.state !== 'login_pending' || link.linkId !== local.localLinkId || link.generation !== local.localLinkGeneration
+          || link.accountId !== binding.accountId || claim.publicKeyFingerprint !== local.localDeviceFingerprint)
+        throw accountPairingError('account_pairing_source_changed', 409);
+    }
     const proof = { instanceId: this.identity.instanceId, accountId: binding.accountId, issuedAt: new Date(this.clock()).toISOString() };
     proof.signature = signWithInstanceIdentity(this.identity, buildDesktopAccountSessionAuthorization({ ...proof,
       transactionId: claim.transactionId, requestId: claim.requestId, deviceId: claim.deviceId,
@@ -58,6 +77,7 @@ export class AccountPairingService {
     return current;
   }
   async pollPending(onError = () => {}) {
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot' && readProotAccountLink().state === 'signed_out') return;
     for (const invitation of await this.listPendingInvitations()) {
       if (!invitation.accountHandoffAccountId || invitation.usedAt || Date.parse(invitation.expiresAt) <= this.clock()) continue;
       try {

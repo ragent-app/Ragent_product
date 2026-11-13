@@ -333,6 +333,7 @@ fun WorkbenchScreen(
     onScanPairing: () -> Unit = {},
     onScanPairingFromWelcome: () -> Unit = onScanPairing,
     onSetUpComputer: () -> Unit = onScanPairingFromWelcome,
+    onLocalRuntime: () -> Unit = {},
     onOpenSubscription: () -> Unit = {},
     subscriptionInfoOpen: Boolean = false,
     onCloseSubscriptionInfo: () -> Unit = {},
@@ -417,6 +418,7 @@ fun WorkbenchScreen(
                         onConnectComputer = { onPairingOnboardingEvent(PairingOnboardingEvent.ContinueFromWelcome) },
                         onScanPairing = onScanPairingFromWelcome,
                         onLearnConnectionMethods = { onPairingOnboardingEvent(PairingOnboardingEvent.LearnConnectionMethods) },
+                        onLocalRuntime = onLocalRuntime,
                         modifier = modifier,
                     )
                 } else if (welcomeComputerLookup != null && welcomeComputerLookup != AccountComputerLookup.Empty) {
@@ -424,6 +426,7 @@ fun WorkbenchScreen(
                 } else {
                     WelcomeScreen(onConnectComputer = onSetUpComputer,
                         onScanPairing = onScanPairingFromWelcome, onSetUpComputer = onSetUpComputer,
+                        onLocalRuntime = onLocalRuntime,
                         signedIn = true, modifier = modifier)
                 }
                 if (scannerErrorReturningToWelcome || temporaryPairingAtWelcome) {
@@ -443,6 +446,7 @@ fun WorkbenchScreen(
                 modifier = modifier,
             )
             PairingOnboardingStep.GoogleRequired -> GoogleSignInGuideScreen(
+                onLocalRuntime = onLocalRuntime,
                 onContinueWithDemo = onRequestDemoSignIn,
                 onContinue = {
                     val request = when (fullScreenOnboarding!!.mode) {

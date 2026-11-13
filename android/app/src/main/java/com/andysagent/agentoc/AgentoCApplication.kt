@@ -57,6 +57,9 @@ import com.andysagent.agentoc.core.p2p.P2PSessionFactory
 import com.andysagent.agentoc.core.p2p.WebRTCDataChannelTransport
 import com.andysagent.agentoc.core.protocol.parsePairingUri
 import com.andysagent.agentoc.core.protocol.PairingUriDto
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import com.andysagent.agentoc.core.model.RuntimeConnectionState
 import com.andysagent.agentoc.core.model.OtherDeviceProject
 import com.andysagent.agentoc.core.protocol.ProtocolCodec
@@ -323,6 +326,488 @@ class AndroidRuntimeGraph internal constructor(
     }
     /** Target-scoped rda_ credentials; never used for Accounts directory calls. */
     val credentialStore = AndroidCredentialStore(application)
+    private val localCredentials = LocalCredentialStore(application)
+    private val localAccountLinks = LocalAccountLinkStore(application)
+    private val localSessionRevocations = LocalSessionRevocationOutbox(application)
+    private val localAccountLinkMutex = Mutex()
+    private val localAccountLoginInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val localHandoffActive = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val mutableLocalAccountLinkStates = MutableStateFlow<Map<String, String>>(emptyMap())
+    val localAccountLinkStates: StateFlow<Map<String, String>> = mutableLocalAccountLinkStates.asStateFlow()
+
+    suspend fun localAccountLinkStatus(instanceId: String): LocalAccountLinkStatus {
+        val target = configStore.directory.first().computers.firstOrNull { it.instanceId == instanceId && it.localRuntime }
+            ?: throw IllegalArgumentException("Local instance is unavailable")
+        return withTargetRuntime(target.instanceId) { runtime ->
+            parseLocalAccountLinkStatus(runtime.transport.execute(ApiRequest("GET", "/api/local/account-link")).body, instanceId)
+        }
+    }
+
+    suspend fun beginLocalInstanceAccountLogin(instanceId: String): String {
+        require(localSessionRevocations.ids().isEmpty()) { "Previous sign-out is still waiting for confirmation" }
+        val status = localAccountLinkStatus(instanceId)
+        require(status.state == "signed_out" && localAccountLinks.read(instanceId)?.let {
+            it.tombstone && it.localClearCompleted && it.pendingEventId == null && it.pendingCloudToken == null &&
+                it.linkId == status.linkId && it.deviceId == status.deviceId && it.accountId == status.accountId
+        } == true) { "Account link is not ready for sign-in" }
+        val result = withTargetRuntime(instanceId) { runtime ->
+            kotlinx.serialization.json.Json.parseToJsonElement(runtime.transport.execute(
+                ApiRequest("POST", "/api/auth/google/bind", "{}")).body).jsonObject
+        }
+        require(result["deliveryMode"]?.jsonPrimitive?.content == "instance_poll" && result["mode"]?.jsonPrimitive?.content == "accounts")
+        val authUrl = android.net.Uri.parse(result.getValue("authUrl").jsonPrimitive.content)
+        val accounts = android.net.Uri.parse(application.getString(R.string.accounts_directory_base_url))
+        require(authUrl.scheme == "https" && authUrl.host.equals(accounts.host, ignoreCase = true) &&
+            authUrl.port == accounts.port && authUrl.userInfo == null) { "Invalid account authorization address" }
+        return authUrl.toString()
+    }
+
+    /** User explicitly confirmed removal of the old instance owner and its device grants. */
+    suspend fun unbindLocalAccount(instanceId: String, expectedOwner: String, expectedPhone: String) {
+        require(expectedOwner != expectedPhone && configStore.accountSession.first()?.accountId == expectedPhone)
+        val status = localAccountLinkStatus(instanceId)
+        require(status.ownerAccountId == expectedOwner && status.accountId == expectedOwner)
+        localAccountLinks.invalidate(instanceId)
+        localAccountLinkMutex.withLock {
+            val record = localAccountLinks.read(instanceId) ?: LocalAccountLinkRecord(instanceId,
+                requireNotNull(status.linkId), requireNotNull(status.deviceId), expectedOwner, status.generation, tombstone = true)
+            require(record.accountId == expectedOwner && record.localClearCompleted &&
+                record.linkId == status.linkId && record.deviceId == status.deviceId)
+            localAccountLinks.write(record.copy(tombstone = true, unbindPending = true))
+        }
+        mutableLocalAccountLinkStates.update { it + (instanceId to "pending") }
+        withTargetRuntime(instanceId) { runtime ->
+            runtime.transport.execute(ApiRequest("POST", "/api/auth/google/unbind", "{}"))
+        }
+        reconcileLocalAccountLink(instanceId)
+    }
+
+    /** Invoked only after the caller displays the identities and obtains explicit consent. */
+    suspend fun authorizeLocalAccountLink(instanceId: String, expectedPhoneAccount: String?, expectedOwnerAccount: String?) {
+        val authorizationEpoch = localAccountLinkMutex.withLock { localAccountLinks.epoch(instanceId) }
+        require(localSessionRevocations.ids().isEmpty()) { "Previous sign-out is still waiting for confirmation" }
+        localAccountLinks.read(instanceId)?.let { previous ->
+            require(!previous.tombstone || (previous.localClearCompleted && previous.pendingEventId == null && previous.pendingCloudToken == null)) {
+                "Previous sign-out is still waiting for confirmation"
+            }
+        }
+        val initial = localAccountLinkStatus(instanceId)
+        val phone = configStore.accountSession.first()?.accountId
+        require(phone == expectedPhoneAccount && initial.ownerAccountId == expectedOwnerAccount) { "Account state changed; review it again" }
+        if (initial.state == "signed_out" && phone != null) {
+            val existing = requireNotNull(localAccountLinks.read(instanceId))
+            require(existing.tombstone && existing.localClearCompleted && existing.pendingEventId == null &&
+                existing.accountId == phone && initial.accountId == phone && initial.linkId == existing.linkId &&
+                initial.deviceId == existing.deviceId && initial.generation >= existing.generation)
+            val target = configStore.directory.first().computers.first { it.instanceId == instanceId && it.localRuntime }
+            targetPairingCommits.withTarget(instanceId) { guard ->
+                withTargetRuntime(instanceId) { runtime ->
+                    pairing.joinWithAccountSession(target.endpoint, accountDeviceAlias, autoConnect = false, selectTarget = false,
+                        writeGuard = guard, renewExistingDeviceId = existing.deviceId, localTransport = runtime.transport,
+                        expectedInstanceId = instanceId, persistDirectory = false)
+                }
+            }
+            val after = localAccountLinkStatus(instanceId)
+            require(after.state == "login_pending" && after.linkId == existing.linkId && after.deviceId == existing.deviceId &&
+                after.accountId == existing.accountId && after.generation > initial.generation)
+            localAccountLinkMutex.withLock {
+                require(localAccountLinks.epoch(instanceId) == authorizationEpoch && localAccountLinks.read(instanceId) == existing)
+                localAccountLinks.write(existing.copy(generation = after.generation))
+            }
+            reconcileLocalAccountLink(instanceId)
+            return
+        }
+        require(initial.state != "signed_out") { "Sign in to the local instance again first" }
+        require(initial.ownerAuthority != "unavailable") { "Account authority is unavailable" }
+        require(phone != null || initial.ownerAccountId != null) { "Sign in to one side first" }
+        require(phone == null || initial.ownerAccountId == null || phone == initial.ownerAccountId) { "Accounts differ; resolve the conflict first" }
+        require(initial.state != "active" || localAccountLinks.read(instanceId)?.linkId == initial.linkId) {
+            "This instance is already linked to another installation"
+        }
+        if (initial.state == "active") {
+            val existing = requireNotNull(localAccountLinks.read(instanceId))
+            require(!existing.tombstone && phone == existing.accountId && initial.accountId == existing.accountId &&
+                initial.deviceId == existing.deviceId && initial.generation >= existing.generation) { "Account link needs conflict resolution" }
+            localAccountLinkMutex.withLock {
+                require(localAccountLinks.epoch(instanceId) == authorizationEpoch && localAccountLinks.read(instanceId) == existing)
+                localAccountLinks.write(existing.copy(generation = initial.generation, pendingEventId = null, pendingAction = null))
+            }
+            return
+        }
+        val (invitation, invitationUri) = withTargetRuntime(instanceId) { runtime ->
+            val response = runtime.transport.execute(ApiRequest("POST", "/api/device-pairing/invitations", "{}"))
+            val obj = kotlinx.serialization.json.Json.parseToJsonElement(response.body).jsonObject
+            val uri = obj.getValue("invitation").jsonObject.getValue("pairingUri").jsonPrimitive.content
+            parsePairingUri(uri).also { require(it.instanceId == instanceId) { "Invitation belongs to another instance" } } to uri
+        }
+        if (phone == null) {
+            require(invitation.version == 4 && initial.ownerAccountId != null) { "This instance cannot authorize an account" }
+            val recoveryId = registerLocalHandoffRecovery(instanceId, invitationUri, initial.ownerAccountId, initial.generation, initial.linkId)
+            try { accountSessions.acceptDesktopAccount(invitation, accountDeviceAlias, expectedAccountId = initial.ownerAccountId,
+                persistGate = { grantedAccount, _, token, persist ->
+                    val remote = try { localAccountLinkStatus(instanceId) } catch (error: Exception) {
+                        localSessionRevocations.replaceWithToken(recoveryId, token)
+                        throw error
+                    }
+                    localAccountLinkMutex.withLock {
+                    val current = localAccountLinks.read(instanceId)
+                    val valid = grantedAccount == initial.ownerAccountId && localAccountLinks.epoch(instanceId) == authorizationEpoch &&
+                        remote.generation == initial.generation && remote.state == initial.state &&
+                        (current == null || (!current.tombstone && current.generation == initial.generation))
+                    if (!valid) {
+                        localSessionRevocations.replaceWithToken(recoveryId, token)
+                        error("Account authorization was superseded by sign-out")
+                    }
+                    try { persist().also { localSessionRevocations.remove(recoveryId) } } catch (error: Throwable) {
+                        localSessionRevocations.replaceWithToken(recoveryId, token)
+                        throw error
+                    }
+                } }) } finally { localHandoffActive.remove(recoveryId) }
+        }
+        val accountId = configStore.accountSession.first()?.accountId ?: error("Account sign-in did not complete")
+        require(accountId == (phone ?: initial.ownerAccountId)) { "Account changed during authorization" }
+        val target = configStore.directory.first().computers.firstOrNull { it.instanceId == instanceId && it.localRuntime }
+            ?: error("Local instance was removed")
+        val result = targetPairingCommits.withTarget(instanceId) { guard ->
+            withTargetRuntime(instanceId) { runtime ->
+                pairing.joinWithAccountSession(target.endpoint, accountDeviceAlias,
+                    accountClaimToken = invitation.token.takeIf { invitation.version == 3 },
+                    autoConnect = false, selectTarget = false, writeGuard = guard,
+                    localTransport = runtime.transport, expectedInstanceId = instanceId, persistDirectory = false)
+            }
+        }
+        val afterJoin = localAccountLinkStatus(instanceId)
+        require(afterJoin.ownerAuthority == "active" && afterJoin.ownerAccountId == accountId) { "Instance account could not be verified" }
+        require(afterJoin.generation == initial.generation && afterJoin.state != "active") { "Account link changed; review it again" }
+        val eventId = java.util.UUID.randomUUID().toString()
+        val linkId = "lnk_" + java.util.UUID.randomUUID().toString().replace("-", "")
+        val record = LocalAccountLinkRecord(instanceId, linkId, result.deviceId, accountId, afterJoin.generation,
+            pendingEventId = eventId, pendingAction = "link")
+        localAccountLinkMutex.withLock {
+            require(localAccountLinks.epoch(instanceId) == authorizationEpoch) { "Account authorization was superseded by sign-out" }
+            localAccountLinks.write(record)
+        }
+        val response = withTargetRuntime(instanceId) { runtime ->
+            runtime.transport.execute(localAccountLinkEvent(record, "link", identityStore, eventId, System.currentTimeMillis()))
+        }
+        val accepted = kotlinx.serialization.json.Json.parseToJsonElement(response.body).jsonObject
+        require(accepted["instanceId"]?.jsonPrimitive?.content == instanceId &&
+            accepted["linkId"]?.jsonPrimitive?.content == linkId && accepted["deviceId"]?.jsonPrimitive?.content == result.deviceId &&
+            accepted["accountId"]?.jsonPrimitive?.content == accountId && accepted["eventId"]?.jsonPrimitive?.content == eventId &&
+            accepted["state"]?.jsonPrimitive?.content == "active") { "Account link was not confirmed" }
+        val generation = accepted["generation"]?.jsonPrimitive?.content?.toLongOrNull() ?: error("Invalid account link generation")
+        require(generation > record.generation) { "Account link generation did not advance" }
+        localAccountLinkMutex.withLock {
+            val latest = localAccountLinks.read(instanceId)
+            require(localAccountLinks.epoch(instanceId) == authorizationEpoch && latest == record) { "Account authorization was superseded by sign-out" }
+            localAccountLinks.write(record.copy(generation = generation, pendingEventId = null, pendingAction = null))
+        }
+        mutableLocalAccountLinkStates.update { it + (instanceId to "active") }
+    }
+
+    private suspend fun reconcileLocalAccountLink(instanceId: String) {
+        localAccountLinkMutex.withLock {
+            var record = localAccountLinks.read(instanceId) ?: return@withLock
+            if (record.tombstone && !record.localClearCompleted) {
+                // The durable fence must also be applied while the peer is offline.
+                if (configStore.accountSession.first()?.accountId == record.accountId) accountSessions.clearLocalSession()
+                record = record.copy(localClearCompleted = true)
+                localAccountLinks.write(record)
+            }
+            reconcileLocalCloudLogout(record)
+        }
+        val status = localAccountLinkStatus(instanceId)
+        localAccountLinkMutex.withLock {
+        var record = localAccountLinks.read(instanceId) ?: return@withLock
+        val phoneAccount = configStore.accountSession.first()?.accountId
+        if (record.unbindPending) {
+            if (status.state == "unlinked" && status.ownerAuthority == "unbound" &&
+                record.pendingCloudToken == null && localSessionRevocations.ids().isEmpty()) {
+                localAccountLinks.clear(instanceId)
+                mutableLocalAccountLinkStates.update { it - instanceId }
+            } else {
+                mutableLocalAccountLinkStates.update { it + (instanceId to "pending") }
+            }
+            return@withLock
+        }
+        if (record.tombstone && record.localClearCompleted && record.pendingEventId == null &&
+            record.pendingCloudToken == null && localSessionRevocations.ids().isEmpty() &&
+            phoneAccount == record.accountId && status.state == "signed_out" && status.linkId == record.linkId &&
+            status.deviceId == record.deviceId && status.accountId == record.accountId && status.generation >= record.generation) {
+            mutableLocalAccountLinkStates.update { it + (instanceId to "pending") }
+            if (localAccountLoginInFlight.add(instanceId)) scope.launch {
+                try { authorizeLocalAccountLink(instanceId, phoneAccount, status.ownerAccountId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { mutableLocalAccountLinkStates.update { it + (instanceId to "pending") } }
+                finally { localAccountLoginInFlight.remove(instanceId) }
+            }
+            return@withLock
+        }
+        if (record.tombstone && record.localClearCompleted && record.pendingEventId == null &&
+            record.pendingCloudToken == null && localSessionRevocations.ids().isEmpty() &&
+            status.state == "login_pending" && status.linkId == record.linkId && status.deviceId == record.deviceId &&
+            status.accountId == record.accountId && status.generation >= record.generation &&
+            (phoneAccount == null || phoneAccount == record.accountId)) {
+            record = record.copy(generation = status.generation)
+            localAccountLinks.write(record)
+            mutableLocalAccountLinkStates.update { it + (instanceId to "pending") }
+            if (localAccountLoginInFlight.add(instanceId)) scope.launch {
+                try { completeLocalInstanceLogin(instanceId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { mutableLocalAccountLinkStates.update { it + (instanceId to "pending") } }
+                finally { localAccountLoginInFlight.remove(instanceId) }
+            }
+            return@withLock
+        }
+        // The initial link may have been fenced before its response arrived.
+        // An unchanged unlinked generation proves there is no peer link to revoke;
+        // if the link did commit, retain the logout event and revoke that link.
+        if (record.tombstone && record.pendingAction == "logout" &&
+            ((status.state == "unlinked" && status.generation == record.generation) ||
+                (status.state == "signed_out" && status.linkId == record.linkId && status.deviceId == record.deviceId &&
+                    status.accountId == record.accountId && status.generation >= record.generation))) {
+            record = record.copy(generation = status.generation, pendingEventId = null, pendingAction = null)
+            localAccountLinks.write(record)
+            mutableLocalAccountLinkStates.update { it + (instanceId to if (record.pendingCloudToken == null && localSessionRevocations.ids().isEmpty()) "signed_out" else "pending") }
+            return@withLock
+        }
+        if (record.tombstone && record.pendingAction == "logout" && status.state in setOf("active", "login_pending") &&
+            status.linkId == record.linkId && status.deviceId == record.deviceId && status.accountId == record.accountId &&
+            status.generation > record.generation) {
+            record = record.copy(generation = status.generation)
+            localAccountLinks.write(record)
+        }
+        val pendingId = record.pendingEventId
+        val action = record.pendingAction
+        if (pendingId != null && action in setOf("link", "logout")) {
+            if (action == "link" && (record.tombstone || phoneAccount != record.accountId ||
+                    status.ownerAuthority != "active" || status.ownerAccountId != record.accountId)) {
+                mutableLocalAccountLinkStates.update { it + (instanceId to "conflict") }
+                return@withLock
+            }
+            try {
+                val response = withTargetRuntime(instanceId) { runtime ->
+                    runtime.transport.execute(localAccountLinkEvent(record, requireNotNull(action), identityStore, pendingId, System.currentTimeMillis()))
+                }
+                val value = kotlinx.serialization.json.Json.parseToJsonElement(response.body).jsonObject
+                val generation = value["generation"]?.jsonPrimitive?.content?.toLongOrNull() ?: error("Invalid link generation")
+                require(value["instanceId"]?.jsonPrimitive?.content == instanceId && value["linkId"]?.jsonPrimitive?.content == record.linkId &&
+                    value["deviceId"]?.jsonPrimitive?.content == record.deviceId && value["accountId"]?.jsonPrimitive?.content == record.accountId &&
+                    value["eventId"]?.jsonPrimitive?.content == pendingId && generation > record.generation &&
+                    value["state"]?.jsonPrimitive?.content == (if (action == "logout") "signed_out" else "active"))
+                record = record.copy(generation = generation, pendingEventId = null, pendingAction = null)
+                localAccountLinks.write(record)
+                mutableLocalAccountLinkStates.update { it + (instanceId to if (record.pendingCloudToken != null || localSessionRevocations.ids().isNotEmpty()) "pending" else if (record.tombstone) "signed_out" else "active") }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                val conflict = (error as? com.andysagent.agentoc.core.network.ApiException)?.statusCode == 409
+                mutableLocalAccountLinkStates.update { it + (instanceId to if (conflict) "conflict" else "pending") }
+            }
+            return@withLock
+        }
+        if (status.linkId != record.linkId || status.deviceId != record.deviceId || status.accountId != record.accountId ||
+            status.generation < record.generation) {
+            mutableLocalAccountLinkStates.update { it + (instanceId to "conflict") }
+            return@withLock
+        }
+        if (status.state == "signed_out" && status.generation > record.generation) {
+            // Persist the fence before clearing account credentials. No old peer
+            // state may authorize this installation again after a restart.
+            val oldToken = if (phoneAccount == record.accountId) accountCredentialStore.readToken() else null
+            localAccountLinks.invalidate(instanceId)
+            record = record.copy(generation = status.generation, tombstone = true, pendingEventId = null, pendingAction = null,
+                localClearCompleted = false, pendingCloudToken = oldToken,
+                pendingCloudEventId = oldToken?.let { java.util.UUID.randomUUID().toString() })
+            localAccountLinks.write(record)
+            if (phoneAccount == record.accountId) accountSessions.clearLocalSession()
+            record = record.copy(localClearCompleted = true)
+            localAccountLinks.write(record)
+            mutableLocalAccountLinkStates.update { it + (instanceId to if (record.pendingCloudToken == null && localSessionRevocations.ids().isEmpty()) "signed_out" else "pending") }
+        } else if (record.tombstone) {
+            mutableLocalAccountLinkStates.update { it + (instanceId to if (record.pendingCloudToken == null && localSessionRevocations.ids().isEmpty()) "signed_out" else "pending") }
+        } else if (status.state == "active" && status.generation == record.generation && phoneAccount == record.accountId) {
+            mutableLocalAccountLinkStates.update { it + (instanceId to "active") }
+        } else {
+            mutableLocalAccountLinkStates.update { it + (instanceId to "conflict") }
+        }
+        }
+    }
+
+    private suspend fun completeLocalInstanceLogin(instanceId: String) {
+        val (record, epoch) = localAccountLinkMutex.withLock {
+            val current = requireNotNull(localAccountLinks.read(instanceId))
+            require(current.tombstone && current.pendingEventId == null && localSessionRevocations.ids().isEmpty())
+            current to localAccountLinks.epoch(instanceId)
+        }
+        val eventId = java.util.UUID.randomUUID().toString()
+        val pending = record.copy(tombstone = false, pendingAction = "link", pendingEventId = eventId)
+        if (configStore.accountSession.first()?.accountId == null) {
+            val inviteEventId = java.util.UUID.randomUUID().toString()
+            val response = withTargetRuntime(instanceId) { runtime ->
+                runtime.transport.execute(localAccountLinkEvent(record, "invite", identityStore, inviteEventId, System.currentTimeMillis()))
+            }
+            val obj = kotlinx.serialization.json.Json.parseToJsonElement(response.body).jsonObject
+            require(obj["instanceId"]?.jsonPrimitive?.content == instanceId && obj["linkId"]?.jsonPrimitive?.content == record.linkId &&
+                obj["deviceId"]?.jsonPrimitive?.content == record.deviceId && obj["accountId"]?.jsonPrimitive?.content == record.accountId &&
+                obj["generation"]?.jsonPrimitive?.content?.toLongOrNull() == record.generation && obj["state"]?.jsonPrimitive?.content == "login_pending")
+            val invitationUri = obj.getValue("invitation").jsonObject.getValue("pairingUri").jsonPrimitive.content
+            val invitation = parsePairingUri(invitationUri)
+            require(invitation.version == 4 && invitation.instanceId == instanceId)
+            val recoveryId = registerLocalHandoffRecovery(instanceId, invitationUri, record.accountId, record.generation, record.linkId)
+            try { accountSessions.acceptDesktopAccount(invitation, accountDeviceAlias, expectedAccountId = record.accountId,
+                persistGate = { account, _, token, persist ->
+                    val remote = try { localAccountLinkStatus(instanceId) } catch (error: Exception) {
+                        localSessionRevocations.replaceWithToken(recoveryId, token)
+                        throw error
+                    }
+                    localAccountLinkMutex.withLock {
+                        val current = localAccountLinks.read(instanceId)
+                        val valid = account == record.accountId && localAccountLinks.epoch(instanceId) == epoch && current == record &&
+                            remote.state == "login_pending" && remote.generation == record.generation && remote.linkId == record.linkId
+                        if (!valid) {
+                            localSessionRevocations.replaceWithToken(recoveryId, token)
+                            error("Account authorization was superseded by sign-out")
+                        }
+                        localAccountLinks.write(pending)
+                        try { persist().also { localSessionRevocations.remove(recoveryId) } } catch (error: Throwable) {
+                            localSessionRevocations.replaceWithToken(recoveryId, token)
+                            throw error
+                        }
+                    }
+                }) } finally { localHandoffActive.remove(recoveryId) }
+        }
+        localAccountLinkMutex.withLock {
+            val current = localAccountLinks.read(instanceId)
+            require(localAccountLinks.epoch(instanceId) == epoch && (current == record || current == pending) &&
+                configStore.accountSession.first()?.accountId == record.accountId)
+            if (current == record) localAccountLinks.write(pending)
+        }
+        val response = withTargetRuntime(instanceId) { runtime ->
+            runtime.transport.execute(localAccountLinkEvent(pending, "link", identityStore, eventId, System.currentTimeMillis()))
+        }
+        val obj = kotlinx.serialization.json.Json.parseToJsonElement(response.body).jsonObject
+        val generation = obj["generation"]?.jsonPrimitive?.content?.toLongOrNull() ?: error("Invalid generation")
+        require(obj["state"]?.jsonPrimitive?.content == "active" && obj["linkId"]?.jsonPrimitive?.content == record.linkId &&
+            obj["deviceId"]?.jsonPrimitive?.content == record.deviceId && obj["accountId"]?.jsonPrimitive?.content == record.accountId &&
+            obj["eventId"]?.jsonPrimitive?.content == eventId && generation > record.generation)
+        localAccountLinkMutex.withLock {
+            require(localAccountLinks.epoch(instanceId) == epoch && localAccountLinks.read(instanceId) == pending)
+            localAccountLinks.write(pending.copy(generation = generation, pendingEventId = null, pendingAction = null))
+            mutableLocalAccountLinkStates.update { it + (instanceId to "active") }
+        }
+    }
+
+    private fun registerLocalHandoffRecovery(instanceId: String, uri: String, accountId: String, generation: Long, linkId: String?): String {
+        val handle = kotlinx.serialization.json.buildJsonObject {
+            put("instanceId", instanceId); put("uri", uri); put("accountId", accountId); put("generation", generation)
+            linkId?.let { put("linkId", it) }
+            put("epoch", localAccountLinks.epoch(instanceId)); put("publicKey", identityStore.publicKeyEncoded())
+        }.toString()
+        val id = java.util.UUID.randomUUID().toString()
+        localHandoffActive.add(id)
+        try { return localSessionRevocations.beginRecovery(handle, id) }
+        catch (error: Throwable) { localHandoffActive.remove(id); throw error }
+    }
+
+    /** Only the old session's logout endpoint may use this encrypted outbox credential. */
+    private suspend fun reconcileLocalCloudLogout(record: LocalAccountLinkRecord): LocalAccountLinkRecord {
+        val token = record.pendingCloudToken ?: return record
+        val requestId = record.pendingCloudEventId ?: return record
+        localSessionRevocations.enqueue(token, requestId)
+        val updated = record.copy(pendingCloudToken = null, pendingCloudEventId = null)
+        localAccountLinks.write(updated)
+        return updated
+    }
+
+    private suspend fun reconcileSessionRevocations() {
+        localSessionRevocations.ids().forEach { requestId ->
+            val handle = localSessionRevocations.recovery(requestId)
+            if (handle != null) {
+                if (localHandoffActive.add(requestId)) scope.launch {
+                    try { recoverLocalHandoff(requestId, handle) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Remains pending until recovery is possible. */ }
+                    finally { localHandoffActive.remove(requestId) }
+                }
+                return@forEach
+            }
+            val token = localSessionRevocations.token(requestId)
+            if (token == null) {
+                // An interrupted enqueue is not proof of server revocation.
+                // Keep the task visible until its original token is recovered.
+                return@forEach
+            }
+            if (revokeDetachedSession(token, requestId)) localSessionRevocations.remove(requestId)
+        }
+    }
+
+    private suspend fun recoverLocalHandoff(requestId: String, handle: String) {
+        val value = kotlinx.serialization.json.Json.parseToJsonElement(handle).jsonObject
+        require(value.getValue("publicKey").jsonPrimitive.content == identityStore.publicKeyEncoded())
+        val instanceId = value.getValue("instanceId").jsonPrimitive.content
+        val invitation = parsePairingUri(value.getValue("uri").jsonPrimitive.content)
+        val account = value.getValue("accountId").jsonPrimitive.content
+        require(invitation.version == 4 && invitation.instanceId == instanceId)
+        // Recovery can only queue a revocation, even if another account is active.
+        accountSessions.acceptDesktopAccount(invitation, accountDeviceAlias, expectedAccountId = account,
+            persistGate = { grantedAccount, credentialId, token, _ ->
+                val active = configStore.accountSession.first()
+                val originalEpoch = value.getValue("epoch").jsonPrimitive.content.toLong()
+                val expectedGeneration = value.getValue("generation").jsonPrimitive.content.toLong()
+                val remote = try { localAccountLinkStatus(instanceId) } catch (_: Exception) { null }
+                if (active?.accountId == grantedAccount && active.credentialId == credentialId && remote == null &&
+                    localAccountLinks.epoch(instanceId) == originalEpoch) error("Account link status is unavailable")
+                if (active?.accountId == grantedAccount && active.credentialId == credentialId &&
+                    localAccountLinks.epoch(instanceId) == originalEpoch && remote != null &&
+                    remote.generation == expectedGeneration && remote.state != "signed_out") {
+                    localSessionRevocations.remove(requestId)
+                    if (value["linkId"] == null) scope.launch {
+                        try { authorizeLocalAccountLink(instanceId, grantedAccount, grantedAccount) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { mutableLocalAccountLinkStates.update { it + (instanceId to "pending") } }
+                    }
+                    error("Recovered authorization is already active")
+                }
+                localSessionRevocations.replaceWithToken(requestId, token)
+                error("Recovered authorization queued for revocation")
+            }, recoveryOnly = true)
+    }
+
+    private suspend fun revokeDetachedSession(token: String, requestId: String): Boolean {
+        val client = okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
+        val transport = OkHttpAgentoCTransport(
+            endpointProvider = { application.getString(R.string.accounts_directory_base_url).trimEnd('/') },
+            credentialProvider = { token }, client = client,
+        )
+        val confirmed = try {
+            val body = kotlinx.serialization.json.buildJsonObject { put("requestId", requestId) }.toString()
+            val result = transport.execute(ApiRequest("POST", "/v1/owner-auth/account/session/logout", body,
+                requestId = requestId, idempotencyKey = requestId, isolateCredentialFailure = true))
+            kotlinx.serialization.json.Json.parseToJsonElement(result.body).jsonObject["loggedOut"]?.jsonPrimitive?.content == "true"
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: com.andysagent.agentoc.core.network.ApiException) { error.statusCode in setOf(400, 401, 403) }
+        catch (_: Exception) { false }
+        finally { transport.close() }
+        return confirmed
+    }
+
+    suspend fun importLocalPairing(text: String) {
+        val pairing = LocalPairing.parse(text)
+        val transport = OkHttpAgentoCTransport({ pairing.endpoint }, { pairing.token }, localHttpClient())
+        try {
+            val response = transport.execute(ApiRequest("GET", "/api/local/identity", isolateCredentialFailure = true))
+            val identity = kotlinx.serialization.json.Json.parseToJsonElement(response.body).jsonObject["instanceId"]?.jsonPrimitive?.content
+            require(identity == pairing.instanceId) { "Local runtime identity does not match the pairing file" }
+        } finally { transport.close() }
+        initialized.await()
+        configurationMutex.withLock {
+            connectionUses.revoke(pairing.instanceId)
+            targetRuntimes.remove(pairing.instanceId)?.dispose()
+        }
+        localCredentials.write(pairing.instanceId, pairing.token)
+        configStore.upsertLocalComputer(LinkedComputer(pairing.instanceId, pairing.endpoint, application.getString(R.string.local_runtime_title), platform = "android", localRuntime = true))
+        synchronizeDirectory()
+    }
     /** Account-scoped rac_ credential; separate Keystore alias and preference namespace. */
     val accountCredentialStore = AndroidAccountCredentialStore(application)
     val p2pSecretStore = AndroidP2PSecretStore(application)
@@ -545,6 +1030,26 @@ class AndroidRuntimeGraph internal constructor(
         },
         changeAccountDirectory = { change, update ->
             initialized.await()
+            val previousAccount = configStore.accountSession.first()?.accountId
+            val localTargets = localAccountLinks.instanceIds() + configStore.directory.first().computers.filter { it.localRuntime }.map { it.instanceId }
+            if (change.nextAccountId != null) {
+                require(localTargets.none { instanceId ->
+                    localAccountLinks.read(instanceId)?.let { !it.tombstone && it.accountId != change.nextAccountId } == true
+                }) { "A linked local instance uses another account; sign out or resolve the link first" }
+            } else if (previousAccount != null) {
+                // Expiry, revocation and non-UI sign-outs share the same durable
+                // fence; do not let an alternate clearing path bypass it.
+                val oldToken = accountCredentialStore.readToken()
+                localTargets.forEach(localAccountLinks::invalidate)
+                localTargets.forEach { instanceId ->
+                    localAccountLinks.read(instanceId)?.takeIf { it.accountId == previousAccount }?.let { prior ->
+                        prior.pendingCloudToken?.let { token ->
+                            localSessionRevocations.enqueue(token, requireNotNull(prior.pendingCloudEventId))
+                        }
+                        localAccountLinks.fenceLogout(instanceId, oldToken)
+                    }
+                }
+            }
             val initiator = targetPairingCommits.initiatingJob()
             if (targetRuntimes.values.any { it.ownsJob(initiator) }) throw AccountSessionException(401,
                 "account_session_foreground_reauthorization", "Account authorization expired. Sign out and sign in again.")
@@ -908,11 +1413,47 @@ class AndroidRuntimeGraph internal constructor(
     }
 
     suspend fun logoutAccountSession(): Boolean {
+        val localIds = localAccountLinks.instanceIds() + configStore.directory.first().computers.filter { it.localRuntime }.map { it.instanceId }
+        localIds.forEach(localAccountLinks::invalidate)
+        return localAccountLinkMutex.withLock {
+        val account = configStore.accountSession.first()?.accountId
+        val fenced = localAccountLinks.instanceIds().mapNotNull { instanceId ->
+            localAccountLinks.read(instanceId)?.takeIf { it.accountId == account }
+                ?.let { prior ->
+                    prior.pendingCloudToken?.let { token -> localSessionRevocations.enqueue(token, requireNotNull(prior.pendingCloudEventId)) }
+                    localAccountLinks.fenceLogout(instanceId, accountCredentialStore.readToken())
+                }
+        }
+        if (fenced.isNotEmpty()) mutableLocalAccountLinkStates.update { states ->
+            states + fenced.associate { it.instanceId to "pending" }
+        }
         appApiCallerGrants.revokeAll(appApiOwner)
         assistantDelegations.revokeAll(appApiOwner)
         backgroundDeliveryConsents.revokeAll(appApiOwner)
-        return try { accountSessions.logoutAccountSession() }
-        finally { withContext(kotlinx.coroutines.NonCancellable) { backgroundDeliveryConsents.revokeAll(appApiOwner) } }
+        try {
+            if (fenced.isEmpty()) accountSessions.logoutAccountSession()
+            else {
+                // Revoke remotely from the isolated outbox after the active
+                // account is gone; an unavailable network never delays logout.
+                withContext(NonCancellable) { accountSessions.clearLocalSession() }
+                false
+            }
+        }
+        finally { withContext(NonCancellable) {
+            if (configStore.accountSession.first()?.accountId != account) fenced.forEach { prior ->
+                localAccountLinks.read(prior.instanceId)?.takeIf { it.tombstone && !it.localClearCompleted }
+                    ?.let { localAccountLinks.write(it.copy(localClearCompleted = true)) }
+            }
+            backgroundDeliveryConsents.revokeAll(appApiOwner)
+            if (fenced.isNotEmpty()) scope.launch {
+                fenced.forEach { prior ->
+                    try { reconcileLocalAccountLink(prior.instanceId) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Durable outbox remains pending. */ }
+                }
+            }
+        } }
+        }
     }
 
     private suspend fun <T> accountAuthorityOperation(operation: suspend () -> T): T =
@@ -1106,6 +1647,23 @@ class AndroidRuntimeGraph internal constructor(
         if (!startGuard.compareAndSet(false, true)) return
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         scope.launch {
+            initialized.await()
+            while (isActive && !stopped) {
+                try { reconcileSessionRevocations() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* The encrypted queue is retried later. */ }
+                val instanceIds = localAccountLinks.instanceIds() + configStore.directory.first().computers.filter { it.localRuntime }.map { it.instanceId }
+                instanceIds.forEach { instanceId ->
+                    try { reconcileLocalAccountLink(instanceId) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) {
+                        mutableLocalAccountLinkStates.update { it + (instanceId to "pending") }
+                    }
+                }
+                delay(15_000)
+            }
+        }
+        scope.launch {
             try {
                 configurationMutex.withLock { recoverAccountProfileTransitionLocked() }
                 configStore.migrateLegacy()
@@ -1153,8 +1711,10 @@ class AndroidRuntimeGraph internal constructor(
                 if (targetRuntimes[id] == null) current - id else current
             }
             runtime.dispose()
-            credentialStore.clear(id)
-            p2pSecretStore.clear(id)
+            if (!runtime.localRuntime) {
+                credentialStore.clear(id)
+                p2pSecretStore.clear(id)
+            }
         }
         controlWorkbench?.let { control ->
             if (foreground) {
@@ -1385,6 +1945,7 @@ class AndroidRuntimeGraph internal constructor(
     suspend fun disconnectTarget(instanceId: String) = withContext(NonCancellable) {
         require(instanceId.isNotBlank()) { "Computer target id must not be blank" }
         accountRestoreJob?.cancelAndJoin()
+        val local = configStore.directory.first().computers.any { it.instanceId == instanceId && it.localRuntime }
         targetPairingCommits.remove(instanceId) {
             appApiCallerGrants.revokeForTarget(appApiOwner, instanceId)
             assistantDelegations.revokeForTarget(appApiOwner, instanceId)
@@ -1398,10 +1959,15 @@ class AndroidRuntimeGraph internal constructor(
             // Existing carriers release their lease with the still-current
             // bearer; synchronizeDirectory clears it after teardown. A join
             // that has not created a runtime still needs immediate cleanup.
-            if (targetRuntimes[instanceId] == null) {
+            if (!local && targetRuntimes[instanceId] == null) {
                 credentialStore.clear(instanceId)
                 p2pSecretStore.clear(instanceId)
             }
+            if (local) localCredentials.clear(instanceId)
+        }
+        if (local) configurationMutex.withLock {
+            connectionUses.revoke(instanceId)
+            targetRuntimes.remove(instanceId)?.dispose()
         }
         // Await revocation instead of waiting for the asynchronous directory observer.
         synchronizeDirectory()
@@ -1788,6 +2354,21 @@ class AndroidRuntimeGraph internal constructor(
     }
 
     private fun createTargetRuntime(target: LinkedComputer, childScope: CoroutineScope): TargetRuntime {
+        if (target.localRuntime) {
+            val endpoint = target.endpoint.trimEnd('/')
+            lateinit var controller: LocalTargetConnection
+            val verified = java.util.concurrent.atomic.AtomicBoolean(false)
+            val targetTransport = OkHttpAgentoCTransport({ endpoint }, { localCredentials.read(target.instanceId) }, localHttpClient(),
+                allowRelativeStreaming = true, onDirectSocketReconnect = { controller.refresh() },
+                onDirectSocketUnavailable = { verified.set(false) },
+                requestAdmission = { it.path == "/api/local/identity" || verified.get() })
+            val database = AgentoCDatabase.create(application, targetDatabaseName(target))
+            val repository = RoomSessionRepository(database, targetTransport, contentResolver = application.contentResolver,
+                targetId = target.instanceId)
+            controller = LocalTargetConnection(target.instanceId, targetTransport, childScope, verified)
+            return TargetRuntime(target.instanceId, endpoint, endpoint, targetTransport, repository, controller,
+                childScope, disposeStorage = { database.close() }, localRuntime = true)
+        }
         lateinit var runtime: TargetRuntime
         lateinit var controller: BoundTargetConnection
         val database = AgentoCDatabase.create(application, targetDatabaseName(target))

@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, createPublicKey, verify } from 'crypto';
+import { readProotAccountLink } from '../lib/proot-account-link-state.mjs';
 
 import { TRUSTED_DEVICES_FILE, P2P_SIGNALING_URL } from '../lib/config.mjs';
 import { createConnectivityPolicy, normalizeConnectivityPolicy } from '../lib/connectivity-policy.mjs';
@@ -96,6 +97,10 @@ function normalizeState(value) {
           tokenHash: trimString(entry?.tokenHash),
           shortCodeHash: trimString(entry?.shortCodeHash),
           accountHandoffAccountId: trimString(entry?.accountHandoffAccountId),
+          ...(Number.isSafeInteger(entry?.localLinkGeneration) ? {
+            localLinkId: trimString(entry?.localLinkId), localLinkGeneration: entry.localLinkGeneration,
+            localDeviceFingerprint: trimString(entry?.localDeviceFingerprint),
+          } : {}),
           endpoint: normalizeEndpoint(entry?.endpoint),
           connectivity: normalizeConnectivityPolicy(entry?.connectivity, entry?.endpoint),
           candidates: Array.isArray(entry?.candidates)
@@ -156,6 +161,7 @@ function normalizeState(value) {
           expiresAt: trimString(entry?.expiresAt),
           audience: trimString(entry?.audience),
           instanceId: trimString(entry?.instanceId),
+          ...(Number.isSafeInteger(entry?.prootGeneration) ? { prootGeneration: entry.prootGeneration } : {}),
         })).filter((entry) => entry.challengeId && entry.deviceId)
       : [],
     authTokens: Array.isArray(state.authTokens)
@@ -165,6 +171,7 @@ function normalizeState(value) {
           kind: trimString(entry?.kind) || 'bound',
           scope: trimString(entry?.scope) || 'device-access',
           bindingAuthorityRevision: trimString(entry?.bindingAuthorityRevision),
+          ...(Number.isSafeInteger(entry?.prootGeneration) ? { prootGeneration: entry.prootGeneration } : {}),
           createdAt: trimString(entry?.createdAt),
           expiresAt: trimString(entry?.expiresAt),
           retiredAt: trimString(entry?.retiredAt),
@@ -173,6 +180,7 @@ function normalizeState(value) {
     accountJoinIntents: Array.isArray(state.accountJoinIntents)
       ? state.accountJoinIntents.map((entry) => ({
           intentId: trimString(entry?.intentId),
+          ...(Number.isSafeInteger(entry?.prootGeneration) ? { prootGeneration: entry.prootGeneration } : {}),
           instanceId: trimString(entry?.instanceId),
           deviceId: trimString(entry?.deviceId),
           devicePublicKey: trimString(entry?.devicePublicKey),
@@ -211,7 +219,14 @@ export async function loadState() {
 async function mutateState(mutator) {
   return runTrustedDeviceMutation(async () => {
     const draft = await loadState();
+    const originalTokens = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? new Set(draft.authTokens.map(entry => entry.tokenHash)) : null;
+    const generation = originalTokens ? readProotAccountLink().generation : null;
+    const originalChallenges = originalTokens ? new Set(draft.challenges.map(entry => entry.challengeId)) : null;
     const result = await mutator(draft);
+    if (originalTokens) {
+      for (const entry of draft.authTokens) if (!originalTokens.has(entry.tokenHash) && !Number.isSafeInteger(entry.prootGeneration)) entry.prootGeneration = generation;
+      for (const entry of draft.challenges) if (!originalChallenges.has(entry.challengeId)) entry.prootGeneration = generation;
+    }
     await writeJsonAtomic(TRUSTED_DEVICES_FILE, normalizeState(draft));
     return result;
   });
@@ -294,6 +309,7 @@ export async function createTrustedDeviceAccountIntent({
   accountClaimToken = '',
   renewExistingDeviceId = '',
 } = {}) {
+  const prootGeneration = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
   const normalized = normalizeDevicePublicKey(devicePublicKey);
   if (!normalized) {
     const error = new Error('A valid device public key is required');
@@ -353,6 +369,7 @@ export async function createTrustedDeviceAccountIntent({
     }
     draft.accountJoinIntents.push({
       intentId,
+      ...(prootGeneration !== null ? { prootGeneration } : {}),
       instanceId: identity.instanceId,
       deviceId,
       devicePublicKey: normalized.publicKey,
@@ -376,6 +393,7 @@ export async function createTrustedDeviceAccountIntent({
   });
   return {
     intentId,
+    ...(prootGeneration !== null ? { prootGeneration } : {}),
     instance: publicInstanceIdentity(identity),
     deviceId,
     devicePublicKey: normalized.publicKey,
@@ -463,7 +481,9 @@ export async function getLocalAccountPairingInvitation(invitationId) {
   const state = await loadState();
   const invitation = state.invitations.find((entry) => entry.id === invitationId);
   return invitation ? { id: invitation.id, tokenHash: invitation.tokenHash,
-    expiresAt: invitation.expiresAt, usedAt: invitation.usedAt, accountHandoffAccountId: invitation.accountHandoffAccountId } : null;
+    expiresAt: invitation.expiresAt, usedAt: invitation.usedAt, accountHandoffAccountId: invitation.accountHandoffAccountId,
+    ...(Number.isSafeInteger(invitation.localLinkGeneration) ? { localLinkId: invitation.localLinkId,
+      localLinkGeneration: invitation.localLinkGeneration, localDeviceFingerprint: invitation.localDeviceFingerprint } : {}) } : null;
 }
 
 export async function listPendingAccountPairingInvitations() {
@@ -742,6 +762,7 @@ export async function completeTrustedDeviceAccountIntent({
       tokenHash: hashSecret(token),
       deviceId: device.id,
       kind: 'bound',
+      ...(process.env.AGENTOC_RUNTIME_MODE === 'proot' ? { prootGeneration: Number.isSafeInteger(intent.prootGeneration) ? intent.prootGeneration : -1 } : {}),
       bindingAuthorityRevision,
       scope: 'device-access',
       createdAt: now,
@@ -795,6 +816,10 @@ export async function createTrustedDeviceInvitation(options = {}) {
       tokenHash: hashSecret(token),
       shortCodeHash: hashSecret(shortCode),
       accountHandoffAccountId: trimString(options.accountHandoffAccountId),
+      ...(Number.isSafeInteger(options.localLinkGeneration) ? {
+        localLinkId: trimString(options.localLinkId), localLinkGeneration: options.localLinkGeneration,
+        localDeviceFingerprint: trimString(options.localDeviceFingerprint),
+      } : {}),
       endpoint: '',
       createdAt,
       expiresAt,
@@ -1069,6 +1094,10 @@ export async function authenticateTrustedDeviceToken(token) {
   if (normalizedToken.startsWith('rda_') || normalizedToken.startsWith('rdp_')) {
     const authToken = state.authTokens.find((entry) => entry.tokenHash === tokenHash);
     if (!authToken) return null;
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+      const link = readProotAccountLink();
+      if (link.state !== 'active' || authToken.prootGeneration !== link.generation) return null;
+    }
     const originalExpiry = Date.parse(authToken.expiresAt || '');
     const retirementExpiry = authToken.retiredAt ? Date.parse(authToken.retiredAt) : Infinity;
     const expiresAtMs = Math.min(originalExpiry, retirementExpiry);
@@ -1084,6 +1113,10 @@ export async function authenticateTrustedDeviceToken(token) {
       try { authority = await authorizeDeviceBinding(device, { credential: true, tokenRevision: authToken.bindingAuthorityRevision }); }
       catch { return null; }
     }
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+      const link = readProotAccountLink();
+      if (link.state !== 'active' || authToken.prootGeneration !== link.generation) return null;
+    }
     if (expiresAtMs <= Date.now()) return null;
     return {
       role: provisional ? 'visitor' : 'owner',
@@ -1094,12 +1127,14 @@ export async function authenticateTrustedDeviceToken(token) {
       ...(authority ? { accountId: authority.accountId, bindingAuthorityRevision: authority.revision,
         ...(authority.workspaceAccess ? { workspaceAccess: authority.workspaceAccess } : {}) } : {}),
       authMethod: provisional ? 'provisional_pairing' : 'trusted_device_challenge',
+      ...(process.env.AGENTOC_RUNTIME_MODE === 'proot' ? { prootGeneration: authToken.prootGeneration } : {}),
       scope: provisional ? 'provisional-google' : 'device-access',
       expiry: expiresAtMs,
     };
   }
 
   // rdt_ legacy bearer token.
+  if (process.env.AGENTOC_RUNTIME_MODE === 'proot') return null;
   const device = state.devices.find((entry) => entry.tokenHash === tokenHash && !entry.revokedAt);
   if (!device) return null;
   // Enforce persisted expiresAt for legacy devices.
@@ -1179,6 +1214,7 @@ export async function promoteTrustedDevice(deviceId, accountId) {
 // succeed. Keeping the two local writes together avoids a bound device with no
 // replacement credential when the second write fails.
 export async function convergeTrustedDevice(deviceId, accountId, { bindingAuthorityRevision = '' } = {}) {
+  const prootGeneration = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
   const normalizedDeviceId = trimString(deviceId);
   const normalizedAccountId = trimString(accountId);
   if (!normalizedDeviceId || !normalizedAccountId) {
@@ -1222,6 +1258,7 @@ export async function convergeTrustedDevice(deviceId, accountId, { bindingAuthor
       tokenHash: hashSecret(token),
       deviceId: normalizedDeviceId,
       kind: 'bound',
+      ...(prootGeneration !== null ? { prootGeneration } : {}),
       bindingAuthorityRevision,
       scope: 'device-access',
       createdAt: now,
@@ -1236,6 +1273,7 @@ export async function convergeTrustedDevice(deviceId, accountId, { bindingAuthor
 }
 
 export async function issueTrustedDeviceCredential(deviceId) {
+  const prootGeneration = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
   const normalizedDeviceId = trimString(deviceId);
   await authorizeDeviceBinding(await getTrustedDeviceStatus(normalizedDeviceId));
   return mutateState((draft) => {
@@ -1259,6 +1297,7 @@ export async function issueTrustedDeviceCredential(deviceId) {
       tokenHash: hashSecret(token),
       deviceId: normalizedDeviceId,
       kind: 'bound',
+      ...(prootGeneration !== null ? { prootGeneration } : {}),
       bindingAuthorityRevision: device.bindingAuthorityRevision,
       scope: 'device-access',
       createdAt: nowIso(),
@@ -1456,6 +1495,7 @@ export async function createTrustedDeviceAuthChallenge(deviceId, options = {}) {
       expiresAt,
       audience,
       instanceId,
+      ...(process.env.AGENTOC_RUNTIME_MODE === 'proot' ? { prootGeneration: readProotAccountLink().generation } : {}),
     };
     draft.challenges.push(challenge);
 
@@ -1511,6 +1551,11 @@ export async function verifyTrustedDeviceAuthChallenge({
       const error = new Error('Challenge not found');
       error.statusCode = 404;
       throw error;
+    }
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+      const link = readProotAccountLink();
+      if (link.state !== 'active' || challenge.prootGeneration !== link.generation)
+        throw Object.assign(new Error('Challenge authorization changed'), { statusCode: 401 });
     }
 
     // Check expiry (before sweeping, so the challenge is still present).

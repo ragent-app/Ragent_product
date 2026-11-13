@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PREFIX="${RAGENT_PROOT_HOME:-$HOME/.local/share/ragent-proot}"
+APP="$(cd "$PREFIX/current" && pwd -P)"
+STATE="${RAGENT_PROOT_STATE:-$HOME/.local/state/ragent-proot}"
+DATA="${RAGENT_PROOT_DATA:-$HOME/.local/share/ragent-proot-data}"
+# Do not inherit paths, cloud endpoints or policy from another installation.
+for name in ${!AGENTOC_@}; do unset "$name"; done
+export AGENTOC_RUNTIME_MODE=proot CHAT_BIND_HOST=127.0.0.1
+export AGENTOC_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts
+export AGENTOC_ACCOUNTS_ISSUER=https://ragent.agentoncloud.com
+export AGENTOC_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json
+export AGENTOC_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn
+export AGENTOC_P2P_SIGNALING_URL=https://ragent.agentoncloud.com
+export AGENTOC_INSTANCE_ROOT="$DATA" AGENTOC_CONFIG_DIR="$DATA/config"
+export AGENTOC_WORK_ROOT_DIR="$DATA/work" AGENTOC_RUN_SPOOL_DIR="$DATA/run-spool" AGENTOC_PROVIDER_HOMES_DIR="$DATA/provider-homes"
+export AGENTOC_HARNESS_ROOT="$DATA/harnesses" AGENTOC_PACKAGED_HARNESS_ROOT="$APP/runtime"
+unset AGENTOC_RUNNER_LIFECYCLE_SOCKET AGENTOC_RUNNER_LIFECYCLE_REQUIRED AGENTOC_RUNNER_SUPERVISOR_SOCKET AGENTOC_RUNNER_SUPERVISOR_REQUIRED AGENTOC_RUNNER_DISTINCT_IDENTITY AGENTOC_LINUX_SCOPE_FINISH_ENABLED
+unset NOTIFY_SOCKET WATCHDOG_USEC WATCHDOG_PID INVOCATION_ID
+export PATH="$APP/runtime:$PATH"
+umask 077
+mkdir -p "$STATE" "$AGENTOC_CONFIG_DIR"
+PIDFILE="$STATE/service.pid"
+exec 9>"$STATE/manage.lock"
+flock -x 9
+if [ "${1:-}" = init ] && [ ! -e "$STATE/port" ]; then
+  port="${RAGENT_PROOT_PORT:-17690}"
+  [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { echo 'Invalid RAGENT_PROOT_PORT' >&2; exit 1; }
+  printf '%s\n' "$port" > "$STATE/port"
+fi
+port="$(cat "$STATE/port" 2>/dev/null || true)"
+[[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { echo 'Run ragent init to configure a valid port' >&2; exit 1; }
+export CHAT_PORT="$port" AGENTOC_CHAT_BASE_URL="http://127.0.0.1:$port"
+running() {
+  [ -f "$PIDFILE" ] || return 1
+  local pid command
+  pid="$(cat "$PIDFILE")"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  command="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" || return 1
+  [[ "$command" == "$APP/runtime/node chat-server.mjs " ]]
+}
+case "${1:-}" in
+  init)
+    "$APP/runtime/node" -e 'const fs=require("fs"),crypto=require("crypto"),p=process.argv[1]; for(const [n,v] of [["auth.json","{}\n"],["session-secret",crypto.randomBytes(32).toString("hex")+"\n"]]) { try {fs.writeFileSync(p+"/"+n,v,{flag:"wx",mode:0o600})} catch(e) {if(e.code!=="EEXIST") throw e} }' "$AGENTOC_CONFIG_DIR"
+    exec "$APP/runtime/node" "$APP/app/lib/proot-local-pairing.mjs" init ;;
+  export-pairing) [ "$#" -eq 2 ] || { echo 'Usage: ragent export-pairing /absolute/path.json' >&2; exit 2; }; exec "$APP/runtime/node" "$APP/app/lib/proot-local-pairing.mjs" export "$2" ;;
+  start)
+    if running; then echo 'Already running'; exit 0; fi
+    [ -s "$AGENTOC_CONFIG_DIR/auth.json" ] && [ -s "$AGENTOC_CONFIG_DIR/session-secret" ] && [ -s "$AGENTOC_CONFIG_DIR/proot-local-token" ] || { echo 'Run ragent init first' >&2; exit 1; }
+    boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+    if [[ ! "$boot" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+      boot=unknown
+      echo 'Boot identity unavailable; upgrades will be blocked.' >&2
+    fi
+    printf '%s\n' "$boot" > "$STATE/last-start-boot-id.new"
+    mv -f "$STATE/last-start-boot-id.new" "$STATE/last-start-boot-id"
+    export AGENTOC_AUTH_SESSION_SECRET="$(cat "$AGENTOC_CONFIG_DIR/session-secret")"
+    (cd "$APP/app"; exec 9>&-; exec "$APP/runtime/node" chat-server.mjs) >> "$STATE/service.log" 2>&1 </dev/null &
+    echo "$!" > "$PIDFILE"
+    sleep 1
+    if ! running; then echo 'Service exited during startup; see ragent logs' >&2; exit 1; fi
+    echo "Started (PID $(cat "$PIDFILE")); see ragent logs"
+    ;;
+  stop)
+    if running; then kill "$(cat "$PIDFILE")"; echo 'Stop requested'; else echo 'Not running'; fi
+    ;;
+  status) if running; then echo "Running (PID $(cat "$PIDFILE"))"; else echo 'Not running'; exit 1; fi ;;
+  logs) exec 9>&-; exec tail -n 100 -f "$STATE/service.log" ;;
+  *) echo 'Usage: ragent {init|start|stop|status|logs|export-pairing /absolute/path.json}' >&2; exit 2 ;;
+esac

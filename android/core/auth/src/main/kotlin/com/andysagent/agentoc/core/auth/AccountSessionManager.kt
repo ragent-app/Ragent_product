@@ -214,11 +214,14 @@ class AccountSessionManager(
     }
 
     /** The QR authorizes this phone's key automatically; only Accounts receives or issues rac_. */
-    suspend fun acceptDesktopAccount(invitation: PairingUriDto, alias: String): AccountSessionEstablishment = pairingMutex.withLock {
+    suspend fun acceptDesktopAccount(invitation: PairingUriDto, alias: String, expectedAccountId: String? = null,
+        persistGate: (suspend (String, String, String, suspend () -> AccountSessionCredential) -> AccountSessionCredential)? = null,
+        recoveryOnly: Boolean = false): AccountSessionEstablishment = pairingMutex.withLock {
+        require(!recoveryOnly || persistGate != null)
         require(invitation.version == 4 && invitation.accountInvitationId != null)
         val invitationId = requireNotNull(invitation.accountInvitationId)
         validateFutureExpiry(invitation.expiresAt, "Account pairing code")
-        if (metadataStore.accountSession.first() != null) throw AccountSessionException(409,
+        if (!recoveryOnly && metadataStore.accountSession.first() != null) throw AccountSessionException(409,
             "account_pairing_already_signed_in", "This phone already has account authorization.")
         val expectedDeviceId = if (invitation.accountType == "demo") demoAccountDeviceId() else metadataStore.getOrCreateAccountDeviceId()
         val pending = pairingJournal.read()?.takeIf { it.instanceId == invitation.instanceId && it.invitationId == invitation.accountInvitationId }
@@ -248,7 +251,13 @@ class AccountSessionManager(
                         "account_session_device_mismatch", "Accounts returned a different phone device id.")
                     if (session.accountId.startsWith("acct_demo_") != (invitation.accountType == "demo")) throw AccountSessionException(401,
                         "account_pairing_account_type_mismatch", "Scan a fresh account-link code with an updated app.")
-                    val credential = persistCredential(session.accountId, session.deviceId, session.credential, session.demoAccessMode)
+                    val persist: suspend () -> AccountSessionCredential = {
+                        check(!recoveryOnly) { "Recovered credentials cannot become an active session" }
+                        if (expectedAccountId != null && session.accountId != expectedAccountId) throw AccountSessionException(409,
+                            "account_pairing_account_mismatch", "The instance account changed. Start again.")
+                        persistCredential(session.accountId, session.deviceId, session.credential, session.demoAccessMode)
+                    }
+                    val credential = if (persistGate == null) persist() else persistGate(session.accountId, session.credential.credentialId, session.credential.token, persist)
                     pairingJournal.clear()
                     return@withLock AccountSessionEstablishment(credential, session.accountId, session.email?.takeIf(String::isNotBlank))
                 }

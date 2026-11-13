@@ -1,0 +1,32 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+# Run in Termux itself, not inside the Ubuntu container. The interactive PRoot
+# session must stay open: detaching Node alone does not keep its tracer alive.
+DISTRO="${RAGENT_PROOT_DISTRO:-ubuntu}"
+USER_NAME="${RAGENT_PROOT_USER:-handy}"
+WAKE_LOCK=0
+case "${1:-}" in
+  '') ;;
+  --wake-lock) WAKE_LOCK=1; shift ;;
+  -h|--help) echo 'Usage: termux-ragent [--wake-lock]'; exit 0 ;;
+  *) echo 'Usage: termux-ragent [--wake-lock]' >&2; exit 2 ;;
+esac
+[ "$#" -eq 0 ] || { echo 'Usage: termux-ragent [--wake-lock]' >&2; exit 2; }
+[[ "$DISTRO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo 'Invalid RAGENT_PROOT_DISTRO' >&2; exit 1; }
+[[ "$USER_NAME" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo 'Invalid RAGENT_PROOT_USER' >&2; exit 1; }
+if [ "${PREFIX:-}" != /data/data/com.termux/files/usr ] || ! command -v proot-distro >/dev/null 2>&1; then
+  echo 'Run this command in Termux with proot-distro installed.' >&2
+  exit 1
+fi
+if [ "$WAKE_LOCK" = 1 ]; then
+  if ! command -v termux-wake-lock >/dev/null 2>&1 || ! termux-wake-lock; then
+    echo 'Could not request the Termux wake lock; Ragent was not started.' >&2
+    exit 1
+  fi
+  echo 'Requested the Termux wake lock. It is not released automatically.'
+  echo 'Afterwards, release it manually with termux-wake-unlock only if no other work needs it.'
+fi
+echo 'Starting Ragent in an interactive Ubuntu session. Keep Termux visible; exiting this session can stop Ragent.'
+echo 'Android background availability is not guaranteed. Wake lock is optional and does not prevent all freezing.'
+exec proot-distro login "$DISTRO" --shared-tmp --user "$USER_NAME" -- /bin/bash -lc \
+  'export PATH="$HOME/.local/bin:$PATH"; ragent start || exit $?; exec /bin/bash -l'

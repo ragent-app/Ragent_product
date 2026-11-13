@@ -4,6 +4,7 @@ import com.andysagent.agentoc.core.datastore.ClientConfigStore
 import com.andysagent.agentoc.core.datastore.StoredInstance
 import com.andysagent.agentoc.core.network.ApiRequest
 import com.andysagent.agentoc.core.network.OkHttpAgentoCTransport
+import com.andysagent.agentoc.core.network.AgentoCTransport
 import com.andysagent.agentoc.core.protocol.AgentocProtocol
 import com.andysagent.agentoc.core.protocol.CreateDeviceChallengeRequest
 import com.andysagent.agentoc.core.protocol.CreateDeviceChallengeResponse
@@ -148,6 +149,10 @@ class PairingAuthenticator(
         // with a fresh signature renewal; this branch publishes no local token
         // or directory changes and does not consume a UI's pending join.
         renewExistingDeviceId: String? = null,
+        /** A previously identity-verified local transport; caller retains its lifetime. */
+        localTransport: AgentoCTransport? = null,
+        expectedInstanceId: String? = null,
+        persistDirectory: Boolean = true,
     ): PairingResult {
         require(targetEndpoint.startsWith("http://") || targetEndpoint.startsWith("https://")) {
             "Account join endpoint is invalid"
@@ -157,10 +162,11 @@ class PairingAuthenticator(
         val authorizer = accountJoinAuthorizer
             ?: error("Account join authorization is unavailable")
         val endpoint = targetEndpoint.trimEnd('/')
-        val transport = OkHttpAgentoCTransport({ endpoint }, { null })
+        require((localTransport == null) == (expectedInstanceId == null)) { "Local transport requires a fixed instance identity" }
+        val transport = localTransport ?: OkHttpAgentoCTransport({ endpoint }, { null })
         try {
             val fingerprint = devicePublicKeyFingerprint(identity.publicKeyEncoded())
-            val pending = configStore?.pendingAccountJoin?.first()?.takeIf {
+            val pending = if (localTransport != null) null else configStore?.pendingAccountJoin?.first()?.takeIf {
                 renewExistingDeviceId == null && it.endpoint == endpoint
                     && isTargetDeviceId(it.deviceId)
                     && it.devicePublicKeyFingerprint == fingerprint
@@ -183,7 +189,8 @@ class PairingAuthenticator(
                 require(renewExistingDeviceId == null || created.deviceId == renewExistingDeviceId) { "Renewal changed the device enrollment" }
                 require(created.devicePublicKeyFingerprint == fingerprint) { "Account join device key fingerprint mismatch" }
                 val requestId = UUID.randomUUID().toString()
-                writeGuard.persist(created.instanceId) { if (renewExistingDeviceId == null) configStore?.savePendingAccountJoin(com.andysagent.agentoc.core.datastore.PendingAccountJoin(
+                require(expectedInstanceId == null || created.instanceId == expectedInstanceId) { "Account intent target differs from the local instance" }
+                writeGuard.persist(created.instanceId) { if (renewExistingDeviceId == null && localTransport == null) configStore?.savePendingAccountJoin(com.andysagent.agentoc.core.datastore.PendingAccountJoin(
                     endpoint = endpoint,
                     intentId = created.intentId,
                     instanceId = created.instanceId,
@@ -212,8 +219,9 @@ class PairingAuthenticator(
                 )
             }
             val requestId = pending?.requestId
-                ?: (if (renewExistingDeviceId == null) configStore?.pendingAccountJoin?.first()?.requestId else null)
+                ?: (if (renewExistingDeviceId == null && localTransport == null) configStore?.pendingAccountJoin?.first()?.requestId else null)
                 ?: UUID.randomUUID().toString()
+            require(expectedInstanceId == null || intent.instanceId == expectedInstanceId) { "Account intent target differs from the local instance" }
             val signedMessage = com.andysagent.agentoc.core.protocol.buildAccountJoinIntentMessage(
                 instanceId = intent.instanceId,
                 intentId = intent.intentId,
@@ -263,7 +271,7 @@ class PairingAuthenticator(
             writeGuard.persist(intent.instanceId) {
               if (renewExistingDeviceId == null) {
                 credentialStore.write(intent.instanceId, token, credential.expiresAt, credential.scope)
-                configStore?.save(
+                if (persistDirectory) configStore?.save(
                     StoredInstance(
                         endpoint = endpoint,
                         instanceId = intent.instanceId,
@@ -272,7 +280,7 @@ class PairingAuthenticator(
                     ),
                     select = selectTarget,
                 )
-                configStore?.clearPendingAccountJoin()
+                if (localTransport == null) configStore?.clearPendingAccountJoin()
               }
             }
             return PairingResult(
@@ -284,7 +292,7 @@ class PairingAuthenticator(
                 credentialScope = credential.scope,
             )
         } finally {
-            transport.close()
+            if (localTransport == null) transport.close()
         }
     }
 

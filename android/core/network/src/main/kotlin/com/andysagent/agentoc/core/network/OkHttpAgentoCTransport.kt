@@ -93,6 +93,10 @@ class OkHttpAgentoCTransport(
     private val requireVerifiedCarrier: Boolean = false,
     private val credentialRejectionHandler: CredentialRejectionHandler? = null,
     private val onCarrierUnavailable: ((P2PSession?) -> Unit)? = null,
+    private val allowRelativeStreaming: Boolean = false,
+    private val onDirectSocketReconnect: (() -> Unit)? = null,
+    private val onDirectSocketUnavailable: (() -> Unit)? = null,
+    private val requestAdmission: ((ApiRequest) -> Boolean)? = null,
 ) : AgentoCTransport {
     private val invalidationEvents = MutableSharedFlow<InvalidationHint>(extraBufferCapacity = 64)
     private val socketScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -148,6 +152,7 @@ class OkHttpAgentoCTransport(
     }
 
     override suspend fun execute(request: ApiRequest): ApiResponse = withContext(Dispatchers.IO) {
+        if (requestAdmission?.invoke(request) == false) throw IOException("Local runtime identity has not been verified")
         val endpoint = endpointProvider().trimEnd('/')
         // Signed asset uploads may target storage outside the AgentoC server.
         // They must use the URL and headers returned by the upload intent;
@@ -155,7 +160,7 @@ class OkHttpAgentoCTransport(
         // session would upload to the wrong origin. Relative API paths remain
         // governed by the server bootstrap -> TURN-first -> P2P upgrade lock.
         val serverRelativeRequest = !request.path.startsWith("http://") && !request.path.startsWith("https://")
-        if (request.bodySource != null && serverRelativeRequest) {
+        if (request.bodySource != null && serverRelativeRequest && (!allowRelativeStreaming || requireVerifiedCarrier)) {
             throw ApiException(0, "STREAMING_BODY_REQUIRES_HTTP", "Streaming uploads require a direct HTTP destination", retryable = false)
         }
         if (serverRelativeRequest) {
@@ -431,6 +436,7 @@ class OkHttpAgentoCTransport(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
                 if (webSocket !== this@OkHttpAgentoCTransport.webSocket) return
                 if (response != null && requiresAuthentication(response)) {
+                    onDirectSocketUnavailable?.invoke()
                     socketScope.launch {
                         requireAuthentication(attemptedCredential,
                             stillCurrent = { webSocket === this@OkHttpAgentoCTransport.webSocket },
@@ -499,12 +505,16 @@ class OkHttpAgentoCTransport(
 
     private fun scheduleReconnect(endpoint: String) {
         if (closeRequested || reconnectJob?.isActive == true) return
+        onDirectSocketUnavailable?.invoke()
         mutableConnectionState.value = RuntimeConnectionState.Reconnecting
         val delayMs = minOf(30_000L, 1_000L shl reconnectAttempt.coerceAtMost(5))
         reconnectAttempt += 1
         reconnectJob = socketScope.launch {
             delay(delayMs)
-            if (!closeRequested) openInvalidationSocket(endpoint)
+            if (!closeRequested) {
+                if (onDirectSocketReconnect != null) onDirectSocketReconnect.invoke()
+                else openInvalidationSocket(endpoint)
+            }
         }
     }
 

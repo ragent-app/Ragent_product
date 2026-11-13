@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { isProotRuntime, isDirectProotRequest, authenticateProotRequest } from './lib/proot-local-pairing.mjs';
+import { prootRemoteAccountActive, readProotAccountLink, subscribeProotAccountSignOut } from './lib/proot-account-link-state.mjs';
+import { handleProotAccountLinkRequest } from './chat/proot-account-link-routes.mjs';
+import { loadOrCreateInstanceIdentity as loadProotIdentity } from './lib/instance-identity.mjs';
 import { join } from 'path';
 import { readFile as readFileAsync, rename, writeFile } from 'fs/promises';
 
@@ -133,8 +137,16 @@ const STARTUP_RECOVERY_DELAY_ENV = 'AGENTOC_STARTUP_RECOVERY_DELAY_MS';
 const STALE_APPROVAL_BACKFILL_ENV = 'AGENTOC_STALE_APPROVAL_BACKFILL';
 const P2P_HOST_RECOVERY_ENV = 'AGENTOC_P2P_HOST_RECOVERY';
 
+function captureRemoteGeneration() {
+  if (!isProotRuntime) return null;
+  try { const link = readProotAccountLink(); return link.state === 'active' ? link.generation : -1; } catch { return -1; }
+}
+function remoteGenerationCurrent(generation) {
+  return !isProotRuntime || (generation >= 0 && captureRemoteGeneration() === generation);
+}
+
 function scheduleRendezvousPoll(delayMs = rendezvousPollDelayMs) {
-  if (shuttingDown) return;
+  if (shuttingDown || (isProotRuntime && !prootRemoteAccountActive())) return;
   if (rendezvousPollTimer) clearTimeout(rendezvousPollTimer);
   rendezvousPollTimer = setTimeout(() => {
     rendezvousPollTimer = null;
@@ -144,14 +156,24 @@ function scheduleRendezvousPoll(delayMs = rendezvousPollDelayMs) {
 }
 
 async function runRendezvousPoll() {
-  if (shuttingDown || rendezvousPollBusy) return;
+  if (shuttingDown || rendezvousPollBusy || (isProotRuntime && !prootRemoteAccountActive())) return;
   rendezvousPollBusy = true;
+  const generation = captureRemoteGeneration();
+  const authorizationGuard = () => remoteGenerationCurrent(generation);
   try {
     const { pollOwnerAccountRendezvous } = await import('./lib/owner-account-auth.mjs');
     const result = await pollOwnerAccountRendezvous({
-      buildBootstrap: buildDeviceConnectionBootstrapContract,
-      startP2PHost: ({ deviceId, p2p, bootstrap, iceServers, expiresAt }) => p2pHostRegistry.startP2PHostForDevice(deviceId, {
+      buildBootstrap: async (...args) => {
+        if (!authorizationGuard()) throw new Error('Local account association inactive');
+        const result = await buildDeviceConnectionBootstrapContract(...args);
+        if (!authorizationGuard()) throw new Error('Local account association inactive');
+        return result;
+      },
+      startP2PHost: ({ deviceId, p2p, bootstrap, iceServers, expiresAt }) => {
+        if (!authorizationGuard()) throw new Error('Local account association inactive');
+        return p2pHostRegistry.startP2PHostForDevice(deviceId, {
         p2pAccess: p2p,
+        authorizationGuard,
         signalingUrl: P2P_SIGNALING_URL,
         localBaseUrl: `http://127.0.0.1:${CHAT_PORT}`,
         iceServers,
@@ -162,13 +184,15 @@ async function runRendezvousPoll() {
         commitHandoff: commitRequestedTurnHandoff,
         releaseHandoff: releaseRequestedTurnHandoff,
         refreshHost: async (refreshDeviceId) => {
+          if (!authorizationGuard()) throw new Error('Local account association inactive');
           const bootstrap = await buildDeviceConnectionBootstrapContract({ deviceId: refreshDeviceId });
+          if (!authorizationGuard()) throw new Error('Local account association inactive');
           return {
             iceServers: bootstrap?.turn?.iceServers || [],
             expiresAt: bootstrap?.turn?.expiresAt,
           };
         },
-      }),
+      }); },
     });
     rendezvousPollDelayMs = nextRendezvousPollDelayMs({ result });
   } catch (error) {
@@ -180,7 +204,7 @@ async function runRendezvousPoll() {
     rendezvousPollDelayMs = nextRendezvousPollDelayMs({ error, currentDelayMs: rendezvousPollDelayMs });
   } finally {
     rendezvousPollBusy = false;
-    scheduleRendezvousPoll();
+    if (authorizationGuard()) scheduleRendezvousPoll();
   }
 }
 
@@ -210,20 +234,34 @@ async function commitRequestedTurnHandoff(deviceId, connectionId) {
 
 let accountHostsRecovery = null;
 async function restoreAccountP2PHosts() {
+  if (isProotRuntime && !prootRemoteAccountActive()) return;
   if (accountHostsRecovery) return accountHostsRecovery;
-  const run = restoreMissingAccountP2PHosts(); accountHostsRecovery = run;
+  const run = restoreMissingAccountP2PHosts(captureRemoteGeneration()); accountHostsRecovery = run;
   try { return await run; } finally { if (accountHostsRecovery === run) accountHostsRecovery = null; }
 }
-async function restoreMissingAccountP2PHosts() {
-  if (shuttingDown) return;
+async function restoreMissingAccountP2PHosts(generation) {
+  const authorizationGuard = () => remoteGenerationCurrent(generation);
+  if (shuttingDown || !authorizationGuard()) return;
   const trusted = await listTrustedDevices();
+  if (!authorizationGuard()) return;
   const running = new Set(p2pHostRegistry.p2pHostDeviceIds());
   const missing = (trusted?.devices || []).filter(device => !running.has(device.id));
   const result = await p2pHostRegistry.restoreP2PHostsForDevices(missing, {
     signalingUrl: P2P_SIGNALING_URL,
     localBaseUrl: `http://127.0.0.1:${CHAT_PORT}`,
-    getP2PAccess: getTrustedDeviceP2PAccess,
-    getBootstrap: buildDeviceConnectionBootstrapContract,
+    authorizationGuard,
+    getP2PAccess: async deviceId => {
+      if (!authorizationGuard()) throw new Error('Local account association inactive');
+      const access = await getTrustedDeviceP2PAccess(deviceId);
+      if (!authorizationGuard()) throw new Error('Local account association inactive');
+      return access;
+    },
+    getBootstrap: async options => {
+      if (!authorizationGuard()) throw new Error('Local account association inactive');
+      const bootstrap = await buildDeviceConnectionBootstrapContract(options);
+      if (!authorizationGuard()) throw new Error('Local account association inactive');
+      return bootstrap;
+    },
     prepareHandoff: prepareRequestedTurnHandoff,
     commitHandoff: commitRequestedTurnHandoff,
     releaseHandoff: releaseRequestedTurnHandoff,
@@ -241,7 +279,7 @@ const authorityCarriers = createBindingAuthorityCarrierLifecycle({
   subscribe: bindingAuthorityRuntime.subscribeBindingAuthority, closeClients: closeInvalidBindingClients,
   stopDevice: p2pHostRegistry.stopP2PHost,
   stopHosts: () => shuttingDown ? Promise.resolve() : p2pHostRegistry.stopAllP2PHosts(), restoreHosts: restoreAccountP2PHosts,
-  shouldRestore: () => !shuttingDown && authorityListenerReady
+  shouldRestore: () => (!isProotRuntime || prootRemoteAccountActive()) && !shuttingDown && authorityListenerReady
     && isEnvToggleEnabled(process.env[P2P_HOST_RECOVERY_ENV], { defaultValue: true }),
   onError: error => console.warn(`[binding-authority] carrier recovery failed: ${error?.code || 'unavailable'}`),
 });
@@ -260,7 +298,7 @@ await tools.ensureCodexAvailableAsync();
 // Also repair/publish the local instance's canonical endpoint in the central
 // Accounts directory. This heals bindings created before endpoint publication
 // existed, without requiring the owner to unbind and bind again.
-await import('./lib/owner-account-auth.mjs').then(async ({ recoverOwnerAuthPollers, publishOwnerAccountEndpoint }) => {
+if (!isProotRuntime || prootRemoteAccountActive()) await import('./lib/owner-account-auth.mjs').then(async ({ recoverOwnerAuthPollers, publishOwnerAccountEndpoint }) => {
   const count = await recoverOwnerAuthPollers();
   if (count > 0) console.log(`[owner-auth-poll] resumed ${count} transaction(s)`);
   // Endpoint repair must not make the local control plane depend on the
@@ -581,7 +619,7 @@ async function handleCliSocketAuth(req, res) {
     return;
   }
   let sessionToken;
-  try { sessionToken = await issueSession({ role: 'owner' }); }
+  try { sessionToken = await issueSession({ role: 'owner', ...(isProotRuntime ? { authMethod: 'proot_cli' } : {}) }); }
   catch {
     res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ code: 'AUTH_SESSION_STORE_UNAVAILABLE' }));
@@ -600,7 +638,49 @@ async function handleCliSocketAuth(req, res) {
   res.end(JSON.stringify({ ok: true }));
 }
 
-function handleHttpRequest(req, res) {
+let prootLinkEffects = Promise.resolve();
+function onProotAccountLinkChange(result) {
+  const effect = prootLinkEffects.catch(() => {}).then(async () => {
+    const current = readProotAccountLink();
+    if (result.state === 'active') {
+      if (current.generation !== result.generation || current.state !== result.state) return;
+      await bindingAuthorityRuntime.startBindingAuthorityMonitor();
+      if (!remoteGenerationCurrent(current.generation)) return;
+      const { publishOwnerAccountIdentity } = await import('./lib/owner-account-auth.mjs');
+      if (!remoteGenerationCurrent(current.generation)) return;
+      void publishOwnerAccountIdentity().catch(error => console.warn(`[owner-auth-identity] publication failed: ${error?.message || error}`));
+      scheduleRendezvousPoll(0);
+      void restoreAccountP2PHosts().catch(() => {});
+      return;
+    }
+    if (rendezvousPollTimer) { clearTimeout(rendezvousPollTimer); rendezvousPollTimer = null; }
+    bindingAuthorityRuntime.pauseBindingAuthorityMonitor();
+    bindingAuthorityRuntime.invalidateLocalBindingAuthority();
+    closeInvalidBindingClients();
+    await p2pHostRegistry.stopAllP2PHosts();
+  });
+  prootLinkEffects = effect;
+  return effect;
+}
+if (isProotRuntime) subscribeProotAccountSignOut(result => { void onProotAccountLinkChange(result).catch(() => {}); });
+
+function handleHttpRequest(req, res, fromCliSocket = false) {
+  if (isProotRuntime && !fromCliSocket && !isDirectProotRequest(req)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' }); res.end('{"error":"Forbidden"}'); return;
+  }
+  if (isProotRuntime && ['/api/local/account-link','/api/local/account-link/logout'].includes(req.url)) {
+    void handleProotAccountLinkRequest(req, res, { onChange: onProotAccountLinkChange });
+    return;
+  }
+  if (isProotRuntime && req.method === 'GET' && req.url === '/api/local/identity') {
+    void (async () => {
+      if (!(await authenticateProotRequest(req))) { res.writeHead(401); res.end(); return; }
+      const identity = await loadProotIdentity();
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ instanceId: identity.instanceId }));
+    })().catch(() => { if (!res.headersSent) res.writeHead(503); res.end(); });
+    return;
+  }
   if (shuttingDown) {
     res.writeHead(503, { 'Content-Type': 'text/plain', 'Retry-After': '1' });
     res.end('Service shutting down');
@@ -681,8 +761,14 @@ function handleHttpRequest(req, res) {
 const server = http.createServer(handleHttpRequest);
 const cliSocketServer = http.createServer((req, res) => {
   req.isLocalSocket = true;
-  handleHttpRequest(req, res);
+  handleHttpRequest(req, res, true);
 });
+if (isProotRuntime && !prootRemoteAccountActive()) {
+  // An explicit login may have been interrupted while its Accounts transaction
+  // was pending. Its persisted starting generation still fences completion.
+  const { recoverOwnerAuthPollers } = await import('./lib/owner-account-auth.mjs');
+  await recoverOwnerAuthPollers();
+}
 server.requestTimeout = 30000;
 server.headersTimeout = 10000;
 server.keepAliveTimeout = 5000;
@@ -1019,22 +1105,25 @@ server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
   memoryRegistry.startSampler();
   listenersReadyAtMs = Date.now();
   authorityListenerReady = true;
-  void bindingAuthorityRuntime.startBindingAuthorityMonitor();
-  void import('./chat/temporary-pairing-runtime.mjs').then(({ startTemporaryPairingPoller }) => startTemporaryPairingPoller({
-    onError: (code) => console.warn(`[temporary-pairing] ${code}`),
-  })).then((stop) => {
-    if (shuttingDown) stop(); else stopTemporaryPairingPoller = stop;
-  }).catch((error) => console.warn(`[temporary-pairing] ${/^temporary_[a-z0-9_]{1,65}$/.test(error?.code || '') ? error.code : 'temporary_host_unavailable'}`));
+  if (!isProotRuntime || prootRemoteAccountActive()) {
+    void bindingAuthorityRuntime.startBindingAuthorityMonitor();
+    void import('./chat/temporary-pairing-runtime.mjs').then(({ startTemporaryPairingPoller }) => startTemporaryPairingPoller({
+      onError: (code) => console.warn(`[temporary-pairing] ${code}`),
+    })).then((stop) => {
+      if (shuttingDown) stop(); else stopTemporaryPairingPoller = stop;
+    }).catch((error) => console.warn(`[temporary-pairing] ${/^temporary_[a-z0-9_]{1,65}$/.test(error?.code || '') ? error.code : 'temporary_host_unavailable'}`));
+    void import('./chat/temporary-control-runtime.mjs').then(({ startTemporaryControlPoller }) => startTemporaryControlPoller({
+      onError: (code) => console.warn(`[temporary-control] ${code}`),
+    })).then((stop) => {
+      if (shuttingDown) stop(); else stopTemporaryControlPoller = stop;
+    }).catch((error) => console.warn(`[temporary-control] ${/^temporary_[a-z0-9_]{1,65}$/.test(error?.code || '') ? error.code : 'temporary_control_unavailable'}`));
+  }
   void import('./chat/account-pairing-service.mjs').then(({ startAccountPairingPoller }) => startAccountPairingPoller({
     onError: (error) => console.warn('[account-pairing] automatic handoff unavailable', /^account_pairing_[a-z_]+$/.test(error?.code || '') ? error.code : 'account_pairing_unavailable'),
   })).then((stop) => {
     if (shuttingDown) stop(); else stopAccountPairingPoller = stop;
   }).catch(() => console.warn('[account-pairing] deferred poller start failed'));
-  void import('./chat/temporary-control-runtime.mjs').then(({ startTemporaryControlPoller }) => startTemporaryControlPoller({
-    onError: (code) => console.warn(`[temporary-control] ${code}`),
-  })).then((stop) => {
-    if (shuttingDown) stop(); else stopTemporaryControlPoller = stop;
-  }).catch((error) => console.warn(`[temporary-control] ${/^temporary_[a-z0-9_]{1,65}$/.test(error?.code || '') ? error.code : 'temporary_control_unavailable'}`));
+
   void systemdNotify.systemdNotify({ ready: true, status: 'AgentoC chat server listening' });
   systemdWatchdog = systemdNotify.startSystemdWatchdog({
     status: () => `AgentoC chat server healthy; uptime=${Math.round(process.uptime())}s`,
@@ -1042,7 +1131,7 @@ server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
   // P2P Host lifecycle is per trusted account device, not per invitation.
   // Start it after the control-plane listener is reachable so a slow signaling
   // provider cannot delay systemd readiness or the first HTTP request.
-  if (isEnvToggleEnabled(process.env[P2P_HOST_RECOVERY_ENV], { defaultValue: true })) {
+  if ((!isProotRuntime || prootRemoteAccountActive()) && isEnvToggleEnabled(process.env[P2P_HOST_RECOVERY_ENV], { defaultValue: true })) {
     void restoreAccountP2PHosts().catch((error) => {
       console.warn(`[p2p-host] account device recovery failed: ${error?.message || error}`);
     });

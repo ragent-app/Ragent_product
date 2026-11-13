@@ -86,6 +86,8 @@ data class LinkedComputer(
     val lastSeenAt: Long? = null,
     /** Whether this target may be reconnected in the background automatically. */
     val autoConnect: Boolean = true,
+    /** A local runtime has its own credential and never uses account carriers. */
+    val localRuntime: Boolean = false,
 ) {
     init { require(instanceId.isNotBlank()) { "Computer instance id must not be blank" } }
 
@@ -141,6 +143,8 @@ class ClientConfigStore private constructor(private val context: Context, privat
     private val accountDeviceIdPattern = Regex("^adev_[A-Za-z0-9_-]{4,156}$")
 
     private object Keys {
+        val localComputers = stringPreferencesKey("local_runtime_computers_v1")
+        val localSelected = stringPreferencesKey("local_runtime_selected_v1")
         val endpoint = stringPreferencesKey("endpoint")
         val instanceId = stringPreferencesKey("instance_id")
         val label = stringPreferencesKey("label")
@@ -187,7 +191,8 @@ class ClientConfigStore private constructor(private val context: Context, privat
     val directoryAccountId: Flow<String?> = preferences.data.map { AccountDirectoryProfiles.owner(it, it[Keys.accountSessionAccountId]) }
     val accountProfileState: Flow<AccountProfileDirectoryState> = preferences.data.map { prefs ->
         AccountProfileDirectoryState(AccountDirectoryProfiles.owner(prefs, prefs[Keys.accountSessionAccountId]),
-            prefs[Keys.accountSessionAccountId], readDirectory(prefs).computers.map { it.instanceId })
+            prefs[Keys.accountSessionAccountId], decodeComputers(prefs[Keys.linkedComputers]).filterNot { it.localRuntime }
+                .map { it.instanceId }.ifEmpty { listOfNotNull(prefs[Keys.instanceId]?.takeIf { it.isNotBlank() }) })
     }
     val accountProfileTransition: Flow<AccountProfileTransition?> = preferences.data.map { prefs ->
         prefs[Keys.accountProfileTransition]?.let { raw ->
@@ -331,6 +336,7 @@ class ClientConfigStore private constructor(private val context: Context, privat
     }
 
     suspend fun upsertComputer(value: LinkedComputer, select: Boolean = false) {
+        require(!value.localRuntime) { "Local runtimes require the local directory" }
         preferences.edit { prefs ->
             val existing = decodeComputers(prefs[Keys.linkedComputers]).toMutableList()
             if (existing.isEmpty()) {
@@ -350,6 +356,15 @@ class ClientConfigStore private constructor(private val context: Context, privat
         }
     }
 
+    suspend fun upsertLocalComputer(value: LinkedComputer) {
+        require(value.localRuntime)
+        preferences.edit { prefs ->
+            val existing = decodeComputers(prefs[Keys.localComputers]).filterNot { it.instanceId == value.instanceId }
+            prefs[Keys.localComputers] = json.encodeToString(existing + value)
+            prefs[Keys.localSelected] = value.instanceId
+        }
+    }
+
     /** Refresh display metadata only; an Accounts listing cannot pair or select a computer. */
     suspend fun refreshComputerLabels(labels: Map<String, String>) {
         preferences.edit { prefs ->
@@ -363,8 +378,17 @@ class ClientConfigStore private constructor(private val context: Context, privat
 
     suspend fun selectTarget(instanceId: String) {
         preferences.edit { prefs ->
+            val local = decodeComputers(prefs[Keys.localComputers])
+            if (local.any { it.instanceId == instanceId }) {
+                prefs[Keys.localSelected] = instanceId
+                prefs[Keys.localComputers] = json.encodeToString(local.map {
+                    if (it.instanceId == instanceId) it.copy(lastSelectedAt = System.currentTimeMillis(), autoConnect = true) else it
+                })
+                return@edit
+            }
             val computers = decodeComputers(prefs[Keys.linkedComputers])
             require(computers.any { it.instanceId == instanceId }) { "Unknown computer target: $instanceId" }
+            prefs.remove(Keys.localSelected)
             prefs[Keys.activeTargetId] = instanceId
             prefs[Keys.linkedComputers] = json.encodeToString<List<LinkedComputer>>(computers.map {
                 if (it.instanceId == instanceId) it.copy(
@@ -441,8 +465,26 @@ class ClientConfigStore private constructor(private val context: Context, privat
 
     suspend fun removeTarget(instanceId: String) {
         preferences.edit { prefs ->
+            val local = decodeComputers(prefs[Keys.localComputers])
+            if (local.any { it.instanceId == instanceId }) {
+                val remainingLocal = local.filterNot { it.instanceId == instanceId }
+                if (remainingLocal.isEmpty()) prefs.remove(Keys.localComputers)
+                else prefs[Keys.localComputers] = json.encodeToString(remainingLocal)
+                if (prefs[Keys.localSelected] == instanceId) prefs.remove(Keys.localSelected)
+                val remembered = ShareRuntimeCodec.decode(prefs[Keys.shareRuntimeSelections]) - instanceId
+                if (remembered.isEmpty()) prefs.remove(Keys.shareRuntimeSelections)
+                else prefs[Keys.shareRuntimeSelections] = ShareRuntimeCodec.encode(remembered)
+                val prefix = chatRuntimeCacheKey(instanceId, null)
+                val chatCache = ShareRuntimeCodec.decode(prefs[Keys.chatRuntimeCache]).filterKeys { !it.startsWith(prefix) }
+                if (chatCache.isEmpty()) prefs.remove(Keys.chatRuntimeCache)
+                else prefs[Keys.chatRuntimeCache] = ShareRuntimeCodec.encode(chatCache)
+                val routing = AppApiRoutingCodec.decode(prefs[Keys.appApiRouting])
+                if (routing.readable && instanceId in routing.aliasesByTarget)
+                    prefs[Keys.appApiRouting] = AppApiRoutingCodec.encode(routing.copy(aliasesByTarget = routing.aliasesByTarget - instanceId))
+                return@edit
+            }
             prefs[Keys.automaticAccountRestoreSuppressed] = true
-            val remaining = readDirectory(prefs).computers.filterNot { it.instanceId == instanceId }
+            val remaining = readDirectory(prefs).computers.filterNot { it.localRuntime || it.instanceId == instanceId }
             val remembered = ShareRuntimeCodec.decode(prefs[Keys.shareRuntimeSelections]) - instanceId
             if (remembered.isEmpty()) prefs.remove(Keys.shareRuntimeSelections)
             else prefs[Keys.shareRuntimeSelections] = ShareRuntimeCodec.encode(remembered)
@@ -640,13 +682,16 @@ class ClientConfigStore private constructor(private val context: Context, privat
     }
 
     private fun readDirectory(prefs: androidx.datastore.preferences.core.Preferences): ComputerDirectory {
-        val computers = decodeComputers(prefs[Keys.linkedComputers]).ifEmpty {
+        val remote = decodeComputers(prefs[Keys.linkedComputers]).filterNot { it.localRuntime }.ifEmpty {
             val endpoint = prefs[Keys.endpoint].orEmpty()
             val id = prefs[Keys.instanceId].orEmpty()
             if (endpoint.isBlank() || id.isBlank()) emptyList()
             else listOf(LinkedComputer(id, endpoint, prefs[Keys.label].orEmpty()))
         }
-        val selected = prefs[Keys.activeTargetId]?.takeIf { id -> computers.any { it.instanceId == id } }
+        val local = decodeComputers(prefs[Keys.localComputers]).filter { it.localRuntime }
+        val computers = local + remote.filterNot { r -> local.any { it.instanceId == r.instanceId } }
+        val selected = prefs[Keys.localSelected]?.takeIf { id -> local.any { it.instanceId == id } }
+            ?: prefs[Keys.activeTargetId]?.takeIf { id -> computers.any { it.instanceId == id } }
             ?: computers.firstOrNull()?.instanceId
         return ComputerDirectory(computers, selected, AppApiRoutingCodec.decode(prefs[Keys.appApiRouting]),
             ShareRuntimeCodec.decode(prefs[Keys.shareRuntimeSelections]).filterKeys { id -> computers.any { it.instanceId == id } },

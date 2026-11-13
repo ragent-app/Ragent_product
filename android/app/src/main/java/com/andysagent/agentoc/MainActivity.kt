@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.layout.Row
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
@@ -449,6 +450,159 @@ class MainActivity : ComponentActivity() {
             }
             AgentocTheme(darkTheme = isDark, themeVariant = appTheme.value) {
                 val runtimeScope = rememberCoroutineScope()
+                var localSetupOpen by remember { mutableStateOf(false) }
+                val localLinkDirectory by app.runtime.configStore.directory.collectAsStateWithLifecycle(initialValue = com.andysagent.agentoc.core.datastore.ComputerDirectory())
+                val localLinkStates by app.runtime.localAccountLinkStates.collectAsStateWithLifecycle()
+                var localLinkReview by remember { mutableStateOf<LocalAccountLinkStatus?>(null) }
+                var localUnbindReview by remember { mutableStateOf<LocalAccountLinkStatus?>(null) }
+                var localLinkPhoneAccount by remember { mutableStateOf<String?>(null) }
+                var localLinkBusy by remember { mutableStateOf(false) }
+                val localLinkNotice = when {
+                    localLinkStates.values.any { it == "conflict" } -> "conflict"
+                    localLinkStates.values.any { it == "pending" } -> "pending"
+                    else -> null
+                }
+                var localLinkNoticeDismissed by remember(localLinkNotice) { mutableStateOf(false) }
+                if (localLinkNotice != null && !localLinkNoticeDismissed) AlertDialog(
+                    onDismissRequest = { localLinkNoticeDismissed = true },
+                    title = { Text(getString(R.string.local_link_title)) },
+                    text = { Text(getString(if (localLinkNotice == "conflict") R.string.local_link_conflict else R.string.local_link_pending)) },
+                    confirmButton = { TextButton(onClick = { localLinkNoticeDismissed = true }) { Text(getString(android.R.string.ok)) } },
+                )
+                var addComputerChoiceOpen by remember { mutableStateOf(false) }
+                var addComputerFromPairing by remember { mutableStateOf(false) }
+                var addRemoteRequested by remember { mutableStateOf(false) }
+                var localImportCompleted by remember { mutableStateOf(false) }
+                val localFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri != null) runtimeScope.launch {
+                        try {
+                            val text = withContext(Dispatchers.IO) {
+                                val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                                    val output = java.io.ByteArrayOutputStream()
+                                    val buffer = ByteArray(1024)
+                                    while (output.size() <= 4096) {
+                                        val count = input.read(buffer, 0, minOf(buffer.size, 4097 - output.size()))
+                                        if (count < 0) break
+                                        output.write(buffer, 0, count)
+                                    }
+                                    require(output.size() <= 4096)
+                                    output.toString("UTF-8")
+                                } ?: error("Unable to read file")
+                                bytes
+                            }
+                            app.runtime.importLocalPairing(text)
+                            localSetupOpen = false
+                            localImportCompleted = true
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: com.andysagent.agentoc.core.network.ApiException) {
+                            requestError = getString(if (error.statusCode == 401 || error.statusCode == 403) R.string.local_runtime_expired else R.string.local_runtime_import_failed)
+                        }
+                        catch (_: Exception) { requestError = getString(R.string.local_runtime_import_failed) }
+                    }
+                }
+                if (localSetupOpen) AlertDialog(
+                    onDismissRequest = { localSetupOpen = false },
+                    title = { Text(getString(R.string.local_runtime_title)) },
+                    text = {
+                        Column {
+                            Text(getString(R.string.local_runtime_instructions))
+                            localLinkDirectory.computers.firstOrNull { it.localRuntime }?.let { target ->
+                                val state = localLinkStates[target.instanceId]
+                                if (state != null) Text(getString(when (state) {
+                                    "active" -> R.string.local_link_active
+                                    "signed_out" -> R.string.local_link_signed_out
+                                    "conflict" -> R.string.local_link_conflict
+                                    else -> R.string.local_link_pending
+                                }))
+                                if (state == "signed_out") TextButton(enabled = !localLinkBusy, onClick = {
+                                    localLinkBusy = true
+                                    runtimeScope.launch {
+                                        try {
+                                            val url = app.runtime.beginLocalInstanceAccountLogin(target.instanceId)
+                                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                        } catch (cancelled: CancellationException) { throw cancelled }
+                                        catch (_: Exception) { requestError = getString(R.string.local_link_failed) }
+                                        finally { localLinkBusy = false }
+                                    }
+                                }) { Text(getString(R.string.local_link_instance_sign_in)) }
+                                TextButton(enabled = !localLinkBusy, onClick = {
+                                    localLinkBusy = true
+                                    runtimeScope.launch {
+                                        try {
+                                            val status = app.runtime.localAccountLinkStatus(target.instanceId)
+                                            localLinkPhoneAccount = app.runtime.configStore.accountSession.first()?.accountId
+                                            localLinkReview = status
+                                            localSetupOpen = false
+                                        } catch (cancelled: CancellationException) { throw cancelled }
+                                        catch (_: Exception) { requestError = getString(R.string.local_link_unavailable) }
+                                        finally { localLinkBusy = false }
+                                    }
+                                }) { Text(getString(R.string.local_link_entry)) }
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { localFilePicker.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text(getString(R.string.local_runtime_import)) } },
+                    dismissButton = { TextButton(onClick = { localSetupOpen = false }) { Text(getString(android.R.string.cancel)) } },
+                )
+                localLinkReview?.let { review ->
+                    val phone = localLinkPhoneAccount
+                    val owner = review.ownerAccountId
+                    val conflict = (review.ownerAuthority == "unavailable" && !(review.state == "signed_out" && phone != null && phone == review.accountId)) ||
+                        (phone != null && owner != null && phone != owner) || (phone == null && owner == null)
+                    fun masked(value: String?): String = value?.let { if (it.length > 16) it.take(9) + "…" + it.takeLast(6) else it }
+                        ?: getString(R.string.local_link_none)
+                    AlertDialog(
+                        onDismissRequest = { if (!localLinkBusy) localLinkReview = null },
+                        title = { Text(getString(R.string.local_link_title)) },
+                        text = { Text(getString(R.string.local_link_review, masked(review.instanceId), masked(phone), masked(owner)) +
+                            "\n\n" + getString(if (conflict) R.string.local_link_cannot_confirm else R.string.local_link_consent)) },
+                        confirmButton = { TextButton(enabled = !conflict && !localLinkBusy, onClick = {
+                            localLinkBusy = true
+                            runtimeScope.launch {
+                                try {
+                                    app.runtime.authorizeLocalAccountLink(review.instanceId, phone, owner)
+                                    localLinkReview = null
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { requestError = getString(R.string.local_link_failed) }
+                                finally { localLinkBusy = false }
+                            }
+                        }) { Text(getString(R.string.local_link_confirm)) } },
+                        dismissButton = { Row {
+                            if (phone != null && owner != null && phone != owner) TextButton(enabled = !localLinkBusy, onClick = {
+                                localUnbindReview = review
+                                localLinkReview = null
+                            }) { Text(getString(R.string.local_link_unbind_action)) }
+                            TextButton(enabled = !localLinkBusy, onClick = { localLinkReview = null }) { Text(getString(android.R.string.cancel)) }
+                        } },
+                    )
+                }
+                localUnbindReview?.let { review ->
+                    val phone = localLinkPhoneAccount
+                    fun masked(value: String): String = if (value.length > 16) value.take(9) + "…" + value.takeLast(6) else value
+                    AlertDialog(
+                        onDismissRequest = { if (!localLinkBusy) localUnbindReview = null },
+                        title = { Text(getString(R.string.local_link_unbind_title)) },
+                        text = { Text(getString(R.string.local_link_unbind_review, masked(review.ownerAccountId.orEmpty()), masked(phone.orEmpty()))) },
+                        confirmButton = { TextButton(enabled = !localLinkBusy && phone != null && review.ownerAccountId != null, onClick = {
+                            localLinkBusy = true
+                            runtimeScope.launch {
+                                try {
+                                    app.runtime.unbindLocalAccount(review.instanceId, requireNotNull(review.ownerAccountId), requireNotNull(phone))
+                                    localUnbindReview = null
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { requestError = getString(R.string.local_link_unbind_pending) }
+                                finally { localLinkBusy = false }
+                            }
+                        }) { Text(getString(R.string.local_link_unbind_confirm)) } },
+                        dismissButton = { TextButton(enabled = !localLinkBusy, onClick = { localUnbindReview = null }) { Text(getString(android.R.string.cancel)) } },
+                    )
+                }
+                if (addComputerChoiceOpen) AlertDialog(
+                    onDismissRequest = { addComputerChoiceOpen = false },
+                    title = { Text(getString(R.string.local_runtime_add_title)) },
+                    confirmButton = { TextButton(onClick = { addComputerChoiceOpen = false; localSetupOpen = true }) { Text(getString(R.string.local_runtime_title)) } },
+                    dismissButton = { TextButton(onClick = { addComputerChoiceOpen = false; addRemoteRequested = true }) { Text(getString(R.string.local_runtime_remote)) } },
+                )
                 val voiceController = remember(app) { LocalVoiceController(app, runtimeScope) }
                 LaunchedEffect(appLanguage, appLanguageLoaded) {
                     if (!appLanguageLoaded) return@LaunchedEffect
@@ -940,6 +1094,19 @@ class MainActivity : ComponentActivity() {
                 val projectState by projects.state.collectAsStateWithLifecycle()
                 val computerState by computers.state.collectAsStateWithLifecycle()
                 val pairingOnboardingState by pairingOnboarding.state.collectAsStateWithLifecycle()
+                LaunchedEffect(addRemoteRequested) {
+                    if (addRemoteRequested) {
+                        if (addComputerFromPairing) pairingOnboarding.onEvent(pairingEntryEvent(accounts.state.value.hasVerifiedAccountSession))
+                        else pendingPairingScanFromWelcome = false
+                        addRemoteRequested = false
+                    }
+                }
+                LaunchedEffect(localImportCompleted) {
+                    if (localImportCompleted) {
+                        pairingOnboarding.onEvent(PairingOnboardingEvent.Dismiss)
+                        localImportCompleted = false
+                    }
+                }
                 val appendVoiceTranscript: (String) -> Unit = { transcript ->
                     val currentDraft = chat.state.value.composerText
                     val separator = if (currentDraft.isBlank() || currentDraft.last().isWhitespace()) "" else " "
@@ -1034,6 +1201,19 @@ class MainActivity : ComponentActivity() {
                 val localStartup by localStartupFlow.collectAsStateWithLifecycle(initialValue = null)
                 val computerDirectory = localStartup?.first ?: com.andysagent.agentoc.core.datastore.ComputerDirectory()
                 val currentWorkbenchTargetId = temporaryControlTargetId ?: computerDirectory.activeTargetId
+                var localErrorAcknowledged by remember(currentWorkbenchTargetId) { mutableStateOf(false) }
+                LaunchedEffect(runtimeConnectionState, currentWorkbenchTargetId) {
+                    if (runtimeConnectionState == RuntimeConnectionState.Connected) localErrorAcknowledged = false
+                }
+                if (computerDirectory.activeTarget?.localRuntime == true &&
+                    runtimeConnectionState in setOf(RuntimeConnectionState.Error, RuntimeConnectionState.AuthenticationRequired) && !localErrorAcknowledged) {
+                    AlertDialog(
+                        onDismissRequest = { localErrorAcknowledged = true },
+                        title = { Text(getString(R.string.local_runtime_title)) },
+                        text = { Text(getString(if (runtimeConnectionState == RuntimeConnectionState.AuthenticationRequired) R.string.local_runtime_expired else R.string.local_runtime_offline)) },
+                        confirmButton = { TextButton(onClick = { localErrorAcknowledged = true }) { Text(getString(android.R.string.ok)) } },
+                    )
+                }
                 LaunchedEffect(targetTurnQuotaFailures, currentWorkbenchTargetId) {
                     val failedTargetId = currentWorkbenchTargetId ?: return@LaunchedEffect
                     val failure = targetTurnQuotaFailures[failedTargetId] ?: return@LaunchedEffect
@@ -1117,7 +1297,8 @@ class MainActivity : ComponentActivity() {
                         entryResolved = !startupOnboardingLoading,
                     )
                 }
-                val showWelcomeAtLaunch = shouldShowWelcomeAtLaunch(
+                val hasLocalRuntime = computerDirectory.computers.any { it.localRuntime }
+                val showWelcomeAtLaunch = !hasLocalRuntime && shouldShowWelcomeAtLaunch(
                     startupOnboardingLoading = startupOnboardingLoading,
                     hasPendingGoogleBinding = pendingGoogleBinding != null,
                     welcomeSuppressedBySignIn = welcomeSuppressedBySignIn,
@@ -1141,7 +1322,7 @@ class MainActivity : ComponentActivity() {
                     pairingOnboardingState.open,
                 ) {
                     if (heroDemo || startupOnboardingLoading) return@LaunchedEffect
-                    if (pendingGoogleBinding != null) {
+                    if (pendingGoogleBinding != null && !hasLocalRuntime) {
                         pairingOnboarding.onEvent(PairingOnboardingEvent.Open)
                     } else if (showWelcomeAtLaunch) {
                         pairingOnboarding.onEvent(PairingOnboardingEvent.OpenWelcome)
@@ -1243,7 +1424,10 @@ class MainActivity : ComponentActivity() {
                     accountTargets = accountRemoteTargets,
                     localTargets = localRemoteTargets,
                     sessionComputers = computerState.computers,
-                )
+                ).let { targets ->
+                    val localIds = computerDirectory.computers.filter { it.localRuntime }.mapTo(hashSetOf()) { it.instanceId }
+                    localRemoteTargets.filter { it.instanceId in localIds } + targets.filterNot { it.instanceId in localIds }
+                }
                 val state = WorkbenchUiState(
                     destination = shellState.destination,
                     settingsPage = shellState.settingsPage,
@@ -1565,6 +1749,7 @@ class MainActivity : ComponentActivity() {
                     onSetUpComputer = {
                         pendingPairingScanFromWelcome = true
                     },
+                    onLocalRuntime = { localSetupOpen = true },
                     onOpenSubscription = {
                         subscriptionInfoOpen = true
                     },
@@ -1575,7 +1760,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onEvent = eventHandler@{ event ->
                         when (event) {
-                            WorkbenchEvent.OpenComputerSetup -> pendingPairingScanFromWelcome = false
+                            WorkbenchEvent.OpenComputerSetup -> { addComputerFromPairing = false; addComputerChoiceOpen = true }
                             is WorkbenchEvent.SelectDestination -> shell.onEvent(AppShellEvent.SelectDestination(event.destination, keepChat = tabletDualPane))
                             is WorkbenchEvent.OpenSettingsPage -> {
                                 shell.onEvent(AppShellEvent.OpenSettingsPage(event.page, keepChat = tabletDualPane))
@@ -1883,9 +2068,7 @@ class MainActivity : ComponentActivity() {
                                 projects.onEvent(ProjectsEvent.DismissError)
                                 computers.onEvent(ComputersEvent.DismissError)
                             }
-                            WorkbenchEvent.OpenPairing -> pairingOnboarding.onEvent(
-                                pairingEntryEvent(accounts.state.value.hasVerifiedAccountSession),
-                            )
+                            WorkbenchEvent.OpenPairing -> { addComputerFromPairing = true; addComputerChoiceOpen = true }
                             WorkbenchEvent.DismissPairing -> pairingOnboarding.onEvent(PairingOnboardingEvent.Dismiss)
                             is WorkbenchEvent.PairingUriChanged -> pairingOnboarding.onEvent(PairingOnboardingEvent.PairingUriReceived(event.value))
                             is WorkbenchEvent.PairingDeviceNameChanged -> computers.onEvent(ComputersEvent.PairingDeviceNameChanged(event.value))
@@ -2338,11 +2521,11 @@ internal fun shouldUseExistingComputerTarget(
     target: LinkedComputer?,
     accountDirectoryMode: Boolean = false,
 ): Boolean =
-    !accountDirectoryMode
+    target?.localRuntime == true || (!accountDirectoryMode
         && target != null
         && target.endpoint.isNotBlank()
         && runCatching { RemoteTargetAccessState.valueOf(target.accessState) }
-            .getOrDefault(RemoteTargetAccessState.Unavailable) != RemoteTargetAccessState.NeedsPairing
+            .getOrDefault(RemoteTargetAccessState.Unavailable) != RemoteTargetAccessState.NeedsPairing)
 
 /** Presence is independent of online state, rendezvous keys, or local phone pairing. */
 internal fun accountComputerLookupFor(devices: List<AccountDirectoryDevice>): AccountComputerLookup =

@@ -1,5 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="local_runtime_title">This device</string>
+    <string name="local_runtime_add_title">Add an instance</string>
+    <string name="local_runtime_remote">Remote computer</string>
+    <string name="local_runtime_import">Import pairing file</string>
+    <string name="local_runtime_instructions">Install the Ragent environment in Termux, run ragent start, and export its pairing file to a location available to Android. Import that file here. The file contains a secret; keep it private.</string>
+    <string name="local_runtime_import_failed">Could not connect to the local runtime. Start it in Termux with ragent start and check that the pairing file is current and belongs to this device.</string>
+    <string name="local_runtime_offline">The local runtime is unavailable. Open Termux and run ragent start. If it is already running, import its current pairing file again.</string>
+    <string name="local_runtime_expired">The local pairing credential is no longer accepted. Export and import a current pairing file from Termux.</string>
+    <string name="local_link_entry">Link this device and local account</string>
+    <string name="local_link_title">Link accounts on this device</string>
+    <string name="local_link_review">Instance: %1$s\nPhone account: %2$s\nInstance owner: %3$s</string>
+    <string name="local_link_none">Not signed in or not bound</string>
+    <string name="local_link_consent">Link these accounts? After authorization, account sign-in and sign-out can be coordinated between this phone and this instance. Each keeps its own credentials. Local pairing and other devices are retained.</string>
+    <string name="local_link_cannot_confirm">Account authority is unavailable, neither side is signed in, or the accounts differ. Resolve this before linking; no account will be replaced automatically.</string>
+    <string name="local_link_confirm">Authorize link</string>
+    <string name="local_link_unavailable">Local account link is unavailable. Start the local runtime and check your network.</string>
+    <string name="local_link_failed">Account link could not be confirmed. Check both account identities and try again.</string>
+    <string name="local_link_active">Same-device account link is active.</string>
+    <string name="local_link_signed_out">The linked account is signed out.</string>
+    <string name="local_link_conflict">Account link needs your attention; no account was replaced.</string>
+    <string name="local_link_pending">Account link or sign-out is waiting to synchronize.</string>
+    <string name="local_link_instance_sign_in">Sign in to the local instance</string>
+    <string name="local_link_unbind_action">Resolve account conflict</string>
+    <string name="local_link_unbind_title">Remove the instance owner?</string>
+    <string name="local_link_unbind_review">Instance owner: %1$s\nPhone account: %2$s\n\nRemoving the old owner revokes this instance’s existing device grants and history. Other devices remain signed in to their accounts. The local pairing and offline workspace remain. After confirmation, authorize the new account separately.</string>
+    <string name="local_link_unbind_confirm">Remove old owner</string>
+    <string name="local_link_unbind_pending">The removal could not be confirmed. It remains pending; check the connection and try again.</string>
     <string name="share_route_system_target">Ragent · Share</string>
     <string name="windows_broker_restart_service">Restart the approved Windows test service</string>
     <string name="windows_broker_start_service">Start Windows service</string>

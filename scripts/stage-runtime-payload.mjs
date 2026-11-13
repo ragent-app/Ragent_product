@@ -19,7 +19,7 @@ const windowsBuildInputs = [
 
 // Read immutable blobs from a single commit without a second checkout. The
 // batch protocol keeps binary assets exact and bounds memory to one blob.
-function createGitBlobReader(source) {
+export function createGitBlobReader(source) {
   const child = spawn('git', ['--no-optional-locks', 'cat-file', '--batch'], { cwd: source, windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdin.on('error', () => {});

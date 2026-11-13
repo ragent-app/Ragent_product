@@ -267,7 +267,10 @@ export async function handleGoogleOwnerAuthRoutes({ req, res, pathname, authSess
     }
     try {
       const started = await startOwnerAccountAuth({
-        purpose: 'bind',
+        // A linked PRoot instance must reauthenticate its existing owner;
+        // a fresh bind could change cloud ownership before a local conflict check.
+        purpose: process.env.AGENTOC_RUNTIME_MODE === 'proot' && await getOwnerAccountBinding() ? 'login' : 'bind',
+        localLinkAuthorization: process.env.AGENTOC_RUNTIME_MODE === 'proot',
         alias,
         publicBaseUrl: resolveOwnerAuthPublicBaseUrl(req),
       });

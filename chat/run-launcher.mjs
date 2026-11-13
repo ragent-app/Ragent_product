@@ -35,6 +35,7 @@ const SYSTEMD_MAIN_PID_RETRIES = 8;
 const SYSTEMD_MAIN_PID_RETRY_DELAY_MS = 50;
 
 export const DETACHED_RUNNER_PROCESS_LAUNCH_MODE = 'detached-process';
+export const PROOT_RUNNER_PROCESS_LAUNCH_MODE = 'proot-process';
 export const DETACHED_RUNNER_SYSTEMD_LAUNCH_MODE = 'systemd-transient-service';
 export const DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE = 'runner-supervisor';
 // The lifecycle broker owns one transient systemd unit per Run.  Keeping this
@@ -544,9 +545,10 @@ export function buildDetachedRunnerEnvironment({
     AGENTOC_RUN_SPOOL_DIR: CHAT_RUNS_DIR,
     AGENTOC_USER_SHELL_ENV_B64: serializeUserShellEnvSnapshot(),
     AGENTOC_RUNNER_LAUNCH_MODE: launchMode || DETACHED_RUNNER_PROCESS_LAUNCH_MODE,
+    ...(launchMode === PROOT_RUNNER_PROCESS_LAUNCH_MODE ? { AGENTOC_RUNTIME_MODE: 'proot' } : {}),
     ...(unitName ? { AGENTOC_RUNNER_UNIT_NAME: unitName } : {}),
     ...(unitScope ? { AGENTOC_RUNNER_UNIT_SCOPE: unitScope } : {}),
-    ...(sandboxMode ? {} : { IS_SANDBOX: '1' }),
+    ...(launchMode === PROOT_RUNNER_PROCESS_LAUNCH_MODE ? { IS_SANDBOX: '0' } : (sandboxMode ? {} : { IS_SANDBOX: '1' })),
   }));
   return env;
 }
@@ -556,10 +558,12 @@ function normalizeSupervisorSocketPath(value) {
 }
 
 export function shouldUseRunnerSupervisor({ env = process.env } = {}) {
+  if (env?.AGENTOC_RUNTIME_MODE === 'proot') return false;
   return !!normalizeSupervisorSocketPath(env?.AGENTOC_RUNNER_SUPERVISOR_SOCKET);
 }
 
 export function shouldUseRunnerLifecycleBroker({ env = process.env } = {}) {
+  if (env?.AGENTOC_RUNTIME_MODE === 'proot') return false;
   return !!normalizeSupervisorSocketPath(env?.AGENTOC_RUNNER_LIFECYCLE_SOCKET);
 }
 
@@ -932,8 +936,8 @@ export async function spawnDetachedRunnerAsProcess(runId, {
   processExecPath = process.execPath,
   runnerScriptPath = runnerEntry,
   prepareProviderImpl = prepareDetachedRunnerProvider,
+  launchMode = DETACHED_RUNNER_PROCESS_LAUNCH_MODE,
 } = {}) {
-  const launchMode = DETACHED_RUNNER_PROCESS_LAUNCH_MODE;
   const proxyEnv = await resolveRunnerProxyEnvironment();
   const baseEnv = buildDetachedRunnerEnvironment({ launchMode, proxyEnv });
   const prepared = await prepareProviderImpl(runId, { environment: baseEnv });
@@ -945,6 +949,9 @@ export async function spawnDetachedRunnerAsProcess(runId, {
       stdio: 'ignore',
       env,
     });
+    if (launchMode === PROOT_RUNNER_PROCESS_LAUNCH_MODE) {
+      await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+    }
     child.unref?.();
     oauthLockHandedOff = true;
     return {
@@ -1035,6 +1042,9 @@ export function createDetachedRunnerSpawner({
       error.code = 'WINDOWS_RUNNER_BROKER_REQUIRED';
       error.launchDefinitelyNotSubmitted = true;
       throw error;
+    }
+    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+      return spawnDetachedRunnerAsProcess(runId, { spawnImpl, launchMode: PROOT_RUNNER_PROCESS_LAUNCH_MODE });
     }
     const scope = getScopeImpl();
     if (shouldUseSystemdDetachedRunner({ scope })) {
