@@ -6,6 +6,7 @@
 // convergence loop, not a remote execution path.
 
 import { CONFIG_DIR } from '../lib/config.mjs';
+import { stopProviderPeerSessions } from '../lib/provider-runtime/peer-transport.mjs';
 import {
   createCredentialMutationLedger,
   createNativeProviderRegistry,
@@ -105,5 +106,6 @@ export function stopProviderAccountSync() {
   schedulerTimer = null;
   schedulerStarted = false;
   consecutiveFailures = 0;
-  void import('../lib/provider-runtime/peer-transport.mjs').then(({ stopProviderPeerSessions }) => stopProviderPeerSessions());
+  if (process.env.AGENTOC_RUNTIME_MODE === 'proot') stopProviderPeerSessions();
+  else void import('../lib/provider-runtime/peer-transport.mjs').then(({ stopProviderPeerSessions }) => stopProviderPeerSessions());
 }

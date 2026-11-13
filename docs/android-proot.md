@@ -1,5 +1,7 @@
 # Ragent on Android via Ubuntu PRoot (preview)
 
+Development status, 2026-11-14: the account-link and remote-access code is implemented, but the final APK and PRoot archive have not yet been produced. Android core/auth and workbench compilation passed; final account-link, background operation and remote-device acceptance remain unverified. Builds are paused for insufficient G: disk space after automatic review rejected cleanup without a more specific reason. The Android build input is commit `b6f8b681b68176383b2ff7b875cfd2f109dd535a`; the final PRoot input must also include the subsequent provider-sync fix, with the exact source and builder commits recorded alongside the resulting archive.
+
 This is a separate Linux ARM64 service archive for Ubuntu 24.04 running in Termux with proot-distro. It is not a Termux-native binary or a new APK. The first intended target is the SM-X730 with Android 17. The regular Android app provides the optional local connection. It contains no desktop, GNOME, X11 or Electron and uses neither root nor systemd, D-Bus or a graphical environment. The archive includes Node 24.12.0, npm/corepack, Codex 0.167.2 and Claude Code 2.1.310; Ubuntu supplies standard shell utilities. The bundled harnesses and actual tasks have not been validated across Android PRoot devices. It does not replace the existing Ubuntu workspace or GNOME installation.
 
 In a trusted Ubuntu 24.04 ARM64 PRoot session, download the release archive and its SHA-256 file from the same trusted release, verify it before extraction, then install:

@@ -650,6 +650,9 @@ function onProotAccountLinkChange(result) {
       if (!remoteGenerationCurrent(current.generation)) return;
       void publishOwnerAccountIdentity().catch(error => console.warn(`[owner-auth-identity] publication failed: ${error?.message || error}`));
       scheduleRendezvousPoll(0);
+      const { startProviderAccountSync } = await import('./chat/provider-account-sync-service.mjs');
+      if (!remoteGenerationCurrent(current.generation)) return;
+      startProviderAccountSync();
       void restoreAccountP2PHosts().catch(() => {});
       return;
     }
@@ -657,6 +660,8 @@ function onProotAccountLinkChange(result) {
     bindingAuthorityRuntime.pauseBindingAuthorityMonitor();
     bindingAuthorityRuntime.invalidateLocalBindingAuthority();
     closeInvalidBindingClients();
+    const { stopProviderAccountSync } = await import('./chat/provider-account-sync-service.mjs');
+    stopProviderAccountSync();
     await p2pHostRegistry.stopAllP2PHosts();
   });
   prootLinkEffects = effect;
@@ -847,7 +852,7 @@ async function startDeferredBackgroundServices() {
   // their code and storage work off the cold listener path; a slow archive,
   // organization repair, or mail poll must not delay the first HTTP/WS check.
   await import('./chat/provider-account-sync-service.mjs')
-    .then(({ startProviderAccountSync }) => startProviderAccountSync())
+    .then(({ startProviderAccountSync }) => { if (!isProotRuntime || prootRemoteAccountActive()) startProviderAccountSync(); })
     .catch((error) => console.warn(`[provider-sync] deferred start failed: ${error?.message || error}`));
   try {
     const forkRecovery = await sessionManager.recoverSharedForkHistories?.();

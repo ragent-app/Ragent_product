@@ -4,6 +4,7 @@
 // that exact peer and decrypts a signed envelope.
 
 import { readBody } from '../lib/utils.mjs';
+import { captureProotSyncGeneration, assertProotSyncGeneration } from '../lib/proot-account-link-state.mjs';
 import { CONFIG_DIR } from '../lib/config.mjs';
 import { compareSyncVersions } from '../lib/account-sync.mjs';
 import {
@@ -56,6 +57,8 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
     || req.method !== 'POST') return false;
 
   try {
+    const generation = captureProotSyncGeneration();
+    const check = () => assertProotSyncGeneration(generation);
     const identity = await loadOrCreateInstanceIdentity();
     const binding = await getOwnerAccountBinding();
     if (!binding?.accountId) {
@@ -63,17 +66,21 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
       return true;
     }
     const payload = await readJsonBody(req);
+    check();
     const authorization = await authorizePeer(payload?.sourceProof, identity.instanceId);
+    check();
     if (authorization.accountId !== binding.accountId) {
       writeJson(res, 403, { error: 'Provider sync account mismatch.', code: 'provider_sync_account_mismatch' });
       return true;
     }
     const keyStore = createProviderSyncKeyStore({ configDir: CONFIG_DIR });
     const syncKey = await keyStore.getKeyPair();
+    check();
 
     if (pathname === '/api/provider-sync/handshake') {
       const targetProof = await createProviderSyncPeerProof({ targetInstanceId: authorization.sourceInstanceId,
         requestId: payload.sourceProof.requestId, syncKeyFingerprint: syncKey.fingerprint });
+      check();
       writeJson(res, 200, {
         protocolVersion: 1,
         targetInstanceId: identity.instanceId,
@@ -105,6 +112,7 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
         credentialLedger: createCredentialMutationLedger({ configDir: CONFIG_DIR }),
         sourceInstanceId: identity.instanceId,
       });
+      check();
       const wants = new Map((Array.isArray(payload?.wants) ? payload.wants : []).map((entry) => [
         `${entry?.scope || 'provider'}:${entry?.key || ''}`,
         entry,
@@ -140,6 +148,7 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
       });
       const targetProof = await createProviderSyncPeerProof({ targetInstanceId: authorization.sourceInstanceId,
         requestId: payload.sourceProof.requestId, syncKeyFingerprint: providerSyncKeyFingerprint(requesterSyncPublicKey) });
+      check();
       writeJson(res, 200, {
         ok: true,
         protocolVersion: snapshot.protocolVersion,
@@ -196,7 +205,9 @@ export async function handleProviderSyncRoutes({ req, res, pathname, writeJson }
       credentialLedger: createCredentialMutationLedger({ configDir: CONFIG_DIR }),
       localInstanceId: identity.instanceId,
       incoming: snapshot.records,
+      assertAuthorization: check,
     });
+    check();
     writeJson(res, 200, {
       ok: true,
       protocolVersion: snapshot.protocolVersion,

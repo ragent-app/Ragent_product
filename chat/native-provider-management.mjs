@@ -1033,11 +1033,14 @@ export async function applyAccountSyncRecords({
   localInstanceId = 'local',
   incoming = [],
   configDir = CONFIG_DIR,
+  assertAuthorization = () => {},
 } = {}) {
+  assertAuthorization();
   if (!ledger?.readState || !ledger?.writeState) {
     throw new Error('Account sync ledger is required');
   }
   const state = await ledger.readState();
+  assertAuthorization();
   assertProviderSyncHistory(state);
   const mutationLedger = credentialLedger || createCredentialMutationLedger({ configDir });
   const machineLocalIncoming = incoming.filter((record) => isMachineLocalOAuthSyncRecord(record));
@@ -1056,8 +1059,10 @@ export async function applyAccountSyncRecords({
   const credentialMerged = await mutationLedger.merge(credentialIncoming, {
     apply: async ({ merged }) => {
       for (const record of merged.acceptedRecords) {
+        assertAuthorization();
         appliedCredentialChanges.push(await applyCredentialSyncRecord({ registry, secretStore, record }));
       }
+      assertAuthorization();
     },
     rollback: async () => {
       for (const applied of appliedCredentialChanges.reverse()) await applied?.rollback?.();
@@ -1071,6 +1076,7 @@ export async function applyAccountSyncRecords({
     sourceInstanceId: localInstanceId,
     configDir,
   });
+  assertAuthorization();
   const known = new Map();
   for (const record of [...state.records, ...localRecords].filter((entry) => (entry?.scope || 'provider') !== 'provider-credential')) {
     const normalized = normalizeAccountSyncRecord(record, localInstanceId);
@@ -1081,6 +1087,7 @@ export async function applyAccountSyncRecords({
   const merged = mergeAccountSyncRecords([...known.values()], regularIncoming, localInstanceId);
   const acceptedRecords = merged.acceptedRecords;
   for (const record of acceptedRecords) {
+    assertAuthorization();
     if (record.scope === 'provider') {
       const accountKey = trim(record.auth?.accountMetadata?.accountKey);
       const dedicatedCredential = credentialIncoming.find((credential) => (
@@ -1112,6 +1119,7 @@ export async function applyAccountSyncRecords({
       }
     }
   }
+  assertAuthorization();
   await ledger.writeState({
     ...state,
     records: merged.records,
