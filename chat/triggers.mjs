@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'crypto';
 
 import { CHAT_TRIGGERS_FILE } from '../lib/config.mjs';
-import { appendEvent, findLatestAssistantMessage } from './history.mjs';
+import { appendEvent, findLatestAssistantMessage, loadMeta } from './history.mjs';
 import { statusEvent } from './normalizer.mjs';
 import { createSerialTaskQueue, readJson, statOrNull, writeJsonAtomic } from './fs-utils.mjs';
 import { getSession, getSessionReplyPublication, submitHttpMessage } from './session-manager.mjs';
-import { findRunByRequest, getRun } from './runs.mjs';
+import { findRunByRequest, getRun, getRunManifest } from './runs.mjs';
 
 const DEFAULT_TRIGGER_POLL_MS = 15000;
 const MAX_TRIGGER_IDLE_DELAY_MS = 15 * 60 * 1000;
@@ -411,15 +411,16 @@ async function recordDeliveryResult(triggerId, requestId, change) {
     const results = [...(trigger.deliveryResults || [])];
     const index = results.findIndex((entry) => entry.requestId === requestId);
     const previous = index < 0 ? {} : results[index];
+    if (previous.deliveryState === 'published' && change.deliveryState && change.deliveryState !== 'published') return;
     if (index >= 0 && Object.entries(change).every(([key, value]) => previous[key] === value)) return;
     const next = { ...previous, ...change, requestId, responseId: requestId, updatedAt: nowIso() };
-    if (change.deliveryState && change.deliveryState !== 'pending' && previous.deliveryState === 'pending') next.terminalAt = nowIso();
+    if (change.deliveryState && change.deliveryState !== 'pending' && previous.deliveryState === 'pending') next.terminalAt = previous.terminalAt || nowIso();
     if (change.lastError) {
       next.errors = [...(previous.errors || []), { at: nowIso(), message: change.lastError, attempt: change.attempts || 0 }].slice(-MAX_DELIVERY_ATTEMPTS);
     }
     if (index < 0) {
       if (results.length >= MAX_DELIVERY_RESULTS) {
-        const removable = results.findIndex((entry) => entry.deliveryState !== 'pending');
+        const removable = results.findIndex((entry) => entry.deliveryState !== 'pending' && entry.tracking !== true);
         if (removable < 0) throw Object.assign(new Error('Trigger delivery result capacity is exhausted'), { code: 'TRIGGER_RESULT_CAPACITY' });
         results.splice(removable, 1);
       }
@@ -430,20 +431,91 @@ async function recordDeliveryResult(triggerId, requestId, change) {
   });
 }
 
-async function reconcileDeliveryResult(trigger, result) {
-  if (!result?.requestId || result.deliveryState !== 'pending') return;
-  const run = result.runId ? await getRun(result.runId) : await findRunByRequest(trigger.sessionId, result.requestId);
+async function reconcileDeliveryResult(trigger, result, historyCache) {
+  if (!result?.requestId || (result.deliveryState !== 'pending' && result.tracking !== true)) return;
+  const rootRun = result.runId ? await getRun(result.runId) : await findRunByRequest(trigger.sessionId, result.requestId);
+  let chain;
+  try {
+    chain = await resolveFailoverRuns(trigger.sessionId, rootRun);
+  } catch (error) {
+    if (error?.code !== 'TRIGGER_FAILOVER_CHAIN_INVALID') throw error;
+    await recordDeliveryResult(trigger.id, result.requestId, {
+      deliveryState: 'unknown', tracking: false, lastError: error.message, errorCode: error.code,
+    });
+    return;
+  }
+  const run = chain.at(-1) || null;
   const state = trimString(run?.state).toLowerCase();
-  const publication = !run || ['completed', 'failed', 'cancelled'].includes(state)
-    ? await getSessionReplyPublication(trigger.sessionId, result.responseId || result.requestId) : null;
-  const published = await hasPublishedReply(trigger.sessionId, result.requestId, run, publication);
+  const publication = run?.replyPublication || (!run ? await getSessionReplyPublication(trigger.sessionId, result.responseId || result.requestId) : null);
+  let published = false;
+  let fingerprint = '';
+  if (chain.some((entry) => ['completed', 'failed', 'cancelled'].includes(trimString(entry.state).toLowerCase()))) {
+    let history;
+    try {
+      if (!historyCache.has(trigger.sessionId)) {
+        historyCache.set(trigger.sessionId, loadMeta(trigger.sessionId, { strict: true }));
+      }
+      history = await historyCache.get(trigger.sessionId);
+      if (!Number.isSafeInteger(history?.latestSeq) || history.latestSeq < 0) throw new Error('History sequence is unavailable');
+    } catch (error) {
+      await recordDeliveryResult(trigger.id, result.requestId, {
+        deliveryState: 'unknown', tracking: true, observationError: trimString(error?.message) || 'History metadata is unavailable',
+      });
+      return;
+    }
+    fingerprint = createHash('sha256').update(JSON.stringify({
+      latestSeq: history.latestSeq, historyRevision: history.historyRevision,
+      runs: chain.map((entry) => [entry.id, entry.state, entry.updatedAt, entry.finalizedAt, entry.supersededByRunId, entry.replyPublication]),
+    })).digest('hex');
+    if (fingerprint !== result.observationFingerprint) {
+      for (const entry of chain) {
+        const observed = await hasPublishedReply(trigger.sessionId, entry.requestId, entry, null);
+        if (observed === null) { published = null; break; }
+        if (observed) { published = true; break; }
+      }
+    }
+  }
   const terminalFailure = ['failed', 'cancelled'].includes(state);
+  const publicationState = trimString(publication?.state).toLowerCase();
+  const settled = Boolean(run?.finalizedAt && ['ready', 'failed', 'cancelled'].includes(publicationState));
   await recordDeliveryResult(trigger.id, result.requestId, {
-    runId: trimString(run?.id) || result.runId || '',
+    runId: trimString(rootRun?.id) || result.runId || '',
+    effectiveRunId: trimString(run?.id) || '',
     executionState: state || (publication?.state === 'queued' ? 'queued' : 'unknown'),
-    deliveryState: published ? 'published' : published === null || terminalFailure || state === 'completed' ? 'unknown' : 'pending',
+    deliveryState: resolveDeliveryState(run, publication, published),
+    tracking: !published && (published === null || !settled),
+    observationError: published === null ? 'Reply history could not be read' : '',
+    ...(fingerprint && published !== null ? { observationFingerprint: fingerprint } : {}),
     ...(terminalFailure ? { lastError: trimString(run?.failureReason || run?.error?.message || run?.error || publication?.lastError) } : {}),
   });
+}
+
+async function resolveFailoverRuns(sessionId, rootRun) {
+  if (!rootRun || rootRun.sessionId !== sessionId) return [];
+  const seen = new Set([rootRun.id]);
+  const chain = [rootRun];
+  let current = rootRun;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const nextId = trimString(current.supersededByRunId);
+    if (!nextId) return chain;
+    if (seen.has(nextId)) throw Object.assign(new Error('Trigger failover Run chain contains a cycle'), { code: 'TRIGGER_FAILOVER_CHAIN_INVALID' });
+    const child = await getRun(nextId);
+    const manifest = child ? await getRunManifest(nextId) : null;
+    // Ordinary manual regeneration is not a retry of this trigger occurrence.
+    if (!child || child.sessionId !== sessionId || manifest?.sessionId !== sessionId
+        || manifest?.regenerateParentRunId !== current.id || manifest?.options?.providerFailover !== true) return chain;
+    seen.add(nextId);
+    current = child;
+    chain.push(child);
+  }
+  if (trimString(current.supersededByRunId)) throw Object.assign(new Error('Trigger failover Run chain exceeds the limit'), { code: 'TRIGGER_FAILOVER_CHAIN_INVALID' });
+  return chain;
+}
+
+function resolveDeliveryState(run, publication, published) {
+  if (published) return 'published';
+  const state = trimString(run?.state).toLowerCase();
+  return ['completed', 'failed', 'cancelled'].includes(state) ? 'unknown' : 'pending';
 }
 
 async function hasPublishedReply(sessionId, requestId, run, publication) {
@@ -976,7 +1048,7 @@ async function deliverTrigger(trigger, eventContext = null) {
   const publication = await getSessionReplyPublication(session.id, requestId);
   const published = await hasPublishedReply(session.id, requestId, run, publication);
   const runState = trimString(run?.state).toLowerCase();
-  if (['failed', 'cancelled'].includes(runState) && !published) {
+  if (outcome?.duplicate && !priorResult?.acceptedAt && ['failed', 'cancelled'].includes(runState) && !published) {
     const error = new Error(trimString(run?.failureReason || run?.error?.message || run?.error || publication?.lastError) || `Trigger run ${runState}`);
     error.code = published === null ? 'TRIGGER_RESULT_UNCERTAIN' : 'TRIGGER_RUN_TERMINAL';
     error.runId = run.id;
@@ -990,7 +1062,8 @@ async function deliverTrigger(trigger, eventContext = null) {
   await recordDeliveryResult(trigger.id, requestId, {
     acceptedAt: nowIso(), runId: trimString(run?.id),
     executionState: runState || (outcome.queued || publication?.state === 'queued' ? 'queued' : 'unknown'),
-    deliveryState: published ? 'published' : ['completed', 'failed', 'cancelled'].includes(runState) ? 'unknown' : 'pending',
+    deliveryState: resolveDeliveryState(run, publication, published),
+    tracking: !published,
   });
 
   if (!outcome.duplicate) {
@@ -1135,9 +1208,10 @@ export async function processDueTriggersNow() {
   triggerTickPromise = (async () => {
     const nowMs = Date.now();
     const triggers = await loadTriggers();
+    const historyCache = new Map();
     for (const trigger of triggers) {
       for (const result of trigger.deliveryResults || []) {
-        if (result.deliveryState === 'pending') await reconcileDeliveryResult(trigger, result).catch((error) => console.error(`[triggers] result reconciliation failed for ${trigger.id}: ${error.message}`));
+        if (result.deliveryState === 'pending' || result.tracking === true) await reconcileDeliveryResult(trigger, result, historyCache).catch((error) => console.error(`[triggers] result reconciliation failed for ${trigger.id}: ${error.message}`));
       }
     }
     const due = sortTriggers(triggers).filter((trigger) => isDueTrigger(trigger, nowMs));
@@ -1184,7 +1258,7 @@ async function resolveNextTriggerDelayMs() {
   const pollMs = Number.isInteger(triggerSchedulerOptions.pollMs) && triggerSchedulerOptions.pollMs > 0
     ? triggerSchedulerOptions.pollMs
     : MAX_TRIGGER_IDLE_DELAY_MS;
-  if (triggers.some((trigger) => trigger.deliveryResults?.some((result) => result.deliveryState === 'pending'))) {
+  if (triggers.some((trigger) => trigger.deliveryResults?.some((result) => result.deliveryState === 'pending' || result.tracking === true))) {
     future.push(DEFAULT_TRIGGER_POLL_MS);
   }
   if (future.length === 0) return Math.min(MAX_TRIGGER_IDLE_DELAY_MS, pollMs);

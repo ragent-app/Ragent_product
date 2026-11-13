@@ -5369,7 +5369,10 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
     const definitelyNotSubmitted = error?.launchDefinitelyNotSubmitted === true;
     if (definitelyNotSubmitted && !await getRunResult(run.id)) {
       const completedAt = nowIso();
-      const result = { exitCode: 1, signal: null, error: failureReason, completedAt };
+      const errorCode = typeof error?.code === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(error.code)
+        ? error.code : '';
+      const result = { exitCode: 1, signal: null, error: failureReason, completedAt,
+        ...(errorCode ? { errorCode } : {}) };
       let claimed = false;
       await updateRun(run.id, current => {
         if (isTerminalRunState(current.state) || current.cancelRequested === true || hasRegisteredDetachedRunner(current)) return current;
