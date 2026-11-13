@@ -3054,8 +3054,8 @@ async function reviewRunGate(runId, state, approval, gate) {
     const reviewDiagnostics = d && typeof d === 'object' && stops.has(d.stopReason) && d.blockTypes
       && typeof d.blockTypes === 'object' && !Array.isArray(d.blockTypes)
       && Object.entries(d.blockTypes).every(([key, value]) => blocks.has(key) && count(value))
-      && count(d.textBlocks) && count(d.textLength)
-      ? { stopReason: d.stopReason, blockTypes: d.blockTypes, textBlocks: d.textBlocks, textLength: d.textLength } : null;
+      && count(d.textBlocks) && count(d.textLength) && ['bare', 'single_json_fence', 'unsupported'].includes(d.envelope)
+      ? { stopReason: d.stopReason, blockTypes: d.blockTypes, textBlocks: d.textBlocks, textLength: d.textLength, envelope: d.envelope } : null;
     const reviewAudit = { reviewStatus: result.verdict, reviewAdapter: result.adapter || '',
       reviewReasonCode: result.reasonCode || result.reason || '', reviewInitialReasonCode: gate.reasonCode, reviewUsage: result.usage || null, reviewDiagnostics };
     if (result.verdict === 'allow') return { ...gate, ...reviewAudit, decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,

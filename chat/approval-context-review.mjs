@@ -80,14 +80,27 @@ export async function reviewApprovalContext({ run, manifest, request, fetchImpl 
       }
       const textBlocks = blocks.filter(block => block?.type === 'text' && typeof block.text === 'string');
       diagnostics = { stopReason: allowedStops.has(data.stop_reason) ? data.stop_reason : 'unknown',
-        blockTypes, textBlocks: textBlocks.length, textLength: textBlocks.reduce((sum, block) => sum + block.text.length, 0) };
+        blockTypes, textBlocks: textBlocks.length, textLength: textBlocks.reduce((sum, block) => sum + block.text.length, 0),
+        envelope: 'unsupported' };
       if (diagnostics.stopReason === 'max_tokens' || diagnostics.stopReason === 'model_context_window_exceeded')
         return { ...unknown('provider_output_truncated'), adapter: protocol, usage, diagnostics };
       if (typeof content !== 'string' || !content.trim()) return { ...unknown('provider_no_text'), adapter: protocol, usage, diagnostics };
     }
     let result;
-    try { result = JSON.parse(content); }
-    catch { return { ...unknown('provider_invalid_json'), adapter: protocol, usage, diagnostics }; }
+    try {
+      result = JSON.parse(content);
+      if (diagnostics) diagnostics.envelope = 'bare';
+    } catch {
+      // Accept one complete JSON fence only; never extract a substring or
+      // repair incomplete model output.
+      const fence = typeof content === 'string' ? /^\s*```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*\s*$/i.exec(content) : null;
+      if (!fence) return { ...unknown('provider_invalid_json'), adapter: protocol, usage, diagnostics };
+      try { result = JSON.parse(fence[1]); }
+      catch { return { ...unknown('provider_invalid_json'), adapter: protocol, usage, diagnostics }; }
+      if (!result || typeof result !== 'object' || Array.isArray(result))
+        return { ...unknown('provider_invalid_json'), adapter: protocol, usage, diagnostics };
+      if (diagnostics) diagnostics.envelope = 'single_json_fence';
+    }
     if (!result || !['allow', 'ask', 'deny'].includes(result.verdict)
       || typeof result.reasonCode !== 'string' || !/^[a-z0-9_]{1,64}$/.test(result.reasonCode)
       || typeof result.reason !== 'string' || result.reason.length > 300) return { ...unknown('provider_response_invalid'), adapter: protocol, usage, diagnostics };
