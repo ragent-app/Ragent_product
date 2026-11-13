@@ -142,6 +142,7 @@ function normalizeConfig(rawConfig = {}) {
   return {
     enabled: rawConfig.enabled !== false,
     repo: trimString(rawConfig.repo),
+    responsibilityId: trimString(rawConfig.responsibilityId),
     branches,
     events,
     workflows,
@@ -168,6 +169,7 @@ export function buildMonitorArgv(config) {
   if (config.repo) {
     argv.push('--repo', config.repo);
   }
+  if (config.responsibilityId) argv.push('--responsibility-id', config.responsibilityId);
   for (const branch of config.branches || []) {
     argv.push('--branch', branch);
   }

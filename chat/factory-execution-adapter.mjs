@@ -1,4 +1,5 @@
 import { withDatabase, getCollaborationByIdempotencyKey } from './collaboration-store.mjs';
+import { createHash } from 'node:crypto';
 import { getOrganization, getNode } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
 import { getRun, getRunManifest, requestRunCancel } from './runs.mjs';
@@ -7,6 +8,7 @@ import { getFactoryWorkItem, updateFactoryBinding } from './factory-control.mjs'
 import { reserveFactoryBudget, settleFactoryBudget } from './organization-governor.mjs';
 import { sealFactoryCandidate, verifyFactoryCandidate } from './factory-candidates.mjs';
 import { forEachStoredEvent } from './history.mjs';
+import { verifyRemoteFactoryChild, assertRemoteTargetWorkspace, verifyRemoteCapturedBaseline, inspectSourceRemoteBaseline } from './factory-remote-admission.mjs';
 
 function refuse(message, code = 'FACTORY_CONFLICT') {
   throw Object.assign(new Error(message), { code, statusCode: 409 });
@@ -54,9 +56,25 @@ function profileAllows(db, org, node) {
 // Called immediately before the existing outbox sends a Factory task. A lease
 // fences scheduling, while binding, authorization and reservation facts fence
 // the task; none of these facts claim to terminate a previous process.
-export async function assertFactoryExecutionFence(context) {
+export async function assertFactoryExecutionFence(context, { requireWorkspace = false } = {}) {
   const managedSession = context?.managedSessionId && await getSession(context.managedSessionId);
   if (!managedSession || managedSession.tool !== context.runtimeTool) refuse('Factory managed session runtime changed');
+  const { verifyFactoryResponsibilityFence } = await import('./factory-responsibility-admission.mjs');
+  const responsibility = await withDatabase(db => {
+    const item = db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(context?.workItemId,context?.organizationId);
+    return item ? verifyFactoryResponsibilityFence(db,item) : null;
+  });
+  const remoteBefore = await withDatabase(db => {
+    const item=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(context?.workItemId,context?.organizationId);
+    return item ? verifyRemoteFactoryChild(db,item) : null;
+  });
+  if(remoteBefore) await assertRemoteTargetWorkspace(remoteBefore);
+  if (responsibility) {
+    const { verifyCurrentResponsibilityRepository } = await import('./responsibility-repository.mjs');
+    await verifyCurrentResponsibilityRepository(responsibility.repositoryFactId);
+    const { isGithubFailureCurrent } = await import('./github-ci-observer.mjs');
+    if (!await isGithubFailureCurrent(responsibility.event)) refuse('GitHub failure is no longer current');
+  }
   return withDatabase((db) => {
     const item = db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(context?.workItemId, context?.organizationId);
     const binding = db.prepare('SELECT * FROM factory_execution_bindings WHERE dispatch_key=? AND work_item_id=?').get(context?.dispatchKey, context?.workItemId);
@@ -64,6 +82,15 @@ export async function assertFactoryExecutionFence(context) {
     const node = item && db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assignee_node_id, context.organizationId);
     const lease = db.prepare('SELECT * FROM factory_scheduler_leases WHERE organization_id=?').get(context?.organizationId);
     const runtimeIdentity = binding && db.prepare('SELECT * FROM factory_binding_runtime_identity WHERE binding_id=?').get(binding.id);
+    const remote = item && verifyRemoteFactoryChild(db,item);
+    if ((remote?.bindingId||'')!==(remoteBefore?.bindingId||'') || (remote?.operationId||'')!==(remoteBefore?.operationId||'')) refuse('Remote operation binding changed');
+    if (remote && remote.sessionId!==context.managedSessionId) refuse('Remote managed session changed');
+    if (remote && requireWorkspace) verifyRemoteCapturedBaseline(db,remote,context.dispatchKey);
+    const currentResponsibility = item && verifyFactoryResponsibilityFence(db,item);
+    if ((currentResponsibility?.repositoryFactId || '') !== (responsibility?.repositoryFactId || '')
+        || (currentResponsibility?.eventId || '') !== (responsibility?.eventId || '')) refuse('Responsibility event or repository binding changed');
+    if (item && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_reconciliation_failures'").get()
+        && db.prepare("SELECT 1 FROM factory_reconciliation_failures WHERE organization_id=? AND work_item_id=? AND execution_epoch=? AND state='dead_letter'").get(context.organizationId,item.id,item.execution_epoch)) refuse('Factory reconciliation requires explicit recovery');
     if (!item || !binding || !org || !node || !lease || lease.expires_at <= new Date().toISOString()
         || lease.owner_token !== context.leaseOwnerToken || lease.generation !== context.leaseGeneration
         || item.ownership !== 'active' || item.control_state !== 'none' || item.state !== 'claimed'
@@ -157,14 +184,71 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     if (!budgetReservationFor(item.contract)) return { allowed: false, reason: 'budget_reservation_required' };
     return { allowed: true };
   }
-  async function dispatch({ item, binding }, lease) {
+  async function dispatch({ item, binding }, lease, { freshClaim = false } = {}) {
     if (!lease?.ownerToken || !Number.isInteger(lease.generation)) refuse('Current scheduler lease is required');
     const [org, node] = await Promise.all([getOrganization(organizationId), getNode(item.assigneeNodeId)]);
     const session = node && await getSession(node.currentSessionId);
     if (!(await admit(item)).allowed || !session) refuse('Factory admission changed');
     const budgetKey = `factory:${binding.id}`;
-    await reserveFactoryBudget({ organizationId, revision: item.contract.organizationRevision, reservationId: budgetKey,
-      idempotencyKey: budgetKey, delta: { ...budgetReservationFor(item.contract), runs: 1 } });
+    try {
+      await reserveFactoryBudget({ organizationId, revision: item.contract.organizationRevision, reservationId: budgetKey,
+        idempotencyKey: budgetKey, factoryWorkItemId: item.id, delta: { ...budgetReservationFor(item.contract), runs: 1 } });
+    } catch (error) {
+      // Only the invocation immediately following a new claim can establish
+      // that this process has not yet reached Collaboration dispatch.
+      const current = (await getFactoryWorkItem(organizationId, item.id, actor)).item;
+      if (current.state === 'claimed' && current.executionEpoch === binding.executionEpoch) {
+        const base = { organizationId, workItemId: current.id, expectedVersion: current.rowVersion,
+          contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
+          bindingGeneration: binding.bindingGeneration };
+        if (freshClaim) {
+          try {
+            await updateFactoryBinding({ ...base, action: 'fail', payload: { terminalEvidenceRef: `unstarted:${binding.id}` } }, actor, {
+              verifyTerminal: ({ db, binding: saved, payload }) => {
+                const counter = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_budget_counters'").get()
+                  ? db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(organizationId,item.contract.organizationRevision) : null;
+                let reservations; try { reservations = JSON.parse(counter?.reservations_json || '{}'); } catch { return false; }
+                return saved.status === 'intent' && !saved.runId && !saved.collaborationId && !reservations[budgetKey]
+                  && !db.prepare('SELECT 1 FROM collaborations WHERE root_session_id=? AND idempotency_key=?').get(org.rootSessionId,binding.dispatchKey)
+                  && payload.terminalEvidenceRef === `unstarted:${binding.id}`;
+              },
+            });
+          } catch {
+            await updateFactoryBinding({ ...base, action: 'block', payload: { reason: { code: 'budget_reservation_failed', errorCode: text(error?.code) || 'BUDGET_ERROR' } } }, actor);
+          }
+        } else {
+          await updateFactoryBinding({ ...base, action: 'block', payload: { reason: { code: 'budget_reservation_failed', errorCode: text(error?.code) || 'BUDGET_ERROR' } } }, actor);
+        }
+      }
+      throw error;
+    }
+    const remoteConfig=item.source?.parentRemoteOperation ? null : org.policy?.factoryRemoteBindings?.[node.id];
+    if(remoteConfig) {
+      if(process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1' || !remoteConfig.bindingId || !Number.isSafeInteger(remoteConfig.bindingVersion)
+          || !Number.isSafeInteger(remoteConfig.targetRevision)) refuse('Configured remote Factory target is unavailable');
+      const root=await getSession(org.rootSessionId);
+      if(!root?.folder || item.contract.accessMode==='read') refuse('Remote execution requires a scoped writer and project root');
+      const context={organizationId,workItemId:item.id,contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,
+        bindingGeneration:binding.bindingGeneration,dispatchKey:binding.dispatchKey,managedSessionId:node.currentSessionId,
+        organizationRevision:item.contract.organizationRevision,budgetKey,leaseOwnerToken:lease.ownerToken,leaseGeneration:lease.generation,runtimeTool:session.tool};
+      const inspect=async()=>{await assertFactoryExecutionFence(context);return inspectSourceRemoteBaseline(root.folder,item.contract.allowedPaths);};
+      const baseline=await inspect();
+      const {dispatchRemoteFactoryOperation}=await import('./remote-factory-source.mjs');
+      const result=await dispatchRemoteFactoryOperation({organizationId,workItemId:item.id,expectedVersion:item.rowVersion,
+        sourceFactoryBindingId:binding.id,contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,
+        bindingGeneration:binding.bindingGeneration,leaseOwnerToken:lease.ownerToken,leaseGeneration:lease.generation,
+        bindingId:remoteConfig.bindingId,bindingVersion:remoteConfig.bindingVersion,targetRevision:remoteConfig.targetRevision,
+        operationId:`remote_${binding.id}`,requestId:`remote_${binding.id}`,
+        contractDigest:createHash('sha256').update(JSON.stringify(item.contract)).digest('hex'),
+        payload:{contract:item.contract,sourceReservationId:budgetKey,reservedCost:budgetReservationFor(item.contract).cost,
+          sourceBindingId:remoteConfig.bindingId,sourceBindingVersion:remoteConfig.bindingVersion,
+          expectedBaseHead:baseline.baseHead,expectedBaseBranch:baseline.baseBranch,expectedBaselineDigest:baseline.baselineDigest}},actor,{verifyExternal:inspect});
+      const current=(await getFactoryWorkItem(organizationId,item.id,actor)).item;
+      if(current.state==='claimed' && current.executionEpoch===binding.executionEpoch) await updateFactoryBinding({organizationId,workItemId:item.id,
+        expectedVersion:current.rowVersion,contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,
+        action:'block',payload:{reason:{code:'remote_outcome_pending',bindingId:remoteConfig.bindingId,operationId:`remote_${binding.id}`}}},actor);
+      return {remote:true,...result};
+    }
     const detail = (await getFactoryWorkItem(organizationId, item.id, actor)).item;
     const candidateInputs = detail.dependencies.filter((dependency) => dependency.milestone === 'candidate_ready');
     let validationWorkspace = null;
@@ -193,25 +277,88 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       workspacePolicy: 'shared-exclusive', accessMode: paths.length ? 'write' : 'read',
       executionIsolation: node.grant?.executionIsolation || 'shared', allowedAgentIds: [session.templateId],
       allowedRoles: [role], organizationId, organizationNodeId: node.id, organizationBindingGeneration: node.bindingGeneration };
+    const executionObjective = item.contract.triggerEvidence
+      ? `${item.contract.objective}\n\nVerified CI event: ${JSON.stringify(item.contract.triggerEvidence)}` : item.contract.objective;
     const collaboration = await orchestrator.dispatchFactory({ rootSessionId: org.rootSessionId, projectId: org.projectId,
       idempotencyKey: binding.dispatchKey, policy, plan: { version: 1, title: item.contract.objective,
-        tasks: [{ id: item.id, objective: item.contract.objective, agentId: session.templateId, role,
+        tasks: [{ id: item.id, objective: executionObjective, agentId: session.templateId, role,
           acceptance: item.contract.acceptanceCriteria.map((criterion) => text(criterion.description || criterion.id)),
           writablePaths: paths, projectId: org.projectId, managedSessionId: node.currentSessionId,
           accessMode: paths.length ? 'write' : 'read', executionIsolation: node.grant?.executionIsolation || 'shared',
           runtime, retry: { maxAttempts: 1, retryOn: [] } }] } }, context);
     return reconcile(item, collaboration, lease);
   }
-  async function reconcile(item, known = null, lease = null) {
+  async function reconcile(item, known = null, lease = null, { observationOnly = false } = {}) {
     const latest = (await getFactoryWorkItem(organizationId, item.id, actor)).item;
     const binding = latest.bindings.find((entry) => entry.contractRevision === latest.contractRevision
       && entry.executionEpoch === latest.executionEpoch && entry.bindingGeneration === latest.bindingGeneration);
     if (!binding) return null;
     const revoked = ['intent', 'running', 'unknown'].includes(binding.status)
       && await executionAuthorityRevoked(organizationId, latest, binding);
+    const remote=await withDatabase(db=>db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='remote_factory_source_operations'").get()
+      ? db.prepare('SELECT binding_id,operation_id FROM remote_factory_source_operations WHERE source_factory_binding_id=?').get(binding.id) : null);
+    if(remote) {
+      const {queryRemoteFactoryOperation,fetchRemoteFactoryCandidate,requestRemoteFactoryCancellationFromSource}=await import('./remote-factory-source.mjs');
+      let responsibilityRevoked=false;
+      try { await withDatabase(async db=>{const {verifyFactoryResponsibilityFence}=await import('./factory-responsibility-admission.mjs');
+        const row=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(latest.id,organizationId); if(row) verifyFactoryResponsibilityFence(db,row);}); }
+      catch { responsibilityRevoked=true; }
+      const shouldCancel=revoked||responsibilityRevoked||['cancel_requested','pause_requested'].includes(latest.controlState);
+      const cancellation=shouldCancel ? await requestRemoteFactoryCancellationFromSource(remote.binding_id,remote.operation_id,actor) : null;
+      const receipt=await queryRemoteFactoryOperation(remote.binding_id,remote.operation_id,actor);
+      const usage=receipt?.target?.usage;
+      if(usage && receipt.target.workItemId && usage.attemptId===receipt.target.attemptId && usage.runId===receipt.target.runId
+          && Number.isSafeInteger(usage.tokens) && usage.tokens>=0 && Number.isFinite(usage.cost) && usage.cost>=0) {
+        const budgetKey=`factory:${binding.id}`;
+        await settleFactoryBudget({organizationId,revision:latest.contract.organizationRevision,reservationId:budgetKey,idempotencyKey:budgetKey,
+          backendUsage:{runs:1,tokens:usage.tokens,cost:usage.cost}});
+      }
+      if(!shouldCancel && !observationOnly && latest.controlState==='none' && receipt?.target?.state==='review') {
+        const signed=await fetchRemoteFactoryCandidate(remote.binding_id,remote.operation_id,actor);
+        const {importRemoteFactoryCandidate}=await import('./factory-remote-evidence.mjs');
+        return importRemoteFactoryCandidate({bindingId:remote.binding_id,operationId:remote.operation_id,signed},actor);
+      }
+      if(!observationOnly && ['intent','unknown'].includes(binding.status)) {
+        const {verifyRemoteTerminalReceipt}=await import('./factory-remote-evidence.mjs');
+        const {loadOrCreateInstanceIdentity}=await import('../lib/instance-identity.mjs');
+        const sourceId=(await loadOrCreateInstanceIdentity()).instanceId;
+        const terminal=await withDatabase(db=>{
+          const raw=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(latest.id,organizationId);
+          const saved=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=?').get(binding.id);
+          return raw&&saved ? verifyRemoteTerminalReceipt(db,raw,saved,sourceId) : null;
+        });
+        if(terminal?.attemptState==='succeeded') {
+          return {receipt,cancellation,completion:'completed_pending_review',stopConfirmed:false};
+        }
+        if(terminal && ['failed','cancelled'].includes(terminal.attemptState)) {
+          const action=shouldCancel||terminal.attemptState==='cancelled'?'confirm_stopped':'fail';
+          const ref=`remote:${terminal.operationId}:${terminal.runId}`;
+          const payload={...(action==='fail'?{terminalEvidenceRef:ref}:{stopEvidenceRef:ref}),
+            targetRunState:terminal.runState,targetAttemptState:terminal.attemptState,signedReceipt:terminal.signed};
+          return updateFactoryBinding({organizationId,workItemId:latest.id,expectedVersion:latest.rowVersion,
+            contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,action,payload},actor,{
+            verifyTerminal:({db,binding:current,payload:verified})=>{
+              const raw=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(latest.id,organizationId);
+              const saved=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=?').get(current.id);
+              const actual=raw&&saved&&verifyRemoteTerminalReceipt(db,raw,saved,sourceId);
+              return !!actual && JSON.stringify(actual.signed)===JSON.stringify(verified.signedReceipt)
+                && actual.runId===terminal.runId && actual.runState===verified.targetRunState && actual.attemptState===verified.targetAttemptState;
+            },
+          });
+        }
+      }
+      return cancellation ? {receipt,cancellation,stopConfirmed:false} : receipt;
+    }
     const org = await getOrganization(organizationId);
     const collaboration = known || (binding.collaborationId ? await orchestrator.get(binding.collaborationId)
       : await getCollaborationByIdempotencyKey(org.rootSessionId, binding.dispatchKey));
+    if (observationOnly) {
+      const attempt = collaboration?.attempts.find((entry) => entry.runId);
+      const run = attempt?.runId ? await getRun(attempt.runId) : null;
+      if (['cancel_requested', 'pause_requested'].includes(latest.controlState) && run
+          && !['completed', 'failed', 'cancelled'].includes(run.state) && !run.cancelRequested) await requestRunCancel(attempt.runId);
+      return { observationOnly: true, collaborationId: collaboration?.id || '', runId: attempt?.runId || '', runState: run?.state || 'unknown' };
+    }
     if (!collaboration && binding.status === 'intent' && latest.controlState === 'none' && lease && !revoked) {
       return dispatch({ item: latest, binding }, lease);
     }
@@ -247,15 +394,16 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     }
     if ((latest.controlState === 'cancel_requested' || latest.controlState === 'pause_requested' || revoked) && attempt?.runId) {
       const run = actualRun;
-      if (run?.state === 'cancelled' && attempt.state === 'cancelled') {
+      if (run && ['completed', 'failed', 'cancelled'].includes(run.state)
+          && ['succeeded', 'failed', 'cancelled'].includes(attempt.state) && attempt.failureKind !== 'unknown_outcome') {
         return updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
           contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
           bindingGeneration: binding.bindingGeneration, action: 'confirm_stopped',
           payload: { stopEvidenceRef: `run:${attempt.runId}` } }, actor, {
           verifyTerminal: ({ db, binding: current, payload }) => {
-            const actual = db.prepare('SELECT state,run_id FROM collaboration_attempts WHERE id=? AND task_id=?')
+            const actual = db.prepare('SELECT state,run_id,failure_kind FROM collaboration_attempts WHERE id=? AND task_id=?')
               .get(attempt.id, attempt.taskId);
-            return actual?.state === 'cancelled' && actual.run_id === attempt.runId
+            return ['succeeded', 'failed', 'cancelled'].includes(actual?.state) && actual.failure_kind !== 'unknown_outcome' && actual.run_id === attempt.runId
               && (!current.runId || current.runId === attempt.runId) && payload.stopEvidenceRef === `run:${attempt.runId}`;
           },
         });
@@ -268,7 +416,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       }
       return { cancellationRequested: true, runId: attempt.runId, terminalState: run?.state || 'unknown' };
     }
-    if (binding.status === 'intent' && attempt?.runId) {
+    if (['intent','unknown'].includes(binding.status) && attempt?.runId && !revoked) {
       const bound = await updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
         contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
         bindingGeneration: binding.bindingGeneration, action: 'bind_run', payload: {
@@ -293,6 +441,22 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         const { recordAcceptedTeamMessageInputs } = await import('./organization-team-messages.mjs');
         await recordAcceptedTeamMessageInputs({ sessionId: attempt.sessionId, runId: attempt.runId, manifest: await getRunManifest(attempt.runId) });
       } catch (error) { console.error('[factory] Team message receipt pending:', error?.message || String(error)); }
+    }
+    if (binding.status === 'running' && attempt?.runId === binding.runId && actualRun
+        && ['completed', 'failed', 'cancelled'].includes(actualRun.state)
+        && ['failed', 'cancelled'].includes(attempt.state) && attempt.failureKind !== 'unknown_outcome') {
+      const action = attempt.state === 'cancelled' ? 'confirm_stopped' : 'fail';
+      const evidenceRef = `run:${attempt.runId}`;
+      return updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
+        contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
+        bindingGeneration: binding.bindingGeneration, action,
+        payload: action === 'fail' ? { terminalEvidenceRef: evidenceRef } : { stopEvidenceRef: evidenceRef } }, actor, {
+        verifyTerminal: ({ db, binding: current, payload }) => {
+          const actual = db.prepare('SELECT state,run_id,failure_kind FROM collaboration_attempts WHERE id=? AND task_id=?').get(attempt.id, attempt.taskId);
+          return actual?.state === attempt.state && actual.failure_kind !== 'unknown_outcome' && actual.run_id === attempt.runId && current.runId === attempt.runId
+            && (payload.terminalEvidenceRef || payload.stopEvidenceRef) === evidenceRef;
+        },
+      });
     }
     if (binding.status === 'running' && attempt?.state === 'succeeded' && attempt.runId === binding.runId) {
       const session = await getSession(attempt.sessionId);

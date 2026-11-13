@@ -473,6 +473,7 @@ fun WorkbenchScreen(
     }
 
     var organizationOpen by remember(state.sessionId, state.chatTargetId) { mutableStateOf(false) }
+    var responsibilitySelection by remember(state.sessionId, state.chatTargetId) { mutableStateOf<String?>(null) }
     BackHandler(enabled = organizationOpen) { organizationOpen = false }
     val predictiveBackProgress = remember { Animatable(0f) }
     val backProgress = predictiveBackProgress.value
@@ -811,6 +812,9 @@ fun WorkbenchScreen(
                     transport = organizationTransport,
                     sessionId = state.sessionId,
                     targetId = state.chatTargetId ?: state.activeRemoteTargetId,
+                    responsibilityDraft = state.composerText,
+                    selectedResponsibilityId = responsibilitySelection,
+                    onResponsibilitySelected = { responsibilitySelection = it },
                     onBack = { organizationOpen = false },
                 )
             } else {

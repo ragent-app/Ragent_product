@@ -1,0 +1,48 @@
+import { readBody } from '../lib/utils.mjs';
+import { createResponsibility, listResponsibilities, getResponsibility, updateResponsibility, setResponsibilityLifecycle, listResponsibilityActivity } from './responsibility-service.mjs';
+import { wakeResponsibility } from './responsibility-events.mjs';
+import { assembleResponsibilityContext } from './responsibility-context.mjs';
+import { getRun } from './runs.mjs';
+import { getSession } from './session-manager.mjs';
+import { sanitizeEmailCompletionTargets, recordEmailDeliveryReview } from '../lib/agent-mail-completion-targets.mjs';
+import { observeGithubFailure } from './github-ci-observer.mjs';
+import { proposeResponsibilityIntent } from './responsibility-intent.mjs';
+import { resolveResponsibilityActor } from './responsibility-actor.mjs';
+import { getResponsibilitySessionContext, setResponsibilitySessionContext } from './responsibility-session-context.mjs';
+import { previewResponsibilityMemory, reviseResponsibilityMemory } from './responsibility-memory.mjs';
+
+function mutationSourceAllowed(req) {
+  if(!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers?.['content-type']||''))) return false;
+  const site=String(req.headers?.['sec-fetch-site']||''); if(site && !['same-origin','none'].includes(site)) return false;
+  const origin=String(req.headers?.origin||''); if(!origin) return true;
+  try { const url=new URL(origin); return !url.username && !url.password && url.origin===origin && url.protocol===(req.socket?.encrypted?'https:':'http:') && url.host.toLowerCase()===String(req.headers?.host||'').toLowerCase(); } catch { return false; }
+}
+export async function handleResponsibilityRoutes({req,res,pathname,authSession,writeJson,requireSessionAccess}) {
+  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|wake|activity|context|memory|github-event))?)?$/.exec(String(pathname||''));
+  const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract)$/.exec(String(pathname||''));
+  const review=/^\/api\/runs\/([^/]+)\/email-targets\/([^/]+)\/manual-review$/.exec(String(pathname||''));
+  const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision) return false;
+  if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
+  const actor=await resolveResponsibilityActor(req,authSession);
+  if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
+  try {
+    if(memoryRevision) { if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;} if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;} if(memoryRevision[3]!=='preview'&&process.env.AGENTOC_RESPONSIBILITY_MEMORY_WRITES_ENABLED!=='1') {writeJson(res,503,{code:'MEMORY_REVISION_DISABLED',error:'Memory revision is disabled'});return true;} const raw=await readBody(req,16384); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} const id=decodeURIComponent(memoryRevision[1]),factId=decodeURIComponent(memoryRevision[2]); const result=memoryRevision[3]==='preview'?await previewResponsibilityMemory(id,factId,body,actor):await reviseResponsibilityMemory(id,factId,memoryRevision[3],body,actor); writeJson(res,200,result);return true; }
+    if(sessionContext) {const sessionId=decodeURIComponent(sessionContext[1]); if(typeof requireSessionAccess!=='function') {writeJson(res,503,{error:'Session authorization is unavailable'});return true;} if(!await requireSessionAccess(res,authSession,sessionId)) return true; if(req.method==='GET') {writeJson(res,200,await getResponsibilitySessionContext(sessionId,actor));return true;} if(req.method!=='PUT') {writeJson(res,405,{error:'Method not allowed'});return true;} if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;} const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} writeJson(res,200,await setResponsibilitySessionContext(sessionId,body,actor));return true; }
+    if(review) { if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;} if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
+      const runId=decodeURIComponent(review[1]),targetId=decodeURIComponent(review[2]); const run=await getRun(runId); if(!run?.sessionId) {writeJson(res,404,{error:'Run not found'});return true;}
+      if(typeof requireSessionAccess!=='function') {writeJson(res,503,{error:'Session authorization is unavailable'});return true;} if(!await requireSessionAccess(res,authSession,run.sessionId)) return true;
+      const session=await getSession(run.sessionId); if(!session||!sanitizeEmailCompletionTargets(session.completionTargets||[]).some(target=>target.id===targetId)) {writeJson(res,404,{error:'Email target not found'});return true;}
+      const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
+      writeJson(res,200,await recordEmailDeliveryReview({runId,targetId,observation:body?.observation,evidence:body?.evidence},actor)); return true;
+    }
+    if(match?.[1]==='intent'&&!match[2]) { if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;} const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} writeJson(res,200,await proposeResponsibilityIntent({text:body?.text,responsibilityId:body?.responsibilityId},actor));return true; }
+    const id=match[1]?decodeURIComponent(match[1]):'', action=match[2]||'', url=new URL(req.url||pathname,'http://localhost'); let result;
+    if(req.method==='GET'&&!id) result=await listResponsibilities({organizationId:url.searchParams.get('organizationId')||'',projectId:url.searchParams.get('projectId')||'',limit:Number(url.searchParams.get('limit')||100)},actor);
+    else if(req.method==='GET'&&id&&!action) result=await getResponsibility(id,actor);
+    else if(req.method==='GET'&&id&&action==='activity') result=await listResponsibilityActivity(id,{after:Number(url.searchParams.get('after')||0),limit:Number(url.searchParams.get('limit')||100)},actor);
+    else if(req.method==='GET'&&id&&action==='context') result=await assembleResponsibilityContext(id,actor);
+    else if(req.method==='GET'&&id&&action==='memory') result={schemaVersion:1,revisionEnabled:process.env.AGENTOC_RESPONSIBILITY_MEMORY_WRITES_ENABLED==='1',memory:(await assembleResponsibilityContext(id,actor)).memory};
+    else if((req.method==='POST'&&!id)||(req.method==='PATCH'&&id&&!action)||(req.method==='POST'&&id&&['pause','resume','wake','github-event'].includes(action))) { if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;} const raw=await readBody(req,64*1024); let body; try {body=JSON.parse(raw||'{}');} catch {throw Object.assign(new Error('Invalid JSON body'),{statusCode:400});} if(!body||typeof body!=='object'||Array.isArray(body)) throw Object.assign(new Error('Body must be an object'),{statusCode:400}); if(!id) result=await createResponsibility(body,actor); else if(!action) result=await updateResponsibility(id,body,actor); else if(action==='wake') result=await wakeResponsibility(id,body,actor); else if(action==='github-event') result=await observeGithubFailure(id,body,actor); else result=await setResponsibilityLifecycle(id,action,body,actor);
+    } else {writeJson(res,405,{error:'Method not allowed'});return true;} writeJson(res,200,result);
+  } catch(e) {writeJson(res,e?.code==='BODY_TOO_LARGE'?413:(e?.statusCode||400),{error:e?.message||'Responsibility request failed',...(e?.code?{code:e.code}:{})});} return true;
+}

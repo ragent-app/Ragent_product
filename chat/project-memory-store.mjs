@@ -318,6 +318,17 @@ function ensureSchema(db) {
       PRIMARY KEY(project_id, fact_id)
     );
 
+    CREATE TABLE IF NOT EXISTS memory_user_overrides (
+      project_id TEXT NOT NULL, fact_id TEXT NOT NULL, action TEXT NOT NULL,
+      fact_value TEXT NOT NULL, actor_id TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(project_id, fact_id)
+    );
+    CREATE TABLE IF NOT EXISTS memory_user_mutations (
+      project_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
+      payload_digest TEXT NOT NULL, memory_version INTEGER NOT NULL,
+      PRIMARY KEY(project_id, actor_id, request_id)
+    );
+
     CREATE TABLE IF NOT EXISTS memory_fact_versions (
       project_id TEXT NOT NULL,
       fact_id TEXT NOT NULL,
@@ -700,6 +711,7 @@ export function createProjectMemoryStore(options = {}) {
               throw new Error('Project memory candidate source range is invalid');
             }
             const factId = normalizeProjectFactId(candidate?.factId, kind, statement);
+            if (db.prepare('SELECT 1 FROM memory_user_overrides WHERE project_id=? AND fact_id=?').get(stageInput.projectId, factId)) continue;
             db.prepare(`INSERT OR IGNORE INTO memory_candidates
               (id, stage1_id, project_id, kind, statement, fact_id, confidence, source_event_start, source_event_end,
                state, created_at, updated_at)
@@ -781,6 +793,7 @@ export function createProjectMemoryStore(options = {}) {
         .all(normalizedProjectId);
       return {
         projectId: normalizedProjectId,
+        hasUserOverrides: !!db.prepare('SELECT 1 FROM memory_user_overrides WHERE project_id=? LIMIT 1').get(normalizedProjectId),
         head: head ? {
           projectId: head.project_id,
           currentVersion: Number(head.current_version || 0),
@@ -808,8 +821,8 @@ export function createProjectMemoryStore(options = {}) {
 
   async function commitConsolidation(jobId, ownershipToken, value, { now = new Date() } = {}) {
     const current = iso(now);
-    const content = text(value?.content, 60_000);
-    const summary = text(value?.summary, 8_000);
+    let content = text(value?.content, 60_000);
+    let summary = text(value?.summary, 8_000);
     const consolidationWatermark = Number.isInteger(value?.consolidationWatermark)
       ? Math.max(0, value.consolidationWatermark)
       : (Number.isInteger(value?.sourceWatermark) ? Math.max(0, value.sourceWatermark) : 0);
@@ -845,7 +858,7 @@ export function createProjectMemoryStore(options = {}) {
         }
         const head = input.head;
         const version = Number(head?.currentVersion || 0) + 1;
-        const stampedSummary = /^v\d+\b/.test(summary)
+        let stampedSummary = /^v\d+\b/.test(summary)
           ? summary.replace(/^v\d+\b/, `v${version}`)
           : `v${version}\n${summary}`;
         const normalizedFactResolutions = new Map();
@@ -885,6 +898,25 @@ export function createProjectMemoryStore(options = {}) {
             candidateIds: candidateIdList,
           });
         }
+        // Once a user has corrected or retracted a fact, generated prose may
+        // still contain the old value. Rebuild the injectable projection from
+        // structured facts and apply the user's scoped overrides each time.
+        const overrides = db.prepare('SELECT * FROM memory_user_overrides WHERE project_id=? ORDER BY fact_id').all(job.projectId);
+        for (const override of overrides) {
+          const index = normalizedFacts.findIndex(fact => fact.factId === override.fact_id);
+          const previous = db.prepare('SELECT * FROM memory_facts WHERE project_id=? AND fact_id=?').get(job.projectId, override.fact_id);
+          const fact = { factId: override.fact_id, factKey: previous?.fact_key || override.fact_id,
+            factValue: override.action === 'correct' ? override.fact_value : '', text: override.action === 'correct' ? override.fact_value : '',
+            state: override.action === 'correct' ? 'active' : 'invalidated', contestedBy: '',
+            supersedesFactVersion: Number(previous?.current_version || 0) || null, candidateIds: [], section: 'user' };
+          if (index < 0) normalizedFacts.push(fact); else normalizedFacts[index] = fact;
+        }
+        if (overrides.length) {
+          const visible = normalizedFacts.filter(fact => fact.state === 'active' && fact.factValue);
+          content = `# Project Memory\n\n${visible.map(fact => `- ${fact.factValue}`).join('\n') || 'No active structured facts.'}`;
+          summary = `v${version}\n${visible.map(fact => `- ${fact.factValue}`).join('\n') || 'No active structured facts.'}`;
+          stampedSummary = summary;
+        }
         const outputDigest = digest({
           content, stampedSummary, extractionWatermark, consolidationWatermark, candidateIds, normalizedFacts, workspaceSnapshot,
         });
@@ -921,6 +953,8 @@ export function createProjectMemoryStore(options = {}) {
           db.prepare(`UPDATE memory_candidates SET state = ?, resolved_version = ?, updated_at = ? WHERE id = ?`)
             .run(state, version, current, candidateId);
         }
+        db.prepare(`UPDATE memory_candidates SET state='invalidated',resolved_version=?,updated_at=?
+          WHERE project_id=? AND fact_id IN (SELECT fact_id FROM memory_user_overrides WHERE project_id=?)`).run(version,current,job.projectId,job.projectId);
         const recordFact = (fact) => {
           const previous = db.prepare(`SELECT * FROM memory_facts WHERE project_id = ? AND fact_id = ?`)
             .get(job.projectId, fact.factId);
@@ -1168,6 +1202,71 @@ export function createProjectMemoryStore(options = {}) {
     };
   }
 
+  async function reviseFact({ projectId, factId, action, value = '', expectedVersion, actorId, requestId }, { now = new Date() } = {}) {
+    return projectionQueue(async () => {
+    const project = text(projectId, 160), fact = text(factId, 120), actor = text(actorId, 160), request = text(requestId, 160);
+    const normalizedValue = text(value, 1200), current = iso(now);
+    if (!project || !fact || !actor || !request || !['correct', 'retract'].includes(action)
+        || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1 || (action === 'correct' && !normalizedValue)) {
+      throw Object.assign(new Error('Invalid memory revision'), { statusCode: 400 });
+    }
+    const payloadDigest = digest({ project, fact, action, value: normalizedValue, expectedVersion });
+    const result = await withDatabase((db) => {
+      begin(db);
+      try {
+        const old = db.prepare('SELECT * FROM memory_user_mutations WHERE project_id=? AND actor_id=? AND request_id=?').get(project, actor, request);
+        if (old) {
+          if (old.payload_digest !== payloadDigest) throw Object.assign(new Error('Request identity already used'), { statusCode: 409 });
+          db.exec('COMMIT'); return { version: old.memory_version, replayed: true };
+        }
+        const head = db.prepare('SELECT * FROM project_memory WHERE project_id=?').get(project);
+        const previous = db.prepare('SELECT * FROM memory_facts WHERE project_id=? AND fact_id=?').get(project, fact);
+        if (!head || !previous || Number(head.current_version) !== expectedVersion) throw Object.assign(new Error('Memory or fact version changed'), { statusCode: 409 });
+        const version = expectedVersion + 1, factVersion = Number(previous.current_version) + 1;
+        const state = action === 'correct' ? 'active' : 'invalidated', factValue = action === 'correct' ? normalizedValue : '';
+        db.prepare(`INSERT INTO memory_user_overrides VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,fact_id)
+          DO UPDATE SET action=excluded.action,fact_value=excluded.fact_value,actor_id=excluded.actor_id,updated_at=excluded.updated_at`)
+          .run(project, fact, action, factValue, actor, current);
+        db.prepare('UPDATE memory_facts SET current_version=?,fact_value=?,fact_state=?,supersedes_fact_version=?,contested_by=?,candidate_ids_json=?,updated_at=? WHERE project_id=? AND fact_id=?')
+          .run(factVersion, factValue, state, previous.current_version, '', '[]', current, project, fact);
+        db.prepare('UPDATE memory_candidates SET state=?,resolved_version=?,updated_at=? WHERE project_id=? AND fact_id=?')
+          .run('invalidated', version, current, project, fact);
+        const facts = db.prepare('SELECT * FROM memory_facts WHERE project_id=? ORDER BY fact_id').all(project).map(row => ({
+          factId: row.fact_id, factKey: row.fact_key, factValue: row.fact_value, text: row.fact_value,
+          factVersion: Number(row.current_version), state: row.fact_state, supersedesFactVersion: row.supersedes_fact_version,
+          contestedBy: row.contested_by, candidateIds: parse(row.candidate_ids_json, []), section: row.fact_id === fact ? 'user' : '' }));
+        const visible = facts.filter(entry => entry.state === 'active' && entry.factValue);
+        const lines = visible.map(entry => `- ${entry.factValue}`).join('\n') || 'No active structured facts.';
+        const content = `# Project Memory\n\n${lines}`, summary = `v${version}\n${lines}`;
+        const snapshot = parse(head.workspace_snapshot_json, {}), outputDigest = digest({ content, summary, facts, snapshot });
+        db.prepare(`INSERT INTO memory_versions (project_id,version,parent_version,source_watermark,extraction_watermark,consolidation_watermark,content,summary,facts_json,workspace_snapshot_json,candidate_ids_json,content_digest,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(project, version, expectedVersion, head.source_watermark, head.extraction_watermark, head.consolidation_watermark, content, summary, stringify(facts), stringify(snapshot), '[]', outputDigest, current);
+        db.prepare(`UPDATE project_memory SET current_version=?,content=?,summary=?,facts_json=?,content_digest=?,projection_state='dirty',projection_error='',updated_at=? WHERE project_id=? AND current_version=?`)
+          .run(version, content, summary, stringify(facts), outputDigest, current, project, expectedVersion);
+        db.prepare(`INSERT INTO memory_fact_versions (project_id,fact_id,memory_version,fact_version,fact_key,fact_value,fact_state,supersedes_fact_version,contested_by,candidate_ids_json,section_name,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(project, fact, version, factVersion, previous.fact_key, factValue, state, previous.current_version, '', '[]', 'user', current);
+        db.prepare(`INSERT INTO memory_fact_provenance (id,project_id,memory_version,section_name,fact_text,fact_id,fact_key,fact_value,fact_version,fact_state,candidate_id,stage1_id,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(id('pmprov'), project, version, 'user', factValue, fact, previous.fact_key, factValue, factVersion, state, `user:${request}`, `user:${actor}`, 'user', current);
+        db.prepare('DELETE FROM memory_fresh_deltas WHERE project_id=?').run(project);
+        db.prepare('INSERT INTO memory_user_mutations VALUES(?,?,?,?,?)').run(project, actor, request, payloadDigest, version);
+        db.exec('COMMIT'); return { version, replayed: false };
+      } catch (error) { rollback(db); throw error; }
+    }, { mutate: true });
+    const version = await getMemoryVersion(project, result.version);
+    try { await writeProjectionUnlocked(version); } catch { /* committed DB remains authoritative and dirty for repair */ }
+    return { ...result, projectId: project, factId: fact, projectionState: (await getProjectMemory(project))?.projectionState || 'unknown' };
+    });
+  }
+
+  async function getMemoryMutationReceipt(projectId, actorId, requestId) {
+    const project = text(projectId, 160), actor = text(actorId, 160), request = text(requestId, 160);
+    if (!project || !actor || !request) throw Object.assign(new Error('Receipt identity required'), { statusCode: 400 });
+    return withDatabase(db => {
+      const row = db.prepare('SELECT payload_digest,memory_version FROM memory_user_mutations WHERE project_id=? AND actor_id=? AND request_id=?').get(project, actor, request);
+      return row ? { payloadDigest: row.payload_digest, version: Number(row.memory_version) } : null;
+    });
+  }
+
   async function rollbackProjectMemoryHead(projectId, version, { now = new Date() } = {}) {
     const normalizedProjectId = text(projectId, 160);
     const targetVersion = await getMemoryVersion(normalizedProjectId, version);
@@ -1176,6 +1275,9 @@ export function createProjectMemoryStore(options = {}) {
     return withDatabase((db) => {
       begin(db);
       try {
+        if (db.prepare('SELECT 1 FROM memory_user_overrides WHERE project_id=? LIMIT 1').get(normalizedProjectId)) {
+          throw Object.assign(new Error('Rollback would bypass user memory corrections'), { statusCode: 409 });
+        }
         db.prepare(`INSERT INTO project_memory
           (project_id, current_version, source_watermark, extraction_watermark, consolidation_watermark,
            content, summary, facts_json, workspace_snapshot_json, content_digest, projection_state,
@@ -1240,14 +1342,17 @@ export function createProjectMemoryStore(options = {}) {
       .all(current, current, positiveInt(limit, 32, 128)));
   }
 
-  async function writeProjection(version) {
+  async function writeProjectionUnlocked(version) {
     if (!version?.projectId || !version?.content || !version?.summary) {
       throw new Error('Cannot project an incomplete Project Memory version');
     }
-    return projectionQueue(async () => {
       const canonical = await getMemoryVersion(version.projectId, version.version);
       if (!canonical || (version.digest && canonical.digest !== version.digest)) {
         throw new Error('Project Memory projection source is not the canonical DB version');
+      }
+      const head = await getProjectMemory(version.projectId);
+      if (head?.currentVersion !== canonical.version) {
+        throw new Error('Project Memory projection version is no longer current');
       }
       const paths = projectMemoryProjectionPaths(canonical.projectId, workspaceRoot);
       await markProjectionRepairing(canonical.projectId, canonical.version);
@@ -1275,7 +1380,10 @@ export function createProjectMemoryStore(options = {}) {
         await markProjectionDirty(canonical.projectId, error?.message || String(error), canonical.version).catch(() => {});
         throw error;
       }
-    });
+  }
+
+  async function writeProjection(version) {
+    return projectionQueue(() => writeProjectionUnlocked(version));
   }
 
   async function recordFreshDelta(projectId, value = {}) {
@@ -1283,6 +1391,7 @@ export function createProjectMemoryStore(options = {}) {
     if (!normalizedProjectId) throw new Error('Fresh Delta requires projectId');
     const current = iso();
     return withDatabase((db) => {
+      if (db.prepare('SELECT 1 FROM memory_user_overrides WHERE project_id=? LIMIT 1').get(normalizedProjectId)) return null;
       db.prepare(`INSERT INTO memory_fresh_deltas
         (project_id, base_version, consolidation_watermark, content, candidate_ids_json, generated_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -1304,6 +1413,7 @@ export function createProjectMemoryStore(options = {}) {
 
   async function getFreshDelta(projectId) {
     return withDatabase((db) => {
+      if (db.prepare('SELECT 1 FROM memory_user_overrides WHERE project_id=? LIMIT 1').get(text(projectId, 160))) return null;
       const row = db.prepare('SELECT * FROM memory_fresh_deltas WHERE project_id = ?').get(text(projectId, 160));
       if (!row) return null;
       return {
@@ -1340,6 +1450,8 @@ export function createProjectMemoryStore(options = {}) {
     getFactProvenance,
     listCurrentFacts,
     getFactHistory,
+    reviseFact,
+    getMemoryMutationReceipt,
     diffMemoryVersions,
     rollbackProjectMemoryHead,
     listJobs,

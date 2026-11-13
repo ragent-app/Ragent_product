@@ -6,6 +6,7 @@
 import { withDatabase } from './collaboration-store.mjs';
 import { getOrganization } from './organization-store.mjs';
 import { assertOrganizationCapability } from './organization-runtime-capabilities.mjs';
+import { verifyResponsibilityAuthority } from './responsibility-authority.mjs';
 
 export const ORG_BUDGET_EXCEEDED = 'ORG_BUDGET_EXCEEDED';
 export const ORG_STALLED = 'ORG_STALLED';
@@ -127,6 +128,47 @@ function add(left, right) {
 
 function subtract(left, right) {
   return Object.fromEntries(GOVERNOR_DIMENSIONS.map((key) => [key, Math.max(0, (left[key] || 0) - (right[key] || 0))]));
+}
+
+// Responsibility windows are dimensions of the same reservation transaction;
+// they do not replace the organization counter or accept model-reported usage.
+function responsibilityWindow(db, organizationId, workItemId, delta) {
+  if (!workItemId || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_work_links'").get()) return null;
+  const item=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(workItemId,organizationId);
+  if (!item) throw governorError(ORG_BUDGET_INVALID,'Factory work item unavailable');
+  const link=db.prepare('SELECT * FROM responsibility_work_links WHERE goal_id=?').get(item.goal_id);
+  if (!link) return null;
+  const decision=db.prepare('SELECT proposal_json FROM responsibility_decisions WHERE id=?').get(link.decision_id);
+  if (!decision) throw governorError(ORG_BUDGET_INVALID,'Responsibility decision unavailable');
+  const proposal=JSON.parse(decision.proposal_json);
+  const authority=verifyResponsibilityAuthority(db,{...proposal,organizationId,projectId:item.project_id,responsibilityId:link.responsibility_id,
+    wakeId:link.wake_id,decisionId:link.decision_id,responsibilityRevision:link.responsibility_revision,policyRevision:link.policy_revision});
+  const budget=authority.policy.dailyBudget;
+  if (!budget || typeof budget.timeZone!=='string' || !budget.timeZone || !['maxRuns','maxTokens','maxCost'].some(k=>budget[k]!==undefined)
+      || ['maxRuns','maxTokens'].some(k=>budget[k]!==undefined && (!Number.isSafeInteger(budget[k]) || budget[k]<0))
+      || (budget.maxCost!==undefined && (!Number.isFinite(budget.maxCost) || budget.maxCost<0))) throw governorError(ORG_BUDGET_INVALID,'Valid daily responsibility budget required');
+  let date;
+  try { date=new Intl.DateTimeFormat('en-CA',{timeZone:budget.timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).reduce((o,p)=>(o[p.type]=p.value,o),{}); }
+  catch { throw governorError(ORG_BUDGET_INVALID,'Invalid daily budget time zone'); }
+  const day=`${date.year}-${date.month}-${date.day}`;
+  db.exec(`CREATE TABLE IF NOT EXISTS organization_responsibility_budget_zones (responsibility_id TEXT PRIMARY KEY, time_zone TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS organization_responsibility_budget_windows (responsibility_id TEXT NOT NULL, day TEXT NOT NULL, time_zone TEXT NOT NULL, totals_json TEXT NOT NULL, reserved_json TEXT NOT NULL, PRIMARY KEY(responsibility_id,day));`);
+  db.prepare('INSERT OR IGNORE INTO organization_responsibility_budget_zones VALUES(?,?)').run(link.responsibility_id,budget.timeZone);
+  const zone=db.prepare('SELECT time_zone FROM organization_responsibility_budget_zones WHERE responsibility_id=?').get(link.responsibility_id);
+  if (zone.time_zone!==budget.timeZone) throw governorError(ORG_BUDGET_INVALID,'Changing a responsibility budget time zone requires migration');
+  db.prepare('INSERT OR IGNORE INTO organization_responsibility_budget_windows VALUES(?,?,?,?,?)').run(link.responsibility_id,day,budget.timeZone,json(emptyTotals()),json(emptyTotals()));
+  const row=db.prepare('SELECT * FROM organization_responsibility_budget_windows WHERE responsibility_id=? AND day=?').get(link.responsibility_id,day);
+  const limits={}; if(budget.maxRuns!==undefined) limits.runs=budget.maxRuns; if(budget.maxTokens!==undefined) limits.tokens=budget.maxTokens; if(budget.maxCost!==undefined) limits.cost=budget.maxCost;
+  assertWithinBudget(parse(row.totals_json,emptyTotals()),parse(row.reserved_json,emptyTotals()),delta,limits);
+  db.prepare('UPDATE organization_responsibility_budget_windows SET reserved_json=? WHERE responsibility_id=? AND day=?').run(json(add(parse(row.reserved_json,emptyTotals()),delta)),link.responsibility_id,day);
+  return {responsibilityId:link.responsibility_id,day,timeZone:budget.timeZone,workItemId};
+}
+function updateResponsibilityWindow(db, scope, reservation, usage) {
+  if (!scope) return;
+  const row=db.prepare('SELECT * FROM organization_responsibility_budget_windows WHERE responsibility_id=? AND day=? AND time_zone=?').get(scope.responsibilityId,scope.day,scope.timeZone);
+  if (!row) throw governorError(ORG_BUDGET_INVALID,'Responsibility budget window unavailable');
+  db.prepare('UPDATE organization_responsibility_budget_windows SET totals_json=?,reserved_json=? WHERE responsibility_id=? AND day=?').run(
+    json(add(parse(row.totals_json,emptyTotals()),usage || emptyTotals())),json(subtract(parse(row.reserved_json,emptyTotals()),reservation)),scope.responsibilityId,scope.day);
 }
 
 function rowCounter(row) {
@@ -254,6 +296,19 @@ export async function getBudgetCounter(organizationId, revision) {
   return read((db) => rowCounter(db.prepare('SELECT * FROM organization_budget_counters WHERE organization_id = ? AND revision = ?').get(organizationId, revision)));
 }
 
+export async function getResponsibilityBudgetWindows({organizationId,responsibilityId,limit=30}={},actor) {
+  const orgId=ensureIdentity(organizationId,'organizationId'), id=ensureIdentity(responsibilityId,'responsibilityId');
+  if(actor?.kind!=='user'||actor.role!=='owner'||!text(actor.principalId)) throw governorError(ORG_BUDGET_INVALID,'Owner access required',403);
+  const bounded=Math.max(1,Math.min(100,integer(limit,30)||30));
+  return read(db=>{
+    const r=db.prepare('SELECT id FROM responsibilities WHERE id=? AND organization_id=? AND owner_principal_id=?').get(id,orgId,actor.principalId);
+    if(!r) throw governorError(ORG_BUDGET_INVALID,'Responsibility unavailable',404);
+    if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_responsibility_budget_windows'").get()) return {responsibilityId:id,windows:[]};
+    const rows=db.prepare('SELECT * FROM organization_responsibility_budget_windows WHERE responsibility_id=? ORDER BY day DESC LIMIT ?').all(id,bounded);
+    return {responsibilityId:id,windows:rows.map(row=>({day:row.day,timeZone:row.time_zone,totals:parse(row.totals_json,emptyTotals()),reserved:parse(row.reserved_json,emptyTotals())}))};
+  });
+}
+
 export async function listBudgetCounters(organizationId, { limit = 500 } = {}) {
   const orgId = ensureIdentity(organizationId, 'organizationId');
   const boundedLimit = Math.max(1, Math.min(5000, integer(limit, 500) || 500));
@@ -261,7 +316,7 @@ export async function listBudgetCounters(organizationId, { limit = 500 } = {}) {
     WHERE organization_id = ? ORDER BY revision LIMIT ?`).all(orgId, boundedLimit).map(rowCounter));
 }
 
-export async function reserveOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {}, reservationTtlMs = 0, expiresAt = '', cumulativeAcrossRevisions = false } = {}) {
+export async function reserveOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {}, reservationTtlMs = 0, expiresAt = '', cumulativeAcrossRevisions = false, factoryWorkItemId = '' } = {}) {
   assertOrganizationCapability('stallGovernor', 'organization budget governance is disabled');
   const orgId = ensureIdentity(organizationId, 'organizationId');
   const key = ensureIdentity(idempotencyKey || reservationId, 'idempotencyKey');
@@ -284,7 +339,8 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
       const reservations = parse(current.reservations_json, {});
       const replay = reservations[key];
       if (replay) {
-        if (replay.reservationId !== reservation || JSON.stringify(replay.delta) !== JSON.stringify(normalizedDelta)) {
+        if (replay.reservationId !== reservation || JSON.stringify(replay.delta) !== JSON.stringify(normalizedDelta)
+            || (replay.factoryWorkItemId && replay.factoryWorkItemId !== factoryWorkItemId)) {
           throw governorError(ORG_BUDGET_INVALID, 'idempotency key belongs to a different reservation', 409);
         }
         db.exec('COMMIT');
@@ -300,6 +356,7 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
         reserved: add(sum.reserved, parse(row.reserved_json, emptyTotals())),
       }), { totals: emptyTotals(), reserved: emptyTotals() });
       assertWithinBudget(cumulative.totals, cumulative.reserved, normalizedDelta, effectiveLimits);
+      const responsibilityScope = responsibilityWindow(db,orgId,factoryWorkItemId,normalizedDelta);
       const nextReserved = add(reservedTotals, normalizedDelta);
       const nextReservations = {
         ...reservations,
@@ -308,6 +365,8 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
           idempotencyKey: key,
           delta: normalizedDelta,
           state: 'reserved',
+          ...(factoryWorkItemId ? { factoryWorkItemId } : {}),
+          ...(responsibilityScope ? { responsibilityScope } : {}),
           createdAt: nowIso(),
           ...(requestedExpiry || ttl > 0 ? { expiresAt: requestedExpiry || new Date(Date.now() + ttl).toISOString() } : {}),
         },
@@ -331,9 +390,9 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
 // A Factory reservation is durable until settled or explicitly released with
 // terminal evidence by the execution reconciler; lease expiry is not evidence
 // that a worker stopped or that it consumed nothing.
-export async function reserveFactoryBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {} } = {}) {
+export async function reserveFactoryBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {}, factoryWorkItemId = '' } = {}) {
   return reserveOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, delta, limits,
-    cumulativeAcrossRevisions: true, reservationTtlMs: 0, expiresAt: '' });
+    cumulativeAcrossRevisions: true, reservationTtlMs: 0, expiresAt: '', factoryWorkItemId });
 }
 
 export async function settleOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage, recordActualOverBudget = false } = {}) {
@@ -365,6 +424,7 @@ export async function settleOrganizationBudget({ organizationId, revision, reser
       const nextReserved = subtract(reserved, entry.delta);
       const nextTotals = add(totals, usage);
       if (!recordActualOverBudget) assertWithinBudget(totals, nextReserved, usage, authoritativeLimits);
+      updateResponsibilityWindow(db,entry.responsibilityScope,entry.delta,usage);
       reservations[key] = { ...entry, state: 'settled', usage, settledAt: nowIso() };
       db.prepare(`UPDATE organization_budget_counters SET version = version + 1,
         totals_json = ?, reserved_json = ?, reservations_json = ?, updated_at = ?
@@ -405,6 +465,7 @@ export async function releaseOrganizationBudgetReservation({ organizationId, rev
         return { ...rowCounter(current), reservation: entry, replay: true };
       }
       if (entry.state !== 'reserved') throw governorError(ORG_BUDGET_INVALID, 'reservation is not releasable', 409);
+      updateResponsibilityWindow(db,entry.responsibilityScope,entry.delta,null);
       reservations[key] = { ...entry, state: 'released', releaseReason: text(reason) || 'reservation expired', releasedAt: nowIso() };
       const nextReserved = subtract(parse(current.reserved_json, emptyTotals()), entry.delta);
       const updated = db.prepare(`UPDATE organization_budget_counters SET version = version + 1,

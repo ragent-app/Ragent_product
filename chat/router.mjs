@@ -145,6 +145,9 @@ import { handleCollaborationRoutes } from './router-collaboration-routes.mjs';
 import { handleOrchestrationRoutes } from './router-orchestration-routes.mjs';
 import { handleOrganizationRoutes } from './router-organization-routes.mjs';
 import { handleFactoryRoutes } from './router-factory-routes.mjs';
+import { handleResponsibilityRoutes } from './router-responsibility-routes.mjs';
+import { handleRemoteFactoryRoutes } from './router-remote-factory-routes.mjs';
+import { handleRemoteFileRoutes } from './router-remote-file-routes.mjs';
 import { handleConsultationRoutes } from './router-consultation-routes.mjs';
 import { handleProjectWorkflowRoutes } from './router-project-workflow-routes.mjs';
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
@@ -2026,6 +2029,9 @@ export async function handleRequest(req, res) {
   }
 
   if (await handleFactoryRoutes({ req, res, pathname, authSession, writeJson })) return;
+  if (await handleResponsibilityRoutes({ req, res, pathname, authSession, writeJson, requireSessionAccess })) return;
+  if (await handleRemoteFactoryRoutes({ req, res, pathname, authSession, writeJson })) return;
+  if (await handleRemoteFileRoutes({ req, res, pathname, authSession, writeJson, requireSessionAccess })) return;
 
   if (await handleOrganizationRoutes({
     req,

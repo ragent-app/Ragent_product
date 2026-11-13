@@ -36,6 +36,7 @@ function runTargetStateToDeliveryState(targetState = {}) {
   if (state === 'sending') return 'sending';
   if (state === 'sent') return 'delivered';
   if (state === 'failed') return 'delivery_failed';
+  if (state === 'unknown_outcome') return 'unknown_outcome';
   return '';
 }
 

@@ -7,6 +7,7 @@ import { preflightFactoryWorkspace, verifyFactoryCandidate } from './factory-can
 import { checkFactoryBaseline, checkedFactoryTarget, factoryTargetBranch, factoryTargetHead } from './factory-integration.mjs';
 import { getRun, getRunManifest } from './runs.mjs';
 import { getSession } from './session-manager.mjs';
+import { getOrganization } from './organization-store.mjs';
 
 function fail(message) { throw Object.assign(new Error(message), { code: 'FACTORY_VALIDATION_UNAVAILABLE', statusCode: 409 }); }
 function schema(db) {
@@ -34,21 +35,27 @@ export async function prepareFactoryValidationWorkspace({ organizationId, workIt
     if (deps.length !== 1 || !deps[0].candidate_digest) fail('Validation requires exactly one pinned candidate input');
     const source = selectItem(db, organizationId, deps[0].predecessor_id);
     if (source.candidate_digest !== deps[0].candidate_digest) fail('Candidate dependency changed');
-    const raw = db.prepare("SELECT * FROM factory_execution_bindings WHERE work_item_id=? AND execution_epoch=? AND binding_generation=? AND status='candidate'").get(source.id, source.execution_epoch, source.binding_generation);
+    const raw = db.prepare("SELECT * FROM factory_execution_bindings WHERE work_item_id=? AND execution_epoch=? AND binding_generation=? AND status IN ('candidate','remote_candidate')").get(source.id, source.execution_epoch, source.binding_generation);
     const detail = decode(db.prepare('SELECT details_json FROM factory_candidates WHERE work_item_id=? AND digest=? AND contract_revision=? AND execution_epoch=?').get(source.id, source.candidate_digest, source.contract_revision, source.execution_epoch)?.details_json, {});
     const projected = raw && { status: raw.status, dispatchKey: raw.dispatch_key, contractRevision: raw.contract_revision,
       executionEpoch: raw.execution_epoch, bindingGeneration: raw.binding_generation, runId: raw.run_id, attemptId: raw.attempt_id, collaborationId: raw.collaboration_id };
     if (!projected || !verifyFactoryCandidate({ db, binding: projected, item: { id: source.id }, payload: { candidateId: detail.candidateId, digest: source.candidate_digest } })) fail('Candidate input is not verified');
-    const base = decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(`baseline:${raw.dispatch_key}`)?.files_json, null);
-    const changes = decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(detail.candidateId)?.files_json, null);
+    const remote=raw.status==='remote_candidate' ? decode(db.prepare('SELECT envelope_json FROM factory_remote_evidence WHERE id=? AND work_item_id=?').get(detail.candidateId,source.id)?.envelope_json,null) : null;
+    const base = remote ? {source:{head:remote.baseline?.head,branch:remote.baseline?.branch},files:remote.baseline?.files,workspace:{writablePaths:decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(source.id,source.contract_revision)?.contract_json,{}).allowedPaths}} : decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(`baseline:${raw.dispatch_key}`)?.files_json, null);
+    const changes = remote ? remote.changes : decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(detail.candidateId)?.files_json, null);
     const contract = decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(validation.id, validation.contract_revision)?.contract_json, {});
     const outputPaths = Array.isArray(contract.outputPaths) ? contract.outputPaths : [];
     if (!base?.workspace || !Array.isArray(changes) || outputPaths.some((path) => !validRelative(path))) fail('Validation workspace contract is invalid');
     const prior = db.prepare('SELECT * FROM factory_validation_workspaces WHERE id=?').get(`validation:${binding.id}`);
-    if (prior) return { prior, base, changes };
+    if (prior) return { prior, base, changes, remote:!!remote };
     return { base, changes, outputPaths, candidateDigest: source.candidate_digest,
-      sourceId: source.id, candidateId: detail.candidateId, sourceBindingId: raw.id };
+      sourceId: source.id, candidateId: detail.candidateId, sourceBindingId: raw.id, remote:!!remote };
   });
+  if(data.remote) {
+    const org=await getOrganization(organizationId), root=org?.rootSessionId && await getSession(org.rootSessionId);
+    if(!root?.folder) fail('Source project root is unavailable');
+    data.base.workspace.canonicalCwd=root.folder;
+  }
   if (data.prior) {
     if (data.prior.state !== 'prepared' || data.prior.run_id || data.prior.session_id) fail('Validation workspace has an existing execution');
     const final = new Map(data.base.files.map((file) => [file.path, file]));

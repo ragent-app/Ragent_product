@@ -786,10 +786,128 @@
           for (const item of list.items) button(content, `${item.contract?.objective || item.id} · ${item.state} · ${item.controlState}`, () => showItem(item.id));
           if (list.nextCursor) add(content, 'p', 'More items exist; this view shows the first page.');
           button(content, 'Team lifecycle', showLifecycle);
+          button(content, 'Responsibilities', showResponsibilities);
           button(content, 'Positions and relationships', showTeamConfiguration);
           button(content, 'Integration queue', showIntegrationQueue);
           button(content, 'Refresh', showList);
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work items: ${error.message}`); button(content, 'Retry', showList); }
+      };
+      const responsibilityRequest = async (path, options = {}) => {
+        const response = await fetcher(`/api/responsibilities${path}`, { credentials: 'same-origin', cache: 'no-store', ...options });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+        return body;
+      };
+      const showResponsibilities = async () => {
+        content.replaceChildren(); add(content, 'p', 'Loading responsibilities…');
+        try {
+          const result = await responsibilityRequest(`?organizationId=${encodeURIComponent(organizationId)}`);
+          if (this.projection?.organizationId !== organizationId || screen.hidden) return;
+          content.replaceChildren(); button(content, 'All work items', showList);
+          add(content, 'h3', 'Responsibilities');
+          if (!result.responsibilities?.length) add(content, 'p', 'No responsibilities.');
+          for (const responsibility of result.responsibilities || []) {
+            button(content, `${responsibility.objective} · ${responsibility.lifecycle}`, () => showResponsibility(responsibility.id));
+          }
+          button(content, 'Create responsibility', () => {
+            const projectId = root.prompt('Project ID for this organization'); if (!projectId) return;
+            const objective = root.prompt('Responsibility objective'); if (!objective) return;
+            const criterion = root.prompt('Success criterion'); if (!criterion) return;
+            const validUntil = root.prompt('Policy expiry (ISO date and time, including timezone)');
+            if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
+            const body = { organizationId, projectId, objective, successCriteria: [criterion], policy: { validUntil }, idempotencyKey: root.crypto.randomUUID() };
+            if (!root.confirm(`Create draft responsibility?\nProject: ${projectId}\nObjective: ${objective}\nCriterion: ${criterion}\nPolicy expiry: ${validUntil}`)) return;
+            const submit = async () => { try { await responsibilityRequest('', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); await showResponsibilities(); }
+              catch (error) { add(content, 'p', `Request not confirmed: ${error.message}`); button(content, 'Retry same request', submit); } };
+            submit();
+          });
+          button(content, 'Refresh', showResponsibilities);
+        } catch (error) { content.replaceChildren(); add(content, 'p', `Responsibilities unavailable: ${error.message}`); button(content, 'All work items', showList); }
+      };
+      const showResponsibility = async id => {
+        content.replaceChildren(); add(content, 'p', 'Loading responsibility…');
+        try {
+          const path = `/${encodeURIComponent(id)}`;
+          const [detail, activity] = await Promise.all([responsibilityRequest(path), responsibilityRequest(`${path}/activity`)]);
+          if (this.projection?.organizationId !== organizationId || screen.hidden) return;
+          const item = detail.responsibility;
+          if (item.organizationId !== organizationId) throw new Error('Responsibility belongs to another organization');
+          content.replaceChildren(); button(content, 'Responsibilities', showResponsibilities);
+          add(content, 'h3', item.objective);
+          add(content, 'p', `Responsibility ${item.lifecycle} · version ${item.rowVersion} · policy ${item.policyRevision}`);
+          add(content, 'p', 'A paused responsibility stops new admission; existing work may continue.');
+          add(content, 'h4', 'Success criteria');
+          for (const criterion of item.successCriteria || []) add(content, 'p', criterion);
+          add(content, 'h4', 'Activity');
+          for (const entry of activity.activity || []) add(content, 'p', `${entry.createdAt} · ${entry.type}`);
+          if (!activity.activity?.length) add(content, 'p', 'No activity recorded.');
+          const submitCommand = (action, body, method = 'POST') => {
+            const path = `/${encodeURIComponent(id)}${action ? `/${action}` : ''}`;
+            const submit = async () => { try {
+              const result = await responsibilityRequest(path, { method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+              add(content, 'p', action === 'wake' ? 'Wake recorded; execution is not implied.' : `Request recorded. Existing work stopped: ${result.existingWorkStopped === true ? 'yes' : 'not established'}.`);
+              button(content, 'Refresh', () => showResponsibility(id));
+            } catch (error) { add(content, 'p', `Request not confirmed: ${error.message}`); button(content, 'Retry same request', submit); } };
+            submit();
+          };
+          button(content, 'Edit objective', () => {
+            const objective = root.prompt('New objective', item.objective); if (!objective || objective === item.objective) return;
+            if (!root.confirm(`Change objective for ${item.id}, version ${item.rowVersion}?\n${objective}`)) return;
+            submitCommand('', { objective, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID() }, 'PATCH');
+          });
+          for (const action of ['pause', 'resume', 'wake']) button(content, action, () => {
+            if (!root.confirm(`${action} responsibility ${item.id}, version ${item.rowVersion}? Existing work is not stopped by this command.`)) return;
+            submitCommand(action, { expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID() });
+          });
+          button(content, 'Review command text', async () => {
+            const text = root.prompt('Command text for this responsibility'); if (!text) return;
+            try {
+              const proposal = await responsibilityRequest('/intent', { method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({ text, responsibilityId:id }) });
+              if (proposal.action === 'query') { await showResponsibility(id); return; }
+              if (!['pause', 'resume', 'wake'].includes(proposal.action)) { add(content, 'p', `Text for manual review: ${text}`); return; }
+              if (!root.confirm(`Review ${proposal.action} for ${proposal.objective}, version ${proposal.expectedVersion}? Existing work is not stopped.`)) return;
+              submitCommand(proposal.action, { expectedVersion:proposal.expectedVersion, idempotencyKey:root.crypto.randomUUID() });
+            } catch (error) { add(content, 'p', `Unable to interpret text: ${error.message}`); }
+          });
+          button(content, 'Project memory', async () => {
+            try {
+              const context = await responsibilityRequest(`/${encodeURIComponent(id)}/memory`);
+              content.replaceChildren(); button(content, 'Responsibility', () => showResponsibility(id));
+              const memory = context.memory;
+              if (!memory) { add(content, 'p', 'No committed project memory.'); return; }
+              add(content, 'h3', `Project memory · version ${memory.version}`);
+              if (!context.revisionEnabled) add(content, 'p', 'Memory corrections and retractions are currently disabled.');
+              add(content, 'p', 'Source and validity are shown as recorded; unknown sources are not treated as instructions.');
+              for (const fact of memory.currentFacts || []) {
+                add(content, 'p', `${fact.factId}: ${fact.factValue || '(retracted)'} · ${fact.state} · source ${fact.sourceKind}${fact.contestedBy ? ` · contested by ${fact.contestedBy}` : ''}`);
+                for (const source of (memory.facts || []).filter(entry => entry.factId === fact.factId)) add(content, 'p', `Source: session ${source.sessionId || 'unknown'}, run ${source.runId || 'unknown'}, events ${source.sourceEventStart}-${source.sourceEventEnd}`);
+                for (const action of context.revisionEnabled ? ['correct', 'retract'] : []) button(content, action, async () => {
+                  const value = action === 'correct' ? root.prompt('Corrected fact', fact.factValue || '') : '';
+                  if (action === 'correct' && !value) return;
+                  let preview;
+                  try { preview = await responsibilityRequest(`/${encodeURIComponent(id)}/memory/facts/${encodeURIComponent(fact.factId)}/preview`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ action, value, expectedVersion:memory.version }) }); }
+                  catch (error) { add(content, 'p', `Preview unavailable: ${error.message}`); return; }
+                  const review = add(content, 'div', '');
+                  add(review, 'h4', `Review ${action}: ${fact.factId}`);
+                  add(review, 'p', 'Current summary is rebuilt from active facts. Unstructured text remains in history; this is not physical deletion.');
+                  add(review, 'h4', 'Current summary'); add(review, 'pre', preview.preview.previousSummary);
+                  add(review, 'h4', 'Rebuilt summary'); add(review, 'pre', preview.preview.projectedSummary);
+                  add(review, 'h4', 'Rebuilt content'); add(review, 'pre', preview.preview.projectedContent);
+                  add(review, 'p', `Preview expires ${preview.preview.expiresAt}`);
+                  const body = { value, expectedVersion: memory.version, previewDigest:preview.previewDigest, confirmed:true, idempotencyKey: root.crypto.randomUUID() };
+                  const submit = async () => { try {
+                    const result = await responsibilityRequest(`/${encodeURIComponent(id)}/memory/facts/${encodeURIComponent(fact.factId)}/${action}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+                    add(content, 'p', `Memory version ${result.version}; projection ${result.projectionState}.`);
+                  } catch (error) { add(content, 'p', `Request not confirmed: ${error.message}`); button(content, 'Retry same request', submit); } };
+                  button(review, `Confirm ${action}`, submit);
+                });
+              }
+              if (memory.truncated) add(content, 'p', 'Some facts or sources are omitted from this view.');
+            } catch (error) { add(content, 'p', `Memory unavailable: ${error.message}`); }
+          });
+          button(content, 'Refresh', () => showResponsibility(id));
+        } catch (error) { content.replaceChildren(); add(content, 'p', `Responsibility unavailable: ${error.message}`); button(content, 'Responsibilities', showResponsibilities); }
       };
       const showItem = async id => {
         content.replaceChildren(); add(content, 'p', 'Loading…');

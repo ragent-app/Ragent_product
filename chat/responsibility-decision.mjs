@@ -1,0 +1,41 @@
+import { read, transaction, activity, newId, now, digest } from './responsibility-store.mjs';
+import { captureResponsibilityRepository, verifyCurrentResponsibilityRepository } from './responsibility-repository.mjs';
+import { isGithubFailureCurrent } from './github-ci-observer.mjs';
+import { admitResponsibilityWorkflow } from './factory-responsibility-admission.mjs';
+import { ensureFactorySchema } from './work-graph-store.mjs';
+
+// A deterministic CI decision is derived only from server-fetched facts and
+// the immutable owner policy. Manual and interval wakes remain observations.
+function assertLease(db,wakeId,lease) { const current=db.prepare('SELECT l.*,w.lease_generation FROM responsibility_wake_leases l JOIN responsibility_wakes w ON w.id=l.wake_id WHERE l.wake_id=?').get(wakeId); if(!current||current.owner_token!==lease?.ownerToken||current.generation!==lease?.generation||current.lease_generation!==lease.generation||current.expires_at<=now()) throw Object.assign(new Error('Wake lease expired or fenced'),{code:'RESPONSIBILITY_LEASE_FENCED'}); }
+export async function processResponsibilityWake(wakeId,lease) {
+  const snapshot=await read(db=>{assertLease(db,wakeId,lease);const wake=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId); if(!wake||!['pending','deciding'].includes(wake.state)) return null; const r=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(wake.responsibility_id); const p=r&&db.prepare('SELECT * FROM responsibility_policy_revisions WHERE responsibility_id=? AND revision=?').get(r.id,wake.policy_revision); const e=db.prepare('SELECT e.* FROM responsibility_wake_events we JOIN responsibility_events e ON e.id=we.event_id WHERE we.wake_id=?').get(wakeId); const d=wake.decision_id&&db.prepare('SELECT * FROM responsibility_decisions WHERE id=?').get(wake.decision_id); return {wake,r,p,e,d}; });
+  if(!snapshot) return;
+  const {wake,r,p,e,d}=snapshot;
+  const linked=await transaction(db=>{assertLease(db,wakeId,lease); const link=db.prepare('SELECT * FROM responsibility_work_links WHERE wake_id=? AND responsibility_id=?').get(wakeId,wake.responsibility_id); if(link) {db.prepare("UPDATE responsibility_wakes SET state='admitted',updated_at=? WHERE id=? AND state='deciding'").run(now(),wakeId); if(db.prepare('SELECT changes() AS count').get().count) activity(db,wake.responsibility_id,'workflow_admitted',{wakeId,decisionId:link.decision_id,goalId:link.goal_id,workflowInstanceId:link.workflow_instance_id,recovered:true});} return !!link;});
+  if(linked) return;
+  if(!r||r.lifecycle!=='active'||r.revision!==wake.responsibility_revision||r.policy_revision!==wake.policy_revision||!p||Date.parse(p.valid_until)<=Date.now()) return wait(wakeId,'authority_changed',lease);
+  if(!e||e.source!=='github'||e.verification!=='github_api') return wait(wakeId,'awaiting_verified_ci_event',lease);
+  if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  if(!String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim()) return wait(wakeId,'admission_service_unconfigured',lease);
+  const active=await read(db=>{assertLease(db,wakeId,lease); if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_work_items'").get()) return false; return !!db.prepare("SELECT 1 FROM responsibility_work_links l JOIN factory_work_items w ON w.goal_id=l.goal_id WHERE l.responsibility_id=? AND w.state NOT IN ('completed','cancelled','failed') LIMIT 1").get(r.id);});
+  if(active) return wait(wakeId,'existing_work',lease);
+  const event=JSON.parse(e.payload_json); if(!await isGithubFailureCurrent(event)) return wait(wakeId,'ci_failure_stale',lease);
+  let proposal;
+  if(d) {proposal=JSON.parse(d.proposal_json); await verifyCurrentResponsibilityRepository(proposal.repositoryFactId);}
+  else {
+    const fact=await captureResponsibilityRepository(r.project_id); const policy=JSON.parse(p.policy_json); if(fact.repository!==event.repository||policy.repository!==fact.repository||policy.targetBranch!==event.branch) return wait(wakeId,'repository_or_branch_mismatch',lease);
+    if(policy.templateId!=='agentoc-reviewed-change'||policy.templateVersion!==3||typeof policy.checkActionId!=='string'||!policy.checkActionId) return wait(wakeId,'verified_check_template_required',lease);
+    const keys=['repository','templateId','templateVersion','templateDigest','targetBranch','allowedPaths','candidateScope','maxAttempts','maxCost','nodeBindings',...(policy.templateVersion===3?['checkActionId']:[])]; proposal=Object.fromEntries(keys.map(key=>[key,policy[key]])); proposal.repositoryFactId=fact.id;
+    if(keys.some(key=>proposal[key]===undefined)) return wait(wakeId,'policy_incomplete',lease);
+    const created=await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(r.id),w=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId); if(!current||current.lifecycle!=='active'||current.revision!==wake.responsibility_revision||current.policy_revision!==wake.policy_revision||w.state!=='pending'||w.decision_id) return null;
+      ensureFactorySchema(db); const active=db.prepare("SELECT 1 FROM responsibility_work_links l JOIN factory_work_items w ON w.goal_id=l.goal_id WHERE l.responsibility_id=? AND w.state NOT IN ('completed','cancelled','failed') LIMIT 1").get(r.id); if(active) return 'existing_work';
+      const decisionId=newId('decision'); db.prepare('INSERT INTO responsibility_decisions VALUES(?,?,?,?,?,?,?,?,?)').run(decisionId,r.id,wakeId,r.revision,r.policy_revision,'approved',digest({event,policyRevision:r.policy_revision}),JSON.stringify(proposal),now()); db.prepare("UPDATE responsibility_wakes SET state='deciding',decision_id=?,updated_at=? WHERE id=?").run(decisionId,now(),wakeId); activity(db,r.id,'decision_approved',{wakeId,decisionId,eventId:e.id}); return decisionId; }); if(created==='existing_work') return wait(wakeId,'existing_work',lease); if(!created) return; snapshot.wake.decision_id=created;
+  }
+  if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
+  const decisionId=snapshot.wake.decision_id; const actor={kind:'service',role:'responsibility_admission',principalId:`responsibility-admission:${owner}`};
+  const result=await admitResponsibilityWorkflow({...proposal,organizationId:r.organization_id,projectId:r.project_id,responsibilityId:r.id,responsibilityRevision:r.revision,policyRevision:r.policy_revision,wakeId,decisionId,wakeLeaseOwnerToken:lease.ownerToken,wakeLeaseGeneration:lease.generation,commandId:`responsibility:${decisionId}`,idempotencyKey:`responsibility:${decisionId}`},actor);
+  await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId); if(current?.state==='deciding'&&current.decision_id===decisionId) {db.prepare("UPDATE responsibility_wakes SET state='admitted',updated_at=? WHERE id=?").run(now(),wakeId);activity(db,r.id,'workflow_admitted',{wakeId,decisionId,goalId:result.goal.id,workflowInstanceId:result.instance.id});}});
+}
+async function wait(wakeId,reason,lease) { await transaction(db=>{assertLease(db,wakeId,lease);const wake=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId); if(wake&&['pending','deciding'].includes(wake.state)) {const prior=db.prepare('SELECT last_reason FROM responsibility_wake_retry WHERE wake_id=?').get(wakeId); const next=new Date(Date.now()+15*60000).toISOString(); db.prepare('INSERT INTO responsibility_wake_retry VALUES(?,?,?) ON CONFLICT(wake_id) DO UPDATE SET last_reason=excluded.last_reason,next_retry_at=excluded.next_retry_at').run(wakeId,reason,next); db.prepare("UPDATE responsibility_wakes SET state='waiting',updated_at=? WHERE id=?").run(now(),wakeId);if(prior?.last_reason!==reason) activity(db,wake.responsibility_id,'decision_waiting',{wakeId,reason,nextRetryAt:next});}}); }
+export async function holdResponsibilityWake(wakeId,reason,lease) { return wait(wakeId,reason,lease); }

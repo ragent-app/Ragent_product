@@ -23,7 +23,7 @@ import com.andysagent.agentoc.feature.organization.presentation.OrganizationView
 import com.andysagent.agentoc.core.designsystem.LocalAgentocColors
 
 @Composable
-fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, targetId: String?, onBack: () -> Unit) {
+fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, targetId: String?, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit) {
     val repository = remember(transport, targetId, sessionId) { RealOrganizationRepository(RealOrganizationApi(transport)) }
     val factory = remember(repository) {
         object : ViewModelProvider.Factory {
@@ -36,7 +36,7 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     var loaded by remember(transport, targetId, sessionId) { mutableStateOf(false) }
     var refresh by remember(transport, targetId, sessionId) { mutableStateOf(0) }
     var organizationId by remember(transport, targetId, sessionId) { mutableStateOf<String?>(null) }
-    var workOpen by remember(transport, targetId, sessionId) { mutableStateOf(false) }
+    var workOpen by remember(transport, targetId, sessionId) { mutableStateOf(selectedResponsibilityId != null) }
     var messagesOpen by remember(transport, targetId, sessionId) { mutableStateOf(false) }
     var nodes by remember(transport, targetId, sessionId) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
     LaunchedEffect(transport, targetId, sessionId, refresh) {
@@ -52,7 +52,7 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     }
     Column(Modifier.fillMaxSize().background(LocalAgentocColors.current.canvas)) {
         TextButton(onClick = onBack) { Text("Back") }
-        if (loaded && workOpen && organizationId != null) FactoryWorkScreen(transport, organizationId!!, onBack = { workOpen = false })
+        if (loaded && workOpen && organizationId != null) FactoryWorkScreen(transport, organizationId!!, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, onBack = { workOpen = false })
         else if (loaded && messagesOpen && organizationId != null) TeamMessagesScreen(transport, organizationId!!, nodes, onBack = { messagesOpen = false })
         else if (loaded) {
             TextButton(onClick = { workOpen = true }) { Text("Work items") }

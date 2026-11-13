@@ -52,6 +52,23 @@ export async function reconcileFactoryReviewOpinion({organizationId,opinionId},a
  const {checkWorkspace}=await import('./factory-checks.mjs'); await checkWorkspace(context.workspace);
  const packetId=context.attempt.result_packet_id; const [run,packet]=await Promise.all([getRunAcceptanceEvidence(context.o.reviewer_run_id),packetId?getResultPacket(packetId):null]);
  if (!run || run.state!=='completed' || !packet || packet.state!=='succeeded' || packet.digest!==computeResultPacketDigest(packet) || packet.producer?.runId!==context.o.reviewer_run_id || packet.producer?.attemptId!==context.o.reviewer_attempt_id || packet.producer?.taskId!==context.binding.task_id) fail('Review Run and packet not yet verified');
- return factoryTransaction(db=>{schema(db); const o=db.prepare('SELECT * FROM factory_review_opinions WHERE id=?').get(opinionId); const current=verifyContext(db,o,null,false); if(current.attempt.result_packet_id!==packetId || current.attempt.state!=='succeeded') fail('Review attempt changed'); db.prepare('INSERT OR IGNORE INTO factory_review_opinion_receipts VALUES(?,?,?,?)').run(opinionId,packetId,packet.digest,now()); return {opinionId,state:'verified',verdict:o.verdict};});
+ const result=await factoryTransaction(db=>{schema(db); const o=db.prepare('SELECT * FROM factory_review_opinions WHERE id=?').get(opinionId); const current=verifyContext(db,o,null,false); if(current.attempt.result_packet_id!==packetId || current.attempt.state!=='succeeded') fail('Review attempt changed'); db.prepare('INSERT OR IGNORE INTO factory_review_opinion_receipts VALUES(?,?,?,?)').run(opinionId,packetId,packet.digest,now()); return {opinionId,state:'verified',verdict:o.verdict};});
+ const {getFactoryWorkItem,updateFactoryBinding}=await import('./factory-control.mjs');
+ const item=(await getFactoryWorkItem(organizationId,context.o.reviewer_work_item_id,actor)).item;
+ const binding=item.bindings.find(b=>b.id===context.binding.id);
+ if(binding?.status==='review_result' && binding.details?.opinionId===opinionId) return result;
+ if(!binding || binding.status!=='running') fail('Review binding is no longer running');
+ await updateFactoryBinding({organizationId,workItemId:item.id,expectedVersion:item.rowVersion,contractRevision:binding.contractRevision,
+   executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,action:'submit_review_result',
+   payload:{opinionId,digest:context.o.candidate_digest}},actor,{verifyReviewResult:({db,binding:current,item:review,payload})=>verifyFactoryReviewResult(db,review,current,payload)});
+ return result;
 }
 export function hasVerifiedIndependentReview(db,item) { schema(db); const rows=db.prepare("SELECT o.* FROM factory_review_opinions o JOIN factory_review_opinion_receipts r ON r.opinion_id=o.id WHERE o.candidate_work_item_id=? AND o.candidate_digest=? AND o.contract_revision=? AND o.execution_epoch=? AND o.verdict='pass'").all(item.id,item.candidateDigest,item.contractRevision,item.executionEpoch); return rows.some(o=>{try {verifyContext(db,o,null,false);return true;} catch {return false;}}); }
+export function verifyFactoryReviewResult(db,item,binding,payload) {
+ try {
+  schema(db); const opinion=db.prepare('SELECT o.*,r.packet_id,r.packet_digest FROM factory_review_opinions o JOIN factory_review_opinion_receipts r ON r.opinion_id=o.id WHERE o.id=? AND o.organization_id=?').get(payload.opinionId,item.organizationId);
+  if(!opinion || opinion.reviewer_work_item_id!==item.id || opinion.candidate_digest!==payload.digest || opinion.reviewer_attempt_id!==binding.attemptId || opinion.reviewer_run_id!==binding.runId || !opinion.packet_id || !opinion.packet_digest) return false;
+  const context=verifyContext(db,opinion,null,false);
+  return context.binding.id===binding.id && context.attempt.state==='succeeded' && context.attempt.result_packet_id===opinion.packet_id;
+ } catch { return false; }
+}

@@ -8,6 +8,7 @@ import { withDatabase } from './collaboration-store.mjs';
 import { resolveStagingDiff } from './managed-writer.mjs';
 import { getRun } from './runs.mjs';
 import { MANAGED_WORK_ROOT_DIR, CHAT_COLLABORATIONS_DIR } from '../lib/config.mjs';
+import { verifyRemoteFactoryEvidence } from './factory-remote-evidence.mjs';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 const MAX_FILES = 1000;
@@ -174,6 +175,7 @@ export async function sealFactoryCandidate({ context, workspace, runId }) {
 
 // Synchronous verifier for the graph's transaction; caller supplies no verdict.
 export function verifyFactoryCandidate({ db, binding, item, payload }) {
+  if(binding?.status==='remote_candidate') return verifyRemoteFactoryEvidence(db,item,binding,payload);
   schema(db);
   const row = db.prepare('SELECT * FROM factory_candidate_payloads WHERE candidate_id=?').get(payload?.candidateId);
   if (!row || !['running', 'candidate'].includes(binding.status) || row.work_item_id !== item.id

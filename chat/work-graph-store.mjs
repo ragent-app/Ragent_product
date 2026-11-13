@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS factory_work_items (id TEXT PRIMARY KEY, goal_id TEXT
 CREATE INDEX IF NOT EXISTS factory_items_org ON factory_work_items(organization_id, project_id, goal_id, created_at, id);
 CREATE INDEX IF NOT EXISTS factory_items_queue ON factory_work_items(organization_id, state, priority DESC, id);
 CREATE INDEX IF NOT EXISTS factory_items_assignee ON factory_work_items(organization_id, assignee_node_id);
+CREATE TABLE IF NOT EXISTS factory_work_invalidations (work_item_id TEXT PRIMARY KEY REFERENCES factory_work_items(id), goal_id TEXT NOT NULL, goal_revision INTEGER NOT NULL, command_id TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS factory_work_invalidations_no_update BEFORE UPDATE ON factory_work_invalidations BEGIN SELECT RAISE(ABORT, 'immutable work invalidation'); END;
+CREATE TRIGGER IF NOT EXISTS factory_work_invalidations_no_delete BEFORE DELETE ON factory_work_invalidations BEGIN SELECT RAISE(ABORT, 'immutable work invalidation'); END;
 CREATE TABLE IF NOT EXISTS factory_work_contracts (work_item_id TEXT NOT NULL REFERENCES factory_work_items(id), revision INTEGER NOT NULL, contract_json TEXT NOT NULL, digest TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(work_item_id, revision));
 CREATE TRIGGER IF NOT EXISTS factory_contract_immutable_update BEFORE UPDATE ON factory_work_contracts BEGIN SELECT RAISE(ABORT, 'immutable contract'); END;
 CREATE TRIGGER IF NOT EXISTS factory_contract_immutable_delete BEFORE DELETE ON factory_work_contracts BEGIN SELECT RAISE(ABORT, 'immutable contract'); END;

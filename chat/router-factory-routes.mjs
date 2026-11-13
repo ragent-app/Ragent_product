@@ -3,7 +3,7 @@ import { readBody } from '../lib/utils.mjs';
 import { executeFactoryCommand, getFactoryCommand, getFactoryWorkItem, listFactoryGoals, listFactoryWorkItems } from './factory-control.mjs';
 import { listTeamMessages, sendOwnerTeamMessage, respondToTeamMessage } from './organization-team-messages.mjs';
 import { compileFactoryWorkflow, instantiateFactoryWorkflow } from './factory-workflow.mjs';
-import { decideFactoryManualAcceptance } from './factory-acceptance.mjs';
+import { decideFactoryManualAcceptance, decideFactoryCheckAcceptance } from './factory-acceptance.mjs';
 import { beginOrganizationLifecycle, getOrganizationLifecycleInfo, beginNodeRebind, finishNodeRebind, cancelNodeRebind } from './organization-session-lifecycle.mjs';
 import { getNode } from './organization-store.mjs';
 import { replaceManagedSession } from './organization-replan.mjs';
@@ -12,11 +12,12 @@ import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryR
 import { setPositionProfile, addTeamRelation, retireTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
 import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
-import { requestFactoryReconciliation, getFactoryReconciliation } from './factory-reconciliation.mjs';
+import { requestFactoryReconciliation, getFactoryReconciliation, resumeFactoryReconciliation, verifyFactoryAcceptedRun } from './factory-reconciliation.mjs';
 import { submitFactoryReviewOpinion, reconcileFactoryReviewOpinion } from './factory-review-opinions.mjs';
 import { enqueueFactoryIntegration, materializeFactoryIntegration, attachFactoryCombinationValidation, refreshFactoryIntegrationQueue, getFactoryIntegrationQueue, listFactoryIntegrationQueue } from './factory-integration-queue.mjs';
-import { registerFactoryCombinationCheck, reconcileFactoryCombinationCheck } from './factory-checks.mjs';
+import { registerFactoryCombinationCheck, reconcileFactoryCombinationCheck, registerFactoryCheck, reconcileFactoryCheck } from './factory-checks.mjs';
 import { commitFactoryCombination } from './factory-integration.mjs';
+import { previewFactoryGoalRevision, reviseFactoryGoalWithImpact } from './factory-goal-revision.mjs';
 import { submitFactorySteer, getFactorySteer } from './factory-steering.mjs';
 import { reconcileFactoryShadow, listFactoryShadowReconciliation } from './factory-shadow-reconciliation.mjs';
 import { previewFactoryRetirement, retireFactoryWorkspace } from './factory-evidence-retention.mjs';
@@ -53,6 +54,11 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const response = /^\/api\/sessions\/([^/]+)\/organization\/messages\/([^/]+)\/(ack|reply)$/.exec(String(pathname || ''));
   const reviewOpinion = /^\/api\/sessions\/([^/]+)\/factory\/review-opinion$/.exec(String(pathname || ''));
   const reconcile = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
+  const reconcileResume = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/resume$/.exec(String(pathname || ''));
+  const reconcileVerify = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/verify-accepted$/.exec(String(pathname || ''));
+  const goalRevision = /^\/api\/organizations\/([^/]+)\/factory\/goals\/([^/]+)\/revision\/(preview|commit)$/.exec(String(pathname || ''));
+  const itemCheck = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/checks\/(register|accept)$/.exec(String(pathname || ''));
+  const checkReconcile = /^\/api\/organizations\/([^/]+)\/factory\/checks\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
   const reviewReconcile = /^\/api\/organizations\/([^/]+)\/factory\/review-opinions\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
   const integrationQueue = /^\/api\/organizations\/([^/]+)\/factory\/integration-queue\/(enqueue|materialize|attach-validation|refresh|register-check|reconcile-check|commit)$/.exec(String(pathname || ''));
   const integrationQueueRead = /^\/api\/organizations\/([^/]+)\/factory\/integration-queue\/([^/]+)$/.exec(String(pathname || ''));
@@ -68,7 +74,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reconcileResume && !reconcileVerify && !goalRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   if (reviewOpinion) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -110,6 +116,24 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const input={organizationId,kind:body?.kind,targetId:body?.targetId,idempotencyKey:body?.idempotencyKey,previewDigest:body?.previewDigest};
       writeJson(res,200,await (retirement[2]==='preview'?previewFactoryRetirement(input,actor):retireFactoryWorkspace(input,actor))); return true;
     }
+    if (itemCheck || checkReconcile) {
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      if(checkReconcile) {writeJson(res,200,await reconcileFactoryCheck({organizationId:decodeURIComponent(checkReconcile[1]),checkId:decodeURIComponent(checkReconcile[2])},actor));return true;}
+      const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      const input={...body,organizationId:decodeURIComponent(itemCheck[1]),workItemId:decodeURIComponent(itemCheck[2])};
+      writeJson(res,200,await (itemCheck[3]==='register'?registerFactoryCheck(input,actor):decideFactoryCheckAcceptance(input,actor))); return true;
+    }
+    if (goalRevision) {
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      if (goalRevision[3]==='commit' && process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      const raw=await readBody(req,65536); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const input={...body,organizationId:decodeURIComponent(goalRevision[1]),goalId:decodeURIComponent(goalRevision[2])};
+      writeJson(res,200,await (goalRevision[3]==='preview'?previewFactoryGoalRevision(input,actor):reviseFactoryGoalWithImpact(input,actor))); return true;
+    }
     if (integrationQueueList) {
       if (req.method!=='GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'},url=new URL(req.url || pathname,'http://localhost');
@@ -143,6 +167,20 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       writeJson(res,200,await reconcileFactoryReviewOpinion({organizationId:decodeURIComponent(reviewReconcile[1]),opinionId:decodeURIComponent(reviewReconcile[2])},actor)); return true;
+    }
+    if (reconcileVerify) {
+      if (req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      if (!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
+      const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      writeJson(res,200,await verifyFactoryAcceptedRun({organizationId:decodeURIComponent(reconcileVerify[1]),workItemId:decodeURIComponent(reconcileVerify[2]),expectedVersion:body?.expectedVersion,executionEpoch:body?.executionEpoch,leaseGeneration:body?.leaseGeneration,expectedRunId:body?.expectedRunId},actor));return true;
+    }
+    if (reconcileResume) {
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,8192); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      writeJson(res,200,await resumeFactoryReconciliation({organizationId:decodeURIComponent(reconcileResume[1]),workItemId:decodeURIComponent(reconcileResume[2]),executionEpoch:body?.executionEpoch,expectedVersion:body?.expectedVersion,commandId:body?.commandId},actor)); return true;
     }
     if (reconcile) {
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};

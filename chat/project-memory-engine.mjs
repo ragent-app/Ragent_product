@@ -417,6 +417,8 @@ export async function buildProjectMemoryContext(session, options = {}) {
     memory?.currentVersion || 0,
     { ...options, store, record: true },
   ).catch(() => '');
+  const currentMemory = await store.getProjectMemory(session.projectId);
+  if ((currentMemory?.currentVersion || 0) !== (memory?.currentVersion || 0)) return '';
   if (mode === 'shadow') return '';
   if (!memory?.summary && !freshDelta) return '';
   const workspaceSnapshot = options.workspaceSnapshot
@@ -453,6 +455,9 @@ export async function buildProjectFreshDelta(projectId, headVersion = 0, options
   if (!normalizedProjectId) return '';
   const store = options.store || defaultProjectMemoryStore;
   const input = await store.getConsolidationInput(normalizedProjectId);
+  // A generated delta has no fact-level edit boundary. Suppress it after a
+  // user correction rather than reintroduce a retracted statement in prompts.
+  if (input.hasUserOverrides) return '';
   if (headVersion && input.head && input.head.currentVersion !== headVersion) return '';
   const maxItems = Number.isInteger(options.maxItems) ? Math.max(1, Math.min(options.maxItems, 8)) : 8;
   const candidates = input.candidates
@@ -463,6 +468,8 @@ export async function buildProjectFreshDelta(projectId, headVersion = 0, options
     const source = `${candidate.stage1Id}/${candidate.sessionId || 'session'}:${candidate.sourceEventStart}-${candidate.sourceEventEnd}`;
     return `- ${clip(candidate.statement, 900)} (source: ${source})`;
   }).join('\n');
+  const latest = await store.getConsolidationInput(normalizedProjectId);
+  if (latest.hasUserOverrides || (latest.head?.currentVersion || 0) !== (input.head?.currentVersion || 0)) return '';
   if (options.record !== false && typeof store.recordFreshDelta === 'function') {
     await store.recordFreshDelta(normalizedProjectId, {
       baseVersion: input.head?.currentVersion || 0,

@@ -744,11 +744,13 @@ export async function enqueueAttemptDispatch({
 // acknowledgement resumes delivery using the same requestId.
 export async function claimPendingDispatchCommands({
   collaborationId = '',
+  commandId = '',
   limit = 16,
   leaseMs = DISPATCH_COMMAND_LEASE_MS,
   now = new Date(),
 } = {}) {
   const normalizedCollaborationId = typeof collaborationId === 'string' ? collaborationId.trim() : '';
+  const normalizedCommandId = typeof commandId === 'string' ? commandId.trim() : '';
   const boundedLimit = Math.max(1, Math.min(Number.isInteger(limit) ? limit : 16, 128));
   const commandLeaseMs = positiveDuration(leaseMs, DISPATCH_COMMAND_LEASE_MS);
   const claimed = await withDatabase((db) => {
@@ -762,8 +764,9 @@ export async function claimPendingDispatchCommands({
           AND (d.state = 'pending' OR (d.state = 'claimed' AND d.lease_until IS NOT NULL AND d.lease_until <= ?))
           AND d.available_at <= ?
           AND (? = '' OR d.collaboration_id = ?)
+          AND (? = '' OR d.id = ?)
         ORDER BY d.created_at, d.id LIMIT ?`)
-        .all(timestamp, timestamp, normalizedCollaborationId, normalizedCollaborationId, boundedLimit);
+        .all(timestamp, timestamp, normalizedCollaborationId, normalizedCollaborationId, normalizedCommandId, normalizedCommandId, boundedLimit);
       const output = [];
       for (const candidate of candidates) {
         if (!managedAttemptBindingAvailable(db,candidate.collaboration_id,candidate.task_id)) continue;
@@ -797,6 +800,7 @@ export async function completeAttemptDispatch(commandId, {
   claimToken,
   runId,
   queueDeadlineMs = QUEUE_DEADLINE_MS,
+  verify = null,
 } = {}) {
   const normalizedCommandId = typeof commandId === 'string' ? commandId.trim() : '';
   const normalizedClaimToken = typeof claimToken === 'string' ? claimToken.trim() : '';
@@ -816,6 +820,10 @@ export async function completeAttemptDispatch(commandId, {
         JOIN collaboration_tasks t ON t.id = a.task_id WHERE a.id = ?`).get(command.attempt_id);
       if (!attempt || attempt.state !== 'running' || attempt.lifecycle_phase !== 'dispatching'
           || (attempt.run_id && attempt.run_id !== normalizedRunId)) {
+        db.exec('COMMIT');
+        return null;
+      }
+      if (verify && (typeof verify !== 'function' || verify({db,command,attempt}) !== true)) {
         db.exec('COMMIT');
         return null;
       }

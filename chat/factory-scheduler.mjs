@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { getNode } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
-import { factoryReconciliationDue, recordFactoryReconciliationFailure, clearFactoryReconciliationFailure } from './factory-reconciliation.mjs';
+import { factoryReconciliationState, recordFactoryReconciliationFailure, clearFactoryReconciliationFailure, scheduleFactoryDeadLetterObservation } from './factory-reconciliation.mjs';
+import { reconcileFactoryDependencies } from './work-graph.mjs';
 import {
   acquireFactorySchedulerLease, renewFactorySchedulerLease, releaseFactorySchedulerLease,
   claimFactoryWork, listFactoryWorkItems, listFactoryReadyWork,
@@ -35,13 +36,19 @@ export function createFactoryScheduler({ organizationId, actor, adapter, observe
       const page = await listFactoryWorkItems(organizationId, { cursor, limit }, actor);
       cursor = page.nextCursor || null;
       // Reconciliation never relies on a lease expiring as proof of termination.
-      for (const item of page.items.filter((entry) => ['claimed', 'running', 'blocked', 'review', 'completed'].includes(entry.state))) {
+      for (const item of page.items.filter((entry) => ['claimed', 'running', 'blocked', 'review', 'completed', 'failed', 'cancelled'].includes(entry.state))) {
         if (stopped) break;
         try {
-          if (!['cancel_requested','pause_requested'].includes(item.controlState)
-              && !await factoryReconciliationDue(organizationId,item,actor)) continue;
-          await adapter.reconcile(item, null, lease ? { ownerToken, generation: lease.generation } : null);
-          await clearFactoryReconciliationFailure(organizationId,item,actor);
+          const reconciliation = await factoryReconciliationState(organizationId,item,actor);
+          if (!['cancel_requested','pause_requested'].includes(item.controlState) && !reconciliation.due) continue;
+          const observationOnly = reconciliation.state === 'dead_letter';
+          if (!observationOnly && lease && item.state === 'blocked' && item.blockedReason?.code === 'dependencies') {
+            await reconcileFactoryDependencies({ organizationId, workItemId: item.id, expectedVersion: item.rowVersion,
+              leaseOwnerToken: ownerToken, leaseGeneration: lease.generation }, actor);
+          }
+          await adapter.reconcile(item, null, lease ? { ownerToken, generation: lease.generation } : null, { observationOnly });
+          if (observationOnly) await scheduleFactoryDeadLetterObservation(organizationId,item,actor);
+          else await clearFactoryReconciliationFailure(organizationId,item,actor);
         } catch (error) {
           await recordFactoryReconciliationFailure(organizationId,item,error,actor).catch(onError);
           onError(error);
@@ -63,7 +70,7 @@ export function createFactoryScheduler({ organizationId, actor, adapter, observe
           const claim = await claimFactoryWork({ organizationId, workItemId: item.id, expectedVersion: item.rowVersion,
             bindingGeneration: node.bindingGeneration, dispatchKey, leaseOwnerToken: ownerToken, leaseGeneration: lease.generation,
             managedSessionId: node.currentSessionId, runtimeTool: session.tool }, actor);
-          await adapter.dispatch(claim, { ownerToken, generation: lease.generation });
+          await adapter.dispatch(claim, { ownerToken, generation: lease.generation }, { freshClaim: !claim.replayed });
         } catch (error) { onError(error); }
       }
     })().finally(() => { pending = null; });

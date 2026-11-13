@@ -6,7 +6,7 @@ import { homedir } from 'os';
 import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
-import { AUTH_FILE, CHAT_PORT } from '../lib/config.mjs';
+import { CHAT_PORT } from '../lib/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
@@ -29,6 +29,7 @@ function usage(exitCode = 0) {
 
 Options:
   --repo <owner/repo>         GitHub repository to watch
+  --responsibility-id <id>    Responsibility receiving verified CI events
   --branch <name>             Branch to watch (repeatable; default: main,master)
   --branches <a,b>            Comma-separated branches to watch
   --event <name>              GitHub event to watch (repeatable; default: push)
@@ -57,7 +58,9 @@ Behavior:
   - Polls GitHub Actions runs through gh CLI
   - Looks at the latest matching run for each branch/workflow group
   - Skips runs that are still in progress, already handled, or still within the settle window
-  - Creates a Ragent session with failure context and a repair task when a latest branch CI run is red
+  - Submits failed run identifiers to the responsibility event endpoint; the server verifies GitHub facts
+  - Uses AGENTOC_CI_OWNER_USERNAME and AGENTOC_CI_OWNER_PASSWORD with the existing password login;
+    the retired static owner token is not accepted. Credentials are not written to config.
 `;
   console.log(message);
   process.exit(exitCode);
@@ -140,6 +143,7 @@ function normalizeBaseUrl(value) {
 function parseArgs(argv = []) {
   const options = {
     repo: '',
+    responsibilityId: '',
     branches: [],
     events: [],
     workflows: [],
@@ -165,6 +169,11 @@ function parseArgs(argv = []) {
     const arg = argv[index];
     if (arg === '--repo') {
       options.repo = argv[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--responsibility-id') {
+      options.responsibilityId = argv[index + 1] || '';
       index += 1;
       continue;
     }
@@ -281,6 +290,7 @@ function parseArgs(argv = []) {
   }
 
   options.repo = trimString(options.repo);
+  options.responsibilityId = trimString(options.responsibilityId);
   options.branches = unique((options.branches.length > 0 ? options.branches : DEFAULT_BRANCHES).map((value) => trimString(value)));
   options.events = unique((options.events.length > 0 ? options.events : DEFAULT_EVENTS).map((value) => trimString(value).toLowerCase()));
   options.workflows = unique(options.workflows.map((value) => trimString(value).toLowerCase()));
@@ -295,6 +305,7 @@ function parseArgs(argv = []) {
   if (!options.repo) {
     throw new Error('--repo is required');
   }
+  if (!options.dryRun && !options.responsibilityId) throw new Error('--responsibility-id is required for event delivery');
   if (options.branches.length === 0) {
     throw new Error('At least one branch must be provided');
   }
@@ -483,7 +494,9 @@ export function selectLatestFailureCandidates(runs, options, state, nowMs = Date
       skipped.push({ ...base, reason: 'within_settle_window' });
       continue;
     }
-    if (state?.handledRuns?.[String(run.id)]) {
+    // New events are re-observed on subsequent polls so a held wake can be
+    // reconsidered after configuration or transient failures. SQLite dedupes.
+    if (Number(run.run_attempt || 1) === 1 && state?.handledRuns?.[String(run.id)]) {
       skipped.push({ ...base, reason: 'already_handled' });
       continue;
     }
@@ -669,17 +682,13 @@ export function buildSessionMessage({ repo, sessionFolder, run, commit, failedJo
   return lines.join('\n');
 }
 
-async function readOwnerToken() {
-  const auth = await readJson(AUTH_FILE, {});
-  const token = trimString(auth?.token);
-  if (!token) {
-    throw new Error(`No owner token found in ${AUTH_FILE}`);
-  }
-  return token;
-}
-
-async function loginWithToken(baseUrl, token) {
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/?token=${encodeURIComponent(token)}`, {
+async function loginWithPassword(baseUrl) {
+  const username=String(process.env.AGENTOC_CI_OWNER_USERNAME||'');
+  const password=String(process.env.AGENTOC_CI_OWNER_PASSWORD||'');
+  if (!username || !password) throw new Error('CI monitor requires AGENTOC_CI_OWNER_USERNAME and AGENTOC_CI_OWNER_PASSWORD; static token login is retired');
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/login`, {
+    method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({username,password}),
     redirect: 'manual',
   });
   const setCookie = response.headers.get('set-cookie');
@@ -719,10 +728,7 @@ async function ensureAuthCookie(runtime, forceRefresh = false) {
     runtime.authCookie = '';
     runtime.authToken = '';
   }
-  if (!runtime.authToken) {
-    runtime.authToken = await readOwnerToken();
-  }
-  runtime.authCookie = await loginWithToken(runtime.baseUrl, runtime.authToken);
+  runtime.authCookie = await loginWithPassword(runtime.baseUrl);
   return runtime.authCookie;
 }
 
@@ -917,18 +923,22 @@ export async function runGithubCiAutoRepair(argv = []) {
       continue;
     }
 
-    const sessionResult = await triggerRepairSession(options, runtime, incident);
+    const response = await requestAgentoC(runtime, `/api/responsibilities/${encodeURIComponent(options.responsibilityId)}/github-event`, {
+      method: 'POST', body: {repository:options.repo,runId:String(incident.run.id)},
+    });
+    if (!response.response.ok || !response.json?.wakeId) throw new Error(response.json?.error || response.text || `Failed to submit CI event (${response.response.status})`);
     const triggeredAt = nowIso();
-    state.handledRuns[String(incident.run.id)] = {
+    const eventIdentity = `${incident.run.id}:${incident.run.run_attempt || 1}:${trimString(incident.run.head_sha)}`;
+    state.handledRuns[eventIdentity] = {
       githubRunId: incident.run.id,
       branch: trimString(incident.run.head_branch),
       workflow: workflowLabel(incident.run),
       headSha: trimString(incident.run.head_sha),
       url: trimString(incident.run.html_url),
-      sessionId: sessionResult.sessionId,
-      sessionName: sessionResult.sessionName,
-      agentocRunId: sessionResult.agentocRunId,
-      requestId: sessionResult.requestId,
+      responsibilityId: options.responsibilityId,
+      eventId: response.json.eventId,
+      wakeId: response.json.wakeId,
+      attempt: incident.run.run_attempt || 1,
       snapshotFile: incident.snapshotFile,
       triggeredAt,
       updatedAt: triggeredAt,
@@ -938,8 +948,8 @@ export async function runGithubCiAutoRepair(argv = []) {
       branch: trimString(incident.run.head_branch),
       workflow: workflowLabel(incident.run),
       url: trimString(incident.run.html_url),
-      sessionId: sessionResult.sessionId,
-      agentocRunId: sessionResult.agentocRunId,
+      eventId: response.json.eventId,
+      wakeId: response.json.wakeId,
       snapshotFile: incident.snapshotFile,
     });
   }

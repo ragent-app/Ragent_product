@@ -8,6 +8,7 @@ import { authorize, selectItem, checkVersion } from './work-graph.mjs';
 import { getSession } from './session-manager.mjs';
 import { executeMutation } from './mutation-coordinator.mjs';
 import { verifyFactoryCandidate } from './factory-candidates.mjs';
+import { verifyFactoryResponsibilityFence } from './factory-responsibility-admission.mjs';
 import { recordFactoryMilestone } from './factory-control.mjs';
 import { MANAGED_WORK_ROOT_DIR } from '../lib/config.mjs';
 
@@ -51,6 +52,16 @@ async function version(path) {
   if (!stat) return '';
   if (!stat.isFile() || stat.isSymbolicLink()) fail('Candidate target is not a regular file');
   return sha(await readFile(path));
+}
+function candidateMaterial(db,binding,candidateId,contract,rootPath) {
+  if(binding.status==='remote_candidate') {
+    const row=db.prepare('SELECT envelope_json FROM factory_remote_evidence WHERE id=?').get(candidateId);
+    const envelope=decode(row?.envelope_json,null);
+    if(!envelope?.baseline || !Array.isArray(envelope.changes) || !rootPath) fail('Remote candidate material is unavailable');
+    return {base:{workspace:{canonicalCwd:rootPath,writablePaths:contract.allowedPaths},source:{head:envelope.baseline.head,branch:envelope.baseline.branch},files:envelope.baseline.files},changes:envelope.changes};
+  }
+  return {base:decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(`baseline:${binding.dispatch_key}`)?.files_json,null),
+    changes:decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(candidateId)?.files_json,null)};
 }
 export async function checkFactoryBaseline(root, base) {
   const expected = new Map(base.files.map((file) => [file.path, file]));
@@ -125,6 +136,11 @@ async function applyFactoryChanges({ targetRoot, base, changes, expectedHead, ta
 export async function integrateFactoryCandidate(input, actor) {
   const { organizationId, workItemId, candidateId, candidateDigest, operationId, expectedHead, expectedVersion } = input || {};
   if (![organizationId, workItemId, candidateId, candidateDigest, operationId, expectedHead].every((value) => typeof value === 'string' && value.trim())) fail('Integration requires explicit candidate, operation and target HEAD identities');
+  let remoteRoot='';
+  if(candidateId.startsWith('remote_candidate_')) {
+    const org=await factoryTransaction(db=>authorize(db,organizationId,actor,'factory.IntegrateWork'));
+    const session=await getSession(org.root_session_id); if(!session?.folder) fail('Canonical project identity is unavailable'); remoteRoot=session.folder;
+  }
   const prepared = await factoryTransaction((db) => {
     ensureSchema(db);
     const org = authorize(db, organizationId, actor, 'factory.IntegrateWork');
@@ -137,14 +153,13 @@ export async function integrateFactoryCandidate(input, actor) {
     if (typeof contract.targetBranch !== 'string' || !contract.targetBranch.trim()) fail('Contract must pin the target branch');
     const binding = db.prepare('SELECT * FROM factory_execution_bindings WHERE work_item_id=? AND contract_revision=? AND execution_epoch=? AND binding_generation=?').get(row.id, row.contract_revision, row.execution_epoch, row.binding_generation);
     if (!binding) fail('Accepted execution binding is missing');
+    if(binding.status==='remote_candidate') verifyFactoryResponsibilityFence(db,row);
     const projected = { status: binding.status, dispatchKey: binding.dispatch_key, contractRevision: binding.contract_revision,
       executionEpoch: binding.execution_epoch, bindingGeneration: binding.binding_generation, runId: binding.run_id,
       attemptId: binding.attempt_id, collaborationId: binding.collaboration_id };
     const verified = verifyFactoryCandidate({ db, binding: projected, item: { id: row.id }, payload: { candidateId, digest: candidateDigest } });
     if (!verified) fail('Candidate content or execution evidence changed');
-    const baseline = db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(`baseline:${binding.dispatch_key}`);
-    const source = db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(candidateId);
-    const base = decode(baseline?.files_json, null), changes = decode(source?.files_json, null);
+    const {base,changes}=candidateMaterial(db,binding,candidateId,contract,remoteRoot);
     if (!base?.workspace?.canonicalCwd || !Array.isArray(base.files) || !Array.isArray(changes)) fail('Candidate baseline is unavailable');
     if (base.source?.head !== expectedHead || base.source?.branch !== contract.targetBranch.trim()) fail('Candidate baseline does not match the authorized target');
     if (old) {
@@ -184,6 +199,7 @@ export async function integrateFactoryCandidate(input, actor) {
     targetBranch: prepared.targetBranch,
     beforeApply: () => factoryTransaction((db) => {
       const row = selectItem(db, organizationId, workItemId);
+      if(prepared.binding.status==='remote_candidate') verifyFactoryResponsibilityFence(db,row);
       if (row.row_version !== prepared.rowVersion || row.state !== 'completed' || row.control_state !== 'none'
           || row.candidate_digest !== candidateDigest || !verifyFactoryCandidate({ db, binding: prepared.binding,
             item: { id: row.id }, payload: { candidateId, digest: candidateDigest } })) fail('Acceptance or candidate changed before integration');
@@ -316,10 +332,10 @@ export async function commitFactoryIntegration(input, actor) {
       .get(item.id, item.contract_revision, item.execution_epoch, item.binding_generation);
     const binding = b && { status: b.status, dispatchKey: b.dispatch_key, contractRevision: b.contract_revision,
       executionEpoch: b.execution_epoch, bindingGeneration: b.binding_generation, runId: b.run_id, attemptId: b.attempt_id, collaborationId: b.collaboration_id };
+    if(b?.status==='remote_candidate') verifyFactoryResponsibilityFence(db,item);
     if (!binding || !verifyFactoryCandidate({ db, binding, item: { id: item.id }, payload: { candidateId: op.candidate_id, digest: op.candidate_digest } })) fail('Accepted candidate cannot be verified');
-    const base = decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(`baseline:${b.dispatch_key}`)?.files_json, null);
-    const changes = decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(op.candidate_id)?.files_json, null);
     const contract = decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(item.id, item.contract_revision)?.contract_json, {});
+    const {base,changes}=candidateMaterial(db,b,op.candidate_id,contract,op.target_root);
     if (!base?.source || !Array.isArray(changes) || !changes.length || contract.targetBranch !== base.source.branch) fail('Candidate has no committable authorized changes');
     return { op, binding, base, changes, rowVersion: item.row_version };
   });
@@ -327,7 +343,9 @@ export async function commitFactoryIntegration(input, actor) {
   const result = await commitFactoryChanges({ prepared, root, operationId,
     beforeRef: ({ commitId, treeId }) => factoryTransaction((db) => {
       const row = selectItem(db, organizationId, workItemId);
-      if (row.row_version !== prepared.rowVersion || row.state !== 'completed' || row.candidate_digest !== prepared.op.candidate_digest) fail('Acceptance changed before Git commit');
+      if(prepared.binding.status==='remote_candidate') verifyFactoryResponsibilityFence(db,row);
+      if (row.row_version !== prepared.rowVersion || row.state !== 'completed' || row.control_state!=='none' || row.candidate_digest !== prepared.op.candidate_digest
+          || !verifyFactoryCandidate({db,binding:prepared.binding,item:{id:row.id},payload:{candidateId:prepared.op.candidate_id,digest:prepared.op.candidate_digest}})) fail('Acceptance or candidate changed before Git commit');
       if (!db.prepare("UPDATE factory_integration_operations SET state='committing',commit_id=?,tree_id=?,updated_at=? WHERE id=? AND state='workspace_applied_verified'").run(commitId, treeId, now(), operationId).changes) fail('Git operation was already started');
     }),
     onVerified: ({ commitId, treeId, resultDigest }) => factoryTransaction((db) => db.prepare("UPDATE factory_integration_operations SET state='commit_verified',commit_id=?,tree_id=?,result_digest=?,updated_at=? WHERE id=? AND state IN ('committing','commit_verified','milestone_recorded')").run(commitId, treeId, resultDigest, now(), operationId)),

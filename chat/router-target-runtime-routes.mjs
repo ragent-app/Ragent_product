@@ -110,7 +110,7 @@ async function readRemoteResponse(response) {
   return body;
 }
 
-async function proxyToTarget({ targetId, requestId, idempotencyKey, method, path, operation, resourceId, expectedRevision, expiresAt, body, headers, timeoutMs = REMOTE_REQUEST_TIMEOUT_MS, fetchImpl = globalThis.fetch, authorizeImpl = authorizeOwnerAccountTargetRuntime }) {
+export async function proxyToTarget({ targetId, requestId, idempotencyKey, method, path, operation, resourceId, expectedRevision, expiresAt, body, headers, timeoutMs = REMOTE_REQUEST_TIMEOUT_MS, fetchImpl = globalThis.fetch, authorizeImpl = authorizeOwnerAccountTargetRuntime }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(250, timeoutMs));
   const boundedFetch = (url, options = {}) => fetchImpl(url, { ...options, signal: controller.signal });

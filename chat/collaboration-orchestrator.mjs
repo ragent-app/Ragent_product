@@ -694,7 +694,7 @@ export function createCollaborationOrchestrator(options = {}) {
         const owner = await store.getCollaboration(collaborationId);
         if (owner?.policy?.factoryExecution) {
           const { assertFactoryExecutionFence } = await import('./factory-execution-adapter.mjs');
-          await assertFactoryExecutionFence(owner.policy.factoryExecution);
+          await assertFactoryExecutionFence(owner.policy.factoryExecution, { requireWorkspace: true });
         }
         const outcome = await deps.sendMessage(command.sessionId, command.prompt, [], {
           ...command.options,

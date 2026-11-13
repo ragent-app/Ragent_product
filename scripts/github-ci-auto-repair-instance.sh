@@ -24,6 +24,7 @@ ensure_default_config() {
 {
   "enabled": true,
   "repo": "Ninglo/agentoc",
+  "responsibilityId": "",
   "branches": ["main", "master"],
   "events": ["push"],
   "workflows": ["CI"],
@@ -41,6 +42,7 @@ ensure_default_config() {
 }
 EOF
   echo "created default config: $CONFIG_PATH"
+  echo "Set responsibilityId to an authorized responsibility before the monitor can deliver events."
 }
 
 config_number() {
@@ -140,6 +142,7 @@ show_status() {
 
   echo "plist: $PLIST_PATH"
   echo "config: $CONFIG_PATH"
+  echo "Migration: existing configs must set responsibilityId; missing identity stops event delivery."
   echo "stdout log: $LOG_PATH"
   echo "stderr log: $ERROR_LOG_PATH"
 

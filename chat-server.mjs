@@ -129,6 +129,7 @@ let startupRecoveryTimer = null;
 let stopAdaptiveConcurrency = () => {};
 let stopProjectMemoryRecovery = () => {};
 let factoryRuntime = null;
+let responsibilityRuntime = null;
 let stopTemporaryPairingPoller = () => {};
 let stopAccountPairingPoller = () => {};
 let stopTemporaryControlPoller = () => {};
@@ -872,6 +873,20 @@ async function startDeferredBackgroundServices() {
     console.warn(`[sessions] deferred archive cleanup failed: ${error?.message || error}`);
   }
   triggers.startTriggerScheduler();
+  if (!shuttingDown && process.env.AGENTOC_RESPONSIBILITY_RUNTIME_ENABLED === '1') {
+    try {
+      const { createResponsibilityRuntime } = await import('./chat/responsibility-runtime.mjs');
+      if (!shuttingDown) {
+        responsibilityRuntime = createResponsibilityRuntime();
+        responsibilityRuntime.start();
+        if (shuttingDown) await responsibilityRuntime.stop();
+      }
+    } catch (error) {
+      if (responsibilityRuntime) await responsibilityRuntime.stop().catch(() => {});
+      responsibilityRuntime = null;
+      console.warn(`[responsibility] deferred start failed: ${error?.message || error}`);
+    }
+  }
   managedProcesses.startManagedProcessSupervisor();
   runSpoolArchive.startRunArchiveScheduler();
   await import('./chat/collaboration-orchestrator.mjs')
@@ -980,6 +995,7 @@ async function shutdown(signal = 'signal') {
       memoryRegistry.stopSampler();
       if (mailWorker) mailWorker.stop();
       triggers.stopTriggerScheduler();
+      if (responsibilityRuntime) await responsibilityRuntime.stop();
       managedProcesses.stopManagedProcessSupervisor();
       runSpoolArchive.stopRunArchiveScheduler();
       if (factoryRuntime) await factoryRuntime.stop();
