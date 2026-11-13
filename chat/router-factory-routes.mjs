@@ -9,11 +9,14 @@ import { getNode } from './organization-store.mjs';
 import { replaceManagedSession } from './organization-replan.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryRelease, getFactoryReleaseOperation } from './factory-release.mjs';
-import { setPositionProfile, addTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
+import { setPositionProfile, addTeamRelation, retireTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
 import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
 import { requestFactoryReconciliation, getFactoryReconciliation } from './factory-reconciliation.mjs';
 import { submitFactoryReviewOpinion, reconcileFactoryReviewOpinion } from './factory-review-opinions.mjs';
+import { enqueueFactoryIntegration, materializeFactoryIntegration, attachFactoryCombinationValidation, refreshFactoryIntegrationQueue, getFactoryIntegrationQueue, listFactoryIntegrationQueue } from './factory-integration-queue.mjs';
+import { registerFactoryCombinationCheck, reconcileFactoryCombinationCheck } from './factory-checks.mjs';
+import { commitFactoryCombination } from './factory-integration.mjs';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
 
@@ -44,18 +47,21 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const reviewOpinion = /^\/api\/sessions\/([^/]+)\/factory\/review-opinion$/.exec(String(pathname || ''));
   const reconcile = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
   const reviewReconcile = /^\/api\/organizations\/([^/]+)\/factory\/review-opinions\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
+  const integrationQueue = /^\/api\/organizations\/([^/]+)\/factory\/integration-queue\/(enqueue|materialize|attach-validation|refresh|register-check|reconcile-check|commit)$/.exec(String(pathname || ''));
+  const integrationQueueRead = /^\/api\/organizations\/([^/]+)\/factory\/integration-queue\/([^/]+)$/.exec(String(pathname || ''));
+  const integrationQueueList = /^\/api\/organizations\/([^/]+)\/factory\/integration-queue$/.exec(String(pathname || ''));
   const acceptance = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/manual-acceptance$/.exec(String(pathname || ''));
   const lifecycle = /^\/api\/organizations\/([^/]+)\/factory\/lifecycle(?:\/([^/]+)\/(finalize|cancel))?$/.exec(String(pathname || ''));
   const nodeRebind = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/rebind(?:\/([^/]+)\/(cancel))?$/.exec(String(pathname || ''));
   const release = /^\/api\/organizations\/([^/]+)\/factory\/releases\/(packages|authorizations|requests|operations)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  const team = /^\/api\/organizations\/([^/]+)\/factory\/team(?:\/(profiles|relations))?$/.exec(String(pathname || ''));
+  const team = /^\/api\/organizations\/([^/]+)\/factory\/team(?:\/(profiles|relations|retire-relation))?$/.exec(String(pathname || ''));
   const handoffCreate = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/handoffs$/.exec(String(pathname || ''));
   const handoffRead = /^\/api\/organizations\/([^/]+)\/factory\/handoffs\/([^/]+)$/.exec(String(pathname || ''));
   const shadow = /^\/api\/organizations\/([^/]+)\/factory\/(shadow|readiness)(?:\/(sync))?$/.exec(String(pathname || ''));
   const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reviewReconcile && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts) return false;
+  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts) return false;
   if (reviewOpinion) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -83,6 +89,34 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, 403, { error: 'Owner access required' }); return true;
   }
   try {
+    if (integrationQueueList) {
+      if (req.method!=='GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'},url=new URL(req.url || pathname,'http://localhost');
+      writeJson(res,200,await listFactoryIntegrationQueue(decodeURIComponent(integrationQueueList[1]),{cursor:text(url.searchParams.get('cursor')),limit:Number(url.searchParams.get('limit') || 50)},actor)); return true;
+    }
+    if (integrationQueueRead && req.method==='GET') {
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      writeJson(res,200,await getFactoryIntegrationQueue({organizationId:decodeURIComponent(integrationQueueRead[1]),id:decodeURIComponent(integrationQueueRead[2])},actor)); return true;
+    }
+    if (integrationQueue) {
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const action=integrationQueue[2];
+      if (!['refresh','reconcile-check'].includes(action) && process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      const organizationId=decodeURIComponent(integrationQueue[1]),actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const raw=await readBody(req,32*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      if (!body || typeof body!=='object' || Array.isArray(body)) { writeJson(res,400,{error:'Request must be an object'}); return true; }
+      let result;
+      if (action==='enqueue') result=await enqueueFactoryIntegration({organizationId,candidates:body.candidates,idempotencyKey:body.idempotencyKey},actor);
+      else if (action==='materialize') result=await materializeFactoryIntegration({organizationId,id:body.queueId},actor);
+      else if (action==='attach-validation') result=await attachFactoryCombinationValidation({organizationId,queueId:body.queueId,validationWorkItemId:body.validationWorkItemId,expectedVersion:body.expectedVersion},actor);
+      else if (action==='refresh') result=await refreshFactoryIntegrationQueue({organizationId,id:body.queueId},actor);
+      else if (action==='register-check') result=await registerFactoryCombinationCheck({organizationId,queueId:body.queueId,actionId:body.actionId},actor);
+      else if (action==='reconcile-check') result=await reconcileFactoryCombinationCheck({organizationId,checkId:body.checkId},actor);
+      else result=await commitFactoryCombination({organizationId,queueId:body.queueId,expectedHead:body.expectedHead,operationId:body.operationId},actor);
+      writeJson(res,200,result); return true;
+    }
+    if (integrationQueueRead) { writeJson(res,405,{error:'Method not allowed'}); return true; }
     if (reviewReconcile) {
       if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -120,7 +154,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const selected=team || handoffCreate || handoffRead, organizationId=decodeURIComponent(selected[1]);
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       await listFactoryWorkItems(organizationId,{limit:1},actor);
-      if (req.method==='GET' && team && !team[2]) { writeJson(res,200,await getTeamConfiguration(organizationId,actor)); return true; }
+      if (req.method==='GET' && team && !team[2]) { const value=new URL(req.url || pathname,'http://localhost').searchParams.get('relationVersion'); if(value!==null && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))) { writeJson(res,400,{error:'Invalid relationship version'}); return true; } writeJson(res,200,await getTeamConfiguration(organizationId,actor,value===null?{}:{atRelationVersion:Number(value)})); return true; }
       if (req.method==='GET' && handoffRead) { writeJson(res,200,await getFactoryTaskHandoff(organizationId,decodeURIComponent(handoffRead[2]),actor)); return true; }
       if (req.method!=='POST' || handoffRead || (team && !team[2])) { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
@@ -129,7 +163,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if (!body || typeof body!=='object' || Array.isArray(body)) { writeJson(res,400,{error:'Request must be an object'}); return true; }
       const input={...body,organizationId};
       const result=handoffCreate ? await createFactoryTaskHandoff({...input,workItemId:decodeURIComponent(handoffCreate[2])},actor)
-        : team[2]==='profiles' ? await setPositionProfile(input,actor) : await addTeamRelation(input,actor);
+        : team[2]==='profiles' ? await setPositionProfile(input,actor) : team[2]==='retire-relation' ? await retireTeamRelation(input,actor) : await addTeamRelation(input,actor);
       writeJson(res,200,result); return true;
     }
     if (release) {

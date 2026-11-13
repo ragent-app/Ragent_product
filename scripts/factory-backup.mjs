@@ -98,7 +98,6 @@ export async function createFactoryBackup({ sources, destination, allowedRoot } 
   if (!isAbsolute(destination || '') || !isAbsolute(allowedRoot || '')) fail('Absolute destination and allowed root are required');
   const root = await realpath(allowedRoot), parent = await realpath(dirname(destination)), target = resolve(destination);
   if (!contained(root, parent) || !contained(root, target) || target === root) fail('Backup destination must be a new directory inside the allowed root');
-  if (process.platform === 'win32' && !contained('G:\\AgentoC', root)) fail('Windows AgentoC backups must be under G:\\AgentoC');
   if (await lstat(target).then(() => true, () => false)) fail('Backup destination already exists');
   let sourceBytes = 0;
   for (const name of NAMES) {

@@ -787,6 +787,7 @@
           if (list.nextCursor) add(content, 'p', 'More items exist; this view shows the first page.');
           button(content, 'Team lifecycle', showLifecycle);
           button(content, 'Positions and relationships', showTeamConfiguration);
+          button(content, 'Integration queue', showIntegrationQueue);
           button(content, 'Refresh', showList);
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work items: ${error.message}`); button(content, 'Retry', showList); }
       };
@@ -874,6 +875,25 @@
           }
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load team lifecycle: ${error.message}`); button(content, 'All work items', showList); }
       };
+      const showIntegrationQueue = async () => {
+        content.replaceChildren(); button(content,'All work items',showList); add(content,'h3','Integration queue');
+        const output=add(content,'pre','Loading…');
+        const field=(placeholder)=>{ const el=document.createElement('input'); el.placeholder=placeholder; content.appendChild(el); return el; };
+        const queue=field('Queue ID'), work=field('Validation work item ID'), version=field('Validation work item version'), action=field('Configured check action ID'), check=field('Check ID'), head=field('Expected base HEAD');
+        const candidates=field('Ordered candidates JSON: [{"workItemId":"…","candidateDigest":"…"}]'), key=field('Stable enqueue idempotency key');
+        const run=async(path,body)=>{ try { const result=await request(path,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : undefined); output.textContent=JSON.stringify(result,null,2); } catch(error) { output.textContent=`Not confirmed: ${error.message}`; } };
+        button(content,'Refresh queue',()=>run('/integration-queue'));
+        button(content,'Enqueue accepted candidates',()=>{ try { run('/integration-queue/enqueue',{candidates:JSON.parse(candidates.value),idempotencyKey:key.value.trim()}); } catch(error) { output.textContent=`Invalid candidate list: ${error.message}`; } });
+        button(content,'Inspect queue item',()=>run(`/integration-queue/${encodeURIComponent(queue.value.trim())}`));
+        button(content,'Materialize combination',()=>run('/integration-queue/materialize',{queueId:queue.value.trim()}));
+        button(content,'Attach validation work',()=>run('/integration-queue/attach-validation',{queueId:queue.value.trim(),validationWorkItemId:work.value.trim(),expectedVersion:Number(version.value)}));
+        button(content,'Register configured check',()=>run('/integration-queue/register-check',{queueId:queue.value.trim(),actionId:action.value.trim()}));
+        button(content,'Reconcile check evidence',()=>run('/integration-queue/reconcile-check',{checkId:check.value.trim()}));
+        const operation=field('Stable integration operation ID');
+        button(content,'Commit verified combination',()=>run('/integration-queue/commit',{queueId:queue.value.trim(),expectedHead:head.value.trim(),operationId:operation.value.trim()}));
+        add(content,'p','Each step requires current server authorization and evidence. A recorded commit can still have members awaiting acceptance; missing verification is not success.');
+        await run('/integration-queue');
+      };
       const showTeamConfiguration = async () => {
         content.replaceChildren(); add(content,'p','Loading team configuration…');
         try {
@@ -889,6 +909,8 @@
           const type=document.createElement('select'); for(const value of ['REVIEWS','CONSULTS']) { const option=document.createElement('option'); option.value=value; option.textContent=value; type.appendChild(option); } content.appendChild(type);
           const required=document.createElement('input'); required.type='checkbox'; content.appendChild(required); add(content,'span','Propose required review');
           button(content,'Add relationship',() => submit('/team/relations',{commandId:root.crypto.randomUUID(),fromNodeId:from.value.trim(),toNodeId:to.value.trim(),edgeType:type.value,requiredReview:required.checked,expectedOrganizationRevision:data.organizationRevision}));
+          const retiredRelation=field('Relationship ID to retire');
+          button(content,'Retire relationship',()=>submit('/team/retire-relation',{commandId:root.crypto.randomUUID(),relationId:retiredRelation.value.trim(),expectedOrganizationRevision:data.organizationRevision,expectedRelationVersion:data.currentRelationVersion}));
           add(content,'p','Required review remains a proposal; the impact report identifies contracts that need amendment.');
         } catch(error) { content.replaceChildren(); add(content,'p',`Unable to load team configuration: ${error.message}`); button(content,'All work items',showList); }
       };

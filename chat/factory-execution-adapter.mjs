@@ -168,7 +168,12 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     const detail = (await getFactoryWorkItem(organizationId, item.id, actor)).item;
     const candidateInputs = detail.dependencies.filter((dependency) => dependency.milestone === 'candidate_ready');
     let validationWorkspace = null;
-    if (candidateInputs.length) {
+    const { findFactoryCombinationValidation, prepareFactoryCombinationValidation } = await import('./factory-integration-queue.mjs');
+    const combination = await findFactoryCombinationValidation(organizationId,item.id,actor);
+    if (combination && candidateInputs.length) refuse('Combination validation cannot reuse a single-candidate dependency');
+    if (combination) {
+      validationWorkspace = await prepareFactoryCombinationValidation({ organizationId, workItemId: item.id, binding, actor });
+    } else if (candidateInputs.length) {
       const { prepareFactoryValidationWorkspace } = await import('./factory-validation-workspace.mjs');
       validationWorkspace = await prepareFactoryValidationWorkspace({ organizationId, workItemId: item.id, binding, actor });
     }

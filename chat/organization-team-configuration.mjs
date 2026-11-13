@@ -14,8 +14,14 @@ function schema(db) { db.exec(`CREATE TABLE IF NOT EXISTS organization_position_
   organization_id TEXT NOT NULL,version INTEGER NOT NULL,id TEXT NOT NULL,base_organization_revision INTEGER NOT NULL,
   edge_type TEXT NOT NULL,from_node_id TEXT NOT NULL,to_node_id TEXT NOT NULL,created_at TEXT NOT NULL,
   PRIMARY KEY(organization_id,version),UNIQUE(organization_id,edge_type,from_node_id,to_node_id));
+  CREATE TABLE IF NOT EXISTS organization_team_relation_changes (
+  organization_id TEXT NOT NULL,version INTEGER NOT NULL,relation_id TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','retired')),
+  base_organization_revision INTEGER NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(organization_id,version));
   CREATE TRIGGER IF NOT EXISTS organization_team_relations_no_update BEFORE UPDATE ON organization_team_relations BEGIN SELECT RAISE(ABORT,'immutable relation'); END;
-  CREATE TRIGGER IF NOT EXISTS organization_team_relations_no_delete BEFORE DELETE ON organization_team_relations BEGIN SELECT RAISE(ABORT,'immutable relation'); END;`); }
+  CREATE TRIGGER IF NOT EXISTS organization_team_relations_no_delete BEFORE DELETE ON organization_team_relations BEGIN SELECT RAISE(ABORT,'immutable relation'); END;
+  CREATE TRIGGER IF NOT EXISTS organization_team_relation_changes_no_update BEFORE UPDATE ON organization_team_relation_changes BEGIN SELECT RAISE(ABORT,'immutable relation change'); END;
+  CREATE TRIGGER IF NOT EXISTS organization_team_relation_changes_no_delete BEFORE DELETE ON organization_team_relation_changes BEGIN SELECT RAISE(ABORT,'immutable relation change'); END;`); }
+function relationVersion(db,orgId) { const row=db.prepare('SELECT MAX(version) AS version FROM (SELECT version FROM organization_team_relations WHERE organization_id=? UNION ALL SELECT version FROM organization_team_relation_changes WHERE organization_id=?)').get(orgId,orgId); return row.version || 0; }
 function owner(actor) { if (actor?.kind!=='user' || actor?.role!=='owner' || !text(actor.principalId)) throw fail('Owner access required',403); }
 function transact(input,actor,fn) {
   owner(actor); const orgId=text(input?.organizationId), commandId=text(input?.commandId);
@@ -46,10 +52,11 @@ export async function addTeamRelation(input,actor) {
   if(input.requiredReview === true && input.edgeType!=='REVIEWS') throw fail('Only review relations may propose required review',400);
   return transact(input,actor,(db,org)=>{
     node(db,org.id,input.fromNodeId); node(db,org.id,input.toNodeId);
-    if(db.prepare('SELECT 1 FROM organization_team_relations WHERE organization_id=? AND edge_type=? AND from_node_id=? AND to_node_id=?').get(org.id,input.edgeType,input.fromNodeId,input.toNodeId)) throw fail('Relation already exists');
-    const edgeId=`edge_${randomUUID()}`;
-    const version=(db.prepare('SELECT MAX(version) AS version FROM organization_team_relations WHERE organization_id=?').get(org.id).version || 0)+1;
-    db.prepare('INSERT INTO organization_team_relations VALUES(?,?,?,?,?,?,?,?)').run(org.id,version,edgeId,org.current_revision,input.edgeType,input.fromNodeId,input.toNodeId,new Date().toISOString());
+    const existing=db.prepare('SELECT * FROM organization_team_relations WHERE organization_id=? AND edge_type=? AND from_node_id=? AND to_node_id=?').get(org.id,input.edgeType,input.fromNodeId,input.toNodeId);
+    if(existing && db.prepare('SELECT state FROM organization_team_relation_changes WHERE organization_id=? AND relation_id=? ORDER BY version DESC LIMIT 1').get(org.id,existing.id)?.state!=='retired') throw fail('Relation already exists');
+    const edgeId=existing?.id || `edge_${randomUUID()}`, version=relationVersion(db,org.id)+1;
+    if(existing) db.prepare('INSERT INTO organization_team_relation_changes VALUES(?,?,?,?,?,?)').run(org.id,version,edgeId,'active',org.current_revision,new Date().toISOString());
+    else db.prepare('INSERT INTO organization_team_relations VALUES(?,?,?,?,?,?,?,?)').run(org.id,version,edgeId,org.current_revision,input.edgeType,input.fromNodeId,input.toNodeId,new Date().toISOString());
     const hasItems=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_work_items'").get();
     const items=hasItems ? db.prepare("SELECT id,state,contract_revision,candidate_digest FROM factory_work_items WHERE organization_id=? AND ownership='active' AND state NOT IN ('completed','cancelled') ORDER BY id LIMIT 501").all(org.id) : [];
     const affected=items.slice(0,500).map(r=>({workItemId:r.id,state:r.state,contractRevision:r.contract_revision,candidateDigest:r.candidate_digest}));
@@ -58,6 +65,14 @@ export async function addTeamRelation(input,actor) {
       impact:{affectedWorkItems:affected,truncated:items.length>500,grantsChanged:false,contractsChanged:false}};
   });
 }
-export async function getTeamConfiguration(organizationId,actor) {
-  owner(actor); return withDatabase(db=>{schema(db); const org=db.prepare('SELECT current_revision FROM organizations WHERE id=?').get(organizationId); if(!org) throw fail('Organization not found',404); const profiles=db.prepare(`SELECT p.* FROM organization_position_profiles p WHERE p.organization_id=? AND p.version=(SELECT MAX(q.version) FROM organization_position_profiles q WHERE q.organization_id=p.organization_id AND q.node_id=p.node_id) ORDER BY p.node_id`).all(organizationId).map(r=>({nodeId:r.node_id,version:r.version,organizationRevision:r.organization_revision,profile:JSON.parse(r.profile_json)})); const relations=db.prepare('SELECT * FROM organization_team_relations WHERE organization_id=? ORDER BY version').all(organizationId).map(r=>({id:r.id,type:r.edge_type,fromNodeId:r.from_node_id,toNodeId:r.to_node_id,organizationRevision:r.base_organization_revision,relationVersion:r.version})); const relationVersion=relations.at(-1)?.relationVersion || 0; return {organizationId,organizationRevision:org.current_revision,relationVersion,profiles,relations,schemaVersion:1}; });
+export async function retireTeamRelation(input,actor) {
+  return transact(input,actor,(db,org)=>{ const current=relationVersion(db,org.id); if(current!==input.expectedRelationVersion) throw fail('Relationship version changed');
+    const edge=db.prepare('SELECT * FROM organization_team_relations WHERE organization_id=? AND id=?').get(org.id,input.relationId); if(!edge) throw fail('Relation not found',404);
+    const last=db.prepare('SELECT state FROM organization_team_relation_changes WHERE organization_id=? AND relation_id=? ORDER BY version DESC LIMIT 1').get(org.id,edge.id); if(last?.state==='retired') throw fail('Relation already retired');
+    const version=current+1; db.prepare('INSERT INTO organization_team_relation_changes VALUES(?,?,?,?,?,?)').run(org.id,version,edge.id,'retired',org.current_revision,new Date().toISOString());
+    return {relationId:edge.id,relationVersion:version,organizationRevision:org.current_revision,impact:{grantsChanged:false,contractsChanged:false}};
+  });
+}
+export async function getTeamConfiguration(organizationId,actor,{atRelationVersion}={}) {
+  owner(actor); return withDatabase(db=>{schema(db); const org=db.prepare('SELECT current_revision FROM organizations WHERE id=?').get(organizationId); if(!org) throw fail('Organization not found',404); const profiles=db.prepare(`SELECT p.* FROM organization_position_profiles p WHERE p.organization_id=? AND p.version=(SELECT MAX(q.version) FROM organization_position_profiles q WHERE q.organization_id=p.organization_id AND q.node_id=p.node_id) ORDER BY p.node_id`).all(organizationId).map(r=>({nodeId:r.node_id,version:r.version,organizationRevision:r.organization_revision,profile:JSON.parse(r.profile_json)})); const current=relationVersion(db,organizationId), at=atRelationVersion===undefined?current:atRelationVersion; if(!Number.isInteger(at)||at<0||at>current) throw fail('Invalid relationship version',400); const relations=db.prepare(`SELECT r.* FROM organization_team_relations r WHERE r.organization_id=? AND r.version<=? AND COALESCE((SELECT c.state FROM organization_team_relation_changes c WHERE c.organization_id=r.organization_id AND c.relation_id=r.id AND c.version<=? ORDER BY c.version DESC LIMIT 1),'active')='active' ORDER BY r.version`).all(organizationId,at,at).map(r=>({id:r.id,type:r.edge_type,fromNodeId:r.from_node_id,toNodeId:r.to_node_id,organizationRevision:r.base_organization_revision,relationVersion:r.version})); return {organizationId,organizationRevision:org.current_revision,relationVersion:at,currentRelationVersion:current,profiles,relations,schemaVersion:1}; });
 }
