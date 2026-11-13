@@ -58,6 +58,28 @@ function parseJson(value, fallback = null) {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 }
 
+// Organization-managed attempts share the same SQLite transaction as node
+// rebinding. Generic collaborations without organization policy are unchanged.
+function managedAttemptBindingAvailable(db, collaborationId, taskId) {
+  const raw=db.prepare('SELECT policy_json,plan_version FROM collaborations WHERE id=?').get(collaborationId);
+  const policy=parseJson(raw?.policy_json,null);
+  if (!policy || typeof policy!=='object' || Array.isArray(policy)) throw Object.assign(new Error('Collaboration policy is unavailable; reconcile before dispatch'),{code:'COLLABORATION_MANAGED_BINDING_CONFLICT',statusCode:409});
+  const org=typeof policy.organizationId==='string' ? policy.organizationId.trim() : '';
+  const nodeId=typeof policy.organizationNodeId==='string' ? policy.organizationNodeId.trim() : '';
+  if (!org && !nodeId && policy.organizationBindingGeneration===undefined && !policy.factoryExecution) return true;
+  if (org && !nodeId && policy.organizationBindingGeneration===undefined && !policy.factoryExecution) {
+    const plan=parseJson(db.prepare('SELECT plan_json FROM collaboration_plans WHERE collaboration_id=? AND version=?').get(collaborationId,raw.plan_version)?.plan_json,null);
+    const task=Array.isArray(plan?.tasks) ? plan.tasks.find(item=>item.id===taskId) : null;
+    if (!task) throw Object.assign(new Error('Frozen collaboration task is unavailable'),{code:'COLLABORATION_MANAGED_BINDING_CONFLICT',statusCode:409});
+    if (!task.managedSessionId) return true;
+  }
+  if (!org || !nodeId || !Number.isInteger(policy.organizationBindingGeneration) || policy.organizationBindingGeneration<0) throw Object.assign(new Error('Organization binding facts are incomplete; reconcile before dispatch'),{code:'COLLABORATION_MANAGED_BINDING_CONFLICT',statusCode:409});
+  const node=db.prepare('SELECT current_session_id,binding_generation,retired_revision FROM organization_nodes WHERE id=? AND organization_id=?').get(nodeId,org);
+  if (!node || !node.current_session_id || node.retired_revision!==null || node.binding_generation!==policy.organizationBindingGeneration) throw Object.assign(new Error('Organization binding changed; reconcile before dispatch'),{code:'COLLABORATION_MANAGED_BINDING_CONFLICT',statusCode:409});
+  const hasPending=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_node_rebind_operations'").get();
+  return !(hasPending && db.prepare("SELECT 1 FROM organization_node_rebind_operations WHERE organization_id=? AND node_id=? AND state='pending'").get(org,nodeId));
+}
+
 function rowDispatchCommand(row) {
   if (!row) return null;
   const payload = parseJson(row.payload_json, {});
@@ -559,6 +581,7 @@ export async function claimTaskAttempt(taskId, {
         db.exec('COMMIT');
         return null;
       }
+      if (!managedAttemptBindingAvailable(db,current.collaboration_id,taskId)) { db.exec('COMMIT'); return null; }
       const nextAttempt = Number(current.current_attempt || 0) + 1;
       const hasRun = typeof runId === 'string' && runId.trim().length > 0;
       const lifecyclePhase = hasRun ? 'queued' : 'dispatching';
@@ -743,6 +766,7 @@ export async function claimPendingDispatchCommands({
         .all(timestamp, timestamp, normalizedCollaborationId, normalizedCollaborationId, boundedLimit);
       const output = [];
       for (const candidate of candidates) {
+        if (!managedAttemptBindingAvailable(db,candidate.collaboration_id,candidate.task_id)) continue;
         const claimToken = id('claim');
         const changed = db.prepare(`UPDATE collaboration_dispatch_commands
           SET state = 'claimed', claim_token = ?, lease_until = ?, updated_at = ?

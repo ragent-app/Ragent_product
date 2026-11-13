@@ -12953,7 +12953,7 @@ async function createPreparingHttpRun(prepared) {
         },
       },
     },
-  }));
+  }, { admissionSession:prepared.session }));
   setApiRequestCorrelation({ runId: run.id });
   await updateRunReplyPublication(run.id, () => buildInitialReplyPublication(run, [prepared.responseId]));
   if (prepared.options.recordUserMessage !== false) {
@@ -14073,7 +14073,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
         () => createRun({
           status: { ...status, id: nextRunId },
           manifest: admission.manifest,
-        }),
+        }, { admissionSession:session }),
       );
     }
     return run;
@@ -14460,7 +14460,7 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
       } : {}),
     },
   });
-  const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest });
+  const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest }, { admissionSession:session });
   await updateRunReplyPublication(run.id, () => buildInitialReplyPublication(run, [responseId]));
 
   await updateRun(parentRun.id, (current) => ({
@@ -14795,7 +14795,7 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
       } : {}),
     },
   });
-  const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest });
+  const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest }, { admissionSession:session });
   await updateRunReplyPublication(run.id, () => buildInitialReplyPublication(run, [responseId]));
 
   await updateRun(parentRun.id, (current) => ({

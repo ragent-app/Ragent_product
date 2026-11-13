@@ -30,11 +30,19 @@ export async function beginNodeRebind({ organizationId,nodeId,commandId,actorId,
       const node=db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(nodeId,organizationId);
       if (!org || !node) throw lifecycleError('Organization or node not found',404);
       if (['archived','lifecycle_pending'].includes(org.state) || node.retired_revision !== null || node.binding_generation !== expectedGeneration) throw lifecycleError('Organization or node binding changed');
+      if (db.prepare("SELECT 1 FROM organization_node_rebind_operations WHERE organization_id=? AND node_id=? AND state='pending'").get(organizationId,nodeId)) throw lifecycleError('Another node replacement is pending');
       const ts=new Date().toISOString();
       db.prepare('INSERT INTO organization_node_rebind_operations VALUES (?,?,?,?,?,?,?,?,?,?)').run(commandId,organizationId,nodeId,actorId,expectedGeneration,node.current_session_id,'pending',null,ts,ts);
       db.exec('COMMIT'); return {state:'pending',oldSessionId:node.current_session_id};
     } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
   }, { mutate:true });
+}
+export async function getLatestLegacyNodeRebind(organizationId,nodeId,prefix) {
+  if (!organizationId || !nodeId || !/^legacy_[a-f0-9]{64}_$/.test(prefix)) throw lifecycleError('Invalid replacement identity',400);
+  return withDatabase(db=>{ lifecycleSchema(db); const rows=db.prepare('SELECT * FROM organization_node_rebind_operations WHERE organization_id=? AND node_id=? AND substr(command_id,1,?)=?').all(organizationId,nodeId,prefix.length,prefix);
+    const valid=rows.filter(row=>/^\d+$/.test(row.command_id.slice(prefix.length))).sort((a,b)=>Number(b.command_id.slice(prefix.length))-Number(a.command_id.slice(prefix.length)));
+    const row=valid[0]; return row ? {commandId:row.command_id,state:row.state,expectedGeneration:row.expected_generation,oldSessionId:row.old_session_id,result:row.result_json?JSON.parse(row.result_json):null,attempt:Number(row.command_id.slice(prefix.length))} : null;
+  });
 }
 export async function finishNodeRebind({ organizationId,nodeId,commandId,result }) {
   return withDatabase(db => {
@@ -97,10 +105,12 @@ export async function getOrganizationLifecycleInfo(organizationId) {
     if (!org) throw lifecycleError('Organization not found',404);
     const op=db.prepare("SELECT command_id,kind,state,target_root_session_id FROM organization_lifecycle_operations WHERE organization_id=? AND state='pending'").get(organizationId);
     const nodeRebinds=db.prepare("SELECT command_id,node_id,expected_generation FROM organization_node_rebind_operations WHERE organization_id=? AND state='pending' ORDER BY created_at").all(organizationId);
+    const admissions=exists(db,'organization_run_admissions') ? db.prepare("SELECT run_id,node_id,session_id,state FROM organization_run_admissions WHERE organization_id=? AND state NOT IN ('resolved','unpublished') ORDER BY created_at,run_id LIMIT 101").all(organizationId) : [];
     const nodes=db.prepare('SELECT id,stable_key,current_session_id,binding_generation FROM organization_nodes WHERE organization_id=? AND retired_revision IS NULL ORDER BY stable_key,id').all(organizationId);
     return {organizationId,state:org.state,version:org.version,revision:org.current_revision,rootSessionId:org.root_session_id,
       pending:op ? {commandId:op.command_id,kind:op.kind,state:op.state,targetRootSessionId:op.target_root_session_id} : null,
       pendingNodeRebinds:nodeRebinds.map(row=>({commandId:row.command_id,nodeId:row.node_id,expectedGeneration:row.expected_generation})),
+      unresolvedRunAdmissions:admissions.slice(0,100).map(row=>({runId:row.run_id,nodeId:row.node_id,sessionId:row.session_id,state:row.state})),admissionsTruncated:admissions.length>100,
       nodes:nodes.map(row=>({nodeId:row.id,stableKey:row.stable_key,sessionId:row.current_session_id,bindingGeneration:row.binding_generation}))};
   });
 }
@@ -204,6 +214,9 @@ export async function assertNodeWorkQuiescent(organizationId, nodeId, sessionId)
   return withDatabase(db => {
     if (exists(db,'factory_work_items') && exists(db,'factory_execution_bindings') && db.prepare(`SELECT 1 FROM factory_work_items w JOIN factory_execution_bindings b ON b.work_item_id=w.id WHERE w.organization_id=? AND w.assignee_node_id=? AND b.status IN ('intent','running','unknown') LIMIT 1`).get(organizationId,nodeId)) throw lifecycleError('Node has an active or unknown Factory execution');
     if (exists(db,'collaboration_attempts') && db.prepare("SELECT 1 FROM collaboration_attempts WHERE session_id=? AND (state NOT IN ('succeeded','failed','cancelled') OR (state='failed' AND failure_kind='unknown_outcome')) LIMIT 1").get(sessionId)) throw lifecycleError('Node session has an active or unknown collaboration attempt');
+    if (exists(db,'collaboration_attempts') && db.prepare(`SELECT 1 FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id
+      WHERE json_valid(c.policy_json) AND json_extract(c.policy_json,'$.organizationId')=? AND json_extract(c.policy_json,'$.organizationNodeId')=?
+      AND (a.state NOT IN ('succeeded','failed','cancelled') OR (a.state='failed' AND a.failure_kind='unknown_outcome')) LIMIT 1`).get(organizationId,nodeId)) throw lifecycleError('Node has an active or unknown managed collaboration attempt');
     return true;
   });
 }

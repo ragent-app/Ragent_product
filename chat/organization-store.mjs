@@ -730,12 +730,20 @@ export async function bindNodeSession(nodeId, {
     try {
       const current = db.prepare('SELECT * FROM organization_nodes WHERE id = ?').get(nodeId);
       if (!current) throw orgError('ORGANIZATION_NODE_NOT_FOUND', `node ${nodeId} not found`);
+      const hasRebindTable = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_node_rebind_operations'").get();
+      if (hasRebindTable && db.prepare("SELECT 1 FROM organization_node_rebind_operations WHERE organization_id=? AND node_id=? AND state='pending' AND command_id<>? LIMIT 1").get(current.organization_id,nodeId,rebindCommandId || '')) throw orgError('ORG_OPERATION_CONFLICT', 'Another node replacement is pending');
       if (rebindCommandId) {
         const operation = db.prepare("SELECT * FROM organization_node_rebind_operations WHERE command_id=? AND organization_id=? AND node_id=? AND state='pending'").get(rebindCommandId,current.organization_id,nodeId);
         const org = db.prepare('SELECT state FROM organizations WHERE id=?').get(current.organization_id);
-        if (!operation || ['archived','lifecycle_pending'].includes(org?.state) || operation.expected_generation !== expectedBindingGeneration) throw orgError('ORG_OPERATION_CONFLICT', 'Node replacement operation is no longer pending');
+        if (!operation || ['archived','lifecycle_pending'].includes(org?.state) || operation.expected_generation !== expectedBindingGeneration || operation.old_session_id !== current.current_session_id) throw orgError('ORG_OPERATION_CONFLICT', 'Node replacement operation is no longer pending');
+      }
+      if (rebindCommandId || (current.current_session_id && current.current_session_id !== sessionId)) {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_run_admissions'").get() && db.prepare("SELECT 1 FROM organization_run_admissions WHERE organization_id=? AND node_id=? AND state NOT IN ('resolved','unpublished') LIMIT 1").get(current.organization_id,nodeId)) throw orgError('ORG_OPERATION_CONFLICT', 'Node has an unresolved Run admission');
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_execution_bindings'").get() && db.prepare("SELECT 1 FROM factory_execution_bindings b JOIN factory_work_items w ON w.id=b.work_item_id WHERE w.organization_id=? AND w.assignee_node_id=? AND b.status IN ('intent','running','unknown') LIMIT 1").get(current.organization_id,nodeId)) throw orgError('ORG_OPERATION_CONFLICT', 'Node has active or unknown Factory execution');
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='collaboration_attempts'").get() && db.prepare("SELECT 1 FROM collaboration_attempts WHERE session_id=? AND (state NOT IN ('succeeded','failed','cancelled') OR (state='failed' AND failure_kind='unknown_outcome')) LIMIT 1").get(current.current_session_id)) throw orgError('ORG_OPERATION_CONFLICT', 'Node has active or unknown collaboration attempt');
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='collaboration_attempts'").get() && db.prepare(`SELECT 1 FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id
+          WHERE json_valid(c.policy_json) AND json_extract(c.policy_json,'$.organizationId')=? AND json_extract(c.policy_json,'$.organizationNodeId')=?
+          AND (a.state NOT IN ('succeeded','failed','cancelled') OR (a.state='failed' AND a.failure_kind='unknown_outcome')) LIMIT 1`).get(current.organization_id,nodeId)) throw orgError('ORG_OPERATION_CONFLICT', 'Node has active or unknown managed collaboration attempt');
       }
       if (expectedBindingGeneration !== undefined
         && Number(expectedBindingGeneration) !== Number(current.binding_generation || 0)) {

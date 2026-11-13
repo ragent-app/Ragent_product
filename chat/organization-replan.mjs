@@ -9,6 +9,8 @@ import { createOperation, getOperation, transitionOperation } from './organizati
 import { appendOrganizationEvent, enqueueInternalEnvelope } from './organization-messaging.mjs';
 import { assertOrganizationCapability } from './organization-runtime-capabilities.mjs';
 import { organizationGrantForNode } from './organization-role-contract.mjs';
+import { createHash } from 'node:crypto';
+import { beginNodeRebind, finishNodeRebind, getLatestLegacyNodeRebind } from './organization-session-lifecycle.mjs';
 
 export const ORG_PLAN_AMENDMENT_STALE_REVISION = 'ORG_PLAN_AMENDMENT_STALE_REVISION';
 export const ORG_SESSION_BINDING_CONFLICT = 'ORG_SESSION_BINDING_CONFLICT';
@@ -20,6 +22,9 @@ function error(code, message, statusCode = 409, details = {}) {
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+function legacyRebindPrefix(organizationId,nodeId,replacementKey) {
+  return `legacy_${createHash('sha256').update(JSON.stringify([organizationId,nodeId,replacementKey])).digest('hex')}_`;
 }
 
 function clone(value, fallback = null) {
@@ -99,51 +104,77 @@ export async function replaceManagedSession({ organizationId, nodeId, expectedBi
   if (!Number.isInteger(generation) || generation < 0) throw error(ORG_SESSION_BINDING_CONFLICT, 'expectedBindingGeneration is required', 409);
   const key = stableKey(replacementKey, 'replacementKey');
   if (typeof createManagedSession !== 'function') throw error(ORG_REPLAN_INVALID, 'managed session replacement factory is required', 503);
+  const legacy = !rebindCommandId;
+  let commandId = rebindCommandId;
+  let previousSessionId = node.currentSessionId;
+  if (legacy) {
+    const prefix=legacyRebindPrefix(orgId,node.id,key);
+    const prior=await getLatestLegacyNodeRebind(orgId,node.id,prefix);
+    if (prior?.state==='pending') previousSessionId=prior.oldSessionId;
+    if (prior?.state==='completed') {
+      if (prior.expectedGeneration!==generation) throw error(ORG_SESSION_BINDING_CONFLICT,'Replacement key belongs to an earlier binding');
+      return {...prior.result,replay:true};
+    }
+    commandId = prior && prior.state==='pending' ? prior.commandId : `${prefix}${(prior?.attempt || 0)+1}`;
+    const pending=await beginNodeRebind({organizationId:orgId,nodeId:node.id,commandId,actorId:'legacy-replan',expectedGeneration:generation});
+    if (pending.state!=='pending') throw error(ORG_SESSION_BINDING_CONFLICT,'Replacement is not pending');
+  }
   const ensureIdle = async () => {
     const { assertNodeWorkQuiescent } = await import('./organization-session-lifecycle.mjs');
     await assertNodeWorkQuiescent(orgId,node.id,node.currentSessionId);
     if (node.currentSessionId) {
-      const [{ getSession }, { getRun }] = await Promise.all([import('./session-manager.mjs'),import('./runs.mjs')]);
+      const [{ getSession }, { getRunAcceptanceEvidence, listDurableSessionRunIndexEntries }, {reconcileOrganizationRunAdmissions}] = await Promise.all([import('./session-manager.mjs'),import('./runs.mjs'),import('./organization-run-admission.mjs')]);
       const current = await getSession(node.currentSessionId);
-      if (!current) throw error(ORG_SESSION_BINDING_CONFLICT, 'current managed session is unavailable; replacement requires reconciliation', 409);
-      if (current.activeRunId) {
-        const run = await getRun(current.activeRunId);
-        if (!run || !['completed','failed','cancelled'].includes(run.state)) throw error(ORG_SESSION_BINDING_CONFLICT, 'stop or reconcile the current Run before replacement', 409);
+      const entries=await listDurableSessionRunIndexEntries(node.currentSessionId);
+      const runIds=new Set(entries.map(entry=>entry.id));
+      if (current?.activeRunId) runIds.add(current.activeRunId);
+      if (!current && runIds.size===0) throw error(ORG_SESSION_BINDING_CONFLICT, 'current managed session is unavailable and Run history is inconclusive; restore the record or cancel the pending replacement', 409, { rebindCommandId:commandId });
+      for (const runId of runIds) {
+        const run=await getRunAcceptanceEvidence(runId);
+        if (!run || run.sessionId!==node.currentSessionId || !run.finalizedAt || !['completed','failed','cancelled'].includes(run.state)) throw error(ORG_SESSION_BINDING_CONFLICT, 'stop or reconcile all Runs for the current session before replacement', 409, {rebindCommandId:commandId});
       }
+      await reconcileOrganizationRunAdmissions({organizationId:orgId,nodeId:node.id,commandId});
     }
   };
-  await ensureIdle();
-  let session;
-  try {
-    session = await createManagedSession({
+  let session, bound;
+  if (legacy && node.bindingGeneration===generation+1 && node.currentSessionId) {
+    const {getSession}=await import('./session-manager.mjs');
+    const current=await getSession(node.currentSessionId);
+    if (!current || current.organizationReplacementKey!==key || current.organizationId!==orgId || current.organizationNodeId!==node.id) throw error(ORG_SESSION_BINDING_CONFLICT,'Binding changed; replacement requires reconciliation');
+    session={sessionId:node.currentSessionId}; bound=node;
+  } else {
+    await ensureIdle();
+    try {
+      session = await createManagedSession({
       organizationId: orgId,
       organizationNodeId: node.id,
       organizationRevision: node.createdRevision,
       replacementKey: key,
       previousSessionId: node.currentSessionId,
       role: node.nodeRole,
-    });
-  } catch (cause) {
-    throw error(ORG_REPLAN_INVALID, `managed session replacement failed for ${node.stableKey}`, 503, {
+      });
+    } catch (cause) {
+      throw error(ORG_REPLAN_INVALID, `managed session replacement failed for ${node.stableKey}`, 503, {
       reason: 'managed_session_replacement_failed',
       stableKey: node.stableKey,
       cause: { code: text(cause?.code), message: text(cause?.message) || String(cause) },
-    });
-  }
-  const sessionId = stableKey(session?.sessionId, 'replacement sessionId');
-  let bound;
-  try {
-    await ensureIdle();
-    bound = await bindNodeSession(node.id, {
+      });
+    }
+    const sessionId = stableKey(session?.sessionId, 'replacement sessionId');
+    try {
+      await ensureIdle();
+      bound = await bindNodeSession(node.id, {
       expectedBindingGeneration: generation,
       sessionId,
       roleInstanceId: session?.roleInstanceId,
-      rebindCommandId,
-    });
-  } catch (cause) {
-    if (cause?.code === 'ORG_OPERATION_CONFLICT') throw error(ORG_SESSION_BINDING_CONFLICT, cause.message, 409, { cause });
-    throw cause;
+        rebindCommandId:commandId,
+      });
+    } catch (cause) {
+      if (cause?.code === 'ORG_OPERATION_CONFLICT') throw error(ORG_SESSION_BINDING_CONFLICT, cause.message, 409, { cause });
+      throw cause;
+    }
   }
+  const sessionId=stableKey(session?.sessionId,'replacement sessionId');
   const event = await appendOrganizationEvent({
     organizationId: orgId,
     eventKey: `${node.id}:session-replaced:${key}`,
@@ -153,9 +184,11 @@ export async function replaceManagedSession({ organizationId, nodeId, expectedBi
     actorNodeId: node.id,
     actorSessionId: sessionId,
     payloadRef: { kind: 'session_replacement', nodeId: node.id, replacementKey: key },
-    payload: { oldSessionId: node.currentSessionId, newSessionId: sessionId, bindingGeneration: bound.bindingGeneration, reason: text(reason).slice(0, 240) },
+    payload: { oldSessionId: previousSessionId, newSessionId: sessionId, bindingGeneration: bound.bindingGeneration, reason: text(reason).slice(0, 240) },
   });
-  return { node: bound, sessionId, runId: text(session?.runId), replacementKey: key, event, replay: false };
+  const result={ node: bound, sessionId, runId: text(session?.runId), replacementKey: key, event, replay: false };
+  if (legacy) await finishNodeRebind({organizationId:orgId,nodeId:node.id,commandId,result:{...result,bindingGeneration:bound.bindingGeneration}});
+  return result;
 }
 
 async function reconcileReplacement(operation, amendment, options) {
@@ -163,11 +196,13 @@ async function reconcileReplacement(operation, amendment, options) {
   for (const item of amendment.operations.filter((entry) => entry.operation === 'replace')) {
     const node = await getNodeByStableKey(amendment.organizationId, item.stableKey);
     if (!node) throw error(ORG_REPLAN_INVALID, `replacement node ${item.stableKey} is missing`, 422);
+    const replacementKey=item.replacementKey || `${amendment.idempotencyKey}:${item.stableKey}`;
+    const previous=await getLatestLegacyNodeRebind(amendment.organizationId,node.id,legacyRebindPrefix(amendment.organizationId,node.id,replacementKey));
     const replacement = await replaceManagedSession({
       organizationId: amendment.organizationId,
       nodeId: node.id,
-      expectedBindingGeneration: node.bindingGeneration,
-      replacementKey: item.replacementKey || `${amendment.idempotencyKey}:${item.stableKey}`,
+      expectedBindingGeneration: previous && previous.state!=='cancelled' ? previous.expectedGeneration : node.bindingGeneration,
+      replacementKey,
       reason: item.reason || amendment.reason,
     }, options);
     replacements.push(replacement);

@@ -111,7 +111,7 @@ export async function commitSessionApiMessage(sessionId, scopeInput, requestId, 
           preparation: { version: 1, text: record.request.text, options: record.request.runOptions,
             images: record.request.attachments } } }, { authorizePublication: async () => {
           await authorize?.(meta); deadline(record);
-        } });
+        }, admissionSession:meta });
       return receipt(record, run);
     });
   });

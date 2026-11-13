@@ -1754,7 +1754,7 @@ async function getRunResultUnlocked(runId) {
   return clone(result);
 }
 
-export async function createRun({ status, manifest }, { authorizePublication } = {}) {
+export async function createRun({ status, manifest }, { authorizePublication, admissionSession } = {}) {
   manifest = applyWorkbenchRunPolicy(manifest);
   const run = createRunRecord(status);
   run.runPublication = createRunPublication();
@@ -1824,13 +1824,19 @@ export async function createRun({ status, manifest }, { authorizePublication } =
       },
     }
     : sanitizedBaseManifest;
-  await runMutationQueue(run.id, async () => {
+  const { reserveOrganizationRun, markOrganizationRunAdmission } = await import('./organization-run-admission.mjs');
+  const organizationAdmission = await reserveOrganizationRun({runId:run.id,sessionId:run.sessionId,requestId:run.requestId,session:admissionSession});
+  let publicationAttempted = false;
+  try { await runMutationQueue(run.id, async () => {
     // Load the directory index before creating the new directory.  Otherwise
     // a boot-time rebuild would see the empty directory and append a temporary
     // placeholder record before the real status is published.
     await ensureRunIndex();
     await ensureRunDirectory(run.id);
     await withRunMutationLock(run.id, async () => {
+      // From this point an existing or partially published status must be
+      // reconciled, even when this publication attempt subsequently fails.
+      publicationAttempted = true;
       // A retry may finish an unpublished orphan, but cannot recreate a published
       // Run or replace its execution identity/credentials, even in another process.
       if (await statOrNull(runStatusPath(run.id))) throw runPublicationError('RUN_ALREADY_EXISTS', 409);
@@ -1875,6 +1881,11 @@ export async function createRun({ status, manifest }, { authorizePublication } =
       await recordCacheMeta(run.id, runStatusPath(run.id), runStatusCacheMeta);
     });
   });
+    if (organizationAdmission) await markOrganizationRunAdmission(run.id,'published');
+  } catch (error) {
+    if (organizationAdmission) await markOrganizationRunAdmission(run.id,publicationAttempted?'unknown':'unpublished').catch(()=>{});
+    throw error;
+  }
   return clone(run);
 }
 
