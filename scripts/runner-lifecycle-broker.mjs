@@ -521,6 +521,10 @@ async function readRunManifest(runId, { readFileImpl = readFile } = {}) {
   }
 }
 
+async function readRunStatus(runId) {
+  return JSON.parse(await readFile(join(RUN_SPOOL_DIR, runId, 'status.json'), 'utf8'));
+}
+
 export function readWorkspaceAccessScope(manifest) {
   const scope = manifest?.executionScope;
   const cwd = trimString(scope?.cwd?.realPath) || trimString(manifest?.folder);
@@ -546,6 +550,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   grantExistingRunnerFilesImpl = grantExistingRunnerFiles,
   resolveInheritedGroupsImpl = resolveRunnerInheritedGroups,
   readManifestImpl = readRunManifest,
+  readRunStatusImpl = readRunStatus,
   grantWorkspaceAccessImpl = grantRunnerWorkspaceAccess,
   revokeWorkspaceAccessImpl = revokeRunnerWorkspaceAccess,
   prepareNativeRunProviderHomeImpl = null,
@@ -868,6 +873,13 @@ async function launchLifecycleRunnerUnlocked(runId, {
     environment: runEnvironment,
   });
   try {
+    // Recheck durable identity immediately before systemd submission: the
+    // owner may cancel while provider preparation is awaiting a shared lock.
+    const latest = await readRunStatusImpl(normalized);
+    if (latest?.id !== normalized || latest?.sessionId !== manifest?.sessionId ||
+        latest?.cancelRequested === true || ['completed', 'failed', 'cancelled'].includes(latest?.state)) {
+      throw Object.assign(new Error('Run is no longer eligible for launch'), { code: 'REQUEST_CANCELLED' });
+    }
     await execFileImpl('/usr/bin/systemd-run', args, {
       env: environment,
       timeout: 10_000,

@@ -15,7 +15,7 @@ import { WORKBENCH_EXECUTION_POLICY, buildWorkbenchCodexEnvironment, constrainCo
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { connect, createServer } from 'node:net';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, unlink, chmod, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -120,6 +120,20 @@ export function buildCodexAppServerBrokerSocketPath(codexHomeDir, {
   // limit under long config/test roots. Only shorten paths that cannot have a
   // working legacy broker, so live short-path brokers keep their identity.
   if (Buffer.byteLength(providerLocalPath, 'utf8') <= 100) return providerLocalPath;
+  // Linux control, lifecycle and runner processes have different UIDs and
+  // private /tmp mounts. Their configured provider root is shared and scoped
+  // to this instance; include the complete home in the digest for isolation.
+  const marker = '/by-provider/';
+  const markerIndex = home.indexOf(marker);
+  const sharedRoot = markerIndex > 0 ? home.slice(0, markerIndex) : trimString(process.env.AGENTOC_PROVIDER_HOMES_DIR);
+  if (platform === 'linux' && isAbsolute(sharedRoot)) {
+    const within = relative(sharedRoot, home);
+    if (within && !within.startsWith('..') && !isAbsolute(within)) {
+      const sharedPath = join(sharedRoot, `.ac-${digest}.sock`);
+      if (Buffer.byteLength(sharedPath, 'utf8') > 100) throw new Error('Shared Codex broker socket path is too long');
+      return sharedPath;
+    }
+  }
   const userId = typeof process.getuid === 'function' ? process.getuid() : 'user';
   const temporaryPath = join(tmpdir(), `agentoc-codex-${userId}-${digest}.sock`);
   return Buffer.byteLength(temporaryPath, 'utf8') <= 100

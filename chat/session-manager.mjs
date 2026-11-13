@@ -278,7 +278,7 @@ import {
   updateRunManifest,
   writeRunResult,
 } from './runs.mjs';
-import { spawnDetachedRunner } from './run-launcher.mjs';
+import { spawnDetachedRunner, runnerLifecycleTimeoutMs, shouldUseRunnerLifecycleBroker } from './run-launcher.mjs';
 import { withMessageRequestIdentity } from './message-request-identity.mjs';
 import { assertNoMessagePreparationReuse, validatePreparedMessageAttachments } from './message-preparation-store.mjs';
 import { continueScopedMessageRun, admitScopedMessageLaunch } from './message-commit-store.mjs';
@@ -854,6 +854,7 @@ const synthesizeDetachedRunTermination = createDetachedRunReconciler({
   collectRunOutputPreview,
   graceMs: DETACHED_RUN_RESULT_SYNTHESIS_GRACE_MS,
   launchGraceMs: DETACHED_RUN_LAUNCH_GRACE_MS,
+  lifecycleTimeoutMs: shouldUseRunnerLifecycleBroker() ? runnerLifecycleTimeoutMs : 0,
   isTerminalRunState,
   nowIso,
   stallAfterMs: resolveRunHeartbeatStaleMs(),
@@ -5352,22 +5353,52 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
       launchAttempt: Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0,
     });
   } catch (error) {
-    const completedAt = nowIso();
     const failureReason = `Runner launch failed: ${error?.message || String(error)}`;
-    await writeRunResult(run.id, { exitCode: 1, signal: null, error: failureReason, completedAt });
-    await updateRun(run.id, (current) => ({ ...current, state: 'failed', failureReason, completedAt }));
-    await syncDetachedRun(sessionId, run.id);
-    await releaseAgyRunSlot(run.id, { outcome: 'error' });
-    releaseHarnessRunBudget(run.id, { schedule: true, outcome: 'error' });
-    if (run.appApiMessageVersion === 1) await updateRun(run.id, {
-      messageFailureCode: ['REVISION_CONFLICT', 'REQUEST_EXPIRED', 'REQUEST_CANCELLED', 'RESTRICTED_EXECUTION_UNAVAILABLE',
-        'RUN_EXECUTION_INPUT_UNAVAILABLE'].includes(error.code)
-        ? error.code : 'LAUNCH_FAILED',
+    const definitelyNotSubmitted = error?.launchDefinitelyNotSubmitted === true;
+    if (definitelyNotSubmitted && !await getRunResult(run.id)) {
+      const completedAt = nowIso();
+      const result = { exitCode: 1, signal: null, error: failureReason, completedAt };
+      let claimed = false;
+      await updateRun(run.id, current => {
+        if (isTerminalRunState(current.state) || current.cancelRequested === true || hasRegisteredDetachedRunner(current)) return current;
+        claimed = true;
+        return { ...current, state: 'failed', failureReason, completedAt, result,
+          ...(current.appApiMessageVersion === 1 ? { messageFailureCode: ['REVISION_CONFLICT', 'REQUEST_EXPIRED', 'REQUEST_CANCELLED', 'RESTRICTED_EXECUTION_UNAVAILABLE',
+            'RUN_EXECUTION_INPUT_UNAVAILABLE'].includes(error.code) ? error.code : 'LAUNCH_FAILED' } : {}) };
+      });
+      if (claimed) await writeRunResult(run.id, result);
+    }
+    // A broker timeout can race a successful launch or a terminal result.
+    // Record the diagnostic without claiming the outcome; the ordinary
+    // observer owns missing-result reconciliation under the Run lock.
+    await updateRun(run.id, (current) => {
+      if (isTerminalRunState(current.state) || current.cancelRequested === true) return current;
+      return { ...current, failureReason };
     });
+    const settled = await syncDetachedRun(sessionId, run.id) || await getRun(run.id);
+    if (!settled || isTerminalRunState(settled.state)) {
+      const completed = settled?.state === 'completed';
+      await releaseAgyRunSlot(run.id, { outcome: completed ? 'success' : 'error' });
+      releaseHarnessRunBudget(run.id, { schedule: true, outcome: completed ? 'success' : 'error' });
+      if (completed) return { queued: false, spawned: null, providerId };
+    }
+    // An unacknowledged broker request is not proof that no runner started.
+    // Keep observing the same Run instead of surfacing a definitive failure.
+    if (settled && !isTerminalRunState(settled.state) && settled.cancelRequested !== true)
+      return { queued: false, spawned: null, providerId };
     throw error;
   }
+  const afterLaunch = await getRun(run.id);
+  if (!afterLaunch || isTerminalRunState(afterLaunch.state) || afterLaunch.cancelRequested === true) {
+    const completed = afterLaunch?.state === 'completed';
+    if (afterLaunch && !completed) await requestRunCancel(run.id);
+    await releaseAgyRunSlot(run.id, { outcome: completed ? 'success' : 'cancelled' });
+    releaseHarnessRunBudget(run.id, { schedule: true, outcome: completed ? 'success' : 'cancelled' });
+    if (completed) return { queued: false, spawned, providerId };
+    throw Object.assign(new Error('Run was cancelled or completed during runner launch'), { code: 'REQUEST_CANCELLED' });
+  }
   const runnerStartedAt = nowIso();
-  const startedRun = await updateRun(run.id, (current) => ({
+  const startedRun = await updateRun(run.id, (current) => isTerminalRunState(current.state) || current.cancelRequested === true ? current : ({
     ...current,
     state: current.state === 'queued' ? 'accepted' : current.state,
     agyQueue: undefined,
@@ -5384,6 +5415,14 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
     runnerLaunchState: 'started',
     runnerLifecycleAcceptedAt: current.runnerLifecycleAcceptedAt || runnerStartedAt,
   }));
+  if (!startedRun || isTerminalRunState(startedRun.state) || startedRun.cancelRequested === true) {
+    const completed = startedRun?.state === 'completed';
+    if (startedRun && !completed) await requestRunCancel(run.id);
+    await releaseAgyRunSlot(run.id, { outcome: completed ? 'success' : 'cancelled' });
+    releaseHarnessRunBudget(run.id, { schedule: true, outcome: completed ? 'success' : 'cancelled' });
+    if (completed) return { queued: false, spawned, providerId };
+    throw Object.assign(new Error('Run was cancelled or completed during runner launch'), { code: 'REQUEST_CANCELLED' });
+  }
   const promptReadyToRunnerMs = isoDurationMs(startedRun?.promptReadyAt, startedRun?.runnerStartedAt || runnerStartedAt);
   if (promptReadyToRunnerMs !== null && !run.runnerStartedAt) {
     recordApiRequestPhase('send.prompt_ready_to_runner_started', promptReadyToRunnerMs, {

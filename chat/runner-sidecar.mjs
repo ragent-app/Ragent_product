@@ -3591,7 +3591,9 @@ async function main() {
   }
   await adoptNativeOAuthLockForSidecar();
 
-  await updateRun(runId, (current) => ({
+  const claimedRun = await updateRun(runId, (current) => {
+    if (!current || current.cancelRequested === true || ['completed', 'failed', 'cancelled'].includes(current.state)) return current;
+    return ({
     ...current,
     state: 'running',
     startedAt: current.startedAt || nowIso(),
@@ -3609,7 +3611,16 @@ async function main() {
         },
       }
       : {}),
-  }));
+    });
+  });
+  if (!claimedRun || claimedRun.cancelRequested === true || ['completed', 'failed', 'cancelled'].includes(claimedRun.state)) {
+    await releaseNativeOAuthLock();
+    return;
+  }
+  const launchStillAllowed = async () => {
+    const latest = await getRun(runId);
+    return !!latest && latest.cancelRequested !== true && !['completed', 'failed', 'cancelled'].includes(latest.state);
+  };
   // Runs no longer hold a WorkspaceLease (mutation-scoped lease redesign), so
   // there is no sidecar heartbeat to start.
 
@@ -4311,6 +4322,10 @@ async function main() {
     }
   }
   let codexAppServerBrokered = false;
+  if (!await launchStillAllowed()) {
+    await releaseNativeOAuthLock();
+    return;
+  }
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
       && (!sandboxRequired || sharedSandboxCodex)) {
     const expectedAccountDigest = codexBrokerAccountDigest(codexRolloutAccountId(runtimeAuth));
@@ -4463,6 +4478,10 @@ async function main() {
     else if (!pendingProcessEvent) pendingProcessEvent = { type, args };
   };
   let providerSeedsDelivered = false;
+  if (!await launchStillAllowed()) {
+    await releaseNativeOAuthLock();
+    return;
+  }
   try {
     windowsJob = assertWindowsManagedJob(await createWindowsJobObject());
     if (windowsJob) {

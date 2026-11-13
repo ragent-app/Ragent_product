@@ -58,6 +58,7 @@ export function createDetachedRunReconciler({
   collectRunOutputPreview,
   graceMs,
   launchGraceMs = 30_000,
+  lifecycleTimeoutMs = 0,
   isTerminalRunState,
   nowIso,
   nowMs = null,
@@ -100,6 +101,10 @@ export function createDetachedRunReconciler({
     // cancellation is authoritative in this case: settle it immediately so
     // the Session does not remain permanently "running"/"accepted".
     if (!hasRecordedProcess && run?.cancelRequested !== true) {
+      const submittedAtMs = parseIsoTimestampMs(run?.runnerLifecycleSubmittedAt);
+      if (run?.runnerLaunchState === 'lifecycle_submitting'
+          && Number.isFinite(submittedAtMs)
+          && readNowMs() - submittedAtMs < lifecycleTimeoutMs) return null;
       // Accepted/starting Runs can legitimately exist for a short window
       // before the launcher records its PID or unit. Once that launch window
       // expires, however, there is no owner left to produce a result; leave a
@@ -177,7 +182,7 @@ export function createDetachedRunReconciler({
     }
 
     const completedAt = nowIso();
-    const cancelled = run?.cancelRequested === true;
+    let cancelled = run?.cancelRequested === true;
     if (!cancelled) {
       const missingResultDetectedAtMs = parseIsoTimestampMs(run?.missingResultDetectedAt);
       if (!Number.isFinite(missingResultDetectedAtMs)) {
@@ -217,15 +222,8 @@ export function createDetachedRunReconciler({
       normalizedEventCount: Number.isInteger(run?.normalizedEventCount) ? run.normalizedEventCount : 0,
       preview,
     };
-    const error = cancelled ? null : (priorFailure || 'Detached runner disappeared before writing a result');
-    const result = {
-      completedAt,
-      exitCode: 1,
-      signal: null,
-      cancelled,
-      reconciledMissingResult: true,
-      ...(error ? { error } : {}),
-    };
+    let error = null;
+    let result = null;
 
     // updateRun is serialized per run. Make the terminal state and its result
     // the claim: competing observer/restart passes see that state and become
@@ -235,6 +233,16 @@ export function createDetachedRunReconciler({
     let claimedTerminalTransition = false;
     const reconciledRun = await updateRun(runId, (current) => {
       if (!current || isTerminalRunState(current.state)) return current;
+      // The liveness checks above preceded this lock. A sidecar may have
+      // claimed the Run since then; never settle using that older evidence.
+      if (['runnerProcessId', 'toolProcessId', 'runnerUnitName', 'runnerUnitScope',
+        'runnerLaunchState', 'runnerLifecycleAcceptedAt', 'runnerLaunchAttempt', 'runnerHeartbeatAt']
+        .some(key => (current[key] ?? null) !== (run?.[key] ?? null))) return current;
+      cancelled = current.cancelRequested === true;
+      error = cancelled ? null : (current.failureReason || priorFailure || 'Detached runner disappeared before writing a result');
+      result = { completedAt, exitCode: 1, signal: null, cancelled, reconciledMissingResult: true,
+        ...(error ? { error } : {}) };
+      diagnostic.cancelRequested = cancelled;
       claimedTerminalTransition = true;
       return {
         ...current,

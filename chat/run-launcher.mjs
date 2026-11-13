@@ -45,6 +45,8 @@ const RUNNER_LIFECYCLE_TIMEOUT_MS = Number.parseInt(
   process.env.AGENTOC_RUNNER_LIFECYCLE_TIMEOUT_MS || '120000',
   10,
 );
+export const runnerLifecycleTimeoutMs = Number.isFinite(RUNNER_LIFECYCLE_TIMEOUT_MS) && RUNNER_LIFECYCLE_TIMEOUT_MS > 0
+  ? RUNNER_LIFECYCLE_TIMEOUT_MS : 120_000;
 export const PROVIDER_PREPARATION_MAX_ATTEMPTS = 1;
 
 function sleep(ms) {
@@ -565,8 +567,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
   connectImpl = connectSocket,
   launchAttempt = 0,
   issueScopeGrant = null,
-  timeoutMs = Number.isFinite(RUNNER_LIFECYCLE_TIMEOUT_MS) && RUNNER_LIFECYCLE_TIMEOUT_MS > 0
-    ? RUNNER_LIFECYCLE_TIMEOUT_MS : 120_000,
+  timeoutMs = runnerLifecycleTimeoutMs,
 } = {}) {
   const normalizedSocketPath = normalizeSupervisorSocketPath(socketPath);
   if (!normalizedSocketPath) {
@@ -592,6 +593,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let submitted = false;
     let buffer = '';
     const socket = connectImpl(normalizedSocketPath);
     const finish = (error, result = null) => {
@@ -599,7 +601,10 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
       settled = true;
       clearTimeout(timer);
       socket.destroy();
-      if (error) reject(error);
+      if (error) {
+        if (submitted) error.launchMayHaveBeenAccepted = true;
+        reject(error);
+      }
       else resolve(result);
     };
     const timer = setTimeout(() => {
@@ -609,6 +614,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
 
     socket.setEncoding('utf8');
     socket.once('connect', () => {
+      submitted = true;
       socket.write(`${JSON.stringify({
         type: 'launch',
         runId,
@@ -948,12 +954,16 @@ export function createDetachedRunnerSpawner({
   return async function spawnDetachedRunner(runId, { launchAttempt = 0 } = {}) {
     // All launch strategies, including lifecycle and legacy fallbacks, share
     // this gate before preparing credentials or contacting a broker.
-    await assertExecutionBoundaryImpl(runId);
+    try { await assertExecutionBoundaryImpl(runId); }
+    catch (error) { error.launchDefinitelyNotSubmitted = true; throw error; }
     const launch = async () => {
     if (shouldUseRunnerLifecycleBroker()) {
       try {
         return await launchDetachedRunnerViaLifecycleBroker(runId, { connectImpl, launchAttempt });
       } catch (error) {
+        // A lost acknowledgement after submission is ambiguous. Another
+        // launcher could start a second copy of the same Run.
+        if (error?.launchMayHaveBeenAccepted === true) throw error;
         // These are authoritative safety refusals, not transport outages.
         // Retrying through another launcher could bypass identity checks or
         // start a second copy while a previous unit is still draining.
@@ -962,6 +972,7 @@ export function createDetachedRunnerSpawner({
           if (error?.code !== 'RUNNER_BROKER_UNAVAILABLE') throw error;
           const unavailable = new Error(`Required runner lifecycle broker is unavailable: ${error?.message || String(error)}`);
           unavailable.code = 'RUNNER_BROKER_UNAVAILABLE';
+          unavailable.launchDefinitelyNotSubmitted = true;
           throw unavailable;
         }
         console.error(`[runs] Failed to launch runner via lifecycle broker: ${error?.message || String(error)}; trying legacy launch strategies.`);
