@@ -717,7 +717,7 @@ fi
 [ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
 mv -n "$OUTPUT" "$FINAL_OUTPUT"
 [ ! -e "$OUTPUT" ] || { echo 'Candidate output appeared during publishing; refusing to overwrite it.' >&2; exit 1; }
-if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && [ "$ARCH" = amd64 ]; then
+if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
   node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT" "$BUILD_VERSION"
 fi
 printf '%s\n' "$FINAL_OUTPUT"
