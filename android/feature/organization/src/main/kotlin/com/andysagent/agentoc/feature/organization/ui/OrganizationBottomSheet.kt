@@ -117,13 +117,7 @@ fun OrganizationBottomSheet(
                 Box(modifier = Modifier.weight(1f)) {
                     InfoSection(
                         label = "Acceptance",
-                        value = "${node.progressCompleted} / ${if (node.progressTotal > 0) node.progressTotal else 1} items",
-                    )
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    InfoSection(
-                        label = "Tests",
-                        value = "${node.testsPassed} / ${node.testsTotal} passed",
+                        value = "${node.progressCompleted} / ${node.progressTotal} items",
                     )
                 }
             }

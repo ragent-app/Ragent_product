@@ -143,6 +143,7 @@ export async function dispatchOrganizationPhase({
   }
   const organization = await getOrganization(normalizedOrganizationId);
   if (!organization) throw dispatchError('ORGANIZATION_NOT_FOUND', 'organization not found', 404);
+  if (['archived','lifecycle_pending'].includes(organization.state)) throw dispatchError('ORGANIZATION_ARCHIVED', 'organization cannot dispatch during archive or rebind', 409);
   const targetRevision = Number.isInteger(revision) ? revision : organization.currentRevision;
   const revisionRow = await getRevision(organization.id, targetRevision);
   if (!revisionRow) throw dispatchError('REVISION_NOT_FOUND', 'organization revision not found', 404);

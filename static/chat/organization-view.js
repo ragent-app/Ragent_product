@@ -642,6 +642,7 @@
             <div class="org-radar-meta" id="orgRadarMeta">Revision #0 · 0 agents</div>
           </div>
           <div class="org-radar-top-actions">
+            <button type="button" class="org-icon-btn" id="orgFactoryWorkBtn" title="Work items">Tasks</button>
             <button type="button" class="org-icon-btn" id="orgRadarResetBtn" title="${tr("organization.resetView")}" aria-label="${tr("organization.resetView")}">
               ${root.AgentoCIcons?.render?.("refresh") || "↺"}
             </button>
@@ -702,6 +703,7 @@
         sheetBackdrop: surface.querySelector("#orgBottomSheetBackdrop"),
         sheet: surface.querySelector("#orgBottomSheet"),
         detailScreen: surface.querySelector("#orgDetailScreen"),
+        factoryWorkBtn: surface.querySelector("#orgFactoryWorkBtn"),
         radarBtn: document.getElementById("orgRadarBtn"),
         overflowRadarBtn: document.getElementById("headerOverflowOrgRadarBtn"),
       };
@@ -711,6 +713,7 @@
       // Top bar actions
       this.dom.resetBtn?.addEventListener("click", () => this.resetView());
       this.dom.closeBtn?.addEventListener("click", () => this.toggleOrganizationMode(false));
+      this.dom.factoryWorkBtn?.addEventListener("click", () => this.showFactoryWork());
 
       // Header Radar Buttons
       this.dom.radarBtn?.addEventListener("click", () => this.toggleOrganizationMode());
@@ -750,6 +753,108 @@
         this.viewportWidth = rect.width;
         this.viewportHeight = rect.height;
       }
+    }
+
+    async showFactoryWork() {
+      const organizationId = this.projection?.organizationId;
+      if (!organizationId || !this.dom.detailScreen) return;
+      const screen = this.dom.detailScreen;
+      screen.hidden = false;
+      screen.replaceChildren();
+      const add = (parent, tag, value) => { const el = document.createElement(tag); el.textContent = value; parent.appendChild(el); return el; };
+      const button = (parent, label, action) => { const el = add(parent, 'button', label); el.type = 'button'; el.className = 'org-btn org-btn--secondary'; el.addEventListener('click', action); return el; };
+      const base = `/api/organizations/${encodeURIComponent(organizationId)}/factory`;
+      const fetcher = root.agentocFetch || fetch;
+      const request = async (path, options = {}) => {
+        const response = await fetcher(base + path, { credentials: 'same-origin', cache: 'no-store', ...options });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+        return body;
+      };
+      const header = add(screen, 'div', '');
+      button(header, 'Back', () => { screen.hidden = true; screen.replaceChildren(); });
+      add(header, 'h2', 'Work items');
+      const content = add(screen, 'div', 'Loading…');
+      const showList = async () => {
+        content.replaceChildren(); add(content, 'p', 'Loading…');
+        try {
+          const [list, status] = await Promise.all([request('/work-items'), request('/status')]);
+          if (this.projection?.organizationId !== organizationId || screen.hidden) return;
+          content.replaceChildren();
+          add(content, 'p', `As of ${list.asOf} · Automatic admission ${status.automaticAdmission === true ? 'enabled' : status.automaticAdmission === false ? 'off' : 'status unavailable'} · Execution ${status.executionReadiness}`);
+          if (!list.items.length) add(content, 'p', 'No work items.');
+          for (const item of list.items) button(content, `${item.contract?.objective || item.id} · ${item.state} · ${item.controlState}`, () => showItem(item.id));
+          if (list.nextCursor) add(content, 'p', 'More items exist; this view shows the first page.');
+          button(content, 'Team lifecycle', showLifecycle);
+          button(content, 'Refresh', showList);
+        } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work items: ${error.message}`); button(content, 'Retry', showList); }
+      };
+      const showItem = async id => {
+        content.replaceChildren(); add(content, 'p', 'Loading…');
+        try {
+          const { item, asOf } = await request(`/work-items/${encodeURIComponent(id)}`);
+          if (this.projection?.organizationId !== organizationId || screen.hidden) return;
+          content.replaceChildren(); button(content, 'All work items', showList);
+          add(content, 'h3', item.contract?.objective || item.id);
+          add(content, 'p', `State ${item.state}; control ${item.controlState}; priority ${item.priority}; version ${item.rowVersion}; contract ${item.contractRevision}; as of ${asOf}`);
+          for (const [label, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', item.candidates], ['Decisions', item.decisions]]) {
+            add(content, 'h4', label); add(content, 'pre', JSON.stringify(value || [], null, 2));
+          }
+          const receipt = add(content, 'p', '');
+          const send = (type, payload = {}) => {
+            const token = root.crypto.randomUUID();
+            const command = { commandId: token, idempotencyKey: token, type, targetId: item.id, expectedVersion: item.rowVersion, payload };
+            const submit = async () => {
+              receipt.textContent = 'Submitting request…';
+              try {
+                const result = await request('/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
+                receipt.textContent = `Receipt ${result.operation?.commandId || token}: ${result.operation?.state || 'unknown'}; task control ${result.item?.controlState || 'unknown'}. Refresh for current facts.`;
+              } catch (error) { receipt.textContent = `Request not confirmed: ${error.message}. Retry uses the same command ID.`; button(content, 'Retry same request', submit); }
+            };
+            submit();
+          };
+          button(content, 'Increase priority', () => send('ChangePriority', { priority: item.priority + 1 }));
+          button(content, 'Request pause', () => send('RequestPause'));
+          button(content, 'Request cancel', () => send('RequestCancel'));
+        } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work item: ${error.message}`); button(content, 'All work items', showList); }
+      };
+      const showLifecycle = async () => {
+        content.replaceChildren(); add(content, 'p', 'Loading team state…');
+        try {
+          const info = await request('/lifecycle');
+          content.replaceChildren(); button(content, 'All work items', showList);
+          add(content, 'h3', 'Team lifecycle');
+          add(content, 'p', `State ${info.state}; revision ${info.revision}; root ${info.rootSessionId}; version ${info.version}`);
+          const receipt = add(content, 'p', info.pending ? `Pending ${info.pending.kind}: ${info.pending.commandId}` : 'No lifecycle operation pending.');
+          const post = async (path, body, retry) => {
+            try { const result = await request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); receipt.textContent = `Operation ${result.commandId}: ${result.state}.`; button(content, 'Refresh state', showLifecycle); }
+            catch (error) { receipt.textContent = `Not completed: ${error.message}`; if (retry) button(content, 'Retry same request', retry); }
+          };
+          if (info.pending) {
+            const id = encodeURIComponent(info.pending.commandId);
+            button(content, 'Finalize when clear', () => post(`/lifecycle/${id}/finalize`, {}));
+            button(content, 'Cancel transition', () => post(`/lifecycle/${id}/cancel`, {}));
+          } else if (info.state !== 'archived') {
+            const begin = (kind, targetRootSessionId = '') => {
+              const body = { commandId: root.crypto.randomUUID(), kind, expectedVersion: info.version, targetRootSessionId };
+              const submit = () => post('/lifecycle', body, submit); submit();
+            };
+            button(content, 'Request team archive', () => begin('archive'));
+            const target = document.createElement('input'); target.placeholder = 'Existing root session ID'; content.appendChild(target);
+            button(content, 'Request root rebind', () => { if (target.value.trim()) begin('rebind_root', target.value.trim()); });
+            add(content, 'p', 'These requests pause new admissions. Finalize after active work and pending operations are resolved. Node session replacement is a separate operation.');
+            for (const node of info.nodes || []) {
+              const existing = (info.pendingNodeRebinds || []).find(op => op.nodeId === node.nodeId);
+              const command = existing ? { commandId: existing.commandId, expectedGeneration: existing.expectedGeneration } : { commandId: root.crypto.randomUUID(), expectedGeneration: node.bindingGeneration };
+              const path = `/nodes/${encodeURIComponent(node.nodeId)}/rebind`;
+              const submit = () => post(path, command, submit);
+              button(content, `${existing ? 'Resume' : 'Replace'} ${node.stableKey} session (generation ${command.expectedGeneration})`, submit);
+              if (existing) button(content, `Cancel ${node.stableKey} replacement`, () => post(`${path}/${encodeURIComponent(command.commandId)}/cancel`, {}));
+            }
+          }
+        } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load team lifecycle: ${error.message}`); button(content, 'All work items', showList); }
+      };
+      await showList();
     }
 
     // --- Pointer & Gesture Handling (Pan / Pinch / Wheel Zoom) ---
@@ -967,16 +1072,8 @@
       const nodes = proj.nodes || [];
       const edges = proj.edges || [];
 
-      // Check blockers requiring approval
-      const blockedNode = nodes.find((n) => n.status === "blocked" || n.blocker);
-      if (blockedNode && blockedNode.blocker) {
-        this.approvalOverlay = {
-          id: blockedNode.id,
-          actionSummary: blockedNode.blocker.reason || blockedNode.blocker.reasonCode || tr("organization.blocked"),
-        };
-      } else {
-        this.approvalOverlay = null;
-      }
+      // A blocker is not an approval request; the old buttons had no command.
+      this.approvalOverlay = null;
 
       // Schedule particles for active nodes/edges
       nodes.forEach((node) => {
@@ -1191,7 +1288,7 @@
           currentTaskSummary: n.task?.objective || n.currentTaskSummary || (n.progress ? `${tr("organization.working")} (${n.progress.completed}/${n.progress.total})` : null),
           currentTaskDetail: n.task?.detail || n.currentTaskDetail || null,
           progressCompleted: n.progress?.completed || 0,
-          progressTotal: n.progress?.total || 1,
+          progressTotal: n.progress?.total || 0,
           blockerText: n.blocker?.reason || n.blocker?.reasonCode || (hasBlocker ? tr("organization.blocked") : null),
           testsPassed: n.testsPassed || 0,
           testsTotal: n.testsTotal || 0,
@@ -1408,11 +1505,7 @@
         <div class="org-info-row">
           <div class="org-info-card">
             <div class="org-info-card-label">${tr("organization.acceptance")}</div>
-            <div class="org-info-card-value">${node.progressCompleted} / ${node.progressTotal > 0 ? node.progressTotal : 1} ${tr("organization.items")}</div>
-          </div>
-          <div class="org-info-card">
-            <div class="org-info-card-label">${tr("organization.tests")}</div>
-            <div class="org-info-card-value">${node.testsPassed} / ${node.testsTotal} ${tr("organization.testsPassed")}</div>
+            <div class="org-info-card-value">${node.progressCompleted} / ${node.progressTotal} ${tr("organization.items")}</div>
           </div>
         </div>
 
@@ -1544,12 +1637,7 @@
             </div>
           </div>
 
-          <div class="org-info-card" style="margin-bottom:12px;">
-            <div class="org-info-card-label">${tr("organization.testsAndVerification")}</div>
-            <div class="org-info-card-value" style="color:#10b981;">
-              ${tr("organization.testsPassedFull", { passed: node.testsPassed, total: node.testsTotal, coverage: 100 })}
-            </div>
-          </div>
+          <div class="org-info-card" style="margin-bottom:12px;"><button type="button" class="org-btn org-btn--secondary" id="orgNodeInboxBtn">Messages</button></div>
 
           ${
             node.resultPacketSummary
@@ -1577,8 +1665,40 @@
       if (backBtn) {
         backBtn.addEventListener("click", () => this.closeDetailScreen());
       }
+      screen.querySelector('#orgNodeInboxBtn')?.addEventListener('click', () => this.showNodeInbox(node));
 
       screen.hidden = false;
+    }
+
+    async showNodeInbox(node) {
+      const organizationId = this.projection?.organizationId;
+      const screen = this.dom.detailScreen;
+      if (!organizationId || !screen) return;
+      screen.replaceChildren();
+      const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; screen.appendChild(el); return el; };
+      const button = (label, action) => { const el = add('button', label); el.type = 'button'; el.className = 'org-btn org-btn--secondary'; el.addEventListener('click', action); return el; };
+      button('Back', () => this.openDetailScreen(node));
+      add('h2', `Messages to ${node.displayName || node.id}`);
+      const list = add('div', 'Loading…');
+      const field = document.createElement('textarea'); field.maxLength = 4000; field.placeholder = 'Informational message'; screen.appendChild(field);
+      const receipt = add('p', 'Messages are queued for the node; delivery does not mean a reply.');
+      const path = `/api/organizations/${encodeURIComponent(organizationId)}/factory/nodes/${encodeURIComponent(node.id)}/messages`;
+      const fetcher = root.agentocFetch || fetch;
+      const request = async options => { const res = await fetcher(path, { credentials: 'same-origin', cache: 'no-store', ...options }); const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data; };
+      const refresh = async () => {
+        try { const data = await request(); list.replaceChildren(); for (const message of data.messages) { const p = document.createElement('p'); p.textContent = `${message.createdAt} · ${message.deliveryState === 'delivered' ? 'Delivered to Run' : message.deliveryState} · ${message.requestState || 'information'} · ${message.body}${message.reply ? ` · Reply: ${message.reply.body}` : ''}`; list.appendChild(p); } if (!data.messages.length) list.textContent = 'No messages.'; }
+        catch (error) { list.textContent = `Unable to load messages: ${error.message}`; }
+      };
+      const send = requestType => {
+        const body = field.value.trim(); if (!body) return;
+        const command = { body, requestType, idempotencyKey: root.crypto.randomUUID() };
+        const submit = async () => { try { const data = await request({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) }); receipt.textContent = `Message ${data.message.messageId}: ${data.message.deliveryState}`; field.value = ''; await refresh(); }
+          catch (error) { receipt.textContent = `Not confirmed: ${error.message}. Retry uses the same message ID.`; button('Retry same message', submit); } };
+        submit();
+      };
+      button('Send information', () => send('information'));
+      button('Request a reply', () => send('required_response'));
+      button('Refresh', refresh); await refresh();
     }
 
     closeDetailScreen() {

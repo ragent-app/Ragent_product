@@ -139,8 +139,6 @@ object OrganizationReducer {
             blockerText = blocker?.reasonCode ?: blocker?.type,
             reviewState = dto.reviewState,
             attemptCount = dto.attemptCount,
-            testsPassed = if (runtimeState == NodeRuntimeState.DONE) 23 else 18,
-            testsTotal = 23,
             lastChangedAt = System.currentTimeMillis(),
         )
     }

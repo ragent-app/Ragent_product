@@ -213,6 +213,10 @@ export async function createOperation(input = {}) {
       }
       const existingId = db.prepare('SELECT * FROM organization_operations WHERE operation_id = ?').get(value.operationId);
       if (existingId) throw error(ORG_OPERATION_CONFLICT, `operation ${value.operationId} already exists`, 409);
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organizations'").get()) {
+        const org = db.prepare('SELECT state FROM organizations WHERE id=?').get(value.organizationId);
+        if (org && ['archived','lifecycle_pending'].includes(org.state)) throw error(ORG_OPERATION_CONFLICT, 'Organization lifecycle transition blocks new operations', 409);
+      }
       db.prepare(`INSERT INTO organization_operations
         (operation_id, organization_id, command_kind, idempotency_key, actor_node_id, actor_session_id,
          revision, version, generation, state, current_step, payload_json, result_json, error_json,

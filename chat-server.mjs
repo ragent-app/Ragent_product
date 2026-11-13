@@ -124,6 +124,7 @@ let shutdownPromise = null;
 let startupRecoveryTimer = null;
 let stopAdaptiveConcurrency = () => {};
 let stopProjectMemoryRecovery = () => {};
+let factoryRuntime = null;
 let stopTemporaryPairingPoller = () => {};
 let stopAccountPairingPoller = () => {};
 let stopTemporaryControlPoller = () => {};
@@ -801,6 +802,14 @@ async function startDeferredBackgroundServices() {
       }
     })
     .catch((error) => console.warn(`[organization-reconciler] deferred recovery failed: ${error?.message || error}`));
+  if (!shuttingDown) {
+    try {
+      const { createFactoryRuntime } = await import('./chat/factory-runtime.mjs');
+      factoryRuntime = createFactoryRuntime();
+      await factoryRuntime.start();
+      if (shuttingDown) await factoryRuntime.stop();
+    } catch (error) { console.warn(`[factory] deferred start failed: ${error?.message || error}`); }
+  }
   await import('./lib/embedded-mail-worker.mjs')
     .then(({ startEmbeddedMailWorker }) => startEmbeddedMailWorker({
       createSession: sessionManager.createSession,
@@ -882,6 +891,7 @@ async function shutdown(signal = 'signal') {
       triggers.stopTriggerScheduler();
       managedProcesses.stopManagedProcessSupervisor();
       runSpoolArchive.stopRunArchiveScheduler();
+      if (factoryRuntime) await factoryRuntime.stop();
       try {
         const { stopOrchestrationReconciler } = await import('./chat/orchestration-reconciler.mjs');
         stopOrchestrationReconciler();

@@ -43,7 +43,8 @@ const OPERATIONS = Object.freeze([
   'session.asset.publish',
   'session.assistant_message.publish',
 ]);
-const OPERATION_SET = new Set(OPERATIONS);
+const NODE_MESSAGE_OPERATIONS = Object.freeze(['organization.message.ack', 'organization.message.reply']);
+const OPERATION_SET = new Set([...OPERATIONS, ...NODE_MESSAGE_OPERATIONS]);
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 
 export const SESSION_CONTROL_ERROR_CODES = Object.freeze({
@@ -55,6 +56,13 @@ export const SESSION_CONTROL_ERROR_CODES = Object.freeze({
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+function validMessageScope(scope) {
+  if (!scope || scope.kind !== 'organization_message' || !text(scope.organizationId) || !text(scope.nodeId) || !Number.isInteger(scope.bindingGeneration) || scope.bindingGeneration < 1 || !Number.isInteger(scope.organizationRevision) || scope.organizationRevision < 0) return false;
+  if (scope.workItemId || scope.managedSessionId || scope.attemptId || scope.executionEpoch !== undefined) {
+    return !!text(scope.workItemId) && !!text(scope.managedSessionId) && !!text(scope.attemptId) && Number.isInteger(scope.executionEpoch) && scope.executionEpoch > 0;
+  }
+  return true;
 }
 
 // Paired owner devices submit turns as trusted_device, rather than owner.
@@ -142,10 +150,11 @@ function hasFullKnownOperationSet(payload) {
     && OPERATIONS.every((operation) => payload.operations.includes(operation));
 }
 
-function capabilityPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs }) {
+function capabilityPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, scope }) {
   return {
     version: SESSION_CONTROL_CAPABILITY_VERSION,
-    operations: [...OPERATIONS],
+    operations: scope ? [...NODE_MESSAGE_OPERATIONS] : [...OPERATIONS],
+    ...(scope ? { organizationMessageScope: scope } : {}),
     resource: { type: 'session_tree', id: sessionId },
     selection: { runId, turnId },
     runnerSessionId: sessionId,
@@ -155,11 +164,12 @@ function capabilityPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs }
   };
 }
 
-function renewalPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs }) {
+function renewalPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, scope }) {
   return {
     version: SESSION_CONTROL_RENEWAL_VERSION,
     operation: SESSION_CONTROL_RENEWAL_OPERATION,
     selection: { runId, sessionId, turnId },
+    ...(scope ? { organizationMessageScope: scope } : {}),
     issuedAt: new Date(issuedAtMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),
     nonce: randomBytes(24).toString('base64url'),
@@ -169,6 +179,10 @@ function renewalPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs }) {
 export function sessionControlOperation(pathname, method) {
   const parts = String(pathname || '').split('/').filter(Boolean);
   const normalizedMethod = text(method).toUpperCase();
+  if (parts.length === 7 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'organization' && parts[4] === 'messages' && normalizedMethod === 'POST') {
+    if (parts[6] === 'ack') return 'organization.message.ack';
+    if (parts[6] === 'reply') return 'organization.message.reply';
+  }
   if (parts.length === 3 && parts[0] === 'api' && parts[1] === 'auth' && parts[2] === 'me'
       && normalizedMethod === 'GET') return 'session.auth.read';
   if (parts.length === 2 && parts[0] === 'api' && parts[1] === 'triggers' && normalizedMethod === 'GET') return 'session.trigger.read';
@@ -219,6 +233,7 @@ export function createRunSessionControlCapability({
   ttlMs = SESSION_CONTROL_CAPABILITY_TTL_MS,
   maxExpiresAtMs = Infinity,
   secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  scope = null,
 } = {}) {
   const normalizedRunId = text(runId);
   const normalizedSessionId = text(sessionId);
@@ -227,6 +242,7 @@ export function createRunSessionControlCapability({
   const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : SESSION_CONTROL_CAPABILITY_TTL_MS;
   const absoluteExpiry = Number.isFinite(maxExpiresAtMs) ? maxExpiresAtMs : Infinity;
   const expiresAtMs = Math.min(issuedAtMs + ttl, absoluteExpiry);
+  if (scope && !validMessageScope(scope)) return null;
   if (!normalizedRunId || !normalizedSessionId || !normalizedTurnId
       || !Number.isFinite(issuedAtMs) || !Number.isFinite(expiresAtMs)
       || expiresAtMs <= issuedAtMs || !text(secret)) return null;
@@ -236,6 +252,7 @@ export function createRunSessionControlCapability({
     turnId: normalizedTurnId,
     issuedAtMs,
     expiresAtMs,
+    scope,
   }), secret, 'sc2');
   return Object.freeze({
     endpoint: SESSION_CONTROL_CAPABILITY_ENDPOINT,
@@ -247,6 +264,7 @@ export function createRunSessionControlCapability({
     sessionId: normalizedSessionId,
     issuedAt: new Date(issuedAtMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),
+    ...(scope ? { scope } : {}),
   });
 }
 
@@ -258,6 +276,7 @@ export function createRunSessionControlRenewalCapability({
   runCreatedAt = now,
   maxLifetimeMs = SESSION_CONTROL_MAX_RUN_LIFETIME_MS,
   secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  scope = null,
 } = {}) {
   const normalizedRunId = text(runId);
   const normalizedSessionId = text(sessionId);
@@ -267,6 +286,7 @@ export function createRunSessionControlRenewalCapability({
   const lifetime = Number.isFinite(maxLifetimeMs) && maxLifetimeMs > 0
     ? maxLifetimeMs : SESSION_CONTROL_MAX_RUN_LIFETIME_MS;
   const expiresAtMs = createdAtMs + lifetime;
+  if (scope && !validMessageScope(scope)) return null;
   if (!normalizedRunId || !normalizedSessionId || !normalizedTurnId
       || !Number.isFinite(issuedAtMs) || !Number.isFinite(expiresAtMs)
       || expiresAtMs <= issuedAtMs || !text(secret)) return null;
@@ -276,6 +296,7 @@ export function createRunSessionControlRenewalCapability({
     turnId: normalizedTurnId,
     issuedAtMs,
     expiresAtMs,
+    scope,
   }), secret, 'scr1');
   return Object.freeze({
     endpoint: SESSION_CONTROL_RENEWAL_ENDPOINT,
@@ -370,7 +391,10 @@ async function authenticateSessionControlDetailed(req, {
 
   const parts = String(pathname || '').split('/').filter(Boolean);
   let targetSessionId = rootSessionId;
-  if (operation === 'session.delegate' || operation === 'session.process.create') {
+  if (NODE_MESSAGE_OPERATIONS.includes(operation)) {
+    if (decodeURIComponent(parts[2] || '') !== rootSessionId || !validMessageScope(payload.organizationMessageScope)
+        || JSON.stringify(channel.scope) !== JSON.stringify(payload.organizationMessageScope)) return invalidResult();
+  } else if (operation === 'session.delegate' || operation === 'session.process.create') {
     if (decodeURIComponent(parts[2] || '') !== rootSessionId) return invalidResult();
   } else if ([
     'session.auth.read',
@@ -407,6 +431,7 @@ async function authenticateSessionControlDetailed(req, {
       capabilityOperation: operation,
       resourceType: 'session_tree',
       capabilityVersion: payload.version,
+      ...(NODE_MESSAGE_OPERATIONS.includes(operation) ? { organizationMessageScope: payload.organizationMessageScope } : {}),
     }),
     errorCode: '',
     attempted: true,
@@ -494,6 +519,7 @@ export function createSessionControlRenewalAuthenticator({
       if (!channel.renewalTokenHash || !constantTimeHexEqual(channel.renewalTokenHash, hashToken(token))) {
         return invalidResult(SESSION_CONTROL_ERROR_CODES.REVOKED, 'Session-control renewal is revoked');
       }
+      if (JSON.stringify(payload.organizationMessageScope || null) !== JSON.stringify(channel.scope || null)) return invalidResult();
       return {
         principal: Object.freeze({
           role: 'runner',

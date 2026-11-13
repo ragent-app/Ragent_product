@@ -191,17 +191,6 @@ fun AgentDetailScreen(
 
             Spacer(modifier = Modifier.height(AgentoSpacing.md))
 
-            // Tests & Evidence
-            SectionCard(title = "Tests & Verification") {
-                Text(
-                    text = "${node.testsPassed} / ${node.testsTotal} tests passed (100% assertion coverage)",
-                    style = AgentoConversationTypography.Body,
-                    color = colors.success,
-                )
-            }
-
-            Spacer(modifier = Modifier.height(AgentoSpacing.md))
-
             // ResultPacket (if completed)
             if (!node.resultPacketSummary.isNullOrBlank()) {
                 SectionCard(title = "Result Packet") {

@@ -324,6 +324,7 @@ enum class GoogleSignInSuccessAction {
 @Composable
 fun WorkbenchScreen(
     state: WorkbenchUiState,
+    organizationTransport: com.andysagent.agentoc.core.network.AgentoCTransport? = null,
     accountsViewModel: AccountsViewModel? = null,
     webParityViewModel: WebParityViewModel? = null,
     chatWebParityViewModel: WebParityViewModel? = null,
@@ -467,6 +468,8 @@ fun WorkbenchScreen(
         return
     }
 
+    var organizationOpen by remember(state.sessionId, state.chatTargetId) { mutableStateOf(false) }
+    BackHandler(enabled = organizationOpen) { organizationOpen = false }
     val predictiveBackProgress = remember { Animatable(0f) }
     val backProgress = predictiveBackProgress.value
     val parityState = webParityViewModel?.state?.collectAsState()?.value ?: WebParityUiState()
@@ -796,6 +799,21 @@ fun WorkbenchScreen(
                     )
                 },
             )
+            }
+        }
+        if (state.chatOpen && state.sessionId != null && organizationTransport != null) {
+            if (organizationOpen) {
+                com.andysagent.agentoc.feature.organization.ui.ConnectedOrganizationScreen(
+                    transport = organizationTransport,
+                    sessionId = state.sessionId,
+                    targetId = state.chatTargetId ?: state.activeRemoteTargetId,
+                    onBack = { organizationOpen = false },
+                )
+            } else {
+                androidx.compose.material3.TextButton(
+                    onClick = { organizationOpen = true },
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().zIndex(5f),
+                ) { Text("Organization") }
             }
         }
         state.error?.takeUnless(::isTransportConnectionFailure)?.let { error ->

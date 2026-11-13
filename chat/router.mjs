@@ -144,6 +144,7 @@ import { handleSessionControlInternalRoutes } from './router-session-control-rou
 import { handleCollaborationRoutes } from './router-collaboration-routes.mjs';
 import { handleOrchestrationRoutes } from './router-orchestration-routes.mjs';
 import { handleOrganizationRoutes } from './router-organization-routes.mjs';
+import { handleFactoryRoutes } from './router-factory-routes.mjs';
 import { handleConsultationRoutes } from './router-consultation-routes.mjs';
 import { handleProjectWorkflowRoutes } from './router-project-workflow-routes.mjs';
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
@@ -2023,6 +2024,8 @@ export async function handleRequest(req, res) {
   })) {
     return;
   }
+
+  if (await handleFactoryRoutes({ req, res, pathname, authSession, writeJson })) return;
 
   if (await handleOrganizationRoutes({
     req,

@@ -89,6 +89,7 @@ export async function provisionFrozenRevision({
   }
   const org = await getOrganization(organizationId);
   if (!org) throw provisioningError('organization not found', 'ORGANIZATION_NOT_FOUND', 404);
+  if (['archived','lifecycle_pending'].includes(org.state)) throw provisioningError('organization cannot be provisioned during archive or rebind', 'ORGANIZATION_ARCHIVED', 409);
   const revisionRow = await getRevision(organizationId, revision);
   if (!revisionRow) throw provisioningError('revision not found', 'REVISION_NOT_FOUND', 404);
   if (revisionRow.state !== 'frozen') {

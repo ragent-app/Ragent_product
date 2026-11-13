@@ -473,9 +473,13 @@ export async function getOrganization(organizationId) {
 export async function getOrganizationByRootSession(rootSessionId) {
   const normalized = typeof rootSessionId === 'string' ? rootSessionId.trim() : '';
   if (!normalized) return null;
-  return withDatabase((db) => rowOrganization(db.prepare(
-    'SELECT * FROM organizations WHERE root_session_id = ?',
-  ).get(normalized)));
+  return withDatabase((db) => {
+    const current = db.prepare('SELECT * FROM organizations WHERE root_session_id = ?').get(normalized);
+    if (current) return rowOrganization(current);
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_root_binding_history'").get()) return null;
+    return rowOrganization(db.prepare(`SELECT o.* FROM organization_root_binding_history h JOIN organizations o ON o.id=h.organization_id
+      WHERE h.root_session_id=? ORDER BY h.created_at DESC,h.generation DESC LIMIT 1`).get(normalized));
+  });
 }
 
 export async function listOrganizations({ projectId = '' } = {}) {
@@ -718,6 +722,7 @@ export async function bindNodeSession(nodeId, {
   expectedBindingGeneration,
   sessionId,
   roleInstanceId = undefined,
+  rebindCommandId = '',
 } = {}) {
   if (!nodeId || !sessionId) throw orgError('BAD_REQUEST', 'nodeId and sessionId are required');
   return withDatabase((db) => {
@@ -725,6 +730,13 @@ export async function bindNodeSession(nodeId, {
     try {
       const current = db.prepare('SELECT * FROM organization_nodes WHERE id = ?').get(nodeId);
       if (!current) throw orgError('ORGANIZATION_NODE_NOT_FOUND', `node ${nodeId} not found`);
+      if (rebindCommandId) {
+        const operation = db.prepare("SELECT * FROM organization_node_rebind_operations WHERE command_id=? AND organization_id=? AND node_id=? AND state='pending'").get(rebindCommandId,current.organization_id,nodeId);
+        const org = db.prepare('SELECT state FROM organizations WHERE id=?').get(current.organization_id);
+        if (!operation || ['archived','lifecycle_pending'].includes(org?.state) || operation.expected_generation !== expectedBindingGeneration) throw orgError('ORG_OPERATION_CONFLICT', 'Node replacement operation is no longer pending');
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_execution_bindings'").get() && db.prepare("SELECT 1 FROM factory_execution_bindings b JOIN factory_work_items w ON w.id=b.work_item_id WHERE w.organization_id=? AND w.assignee_node_id=? AND b.status IN ('intent','running','unknown') LIMIT 1").get(current.organization_id,nodeId)) throw orgError('ORG_OPERATION_CONFLICT', 'Node has active or unknown Factory execution');
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='collaboration_attempts'").get() && db.prepare("SELECT 1 FROM collaboration_attempts WHERE session_id=? AND (state NOT IN ('succeeded','failed','cancelled') OR (state='failed' AND failure_kind='unknown_outcome')) LIMIT 1").get(current.current_session_id)) throw orgError('ORG_OPERATION_CONFLICT', 'Node has active or unknown collaboration attempt');
+      }
       if (expectedBindingGeneration !== undefined
         && Number(expectedBindingGeneration) !== Number(current.binding_generation || 0)) {
         throw orgError('ORG_OPERATION_CONFLICT', `node ${nodeId} binding generation is ${current.binding_generation}, expected ${expectedBindingGeneration}`);

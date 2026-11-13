@@ -156,15 +156,9 @@ object OrganizationUiMapper {
         }
 
         // Check if any node is waiting for approval
-        val blockedNode = state.nodes.values.firstOrNull { it.runtimeState == NodeRuntimeState.BLOCKED }
-        val approvalOverlay = if (blockedNode != null) {
-            ApprovalOverlayUiState(
-                id = blockedNode.id,
-                requestingNodeName = blockedNode.displayName,
-                actionSummary = "Approval required: ${blockedNode.currentTaskSummary ?: "Operation requires authorization"}",
-                details = blockedNode.blockerText ?: "Worker requires approval to proceed with execution plan.",
-            )
-        } else null
+        // A blocked node is not evidence of an approval request. The old
+        // controls had no server command behind them, so do not present them.
+        val approvalOverlay: ApprovalOverlayUiState? = null
 
         return OrganizationUiState(
             organizationId = state.organizationId,

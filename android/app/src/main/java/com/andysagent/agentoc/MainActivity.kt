@@ -1423,6 +1423,7 @@ class MainActivity : ComponentActivity() {
                     },
                 ) {
                 WorkbenchScreen(
+                    organizationTransport = if (tabletDualPane) tabletChatBinding.transport else app.runtime.transport,
                     modifier = Modifier.drawWithContent {
                         if (pendingGoogleSignIn != null) recordToLayer(signInBackdrop) else drawContent()
                     },

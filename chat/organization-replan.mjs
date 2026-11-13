@@ -85,17 +85,34 @@ function applyAmendmentToProposal(baseProposal, amendment) {
   return next;
 }
 
-export async function replaceManagedSession({ organizationId, nodeId, expectedBindingGeneration, replacementKey, reason = 'managed session replacement' } = {}, {
+export async function replaceManagedSession({ organizationId, nodeId, expectedBindingGeneration, replacementKey, rebindCommandId = '', reason = 'managed session replacement' } = {}, {
   createManagedSession,
 } = {}) {
   assertOrganizationCapability('dynamicReplan', 'managed-session replacement is disabled');
   const orgId = stableKey(organizationId, 'organizationId');
+  const org = await getOrganization(orgId);
+  if (!org) throw error('ORGANIZATION_NOT_FOUND', `organization ${orgId} not found`, 404);
+  if (['archived','lifecycle_pending'].includes(org.state)) throw error('ORGANIZATION_ARCHIVED', 'organization cannot replace sessions during archive or rebind', 409);
   const node = await getNode(stableKey(nodeId, 'nodeId'));
   if (!node || node.organizationId !== orgId) throw error(ORG_REPLAN_INVALID, 'node is not in organization', 400);
   const generation = Number(expectedBindingGeneration);
   if (!Number.isInteger(generation) || generation < 0) throw error(ORG_SESSION_BINDING_CONFLICT, 'expectedBindingGeneration is required', 409);
   const key = stableKey(replacementKey, 'replacementKey');
   if (typeof createManagedSession !== 'function') throw error(ORG_REPLAN_INVALID, 'managed session replacement factory is required', 503);
+  const ensureIdle = async () => {
+    const { assertNodeWorkQuiescent } = await import('./organization-session-lifecycle.mjs');
+    await assertNodeWorkQuiescent(orgId,node.id,node.currentSessionId);
+    if (node.currentSessionId) {
+      const [{ getSession }, { getRun }] = await Promise.all([import('./session-manager.mjs'),import('./runs.mjs')]);
+      const current = await getSession(node.currentSessionId);
+      if (!current) throw error(ORG_SESSION_BINDING_CONFLICT, 'current managed session is unavailable; replacement requires reconciliation', 409);
+      if (current.activeRunId) {
+        const run = await getRun(current.activeRunId);
+        if (!run || !['completed','failed','cancelled'].includes(run.state)) throw error(ORG_SESSION_BINDING_CONFLICT, 'stop or reconcile the current Run before replacement', 409);
+      }
+    }
+  };
+  await ensureIdle();
   let session;
   try {
     session = await createManagedSession({
@@ -116,10 +133,12 @@ export async function replaceManagedSession({ organizationId, nodeId, expectedBi
   const sessionId = stableKey(session?.sessionId, 'replacement sessionId');
   let bound;
   try {
+    await ensureIdle();
     bound = await bindNodeSession(node.id, {
       expectedBindingGeneration: generation,
       sessionId,
       roleInstanceId: session?.roleInstanceId,
+      rebindCommandId,
     });
   } catch (cause) {
     if (cause?.code === 'ORG_OPERATION_CONFLICT') throw error(ORG_SESSION_BINDING_CONFLICT, cause.message, 409, { cause });
@@ -307,6 +326,7 @@ export async function applyPlanAmendment({ organizationId, amendment, expectedCu
   if (existing?.state === 'completed' && existing.result) return { ...existing.result, operation: existing, replay: true };
   const org = await getOrganization(orgId);
   if (!org) throw error('ORGANIZATION_NOT_FOUND', `organization ${orgId} not found`, 404);
+  if (['archived','lifecycle_pending'].includes(org.state)) throw error('ORGANIZATION_ARCHIVED', 'organization cannot be revised during archive or rebind', 409);
   if (existing && existing.organizationId !== orgId) {
     throw error(ORG_REPLAN_INVALID, `operation ${operationId} belongs to another organization`, 409);
   }

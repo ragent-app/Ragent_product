@@ -2137,12 +2137,19 @@ export async function renewRunSessionControlCapability({
     const currentMs = typeof now === 'number' ? now : Date.parse(now);
     const maxExpiresAtMs = (Number.isFinite(createdAtMs) ? createdAtMs : currentMs)
       + SESSION_CONTROL_MAX_RUN_LIFETIME_MS;
+    const currentChannel = manifest.options?.sessionControlChannel;
+    if (!currentChannel) {
+      const error = new Error('Session-control channel is unavailable');
+      error.code = 'SESSION_CONTROL_CAPABILITY_REVOKED';
+      throw error;
+    }
     const capability = createRunSessionControlCapability({
       runId: normalizedRunId,
       sessionId: normalizedSessionId,
       turnId: normalizedTurnId,
       now: currentMs,
       maxExpiresAtMs,
+      scope: currentChannel.scope || null,
     });
     if (!capability) {
       const error = new Error('Session-control renewal absolute lifetime has expired');
@@ -2150,7 +2157,6 @@ export async function renewRunSessionControlCapability({
       throw error;
     }
 
-    const currentChannel = manifest.options?.sessionControlChannel;
     const oldRenewalToken = await readRunSessionControlRenewalToken(normalizedRunId);
     const renewal = oldRenewalToken && currentChannel?.renewalTokenHash
       ? {
@@ -2169,6 +2175,7 @@ export async function renewRunSessionControlCapability({
         turnId: normalizedTurnId,
         now: currentMs,
         runCreatedAt: Number.isFinite(createdAtMs) ? createdAtMs : currentMs,
+        scope: currentChannel.scope || null,
       });
     if (!renewal) {
       const error = new Error('Session-control renewal absolute lifetime has expired');

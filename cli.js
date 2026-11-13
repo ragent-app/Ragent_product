@@ -440,6 +440,13 @@ switch (command) {
     break;
   }
 
+  case 'team-message': {
+    const { runTeamMessageCommand } = await import(modulePath('lib/team-message-command.mjs'));
+    try { process.exitCode = await runTeamMessageCommand(args); }
+    catch (error) { console.error(error.message || String(error)); process.exitCode = 1; }
+    break;
+  }
+
   case 'consult': {
     const { createAgentoCHttpClient } = await import(modulePath('lib/agentoc-http-client.mjs'));
 

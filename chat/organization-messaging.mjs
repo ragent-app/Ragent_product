@@ -25,6 +25,7 @@ export const INTERNAL_ENVELOPE_TYPES = Object.freeze([
   'PHASE_COMPLETED',
   'CANCEL_REQUESTED',
   'SESSION_REPLACED',
+  'OWNER_MESSAGE',
 ]);
 
 export const INTERNAL_ENVELOPE_STATES = Object.freeze([
@@ -193,6 +194,10 @@ function ensureSchema(db) {
   ensureEnvelopeSchema(db);
 }
 
+// Used by the team-message store so body and delivery reference can be
+// committed together without opening a nested transaction.
+export function ensureOrganizationMessageEnvelopeSchema(db) { ensureSchema(db); }
+
 async function read(fn) {
   return withDatabase((db) => { ensureSchema(db); return fn(db); });
 }
@@ -289,6 +294,7 @@ function validateEnvelopeInput(input = {}) {
   if (!ID_RE.test(envelopeId)) throw makeError(ORG_ENVELOPE_INVALID, 'envelopeId is invalid');
   const type = text(input.type);
   if (!ENVELOPE_TYPES.has(type)) throw makeError(ORG_ENVELOPE_INVALID, 'unsupported internal envelope type', 400, { type });
+  if (type === 'OWNER_MESSAGE') throw makeError(ORG_ENVELOPE_INVALID, 'owner messages require the authenticated team-message boundary', 403);
   const revision = input.organizationRevision ?? input.revision ?? 0;
   if (!Number.isInteger(revision) || revision < 0) throw makeError(ORG_ENVELOPE_INVALID, 'organizationRevision must be non-negative');
   const subject = text(input.subject);

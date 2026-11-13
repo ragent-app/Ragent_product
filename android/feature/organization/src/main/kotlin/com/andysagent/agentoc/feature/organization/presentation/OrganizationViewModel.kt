@@ -8,6 +8,7 @@ import com.andysagent.agentoc.feature.organization.animation.GraphDiffAnimator
 import com.andysagent.agentoc.feature.organization.animation.NodeAppearanceAnimation
 import com.andysagent.agentoc.feature.organization.animation.ParticleAnimation
 import com.andysagent.agentoc.feature.organization.data.OrganizationRepository
+import com.andysagent.agentoc.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.agentoc.feature.organization.domain.OrganizationState
 import com.andysagent.agentoc.feature.organization.layout.EdgePoint
 import com.andysagent.agentoc.feature.organization.layout.LayoutResult
@@ -32,6 +33,8 @@ class OrganizationViewModel(
     private val repository: OrganizationRepository,
     private val layoutEngine: OrganizationLayoutEngine = OrganizationLayoutEngine(),
 ) : ViewModel() {
+
+    fun applyProjection(projection: OrganizationProjectionDto) = repository.applyProjection(projection)
 
     private val diffAnimator = GraphDiffAnimator(viewModelScope)
     private val communicationScheduler = CommunicationVisualScheduler(viewModelScope)

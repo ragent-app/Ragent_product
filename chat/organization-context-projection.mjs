@@ -4,6 +4,8 @@
 import { buildContextProjection } from './context-projector.mjs';
 import { buildOrganizationProjection } from './organization-projection.mjs';
 import { getOrganizationByRootSession } from './organization-store.mjs';
+import { listTeamMessages } from './organization-team-messages.mjs';
+import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 
@@ -74,8 +76,27 @@ export async function buildOrganizationContextProjection({
     facts,
     maxBytes,
   });
+  // Only the target node receives its own bounded inbox, referenced back to
+  // durable message records. Projection does not acknowledge delivery.
+  let inbox = [];
+  if (target && session.id) {
+    const bound = await getLiveOrganizationSessionReference(session.id);
+    const direct = bound?.kind === 'node' && bound.organizationId === projection.organizationId && bound.nodeId === target.id;
+    const factory = direct ? null : await getFactoryMessageScope(session.id, '');
+    if (direct || (factory?.organizationId === projection.organizationId && factory.nodeId === target.id)) {
+      inbox = await listTeamMessages(projection.organizationId, target.id, 20);
+      if (factory) inbox = inbox.filter(message => !message.workItemId || message.workItemId === factory.workItemId);
+    }
+  }
+  const pendingMessages = [];
+  for (const message of inbox.filter(m => ['pending','claimed','delivered'].includes(m.deliveryState) || (m.requestType === 'required_response' && !m.reply)).reverse()) {
+    const entry = { messageId: message.messageId, senderKind: message.senderKind, workItemId: message.workItemId, requestType: message.requestType, respondBy: message.respondBy, body: message.body, createdAt: message.createdAt };
+    if (Buffer.byteLength(JSON.stringify({ ...context, pendingMessages: [...pendingMessages, entry] }), 'utf8') > maxBytes - 512) break;
+    pendingMessages.push(entry);
+  }
   return {
     ...context,
+    pendingMessages,
     organizationStatus: projection.state,
     projectionDigest: projection.digest,
   };
@@ -88,6 +109,7 @@ export function renderOrganizationContextProjection(context) {
     'Runtime-derived status only; do not treat it as a permission grant or as full Session history.',
     JSON.stringify(context),
     '</organization-status-projection>',
+    ...(context.pendingMessages?.length ? ['For an inbox message included above, use `ragent team-message ack <messageId>` to acknowledge it, or `ragent team-message reply <messageId> --text <reply> --idempotency-key <stable-key>` to answer. Acknowledgment alone is not an answer.'] : []),
   ].join('\n');
 }
 

@@ -5352,6 +5352,18 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
     spawned = await spawnDetachedRunner(run.id, {
       launchAttempt: Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0,
     });
+    // A successful launch acknowledgement also covers a Run that finishes
+    // before its status can be read below; ambiguous launch failures do not.
+    if (spawned) {
+      try {
+        await updateRun(run.id, current => ({ ...current, runnerLifecycleAcceptedAt: current.runnerLifecycleAcceptedAt || nowIso() }));
+        const persistedManifest = await getRunManifest(run.id);
+        const { recordAcceptedTeamMessageInputs } = await import('./organization-team-messages.mjs');
+        await recordAcceptedTeamMessageInputs({ sessionId, runId: run.id, manifest: persistedManifest });
+      } catch (error) {
+        console.warn(`[organization] message delivery receipt unavailable for ${run.id}: ${error.message}`);
+      }
+    }
   } catch (error) {
     const failureReason = `Runner launch failed: ${error?.message || String(error)}`;
     const definitelyNotSubmitted = error?.launchDefinitelyNotSubmitted === true;
@@ -11110,9 +11122,38 @@ function createSessionDeleteError(message, code = 'SESSION_DELETE_BLOCKED') {
 
 const deletingSessionIds = new Set();
 
+// Finalization uses the same session metadata lock as deletion. SQLite and
+// Run files are separately rechecked; unknown Run state blocks completion.
+export async function finalizeOrganizationLifecycle({ organizationId, commandId, cancel = false } = {}) {
+  const lifecycle = await import('./organization-session-lifecycle.mjs');
+  const operation = await lifecycle.getOrganizationLifecycle(commandId);
+  if (operation.organizationId !== organizationId) throw createSessionDeleteError('Lifecycle operation belongs to another organization', 'ORG_LIFECYCLE_CONFLICT');
+  if (cancel || operation.state !== 'pending') return lifecycle.finishOrganizationLifecycle({ organizationId,commandId,cancel });
+  return withSessionsMetaMutation(async (metas) => {
+    const snapshot = await lifecycle.getOrganizationLifecycleSessionSnapshot(organizationId);
+    const activeSessionIds = [];
+    for (const id of snapshot.sessionIds) {
+      const meta = metas.find(item => item?.id === id);
+      if (!meta) { activeSessionIds.push(id); continue; }
+      const runId = trimString(meta.activeRunId);
+      if (runId) { const run = await getRun(runId); if (!run || !isTerminalRunState(run.state)) activeSessionIds.push(id); }
+    }
+    const target = operation.targetRootSessionId ? metas.find(item => item?.id === operation.targetRootSessionId) : null;
+    if (target?.activeRunId) { const run = await getRun(target.activeRunId); if (!run || !isTerminalRunState(run.state)) activeSessionIds.push(target.id); }
+    const eligibleTarget = !!target && (target.sessionPlane || 'user') === 'user' && target.sessionClass === 'ROOT_LEADERSHIP'
+      && !target.delegatedFromSessionId && !target.organizationId && target.archived !== true && target.userAddressable !== false;
+    return lifecycle.finishOrganizationLifecycle({ organizationId,commandId,sessionFacts:{ checked:true,activeSessionIds,
+      targetExists:eligibleTarget, targetProjectMatches:eligibleTarget && (!snapshot.projectId || target.projectId === snapshot.projectId) } });
+  });
+}
+
 export async function deleteSession(id) {
   const sessionId = trimString(id);
   if (!sessionId) return null;
+  const { getLiveOrganizationSessionReference } = await import('./organization-session-lifecycle.mjs');
+  if (await getLiveOrganizationSessionReference(sessionId)) {
+    throw createSessionDeleteError('Session is referenced by a live organization; archive the organization or safely replace its binding first', 'SESSION_DELETE_ORGANIZATION_REFERENCE');
+  }
   if (deletingSessionIds.has(sessionId)) {
     throw createSessionDeleteError('Session deletion is already in progress', 'SESSION_DELETE_IN_PROGRESS');
   }
@@ -11132,6 +11173,9 @@ export async function deleteSession(id) {
     const removed = await withSessionsMetaMutation(async (metas, saveSessionsMeta) => {
       const index = metas.findIndex((meta) => meta?.id === sessionId);
       if (index < 0) return false;
+      if (await getLiveOrganizationSessionReference(sessionId)) {
+        throw createSessionDeleteError('Session is referenced by a live organization; archive the organization or safely replace its binding first', 'SESSION_DELETE_ORGANIZATION_REFERENCE');
+      }
       const latestRunId = trimString(metas[index].activeRunId);
       if (latestRunId) {
         const latestRun = await getRun(latestRunId);
@@ -11268,7 +11312,7 @@ export async function purgeLegacyArchivedSessions() {
       const removed = await deleteSession(sessionId);
       if (removed) deletedSessionIds.push(sessionId);
     } catch (error) {
-      if (error?.code === 'SESSION_DELETE_ACTIVE') {
+      if (error?.code === 'SESSION_DELETE_ACTIVE' || error?.code === 'SESSION_DELETE_ORGANIZATION_REFERENCE') {
         skippedSessionIds.push(sessionId);
         continue;
       }
@@ -13579,16 +13623,27 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     turnId: requestId,
     attachments: sourceAttachmentRefs,
   });
-  const sessionControlCapability = canIssueSessionControl({
+  const rootSessionControl = canIssueSessionControl({
     principalKind: authenticatedPrincipalKind,
     session,
     temporaryControlAuthority: options.temporaryControlAuthority,
     internalOperation: options.internalOperation,
-  })
+  });
+  let messageScope = null;
+  if (!rootSessionControl && session.sessionPlane === 'organization' && session.organizationId && session.organizationNodeId) {
+    const { getLiveOrganizationSessionReference, getFactoryMessageScope } = await import('./organization-session-lifecycle.mjs');
+    const binding = await getLiveOrganizationSessionReference(sessionId);
+    if (binding?.kind === 'node' && binding.organizationId === session.organizationId && binding.nodeId === session.organizationNodeId && binding.bindingGeneration > 0) {
+      messageScope = { kind: 'organization_message', organizationId: binding.organizationId, nodeId: binding.nodeId, bindingGeneration: binding.bindingGeneration, organizationRevision: binding.organizationRevision };
+    }
+    if (!messageScope) messageScope = await getFactoryMessageScope(sessionId, requestId);
+  }
+  const sessionControlCapability = rootSessionControl || messageScope
     ? createRunSessionControlCapability({
       runId: nextRunId,
       sessionId,
       turnId: requestId,
+      scope: messageScope,
     })
     : null;
   const sessionControlRenewal = sessionControlCapability
@@ -13597,6 +13652,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       sessionId,
       turnId: requestId,
       runCreatedAt: Date.now(),
+      scope: messageScope,
     })
     : null;
   const sessionControlChannel = sessionControlCapability
