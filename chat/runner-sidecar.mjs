@@ -2200,6 +2200,8 @@ function armCodexAppServerMcpReadinessTimeout(runId, state, terminate) {
   if (!state?.mcpRequired || state.mcpReadinessTimer || state.mcpReady) return;
   const configured = Number(process.env.AGENTOC_CODEX_MCP_READINESS_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : 15_000;
+  state.mcpReadinessStartedAt = nowIso();
+  state.mcpReadinessTimeoutMs = timeoutMs;
   state.mcpReadinessTimer = setTimeout(() => {
     state.mcpReadinessTimer = null;
     if (state.mcpReady || state.terminalSeen) return;
@@ -2241,6 +2243,12 @@ async function failCodexAppServerMcpReadiness(runId, state, terminate, reasonCod
       codexMcpStatus: 'failed',
       codexMcpReadiness: 'failed',
       codexMcpFailureReason: reasonCode,
+      codexMcpReadinessStartedAt: state.mcpReadinessStartedAt || null,
+      codexMcpReadinessTimeoutMs: state.mcpReadinessTimeoutMs || null,
+      codexMcpServer: state.mcpExpectedServerName || '',
+      codexMcpTools: state.mcpRequiredToolNames || [],
+      codexMcpReadyStatusObserved: state.mcpReadyStatusObserved === true,
+      codexMcpStatusRequestPending: Boolean(state.mcpStatusRequestId),
     },
   });
   try {

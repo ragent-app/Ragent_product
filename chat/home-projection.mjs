@@ -96,7 +96,9 @@ function triggerTitle(trigger, session) {
 
 function buildTriggerItem(trigger, session, nowMs) {
   const scheduledAt = timestampMs(trigger?.scheduledAt);
-  const failed = trigger?.status === 'failed';
+  const results = Array.isArray(trigger?.deliveryResults) ? trigger.deliveryResults : [];
+  const latest = results[results.length - 1];
+  const failed = trigger?.status === 'failed' || latest?.deliveryState === 'failed';
   const overdue = scheduledAt > 0 && scheduledAt <= nowMs
     && ['pending', 'delivering'].includes(trigger?.status);
   return {
@@ -108,14 +110,16 @@ function buildTriggerItem(trigger, session, nowMs) {
     title: triggerTitle(trigger, session),
     summary: trimString(trigger?.text) || 'Scheduled agent follow-up',
     reason: failed
-      ? (trimString(trigger?.lastError) || 'Scheduled work failed')
+      ? (trimString(latest?.lastError) || trimString(trigger?.lastError) || 'Scheduled work failed')
       : (overdue ? 'Scheduled work is overdue' : 'Scheduled work is coming up'),
     severity: failed || overdue ? 'urgent' : 'normal',
     action: failed || overdue ? 'open' : 'schedule',
     updatedAt: trimString(trigger?.updatedAt || trigger?.scheduledAt) || null,
     scheduledAt: trimString(trigger?.scheduledAt) || null,
     status: trimString(trigger?.status) || null,
-    runId: trimString(trigger?.runId) || null,
+    deliveryState: trimString(latest?.deliveryState) || 'unknown',
+    executionState: trimString(latest?.executionState) || 'unknown',
+    runId: trimString(latest?.runId || trigger?.runId) || null,
     overdue,
   };
 }
@@ -181,13 +185,18 @@ export function buildHomeProjection({ sessions = [], triggers = [], now = Date.n
 
   const upcomingAutomation = [];
   for (const trigger of Array.isArray(triggers) ? triggers : []) {
-    if (!trigger || trigger.enabled !== true) continue;
+    if (!trigger) continue;
+    const results = Array.isArray(trigger.deliveryResults) ? trigger.deliveryResults : [];
+    const latest = results[results.length - 1];
+    const recentFailure = (trigger.status === 'failed' || latest?.deliveryState === 'failed')
+      && timestampMs(latest?.terminalAt || trigger.updatedAt) >= nowMs - 2 * DAY_MS;
+    if (trigger.enabled !== true && !recentFailure) continue;
     const session = sessionById.get(trigger.sessionId);
     if (!session) continue;
     const status = trimString(trigger.status);
-    if (status === 'failed' || status === 'delivering' || status === 'pending') {
+    if (recentFailure || status === 'failed' || status === 'delivering' || status === 'pending') {
       const item = buildTriggerItem(trigger, session, nowMs);
-      if (item.overdue || status === 'failed') focusItems.push(item);
+      if (item.overdue || status === 'failed' || latest?.deliveryState === 'failed') focusItems.push(item);
       else if (timestampMs(item.scheduledAt) <= nowMs + 7 * DAY_MS) upcomingAutomation.push(item);
     }
   }

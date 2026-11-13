@@ -675,11 +675,15 @@ export function exchangeWindowsSupervisorRequest(request, { timeoutMs = 30000, s
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > 16384) return Promise.reject(new Error('Runner supervisor request is too large'));
   return new Promise((resolve, reject) => {
-    let child, settled = false, output = '';
+    let child, settled = false, output = '', handedOff = false, responseReceived = false;
     const finish = (error, value) => {
       if (settled) return;
       settled = true; clearTimeout(timer);
-      if (error) { child?.kill(); reject(error); } else resolve(value);
+      if (error) {
+        if (handedOff && !responseReceived) error.launchMayHaveBeenAccepted = true;
+        else if (!handedOff) error.launchDefinitelyNotSubmitted = true;
+        child?.kill(); reject(error);
+      } else resolve(value);
     };
     const timer = setTimeout(() => finish(new Error(`Runner supervisor timed out after ${timeoutMs}ms`)), timeoutMs);
     timer.unref?.();
@@ -693,10 +697,13 @@ export function exchangeWindowsSupervisorRequest(request, { timeoutMs = 30000, s
       if (code !== 0) { finish(new Error('Runner supervisor native client rejected the connection')); return; }
       try {
         const response = JSON.parse(output.trim());
-        if (!response?.ok) { const error = new Error(response?.error || 'Runner supervisor rejected launch request'); if (typeof response?.code === 'string') error.code = response.code; throw error; }
+        if (response?.ok !== true && response?.ok !== false) throw new Error('Invalid runner supervisor response');
+        responseReceived = true;
+        if (!response.ok) { const error = new Error(response.error || 'Runner supervisor rejected launch request'); error.launchStage = 'supervisor-rejection'; if (typeof response.code === 'string') error.code = response.code; throw error; }
         finish(null, response);
       } catch (error) { finish(error); }
     });
+    handedOff = true;
     child.stdin.end(encoded);
   });
 }
@@ -717,10 +724,17 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
     launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE,
     proxyEnv,
   });
-  const prepared = await prepareProviderImpl(runId, {
-    environment: baseEnv,
-    runnerReadable: true,
-  });
+  let prepared;
+  try {
+    prepared = await prepareProviderImpl(runId, {
+      environment: baseEnv,
+      runnerReadable: true,
+    });
+  } catch (error) {
+    error.launchDefinitelyNotSubmitted = true;
+    error.launchStage = 'provider-preparation';
+    throw error;
+  }
   const providerHomesDir = trimString(prepared?.providerId)
     ? trimString(prepared?.providerHomesDir)
     : '';
@@ -743,6 +757,8 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
         unitName: null, unitScope: null, supervisorSocket: normalizedSocketPath, launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE };
     } else result = await new Promise((resolve, reject) => {
     let settled = false;
+    let submitted = false;
+    let responseReceived = false;
     let buffer = '';
     const socket = connectImpl(normalizedSocketPath);
     const finish = (error, result = null) => {
@@ -750,8 +766,11 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
       settled = true;
       clearTimeout(timer);
       socket.destroy();
-      if (error) reject(error);
-      else resolve(result);
+      if (error) {
+        if (submitted && !responseReceived) error.launchMayHaveBeenAccepted = true;
+        else if (!submitted) error.launchDefinitelyNotSubmitted = true;
+        reject(error);
+      } else resolve(result);
     };
     const timer = setTimeout(() => {
       finish(new Error(`Runner supervisor timed out after ${timeoutMs}ms`));
@@ -760,6 +779,7 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
 
     socket.setEncoding('utf8');
     socket.once('connect', () => {
+      submitted = true;
       socket.write(`${JSON.stringify(request)}\n`);
     });
     socket.on('data', (chunk) => {
@@ -773,8 +793,14 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
         finish(new Error(`Invalid runner supervisor response: ${error.message}`));
         return;
       }
-      if (!response?.ok) {
-        const error = new Error(response?.error || 'Runner supervisor rejected launch request');
+      if (response?.ok !== true && response?.ok !== false) {
+        finish(new Error('Invalid runner supervisor response'));
+        return;
+      }
+      responseReceived = true;
+      if (!response.ok) {
+        const error = new Error(response.error || 'Runner supervisor rejected launch request');
+        error.launchStage = 'supervisor-rejection';
         if (typeof response?.code === 'string') error.code = response.code;
         finish(error);
         return;
@@ -987,11 +1013,17 @@ export function createDetachedRunnerSpawner({
       try {
         return await launchDetachedRunnerViaSupervisor(runId, { connectImpl });
       } catch (error) {
+        if (error?.launchMayHaveBeenAccepted || error?.providerPreparation
+            || ['provider-preparation', 'supervisor-rejection'].includes(error?.launchStage)) throw error;
         if (error?.code === 'WINDOWS_EXECUTION_IDENTITY_UNSAFE'
             || error?.code === 'WINDOWS_EXECUTION_IDENTITY_UNAVAILABLE') throw error;
         if (process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED === '1'
           || isWindowsManagedRunnerPlatform(platform)) {
-          throw new Error(`Required runner supervisor is unavailable: ${error?.message || String(error)}`);
+          if (error?.code && !['ENOENT', 'ECONNREFUSED', 'EPIPE', 'ECONNRESET'].includes(error.code)) throw error;
+          const unavailable = new Error(`Required runner supervisor is unavailable: ${error?.message || String(error)}`, { cause: error });
+          unavailable.code = error?.code || 'RUNNER_SUPERVISOR_UNAVAILABLE';
+          if (error?.launchDefinitelyNotSubmitted) unavailable.launchDefinitelyNotSubmitted = true;
+          throw unavailable;
         }
         console.error(`[runs] Failed to launch detached runner ${runId} via runner supervisor: ${error?.message || String(error)}; trying legacy launch strategies.`);
       }

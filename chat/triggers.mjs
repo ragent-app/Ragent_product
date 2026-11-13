@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'crypto';
 
 import { CHAT_TRIGGERS_FILE } from '../lib/config.mjs';
-import { appendEvent } from './history.mjs';
+import { appendEvent, findLatestAssistantMessage } from './history.mjs';
 import { statusEvent } from './normalizer.mjs';
 import { createSerialTaskQueue, readJson, statOrNull, writeJsonAtomic } from './fs-utils.mjs';
-import { getSession, submitHttpMessage } from './session-manager.mjs';
+import { getSession, getSessionReplyPublication, submitHttpMessage } from './session-manager.mjs';
+import { findRunByRequest, getRun } from './runs.mjs';
 
 const DEFAULT_TRIGGER_POLL_MS = 15000;
 const MAX_TRIGGER_IDLE_DELAY_MS = 15 * 60 * 1000;
@@ -42,6 +43,7 @@ const MIN_RECURRENCE_INTERVAL_MS = 100;
 const MAX_RECURRENCE_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
 const MAX_EVENT_PAYLOAD_BYTES = 16 * 1024;
 const MAX_EVENT_KEYS = 64;
+const MAX_DELIVERY_RESULTS = 64;
 const MAX_DEDUPE_KEY_CHARS = 256;
 
 let triggersCache = null;
@@ -236,6 +238,7 @@ function normalizeStoredTrigger(value) {
     deliveryAttempts: Math.max(0, parsePositiveInteger(raw.deliveryAttempts, 0)),
     runId: trimString(raw.runId),
     deliveryMode: trimString(raw.deliveryMode),
+    deliveryResults: Array.isArray(raw.deliveryResults) ? raw.deliveryResults.slice(-MAX_DELIVERY_RESULTS) : [],
     eventType: normalizeEventType(raw.eventType),
     eventFilter: normalizeEventFilter(raw.eventFilter),
     recurrence: normalizeRecurrence(raw.recurrence || raw.schedule),
@@ -387,7 +390,80 @@ function resolveRetryDelayMs(attempts) {
 }
 
 function isPermanentTriggerError(error) {
-  return error?.code === 'SESSION_NOT_FOUND';
+  return ['SESSION_NOT_FOUND', 'TRIGGER_RUN_TERMINAL', 'TRIGGER_STATUS_UNCERTAIN', 'TRIGGER_RESULT_UNCERTAIN', 'TRIGGER_RESULT_CAPACITY'].includes(error?.code);
+}
+
+function occurrenceRequestId(trigger, eventContext = null) {
+  if (eventContext?.eventKey) return `${trigger.requestId}:${eventContext.eventKey}`;
+  const recorded = (trigger.deliveryResults || []).find((entry) => entry.occurrence === trigger.occurrence);
+  if (recorded?.requestId) return recorded.requestId;
+  if (!trigger.recurrence || !trigger.occurrence) return trigger.requestId;
+  // An old claim may already have submitted the legacy identity before upgrade.
+  if (trigger.status === TRIGGER_STATUS_DELIVERING && !trigger.deliveryResults?.length
+      && trigger.deliveryAttempts > 1) return trigger.requestId;
+  return `${trigger.requestId}:occurrence:${trigger.occurrence}`;
+}
+
+async function recordDeliveryResult(triggerId, requestId, change) {
+  await withTriggerMutation(async (triggers, save) => {
+    const trigger = triggers.find((entry) => entry.id === triggerId);
+    if (!trigger) return;
+    const results = [...(trigger.deliveryResults || [])];
+    const index = results.findIndex((entry) => entry.requestId === requestId);
+    const previous = index < 0 ? {} : results[index];
+    if (index >= 0 && Object.entries(change).every(([key, value]) => previous[key] === value)) return;
+    const next = { ...previous, ...change, requestId, responseId: requestId, updatedAt: nowIso() };
+    if (change.deliveryState && change.deliveryState !== 'pending' && previous.deliveryState === 'pending') next.terminalAt = nowIso();
+    if (change.lastError) {
+      next.errors = [...(previous.errors || []), { at: nowIso(), message: change.lastError, attempt: change.attempts || 0 }].slice(-MAX_DELIVERY_ATTEMPTS);
+    }
+    if (index < 0) {
+      if (results.length >= MAX_DELIVERY_RESULTS) {
+        const removable = results.findIndex((entry) => entry.deliveryState !== 'pending');
+        if (removable < 0) throw Object.assign(new Error('Trigger delivery result capacity is exhausted'), { code: 'TRIGGER_RESULT_CAPACITY' });
+        results.splice(removable, 1);
+      }
+      results.push(next);
+    } else results[index] = next;
+    trigger.deliveryResults = results;
+    await save(triggers);
+  });
+}
+
+async function reconcileDeliveryResult(trigger, result) {
+  if (!result?.requestId || result.deliveryState !== 'pending') return;
+  const run = result.runId ? await getRun(result.runId) : await findRunByRequest(trigger.sessionId, result.requestId);
+  const state = trimString(run?.state).toLowerCase();
+  const publication = !run || ['completed', 'failed', 'cancelled'].includes(state)
+    ? await getSessionReplyPublication(trigger.sessionId, result.responseId || result.requestId) : null;
+  const published = await hasPublishedReply(trigger.sessionId, result.requestId, run, publication);
+  const terminalFailure = ['failed', 'cancelled'].includes(state);
+  await recordDeliveryResult(trigger.id, result.requestId, {
+    runId: trimString(run?.id) || result.runId || '',
+    executionState: state || (publication?.state === 'queued' ? 'queued' : 'unknown'),
+    deliveryState: published ? 'published' : published === null || terminalFailure || state === 'completed' ? 'unknown' : 'pending',
+    ...(terminalFailure ? { lastError: trimString(run?.failureReason || run?.error?.message || run?.error || publication?.lastError) } : {}),
+  });
+}
+
+async function hasPublishedReply(sessionId, requestId, run, publication) {
+  if (!run || !['completed', 'failed', 'cancelled'].includes(trimString(run.state).toLowerCase())) return false;
+  try {
+    const ids = new Set([run.id]);
+    const children = new Set([...(run.replyPublication?.continuationRunIds || []), run.replyPublication?.finalRunId].filter(Boolean));
+    for (const id of children) {
+      if (id === run.id) continue;
+      const child = await getRun(id);
+      if (child?.sessionId === sessionId && child.replyPublicationRootRunId === run.id) ids.add(id);
+    }
+    return Boolean(await findLatestAssistantMessage(sessionId, {
+    includeBodies: false, strict: true,
+    match: (event) => {
+      const eventRunId = trimString(event.runId || event.resultRunId);
+      return eventRunId ? ids.has(eventRunId) : trimString(event.responseId || event.requestId) === requestId;
+    },
+    }));
+  } catch { return null; }
 }
 
 async function assertWritableTargetSession(sessionId) {
@@ -804,6 +880,7 @@ async function markTriggerDeliveryFailure(triggerId, error, attemptCount = 1) {
       updatedAt: failedAt,
       lastError: trimString(error?.message) || 'Trigger delivery failed',
       lastErrorAt: failedAt,
+      runId: trimString(error?.runId) || current.runId,
       nextAttemptAt: exhausted ? '' : new Date(Date.now() + retryDelayMs).toISOString(),
     };
     triggers[index] = next;
@@ -815,16 +892,12 @@ async function markTriggerDeliveryFailure(triggerId, error, attemptCount = 1) {
 }
 
 async function appendTriggerStatusEvent(trigger, outcome) {
-  try {
-    const event = statusEvent(buildTriggerStatusText(trigger, { queued: outcome?.queued === true }));
-    event.requestId = trigger.requestId;
-    if (trimString(outcome?.runId)) {
-      event.runId = trimString(outcome.runId);
-    }
-    await appendEvent(trigger.sessionId, event);
-  } catch (error) {
-    console.error(`[triggers] failed to append status event for ${trigger.id}: ${error.message}`);
+  const event = statusEvent(buildTriggerStatusText(trigger, { queued: outcome?.queued === true }));
+  event.requestId = trigger.requestId;
+  if (trimString(outcome?.runId)) {
+    event.runId = trimString(outcome.runId);
   }
+  await appendEvent(trigger.sessionId, event);
 }
 
 function renderTriggerText(trigger, eventContext = null) {
@@ -841,11 +914,31 @@ function renderTriggerText(trigger, eventContext = null) {
 
 async function deliverTrigger(trigger, eventContext = null) {
   const session = await assertWritableTargetSession(trigger.sessionId);
-  const requestId = eventContext?.eventKey ? `${trigger.requestId}:${eventContext.eventKey}` : trigger.requestId;
+  const requestId = occurrenceRequestId(trigger, eventContext);
   const inputMode = normalizeInputMode(trigger.inputMode);
+  const priorResult = (trigger.deliveryResults || []).find((entry) => entry.requestId === requestId);
+  if (priorResult?.deliveryState === 'published') {
+    const outcome = { duplicate: true, run: priorResult.runId ? { id: priorResult.runId } : null };
+    if (!eventContext) await markTriggerDelivered(trigger.id, { runId: priorResult.runId });
+    return outcome;
+  }
+  if (inputMode === TRIGGER_INPUT_MODE_STATUS_NOTIFICATION && priorResult?.statusAttempted) {
+    if (priorResult.statusRecorded) {
+      const outcome = { statusNotified: true };
+      if (!eventContext) await markTriggerDelivered(trigger.id, outcome);
+      return outcome;
+    }
+    throw Object.assign(new Error('Status notification outcome is uncertain'), { code: 'TRIGGER_STATUS_UNCERTAIN' });
+  }
+  await recordDeliveryResult(trigger.id, requestId, {
+    occurrence: trigger.occurrence, scheduledAt: trigger.scheduledAt, firedAt: priorResult?.firedAt || trigger.lastAttemptAt,
+    executionState: 'preparing', deliveryState: 'pending', attempts: trigger.deliveryAttempts,
+  });
   if (inputMode === TRIGGER_INPUT_MODE_STATUS_NOTIFICATION) {
     const outcome = { duplicate: false, queued: false, run: null, statusNotified: true };
+    await recordDeliveryResult(trigger.id, requestId, { statusAttempted: true });
     await appendTriggerStatusEvent({ ...trigger, requestId }, outcome);
+    await recordDeliveryResult(trigger.id, requestId, { acceptedAt: nowIso(), executionState: 'completed', deliveryState: 'unknown', deliveryMode: 'status', statusRecorded: true });
     if (!eventContext) {
       await markTriggerDelivered(trigger.id, outcome);
     }
@@ -879,11 +972,32 @@ async function deliverTrigger(trigger, eventContext = null) {
     throw error;
   }
 
+  const run = outcome?.run || await findRunByRequest(session.id, requestId);
+  const publication = await getSessionReplyPublication(session.id, requestId);
+  const published = await hasPublishedReply(session.id, requestId, run, publication);
+  const runState = trimString(run?.state).toLowerCase();
+  if (['failed', 'cancelled'].includes(runState) && !published) {
+    const error = new Error(trimString(run?.failureReason || run?.error?.message || run?.error || publication?.lastError) || `Trigger run ${runState}`);
+    error.code = published === null ? 'TRIGGER_RESULT_UNCERTAIN' : 'TRIGGER_RUN_TERMINAL';
+    error.runId = run.id;
+    throw error;
+  }
+  if (!run && !outcome.queued && !['queued', 'checking', 'preparing', 'running'].includes(publication?.state)) {
+    const error = new Error('Trigger submission result is uncertain');
+    error.code = 'TRIGGER_RESULT_UNCERTAIN';
+    throw error;
+  }
+  await recordDeliveryResult(trigger.id, requestId, {
+    acceptedAt: nowIso(), runId: trimString(run?.id),
+    executionState: runState || (outcome.queued || publication?.state === 'queued' ? 'queued' : 'unknown'),
+    deliveryState: published ? 'published' : ['completed', 'failed', 'cancelled'].includes(runState) ? 'unknown' : 'pending',
+  });
+
   if (!outcome.duplicate) {
     await appendTriggerStatusEvent({ ...trigger, requestId }, {
       queued: outcome.queued === true,
       runId: trimString(outcome?.run?.id),
-    });
+    }).catch((error) => console.error(`[triggers] failed to append status event for ${trigger.id}: ${error.message}`));
   }
 
   if (!eventContext) {
@@ -903,6 +1017,23 @@ async function attemptTriggerDelivery(triggerId) {
     await deliverTrigger(trigger);
     return await getTrigger(trigger.id);
   } catch (error) {
+    const requestId = occurrenceRequestId(trigger);
+    const run = await findRunByRequest(trigger.sessionId, requestId);
+    const published = await hasPublishedReply(trigger.sessionId, requestId, run, null);
+    if (published) {
+      await recordDeliveryResult(trigger.id, requestId, { runId: run.id, executionState: trimString(run.state), deliveryState: 'published' });
+      return await markTriggerDelivered(trigger.id, { runId: run.id });
+    }
+    const terminal = ['failed', 'cancelled'].includes(trimString(run?.state).toLowerCase());
+    const sourceCode = trimString(error?.code);
+    if (terminal) { error.code = published === null ? 'TRIGGER_RESULT_UNCERTAIN' : 'TRIGGER_RUN_TERMINAL'; error.runId = run.id; }
+    await recordDeliveryResult(trigger.id, requestId, {
+      runId: trimString(run?.id), executionState: trimString(run?.state) || 'unknown',
+      deliveryState: terminal || isPermanentTriggerError(error) || trigger.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS ? 'unknown' : 'pending',
+      lastError: trimString(error?.message), errorCode: sourceCode,
+      causeCode: trimString(error?.causeCode || error?.providerPreparation?.causeCode),
+      stage: trimString(error?.launchStage || error?.stage), attempts: trigger.deliveryAttempts,
+    }).catch((recordError) => console.error(`[triggers] could not record delivery failure: ${recordError.message}`));
     await markTriggerDeliveryFailure(trigger.id, error, trigger.deliveryAttempts || 1);
     console.error(`[triggers] failed to deliver ${trigger.id}: ${error.message}`);
     return await getTrigger(trigger.id);
@@ -955,9 +1086,27 @@ async function attemptEventTriggerDelivery(triggerId, eventContext) {
     return await markTriggerDelivered(trigger.id, {
       eventKey: eventContext.eventKey,
       queued: outcome?.queued === true,
+      statusNotified: outcome?.statusNotified === true,
       runId: trimString(outcome?.run?.id),
     });
   } catch (error) {
+    const requestId = occurrenceRequestId(trigger, eventContext);
+    const run = await findRunByRequest(trigger.sessionId, requestId);
+    const published = await hasPublishedReply(trigger.sessionId, requestId, run, null);
+    if (published) {
+      await recordDeliveryResult(trigger.id, requestId, { runId: run.id, executionState: trimString(run.state), deliveryState: 'published' });
+      return await markTriggerDelivered(trigger.id, { eventKey: eventContext.eventKey, runId: run.id });
+    }
+    const terminal = ['failed', 'cancelled'].includes(trimString(run?.state).toLowerCase());
+    const sourceCode = trimString(error?.code);
+    if (terminal) { error.code = published === null ? 'TRIGGER_RESULT_UNCERTAIN' : 'TRIGGER_RUN_TERMINAL'; error.runId = run.id; }
+    await recordDeliveryResult(trigger.id, requestId, {
+      runId: trimString(run?.id), executionState: trimString(run?.state) || 'unknown',
+      deliveryState: terminal || isPermanentTriggerError(error) || trigger.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS ? 'unknown' : 'pending',
+      lastError: trimString(error?.message), errorCode: sourceCode,
+      causeCode: trimString(error?.causeCode || error?.providerPreparation?.causeCode),
+      stage: trimString(error?.launchStage || error?.stage), attempts: trigger.deliveryAttempts,
+    }).catch((recordError) => console.error(`[triggers] could not record delivery failure: ${recordError.message}`));
     await markTriggerDeliveryFailure(trigger.id, error, trigger.deliveryAttempts || 1);
     console.error(`[triggers] failed to deliver event ${trigger.id}: ${error.message}`);
     return await getTrigger(trigger.id);
@@ -986,6 +1135,11 @@ export async function processDueTriggersNow() {
   triggerTickPromise = (async () => {
     const nowMs = Date.now();
     const triggers = await loadTriggers();
+    for (const trigger of triggers) {
+      for (const result of trigger.deliveryResults || []) {
+        if (result.deliveryState === 'pending') await reconcileDeliveryResult(trigger, result).catch((error) => console.error(`[triggers] result reconciliation failed for ${trigger.id}: ${error.message}`));
+      }
+    }
     const due = sortTriggers(triggers).filter((trigger) => isDueTrigger(trigger, nowMs));
     for (const trigger of due) {
       await attemptTriggerDelivery(trigger.id);
@@ -1030,6 +1184,9 @@ async function resolveNextTriggerDelayMs() {
   const pollMs = Number.isInteger(triggerSchedulerOptions.pollMs) && triggerSchedulerOptions.pollMs > 0
     ? triggerSchedulerOptions.pollMs
     : MAX_TRIGGER_IDLE_DELAY_MS;
+  if (triggers.some((trigger) => trigger.deliveryResults?.some((result) => result.deliveryState === 'pending'))) {
+    future.push(DEFAULT_TRIGGER_POLL_MS);
+  }
   if (future.length === 0) return Math.min(MAX_TRIGGER_IDLE_DELAY_MS, pollMs);
   return Math.max(0, Math.min(...future, MAX_TRIGGER_IDLE_DELAY_MS, pollMs));
 }
