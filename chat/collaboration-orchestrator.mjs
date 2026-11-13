@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { compileCollaborationPlan, classifyAttemptOutcome } from './collaboration-plan.mjs';
 import {
   assertManagerCanDelegate,
@@ -39,6 +39,7 @@ import {
 } from './runtime-adapter.mjs';
 import { isBwrapPresent } from '../lib/runner-sandbox.mjs';
 import { getProject } from './projects.mjs';
+import { getOrganization, getNode } from './organization-store.mjs';
 import { MANAGED_WRITER_ENABLED, REVIEWER_ENABLED } from '../lib/config.mjs';
 import {
   createStagingWorkspace,
@@ -290,7 +291,6 @@ export function createCollaborationOrchestrator(options = {}) {
   // is tagged with the org/phase it reworks and the packet it chains from, so
   // the rework attempt's ResultPacket v2 fields are derived server-side
   // (parentPacketIds references the old packet; §2.6/§2.7/§7).
-  const reworkContext = new Map();
   let timer = null;
 
   async function exclusive(collaborationId, fn) {
@@ -620,8 +620,9 @@ export function createCollaborationOrchestrator(options = {}) {
         ...(agentContracts[task.id]?.runtime ? { runtime: agentContracts[task.id].runtime } : {}),
       })),
     });
+    const { reworkContext: _ignoredReworkContext, factoryExecution: _ignoredFactoryExecution, ...externalPolicy } = policy;
     const frozenPolicy = {
-      ...policy,
+      ...externalPolicy,
       agentContracts,
       planGates: plan.gates,
     };
@@ -632,18 +633,28 @@ export function createCollaborationOrchestrator(options = {}) {
     };
   }
 
-  async function createRecord(input = {}) {
+  async function createRecord(input = {}, internalContext = null, factoryExecution = null) {
     const prepared = await prepareRecord(input);
     const existing = await store.listCollaborationRecords({ activeOnly: false });
     const usedTaskIds = new Set(existing.flatMap((record) => record.tasks.map((task) => task.id)));
     const plan = namespacePlanTaskIds(prepared.plan, usedTaskIds);
+    const agentContracts = Object.fromEntries(plan.tasks.map((task, index) => [
+      task.id, prepared.policy.agentContracts[prepared.plan.tasks[index].id],
+    ]));
     const collaboration = await store.createCollaborationRecord({
       rootSessionId: prepared.root.id,
       title: trim(input.title) || plan.title,
-      policy: prepared.policy,
+      policy: { ...prepared.policy, agentContracts, ...(internalContext ? { reworkContext: internalContext } : {}),
+        ...(factoryExecution ? { factoryExecution } : {}) },
       plan,
       idempotencyKey: trim(input.idempotencyKey),
     });
+    if (internalContext && JSON.stringify(collaboration.policy?.reworkContext) !== JSON.stringify(internalContext)) {
+      const error = new Error('Rework idempotency key is already bound to a different intent');
+      error.code = 'COLLABORATION_IDEMPOTENCY_CONFLICT';
+      error.statusCode = 409;
+      throw error;
+    }
     await mirrorCollaborationExecution(collaboration, { stage: 'plan_frozen' });
     return collaboration;
   }
@@ -680,6 +691,11 @@ export function createCollaborationOrchestrator(options = {}) {
     let delivered = 0;
     for (const command of commands) {
       try {
+        const owner = await store.getCollaboration(collaborationId);
+        if (owner?.policy?.factoryExecution) {
+          const { assertFactoryExecutionFence } = await import('./factory-execution-adapter.mjs');
+          await assertFactoryExecutionFence(owner.policy.factoryExecution);
+        }
         const outcome = await deps.sendMessage(command.sessionId, command.prompt, [], {
           ...command.options,
           requestId: command.requestId,
@@ -737,6 +753,7 @@ export function createCollaborationOrchestrator(options = {}) {
     const providerProfile = trim(runtime.provider || runtime.providerProfile);
     const managedSessionId = trim(task.managedSessionId);
     let managedTarget = null;
+    const validationWorkspace = collaboration.policy?.factoryExecution?.validationWorkspace || null;
     if (managedSessionId) {
       // A pre-provisioned Organization Session may only be consumed by a
       // Runtime-created collaboration that is explicitly bound to the same
@@ -745,11 +762,19 @@ export function createCollaborationOrchestrator(options = {}) {
       managedTarget = await deps.getSession(managedSessionId);
       const expectedOrganizationId = trim(collaboration.policy?.organizationId);
       const expectedNodeId = trim(collaboration.policy?.organizationNodeId);
+      const organization = expectedOrganizationId ? await getOrganization(expectedOrganizationId) : null;
+      const node = expectedNodeId ? await getNode(expectedNodeId) : null;
       if (!managedTarget
         || managedTarget.sessionPlane !== 'organization'
         || !expectedOrganizationId
         || trim(managedTarget.organizationId) !== expectedOrganizationId
-        || (expectedNodeId && trim(managedTarget.organizationNodeId) !== expectedNodeId)) {
+        || !organization || trim(organization.rootSessionId) !== trim(root.id)
+        || !node || node.organizationId !== expectedOrganizationId
+        || node.currentSessionId !== managedSessionId
+        || (Number.isInteger(collaboration.policy?.organizationBindingGeneration)
+          && node.bindingGeneration !== collaboration.policy.organizationBindingGeneration)
+        || Number(managedTarget.organizationRevision) !== Number(organization.currentRevision)
+        || trim(managedTarget.organizationNodeId) !== expectedNodeId) {
         const error = new Error(`Managed Session target is not bound to this Organization task: ${task.id}`);
         error.code = 'COLLABORATION_MANAGED_SESSION_BINDING_INVALID';
         error.statusCode = 409;
@@ -768,8 +793,8 @@ export function createCollaborationOrchestrator(options = {}) {
     // the canonical root. The staging dir becomes the worker's cwd; on
     // completion completeRun() validates the diff and commits through
     // executeMutation(). Non-managed attempts keep the exact pre-S11 path.
-    const managedWriter = managedWriterEnabled
-      && root?.sessionPlane === 'organization'
+    const managedWriter = (managedWriterEnabled || Boolean(collaboration.policy?.factoryExecution))
+      && (root?.sessionPlane === 'organization' || Boolean(managedTarget))
       && taskAccessMode !== 'read'
       && task.role !== 'reviewer'
       && Array.isArray(task.writablePaths) && task.writablePaths.length > 0;
@@ -779,14 +804,18 @@ export function createCollaborationOrchestrator(options = {}) {
     // This materially narrows the former orphan-child window.
     const reserveBeforeRun = typeof store.bindAttemptRun === 'function';
     const reserved = reserveBeforeRun
-      ? await store.claimTaskAttempt(task.id, { sessionId: managedTarget?.id || '' })
+      ? await store.claimTaskAttempt(task.id, { sessionId: (managedWriter || validationWorkspace) ? '' : (managedTarget?.id || '') })
       : null;
     if (reserveBeforeRun && !reserved) return null;
     let staging = null;
     let worktreeRef = '';
     let child = null;
     try {
-      if (managedWriter && typeof deps.createStagingWorkspace === 'function') {
+      if (!validationWorkspace && managedWriter && typeof deps.createStagingWorkspace === 'function') {
+        if (collaboration.policy?.factoryExecution) {
+          const { preflightFactoryWorkspace } = await import('./factory-candidates.mjs');
+          await preflightFactoryWorkspace({ canonicalCwd: root.folder, writablePaths: task.writablePaths });
+        }
         staging = await deps.createStagingWorkspace({
           canonicalCwd: root.folder,
           writablePaths: task.writablePaths,
@@ -804,12 +833,21 @@ export function createCollaborationOrchestrator(options = {}) {
           taskId: `${task.id}:attempt:${attemptNumber}`,
         });
       }
-      const childFolder = staging?.stagingDir || worktreeRef || root.folder;
+      if (managedWriter && !staging && !validationWorkspace && collaboration.policy?.factoryExecution) {
+        throw Object.assign(new Error('Factory writer requires an isolated staging workspace'), { code: 'FACTORY_WORKSPACE_UNAVAILABLE' });
+      }
+      if (staging && collaboration.policy?.factoryExecution) {
+        const { captureFactoryBaseline } = await import('./factory-candidates.mjs');
+        await captureFactoryBaseline(collaboration.policy.factoryExecution, staging.mapping);
+      }
+      const childFolder = validationWorkspace?.cwd || staging?.stagingDir || worktreeRef || root.folder;
     // A managed writer child is bound to the staging workspace, so its session
     // must not be forced back onto the canonical project root (session-manager
     // would rewrite the folder from a projectId). The attempt itself still
     // carries the canonical project via claimTaskAttempt -> task.project_id.
-      const sourceContext = staging
+      const sourceContext = validationWorkspace
+      ? { collaborationId: collaboration.id, taskId: task.id, factoryValidation: validationWorkspace }
+      : staging
       ? {
           collaborationId: collaboration.id,
           taskId: task.id,
@@ -828,14 +866,27 @@ export function createCollaborationOrchestrator(options = {}) {
             policyRevision: contract?.policyRevision || '',
           }
         : null;
-      child = managedTarget || await deps.createSession(childFolder, childTool, `${collaboration.title} · ${task.id}`, {
-      ...(managedWriter ? {} : { projectId: task.projectId || root.projectId || '' }),
+      child = ((managedWriter || validationWorkspace) ? null : managedTarget) || await deps.createSession(childFolder, childTool, `${collaboration.title} · ${task.id}`, {
+      ...((managedWriter || validationWorkspace) && managedTarget ? {
+        sessionPlane: 'organization',
+        sessionClass: managedTarget.sessionClass,
+        managedScope: managedTarget.managedScope,
+        organizationRootSessionId: managedTarget.organizationRootSessionId,
+        organizationId: managedTarget.organizationId,
+        organizationNodeId: managedTarget.organizationNodeId,
+        organizationRevision: managedTarget.organizationRevision,
+        roleInstanceId: managedTarget.roleInstanceId,
+        controllerSessionId: managedTarget.controllerSessionId,
+        parentSessionId: managedTarget.id,
+        inputPolicy: managedTarget.inputPolicy,
+      } : {}),
+      ...((managedWriter || validationWorkspace) ? {} : { projectId: task.projectId || root.projectId || '' }),
       templateId: app.id,
       templateName: app.name,
       sourceId: root.sourceId || '',
       sourceName: root.sourceName || '',
-      delegatedFromSessionId: root.id,
-      delegationDepth: Number(root.delegationDepth || 0) + 1,
+      delegatedFromSessionId: managedTarget?.id || root.id,
+      delegationDepth: Number((managedTarget || root).delegationDepth || 0) + 1,
       externalTriggerId,
       group: root.group || '',
       description: `Collaboration task ${task.id}`,
@@ -915,6 +966,7 @@ export function createCollaborationOrchestrator(options = {}) {
         recordUserMessage: false,
         skipSessionContinuation: true,
         sourceContext: {
+          ...(sourceContext || {}),
           kind: 'collaboration_dispatch',
           collaborationId: collaboration.id,
           taskId: task.id,
@@ -1034,6 +1086,31 @@ export function createCollaborationOrchestrator(options = {}) {
       error.code = 'BAD_REQUEST';
       throw error;
     }
+    if (!trim(idempotencyKey)) {
+      const error = new Error('dispatchRework requires an idempotencyKey for durable gate recovery');
+      error.code = 'BAD_REQUEST';
+      error.statusCode = 400;
+      throw error;
+    }
+    const context = {
+      organizationId: trim(organizationId),
+      phaseId: trim(phaseId),
+      parentPacketId: trim(parentPacketId),
+      nodeId: trim(nodeId),
+      ...(Number.isInteger(revision) ? { revision } : {}),
+      intentDigest: createHash('sha256').update(JSON.stringify({ plan, projectId: trim(projectId) })).digest('hex'),
+    };
+    if (trim(idempotencyKey) && typeof store.getCollaborationByIdempotencyKey === 'function') {
+      const existing = await store.getCollaborationByIdempotencyKey(trim(rootSessionId), trim(idempotencyKey));
+      if (existing && JSON.stringify(existing.policy?.reworkContext) !== JSON.stringify(context)) {
+        const error = new Error('Rework idempotency key is already bound to a different intent');
+        error.code = 'COLLABORATION_IDEMPOTENCY_CONFLICT';
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+    // Reject an invalid execution plan before recording its gate decision.
+    await prepareRecord({ rootSessionId, plan, projectId });
     const gate = await deps.decideGate({
       organizationId,
       phaseId,
@@ -1042,15 +1119,10 @@ export function createCollaborationOrchestrator(options = {}) {
       decidedByNodeId,
       packetId: parentPacketId,
       acceptance,
+      idempotencyKey: trim(idempotencyKey) ? `rework:${trim(rootSessionId)}:${trim(idempotencyKey)}` : '',
+      intentContext: context,
     });
-    const collaboration = await createRecord({ rootSessionId, plan, projectId, idempotencyKey });
-    reworkContext.set(collaboration.id, {
-      organizationId: trim(organizationId),
-      phaseId: trim(phaseId),
-      parentPacketId: trim(parentPacketId),
-      nodeId: trim(nodeId),
-      revision: Number.isInteger(revision) ? revision : undefined,
-    });
+    const collaboration = await createRecord({ rootSessionId, plan, projectId, idempotencyKey }, context);
     await dispatchReady(collaboration.id);
     return {
       collaboration: await store.getCollaboration(collaboration.id, { includeEvents: true }),
@@ -1102,7 +1174,7 @@ export function createCollaborationOrchestrator(options = {}) {
       // surface the committed files on the envelope. A MANAGED_WRITE_ESCAPE
       // (409) fails the attempt deterministically and never reaches a packet.
       const managedWriter = session?.sourceContext?.managedWriter || null;
-      if (managedWriter) {
+      if (managedWriter && !taskCollaboration.policy?.factoryExecution) {
         let committed = null;
         try {
           committed = await deps.commitStagingToCanonical({
@@ -1144,7 +1216,7 @@ export function createCollaborationOrchestrator(options = {}) {
         // ResultPacket v2 org/phase fields and chains the previous packet via
         // parentPacketIds. Non-rework attempts pass nothing, keeping the packet
         // shape and digest semantics identical to S5.
-        const rework = reworkContext.get(taskCollaboration.id) || null;
+        const rework = taskCollaboration.policy?.reworkContext || null;
         const packet = await deps.createExecutionPacket({
           runId,
           projectId: packetProjectId,
@@ -1345,6 +1417,20 @@ export function createCollaborationOrchestrator(options = {}) {
     return store.getCollaboration(collaboration.id, { includeEvents: true });
   }
 
+  async function dispatchFactory(input, factoryExecution) {
+    const { assertFactoryExecutionFence } = await import('./factory-execution-adapter.mjs');
+    await assertFactoryExecutionFence(factoryExecution);
+    if (!Array.isArray(input?.plan?.tasks) || input.plan.tasks.length !== 1) {
+      throw Object.assign(new Error('Factory execution requires exactly one task'), { code: 'FACTORY_INVALID' });
+    }
+    const collaboration = await createRecord(input, null, factoryExecution);
+    if (JSON.stringify(collaboration.policy?.factoryExecution) !== JSON.stringify(factoryExecution)) {
+      throw Object.assign(new Error('Factory dispatch key belongs to a different binding'), { code: 'FACTORY_CONFLICT' });
+    }
+    await dispatchReady(collaboration.id);
+    return store.getCollaboration(collaboration.id);
+  }
+
   async function cancel(collaborationId, reason = 'cancelled by manager') {
     const collaboration = await store.getCollaboration(collaborationId);
     if (!collaboration) return false;
@@ -1399,6 +1485,7 @@ export function createCollaborationOrchestrator(options = {}) {
     completeRun,
     createRecord,
     dispatch,
+    dispatchFactory,
     dispatchReady,
     dispatchRework,
     get: (id) => store.getCollaboration(id, { includeEvents: true }),

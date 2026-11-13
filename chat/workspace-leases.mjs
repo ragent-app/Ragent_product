@@ -175,6 +175,7 @@ function reclaimExpiredLeases(db, { lockKey, now }) {
     FROM workspace_leases
     WHERE lock_key = ?
       AND state IN ('preparing', 'active')
+      AND COALESCE(runtime_id, '') <> 'factory-integration'
       AND expires_at < ?
   `).all(lockKey, reclaimedAt);
   if (expired.length === 0) return [];
@@ -801,6 +802,7 @@ export async function recoverMutationLeases({ now = new Date() } = {}) {
         SELECT lease_id, generation, lock_key, run_id
         FROM workspace_leases
         WHERE state IN ('preparing', 'active', 'quarantined')
+          AND COALESCE(runtime_id, '') <> 'factory-integration'
           AND expires_at < ?
         ORDER BY acquired_at, lease_id
       `).all(threshold);

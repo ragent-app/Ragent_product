@@ -261,7 +261,7 @@ export async function listBudgetCounters(organizationId, { limit = 500 } = {}) {
     WHERE organization_id = ? ORDER BY revision LIMIT ?`).all(orgId, boundedLimit).map(rowCounter));
 }
 
-export async function reserveOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {}, reservationTtlMs = 0, expiresAt = '' } = {}) {
+export async function reserveOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {}, reservationTtlMs = 0, expiresAt = '', cumulativeAcrossRevisions = false } = {}) {
   assertOrganizationCapability('stallGovernor', 'organization budget governance is disabled');
   const orgId = ensureIdentity(organizationId, 'organizationId');
   const key = ensureIdentity(idempotencyKey || reservationId, 'idempotencyKey');
@@ -292,7 +292,14 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
       }
       const totals = parse(current.totals_json, emptyTotals());
       const reservedTotals = parse(current.reserved_json, emptyTotals());
-      assertWithinBudget(totals, reservedTotals, normalizedDelta, effectiveLimits);
+      const allCounters = cumulativeAcrossRevisions
+        ? db.prepare('SELECT totals_json, reserved_json FROM organization_budget_counters WHERE organization_id = ?').all(orgId)
+        : [current];
+      const cumulative = allCounters.reduce((sum, row) => ({
+        totals: add(sum.totals, parse(row.totals_json, emptyTotals())),
+        reserved: add(sum.reserved, parse(row.reserved_json, emptyTotals())),
+      }), { totals: emptyTotals(), reserved: emptyTotals() });
+      assertWithinBudget(cumulative.totals, cumulative.reserved, normalizedDelta, effectiveLimits);
       const nextReserved = add(reservedTotals, normalizedDelta);
       const nextReservations = {
         ...reservations,
@@ -321,7 +328,15 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
   });
 }
 
-export async function settleOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage } = {}) {
+// A Factory reservation is durable until settled or explicitly released with
+// terminal evidence by the execution reconciler; lease expiry is not evidence
+// that a worker stopped or that it consumed nothing.
+export async function reserveFactoryBudget({ organizationId, revision, reservationId, idempotencyKey, delta = {}, limits = {} } = {}) {
+  return reserveOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, delta, limits,
+    cumulativeAcrossRevisions: true, reservationTtlMs: 0, expiresAt: '' });
+}
+
+export async function settleOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage, recordActualOverBudget = false } = {}) {
   assertOrganizationCapability('stallGovernor', 'organization budget governance is disabled');
   const orgId = ensureIdentity(organizationId, 'organizationId');
   const key = ensureIdentity(idempotencyKey || reservationId, 'idempotencyKey');
@@ -349,7 +364,7 @@ export async function settleOrganizationBudget({ organizationId, revision, reser
       const reserved = parse(current.reserved_json, emptyTotals());
       const nextReserved = subtract(reserved, entry.delta);
       const nextTotals = add(totals, usage);
-      assertWithinBudget(totals, nextReserved, usage, authoritativeLimits);
+      if (!recordActualOverBudget) assertWithinBudget(totals, nextReserved, usage, authoritativeLimits);
       reservations[key] = { ...entry, state: 'settled', usage, settledAt: nowIso() };
       db.prepare(`UPDATE organization_budget_counters SET version = version + 1,
         totals_json = ?, reserved_json = ?, reservations_json = ?, updated_at = ?
@@ -364,6 +379,11 @@ export async function settleOrganizationBudget({ organizationId, revision, reser
       throw cause;
     }
   });
+}
+
+export async function settleFactoryBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage } = {}) {
+  return settleOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage,
+    recordActualOverBudget: true });
 }
 
 export async function releaseOrganizationBudgetReservation({ organizationId, revision, reservationId, idempotencyKey, reason = 'reservation expired' } = {}) {

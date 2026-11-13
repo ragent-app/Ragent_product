@@ -547,6 +547,8 @@ export function usageEvent({
   provider,
   runtimeFamily,
   providerSessionId,
+  usageScope,
+  usageAccountingTokens,
 } = {}) {
   return createEvent('usage', {
     role: 'system',
@@ -564,6 +566,8 @@ export function usageEvent({
     ...(typeof provider === 'string' && provider ? { provider } : {}),
     ...(typeof runtimeFamily === 'string' && runtimeFamily ? { runtimeFamily } : {}),
     ...(typeof providerSessionId === 'string' && providerSessionId ? { providerSessionId } : {}),
+    ...(typeof usageScope === 'string' && usageScope ? { usageScope } : {}),
+    ...(Number.isInteger(usageAccountingTokens) && usageAccountingTokens >= 0 ? { usageAccountingTokens } : {}),
   });
 }
 

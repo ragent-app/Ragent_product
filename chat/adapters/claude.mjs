@@ -462,6 +462,11 @@ export function createClaudeAdapter() {
                 : {}),
               ...(Number.isInteger(contextWindowTokens) ? { contextWindowTokens } : {}),
               contextSource: 'provider_turn_usage',
+              ...(Number.isFinite(obj.total_cost_usd)
+                  && ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']
+                    .every((field) => Number.isInteger(u[field]) && u[field] >= 0)
+                ? { usageScope: 'provider_turn_total', usageAccountingTokens: u.input_tokens + u.output_tokens
+                    + u.cache_creation_input_tokens + u.cache_read_input_tokens } : {}),
               ...(providerSessionId ? { providerSessionId } : {}),
               ...(providerCostUsd !== undefined
                 ? { costSource: 'provider_reported' }

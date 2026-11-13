@@ -99,6 +99,7 @@ export async function executeMutation({
   mode = 'write',
   ttlMs = DEFAULT_TTL_MS,
   hardTtlMs = DEFAULT_HARD_TTL_MS,
+  nonReclaimable = false,
   mutate,
   deps = {},
 } = {}) {
@@ -131,7 +132,7 @@ export async function executeMutation({
           mode: normalizedMode,
           workspaceId: trimString(workspaceId) || null,
           runId: trimString(runId) || null,
-          runtimeId: 'mutation-coordinator',
+          runtimeId: nonReclaimable ? 'factory-integration' : 'mutation-coordinator',
           ttlMs: Number(ttlMs) > 0 ? Number(ttlMs) : DEFAULT_TTL_MS,
           hardTtlMs: Number(hardTtlMs) > 0 ? Number(hardTtlMs) : DEFAULT_HARD_TTL_MS,
           // Mutation leases are never heartbeated; skip the ttl >= 3*heartbeat

@@ -35,7 +35,7 @@
 
 阶段 0 定义的 Factory 交付模式在此实现：完成回调只提交候选，不调用旧自动 canonical 回写路径。
 
-每个 executionEpoch 使用独立工作区或 staging 位置，记录 canonical 项目、baseCommit/基准摘要、输入依赖产物、允许路径和资源归属。已存在脏工作区不能自动 reset；不得把用户未提交修改当作 Worker 成果。
+每个 executionEpoch 使用彼此区分的工作区或 staging 位置，记录 canonical 项目、baseCommit/基准摘要、输入依赖产物、允许路径和资源归属。隔离工作内容与执行身份兼容现有共享后端 broker，不要求每个任务各自启动 OS 进程或通用沙箱。已存在脏工作区不能自动 reset；不得把用户未提交修改当作 Worker 成果。
 
 候选封存时记录 commit 或 patch digest、文件清单和内容摘要；确认旧进程不能继续修改被验收的对象。保留失败或返工的必要证据；清理只发生在归属、引用和保留期均确认之后。
 

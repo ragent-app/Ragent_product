@@ -813,6 +813,8 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
             ...sharedOperationFields,
             operationKind: 'command',
             command: formatCommandValue(item.command),
+            exitCodeProvenance: Number.isInteger(item.exitCode) ? 'provider' : 'inferred_status',
+            ...(typeof item.cwd === 'string' && item.cwd.trim() ? { cwdProvenance: 'provider' } : {}),
             ...(Array.isArray(item.commandActions) ? { providerActions: item.commandActions } : {}),
           }),
         ));

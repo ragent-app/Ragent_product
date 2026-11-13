@@ -381,6 +381,9 @@ function rowCollaboration(db, row, {
 } = {}) {
   if (!row) return null;
   const tasks = db.prepare('SELECT * FROM collaboration_tasks WHERE collaboration_id = ? ORDER BY rowid').all(row.id).map(rowTask);
+  const frozenPlan = parseJson(db.prepare('SELECT plan_json FROM collaboration_plans WHERE collaboration_id = ? AND version = ?').get(row.id, row.plan_version)?.plan_json, {});
+  const planTasks = new Map((frozenPlan.tasks || []).map((task) => [task.id, task]));
+  for (const task of tasks) task.managedSessionId = planTasks.get(task.id)?.managedSessionId || '';
   const attempts = db.prepare(`
     SELECT a.* FROM collaboration_attempts a
     JOIN collaboration_tasks t ON t.id = a.task_id
@@ -500,6 +503,13 @@ export async function createCollaborationRecord({ id: collaborationId = id('coll
 
 export async function getCollaboration(collaborationId, options = {}) {
   return withDatabase((db) => rowCollaboration(db, db.prepare('SELECT * FROM collaborations WHERE id = ?').get(collaborationId), options));
+}
+
+export async function getCollaborationByIdempotencyKey(rootSessionId, idempotencyKey) {
+  if (!rootSessionId || !idempotencyKey) return null;
+  return withDatabase((db) => rowCollaboration(db, db.prepare(
+    'SELECT * FROM collaborations WHERE root_session_id = ? AND idempotency_key = ?',
+  ).get(rootSessionId, idempotencyKey)));
 }
 
 export async function listCollaborationRecords({ activeOnly = false, limit = 0 } = {}) {
@@ -1137,6 +1147,11 @@ export async function refreshBarrier(collaborationId) {
       const tasks = db.prepare('SELECT state FROM collaboration_tasks WHERE collaboration_id = ?').all(collaborationId);
       const succeeded = tasks.length > 0 && tasks.every((task) => task.state === 'succeeded');
       const failed = tasks.some((task) => ['failed', 'cancelled'].includes(task.state));
+      const factoryOwned = Boolean(parseJson(row.policy_json, {})?.factoryExecution);
+      if (succeeded && factoryOwned && !['completed', 'cancelled'].includes(row.state)) {
+        db.prepare("UPDATE collaborations SET state = 'completed', updated_at = ? WHERE id = ? AND state NOT IN ('completed', 'cancelled')")
+          .run(timestamp, collaborationId);
+      } else
       if (succeeded && !['aggregating', 'waiting_aggregation', 'completed', 'cancelled'].includes(row.state)) {
         db.prepare(`UPDATE collaborations SET aggregation_generation = aggregation_generation + 1,
           state = 'waiting_aggregation', updated_at = ? WHERE id = ? AND state NOT IN ('completed', 'cancelled', 'waiting_aggregation', 'aggregating')`)
