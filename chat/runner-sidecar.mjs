@@ -3023,6 +3023,9 @@ async function reviewRunGate(runId, state, approval, gate) {
     operationKind: mcpFacts ? 'mcp' : unknownTool ? 'tool' : 'command' };
   const request = { approvalId: approval.approvalId, requestId: state.requestId, context };
   const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+  if (state.reviewStopped) return unknown('review_cancelled');
+  const reviewController = new AbortController();
+  state.activeReviewAbort = reviewController;
   try {
     const token = (await readFile(runReviewCapabilityPath(runId), 'utf8')).trim();
     if (!token) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_empty' };
@@ -3030,13 +3033,15 @@ async function reviewRunGate(runId, state, approval, gate) {
       type: 'agentoc.approval_review_request', runId, approvalId: approval.approvalId,
       requestId: state.requestId, requestHash, reasonCode: gate.reasonCode,
     } });
+    if (state.reviewStopped) return unknown('review_cancelled');
     const response = await fetch(`http://127.0.0.1:${CHAT_PORT}/api/internal/run-review`, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-agentoc-run-review-token': token,
         'x-agentoc-run-review-run-id': runId, 'x-agentoc-run-review-session-id': channel.sessionId,
         'x-agentoc-run-review-turn-id': channel.turnId },
-      body: JSON.stringify({ ...request, requestHash }), signal: AbortSignal.timeout(50000), redirect: 'error',
+      body: JSON.stringify({ ...request, requestHash }), signal: AbortSignal.any([AbortSignal.timeout(50000), reviewController.signal]), redirect: 'error',
     });
     const result = await response.json();
+    if (state.reviewStopped || reviewController.signal.aborted) return unknown('review_cancelled');
     if (state.approvalReviewSteerRevision !== taskRevision || state.steerAwaitingTurnEnd || state.approvalReviewSteerUnconfirmed) return unknown('review_task_changed');
     const bound = result.approvalId === approval.approvalId && result.requestHash === requestHash;
     const safeReason = typeof result.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(result.reason) ? result.reason : '';
@@ -3061,9 +3066,11 @@ async function reviewRunGate(runId, state, approval, gate) {
       needsContextReview: false, reasonCode: 'context_review_ask', reason: 'context review requests owner approval' };
     return { ...gate, ...reviewAudit };
   } catch (error) { return { ...gate, reviewStatus: 'unknown', reviewReasonCode:
-    error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'review_transport_timeout'
-      : error instanceof SyntaxError ? 'review_response_invalid_json'
-        : error?.code === 'ENOENT' ? 'review_capability_missing' : 'review_transport_error' }; }
+    state.reviewStopped || reviewController.signal.aborted ? 'review_cancelled'
+      : error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'review_transport_timeout'
+        : error instanceof SyntaxError ? 'review_response_invalid_json'
+          : error?.code === 'ENOENT' ? 'review_capability_missing' : 'review_transport_error' }; }
+  finally { if (state.activeReviewAbort === reviewController) state.activeReviewAbort = null; }
 }
 
 function bindCodexMcpFacts(approval, state) {
@@ -3277,7 +3284,9 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
       reasonCode: 'mcp_semantics_unknown', mcpFacts };
   }
   gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
+  if (state.reviewStopped) return null;
   await recordGateDecision(runId, state, approval, 'codex', gateDecision);
+  if (state.reviewStopped) return null;
   if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
     return denyUnattendedPermissionRequest(runId, state, approval, proc, 'codex', gateDecision);
@@ -3595,7 +3604,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     let mcpFacts = bindClaudeMcpFacts(approval, state);
     if (!mcpFacts) {
       await refreshClaudeMcpInventory(proc, state);
-      if (!state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+      if (state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
           || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
       mcpFacts = bindClaudeMcpFacts(approval, state);
     }
@@ -3603,10 +3612,10 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
       reasonCode: 'mcp_semantics_unknown', mcpFacts };
   }
   gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
-  if (!state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+  if (state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
       || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
   await recordGateDecision(runId, state, approval, 'claude', gateDecision);
-  if (!state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+  if (state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
       || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
   if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
@@ -5200,6 +5209,9 @@ async function main() {
       }
       if (!current?.cancelRequested || cancelSent) return;
       cancelSent = true;
+      for (const state of [appServerState, claudeBidiState]) {
+        if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
+      }
       if (claudeBidiState) claudeBidiState.mcpRefreshCancelled = true;
       claudeBidiState?.mcpRefresh?.finish();
       if (appServerState) appServerState.startupCancelled = true;
@@ -6793,6 +6805,9 @@ async function main() {
   const handleProcessError = (error) => {
     if (terminalizationInFlight) return;
     terminalizationInFlight = true;
+    for (const state of [appServerState, claudeBidiState]) {
+      if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
+    }
     void (async () => {
       await releaseNativeOAuthLock();
       clearInterval(cancelTimer);
@@ -6845,6 +6860,9 @@ async function main() {
   const handleProcessExit = (code, signal) => {
     if (terminalizationInFlight) return;
     terminalizationInFlight = true;
+    for (const state of [appServerState, claudeBidiState]) {
+      if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
+    }
     void (async () => {
       await releaseNativeOAuthLock();
       clearInterval(cancelTimer);
