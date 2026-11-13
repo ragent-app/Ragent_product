@@ -3330,8 +3330,9 @@ private class RoomEventSink(
                     appliedAt = System.currentTimeMillis(),
                 ),
             )
-            if (event.type == "run_regenerate" && !event.requestId.isNullOrBlank()) {
-                val operation = dao.getPendingOperation(event.requestId)
+            val derivedRequestId = event.requestId
+            if (event.type == "run_regenerate" && !derivedRequestId.isNullOrBlank()) {
+                val operation = dao.getPendingOperation(derivedRequestId)
                 if (operation != null && operation.kind in DERIVED_TURN_KINDS &&
                     android.net.Uri.decode(operation.path.substringBefore('?').split('/').getOrNull(3).orEmpty()) == scope) {
                     dao.deleteOperation(operation.requestId)
