@@ -193,6 +193,10 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         current().submitPlanAction(sessionId, planId, action, text, requestId)
     override suspend fun loadRunProjection(runId: String): JsonObject = current().loadRunProjection(runId)
     override suspend fun resumePendingOperations(): Int = current().resumePendingOperations()
+    override suspend fun pendingApprovalIds(sessionId: String, approvalIds: List<String>): Set<String> =
+        current().pendingApprovalIds(sessionId, approvalIds)
+    override suspend fun resumePendingApproval(sessionId: String, approvalId: String): Int =
+        current().resumePendingApproval(sessionId, approvalId)
 
     private fun current(): SessionRepository = mutableDelegate.value
         ?: error("No remote computer target is selected")

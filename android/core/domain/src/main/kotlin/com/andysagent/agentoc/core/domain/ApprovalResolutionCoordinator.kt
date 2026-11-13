@@ -27,14 +27,14 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         data object RequiresSession : Outcome
 
         /** The submission failed; the message is user-presentable. */
-        data class Failed(val message: String) : Outcome
+        data class Failed(val message: String, val outcomeUnknown: Boolean = false) : Outcome
     }
 
     /** Result of the mandatory re-read that gates every submission. */
     private sealed interface PendingRead {
         data class Found(val approval: Approval) : PendingRead
         data object Missing : PendingRead
-        data class Error(val message: String) : PendingRead
+        data class Error(val message: String, val outcomeUnknown: Boolean = false) : PendingRead
     }
 
     /**
@@ -49,7 +49,7 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         requestId: String = newRequestId(),
     ): Outcome {
         return when (val read = readPending(sessionId, approvalId)) {
-            is PendingRead.Error -> Outcome.Failed(read.message)
+            is PendingRead.Error -> Outcome.Failed(read.message, read.outcomeUnknown)
             is PendingRead.Missing -> Outcome.Stale
             is PendingRead.Found -> {
                 val pending = read.approval
@@ -73,14 +73,14 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
                             requestId = requestId,
                         )
                     }
-                    runCatching { repository.refreshSessionDetail(sessionId) }
                     retireResolvedApproval(sessionId, approvalId)
+                    runCatching { repository.refreshSessionDetail(sessionId) }
                     Outcome.Submitted
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Throwable) {
                     if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
-                    Outcome.Failed(error.message ?: "审批提交失败")
+                    Outcome.Failed(error.message ?: "审批提交失败", error.isAmbiguousApprovalSubmission())
                 }
             }
         }
@@ -142,7 +142,7 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         requestId: String = newRequestId(),
     ): Outcome {
         val read = readPending(sessionId, approvalId)
-        if (read is PendingRead.Error) return Outcome.Failed(read.message)
+        if (read is PendingRead.Error) return Outcome.Failed(read.message, read.outcomeUnknown)
         if (read !is PendingRead.Found || read.approval.status != "pending") return Outcome.Stale
         val pending = read.approval
         if (pending.requiresStructuredResolution() || !pending.isQuestionApproval()) return Outcome.RequiresSession
@@ -159,14 +159,14 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         val runId = pending.runId ?: return Outcome.Failed("当前会话不支持多选回答")
         return try {
             repository.resolveRuntimeApprovalWithMultiChoices(runId, approvalId, selections, answers, requestId)
-            runCatching { repository.refreshSessionDetail(sessionId) }
             retireResolvedApproval(sessionId, approvalId)
+            runCatching { repository.refreshSessionDetail(sessionId) }
             Outcome.Submitted
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
             if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
-            Outcome.Failed(error.message ?: "提交回答失败")
+            Outcome.Failed(error.message ?: "提交回答失败", error.isAmbiguousApprovalSubmission())
         }
     }
 
@@ -181,7 +181,7 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         requestId: String,
     ): Outcome {
         return when (val read = readPending(sessionId, approvalId)) {
-            is PendingRead.Error -> Outcome.Failed(read.message)
+            is PendingRead.Error -> Outcome.Failed(read.message, read.outcomeUnknown)
             is PendingRead.Missing -> Outcome.Stale
             is PendingRead.Found -> {
                 val pending = read.approval
@@ -238,23 +238,29 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
                             requestId = requestId,
                         )
                     }
-                    runCatching { repository.refreshSessionDetail(sessionId) }
                     retireResolvedApproval(sessionId, approvalId)
+                    runCatching { repository.refreshSessionDetail(sessionId) }
                     Outcome.Submitted
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Throwable) {
                     if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
-                    Outcome.Failed(error.message ?: "回答提交失败")
+                    Outcome.Failed(error.message ?: "回答提交失败", error.isAmbiguousApprovalSubmission())
                 }
             }
         }
     }
 
     private suspend fun readPending(sessionId: String, approvalId: String): PendingRead = try {
-        repository.findPendingApproval(sessionId, approvalId)
-            ?.let { PendingRead.Found(it) }
-            ?: PendingRead.Missing
+        if (approvalId in repository.pendingApprovalIds(sessionId, listOf(approvalId))) {
+            PendingRead.Error("审批结果尚未确认，请打开会话查看并核对原决定。", outcomeUnknown = true)
+        } else {
+            repository.findPendingApproval(sessionId, approvalId)
+                ?.let { PendingRead.Found(it) }
+                ?: PendingRead.Missing
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (error: Throwable) {
         PendingRead.Error(error.message ?: "审批状态读取失败")
     }
@@ -324,3 +330,10 @@ private val TERMINAL_APPROVAL_FAILURE_CODES = setOf(
     "BROKER_RUN_NOT_ACTIVE",
     "BROKER_RUN_NOT_FOUND",
 )
+
+fun Throwable.isAmbiguousApprovalSubmission(): Boolean = when (this) {
+    is java.io.IOException -> true
+    is ApiException -> retryable && (statusCode <= 0 || statusCode == 408 || statusCode >= 500)
+    is SessionRepositoryException -> retryable && (statusCode <= 0 || statusCode == 408 || statusCode >= 500)
+    else -> false
+}

@@ -1401,6 +1401,7 @@ private data class OlderTimelineAnchor(
     val itemId: String,
     val offset: Int,
     val keepAtBottom: Boolean = false,
+    val userScrollGeneration: Long = 0,
 )
 
 private data class LatestViewportRequest(
@@ -1617,6 +1618,9 @@ private fun ChatSurface(
     var renameText by remember(state.sessionId, state.sessionTitle) { mutableStateOf(state.sessionTitle) }
     var scrollMode by remember { mutableStateOf(ChatScrollMode.Following) }
     var olderTimelineAnchor by remember(state.sessionId) { mutableStateOf<OlderTimelineAnchor?>(null) }
+    var userScrollGeneration by remember(state.sessionId) { mutableLongStateOf(0L) }
+    val readerDragging by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(readerDragging) { if (readerDragging) userScrollGeneration++ }
     val currentAttachments = rememberUpdatedState(attachments)
 
     fun appendClipboardImages(uris: List<Uri>) {
@@ -1724,7 +1728,10 @@ private fun ChatSurface(
     // Do not infer files or elapsed time from visible message/step counts.
     val stepTraces = state.stepTraces
     val changedFiles = state.changedFiles
-    val runMetrics = state.runMetrics.copy(
+    val displayedMetrics = if (statusActive && activityRunId != null && activityRunId != state.runMetrics.runId) {
+        RunMetricsUiState(status = state.runStatus)
+    } else state.runMetrics
+    val runMetrics = displayedMetrics.copy(
         status = state.runStatus,
         toolCallsCount = stepTraces.size,
         filesChangedCount = changedFiles.size,
@@ -1842,6 +1849,7 @@ private fun ChatSurface(
                 itemId = entry.id,
                 offset = visible.offset,
                 keepAtBottom = contentUnderfillsViewport,
+                userScrollGeneration = userScrollGeneration - if (readerDragging) 1 else 0,
             )
             onEvent(WorkbenchEvent.LoadOlderTimeline)
         }
@@ -1851,6 +1859,11 @@ private fun ChatSurface(
         val anchor = olderTimelineAnchor ?: return@LaunchedEffect
         if (state.loadingOlder) return@LaunchedEffect
         val restoredIndex = turnGroups.indexOfFirst { it.id == anchor.itemId }
+        if (anchor.userScrollGeneration != userScrollGeneration || readerDragging) {
+            olderTimelineAnchor = null
+            scrollMode = ChatScrollMode.Detached
+            return@LaunchedEffect
+        }
         if (anchor.keepAtBottom && turnGroups.isNotEmpty()) {
             listState.scrollToTimelineTail(latestContentItemCount.value - 1, animate = false)
         } else if (restoredIndex >= 0) {
@@ -1862,7 +1875,7 @@ private fun ChatSurface(
 
     LaunchedEffect(state.approval?.id) {
         if (state.approval == null) approvalCollapsed = false
-        if (!state.historyLoading && timelineBelongsToCurrentSession && state.approval != null && turnGroups.isNotEmpty()) {
+        if (!state.historyLoading && timelineBelongsToCurrentSession && state.approval != null && turnGroups.isNotEmpty() && scrollMode == ChatScrollMode.Following) {
             // 审批卡要用户看到：放掉飞顶停靠，让位给动画滚到底部的请求。
             turnDock = null
             turnDockSpacerPx = 0
@@ -1888,7 +1901,6 @@ private fun ChatSurface(
 
     var imeSettling by remember { mutableStateOf(false) }
 
-    val readerDragging by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(readerDragging, isAtBottom, listState.isScrollInProgress, imeSettling, programmaticDockScroll, turnDock, turnDockDetached) {
         // IME resize/padding changes also drive LazyColumn scrolling. Do not treat
         // that system animation as the user detaching from the conversation tail.
@@ -2447,6 +2459,20 @@ private fun ChatSurface(
                 )
             }
 
+            if (state.approvalOutcomeUnknown) {
+                Text(stringResource(R.string.approval_outcome_unknown),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalAgentocColors.current.secondaryContent,
+                    modifier = Modifier.widthIn(max = AgentocSizes.ContentMaxWidth).fillMaxWidth())
+                AgentoButton(
+                    text = stringResource(R.string.approval_recheck),
+                    onClick = { onEvent(WorkbenchEvent.Retry) },
+                    enabled = state.connection == AgentConnectionStatus.Connected && !state.approvalRechecking,
+                    secondary = true,
+                    modifier = Modifier.widthIn(max = AgentocSizes.ContentMaxWidth).fillMaxWidth(),
+                )
+            }
+
             RunDock(
                 runStatus = state.runStatus,
                 approval = state.approval?.copy(
@@ -2589,16 +2615,21 @@ private fun ChatSurface(
                     }
                 },
                 onStop = { onEvent(WorkbenchEvent.CancelRun) },
-                working = state.runStatus == AgentRunStatus.Working,
+                working = state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval ||
+                    state.approval != null || activeDecision?.takeUnless { it.isSubmitted } != null,
+                forceStopAction = state.runStatus == AgentRunStatus.WaitingApproval || state.approval != null ||
+                    activeDecision?.takeUnless { it.isSubmitted } != null,
                 onAddAttachment = { onSetComposerActionSheetOpen(true) },
-                enabled = (!state.isLoading || state.runStatus == AgentRunStatus.Working) &&
-                    !state.historyLoading && state.approval == null && !state.approvalResolving,
+                enabled = (!state.isLoading || state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval) &&
+                    !state.historyLoading,
                 disabledPlaceholder = stringResource(
                     if (state.approval != null || state.approvalResolving) AgentUiR.string.agentui_resolve_approval
                     else AgentUiR.string.agentui_loading_conversation,
                 ),
                 actionEnabled = state.connection == AgentConnectionStatus.Connected && state.stopRequest == StopRequestState.None &&
-                    !state.runtimeResolving && state.runtimeModel != null && state.runtimeModelsError == null,
+                    (state.runStatus == AgentRunStatus.WaitingApproval || state.approval != null ||
+                        activeDecision?.takeUnless { it.isSubmitted } != null ||
+                        (!state.approvalResolving && !state.runtimeResolving && state.runtimeModel != null && state.runtimeModelsError == null)),
                 attachmentsEnabled = true,
                 runtimeTool = state.runtimeTool,
                 slashSuggestions = state.harnessCapabilities.map { item ->
@@ -3159,7 +3190,7 @@ private fun ChatSurface(
                 }
             },
             onDismiss = ::dismissRunIsland,
-            runMetrics = state.runMetrics,
+            runMetrics = runMetrics,
             changedFiles = changedFiles,
             stepTraces = state.stepTraces,
             onOpenFileDiff = { onSetSelectedDiffFile(it) },

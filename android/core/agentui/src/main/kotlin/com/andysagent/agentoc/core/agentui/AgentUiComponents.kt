@@ -1756,6 +1756,7 @@ fun AgentComposer(
     enabled: Boolean = true,
     disabledPlaceholder: String? = null,
     actionEnabled: Boolean = true,
+    forceStopAction: Boolean = false,
     attachmentsEnabled: Boolean = false,
     onAddAttachment: () -> Unit,
     runtimeTool: String = "codex",
@@ -2601,7 +2602,7 @@ fun AgentComposer(
                                     ),
                             ) {
                                 AgentoSendButton(
-                                    onClick = if (working && !hasComposerContent) {
+                                    onClick = if (working && (!hasComposerContent || forceStopAction)) {
                                         onStop
                                     } else {
                                         {
@@ -2612,8 +2613,8 @@ fun AgentComposer(
                                     },
                                     working = working,
                                     pendingSend = pendingSend,
-                                    enabled = enabled && actionEnabled,
-                                    hasText = hasComposerContent,
+                                    enabled = (enabled || forceStopAction) && actionEnabled,
+                                    hasText = hasComposerContent && !forceStopAction,
                                     modifier = Modifier.size(48.dp).testTag("composer-send-action"),
                                     buttonSize = androidx.compose.ui.unit.lerp(30.dp, 34.dp, morph),
                                 )

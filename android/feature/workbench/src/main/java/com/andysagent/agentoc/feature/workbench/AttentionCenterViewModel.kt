@@ -74,7 +74,6 @@ class AttentionCenterViewModel(
     private val passkeyProvider: (suspend (String) -> WebAuthnProofDto)? = null,
 ) : ViewModel() {
 
-    private val coordinator = ApprovalResolutionCoordinator(repository)
     private val mutableState = MutableStateFlow(AttentionUiState())
     val state: StateFlow<AttentionUiState> = mutableState.asStateFlow()
 
@@ -185,10 +184,11 @@ class AttentionCenterViewModel(
             }
             return
         }
+        val fixed = currentRepository() ?: return
         mutableState.update { it.copy(resolvingItemId = itemId, error = null) }
         viewModelScope.launch {
-            val outcome = coordinator.resolvePlainApproval(item.sessionId, approval.id, approve)
-            consumeResolution(itemId, outcome)
+            val outcome = ApprovalResolutionCoordinator(fixed).resolvePlainApproval(item.sessionId, approval.id, approve)
+            consumeResolutionForRepository(fixed, itemId, outcome)
         }
     }
 
@@ -204,6 +204,9 @@ class AttentionCenterViewModel(
         viewModelScope.launch {
             var attempted = false
             try {
+                check(approval.id !in fixed.pendingApprovalIds(item.sessionId, listOf(approval.id))) {
+                    "审批结果尚未确认，请打开会话查看并核对原决定。"
+                }
                 val pending = fixed.findPendingApproval(item.sessionId, approval.id)
                     ?.takeIf { it.status == "pending" && it.kind == "approved_action_batch_request" }
                     ?: error("This approval is no longer pending")
@@ -275,6 +278,9 @@ class AttentionCenterViewModel(
         viewModelScope.launch {
             var attempted = false
             try {
+                check(original.id !in fixed.pendingApprovalIds(item.sessionId, listOf(original.id))) {
+                    "审批结果尚未确认，请打开会话查看并核对原决定。"
+                }
                 val pending = fixed.findPendingApproval(item.sessionId, original.id)
                     ?.takeIf { it.status == "pending" && it.kind == "privileged_batch_request" }
                     ?: error("This approval is no longer pending")
@@ -348,16 +354,17 @@ class AttentionCenterViewModel(
         if (current.resolvingItemId != null) return
         val item = current.items.firstOrNull { it.id == event.itemId } ?: return
         val approval = item.approval ?: return
+        val fixed = currentRepository() ?: return
         mutableState.update { it.copy(resolvingItemId = event.itemId, error = null) }
         viewModelScope.launch {
-            val outcome = coordinator.resolveQuestionApproval(
+            val outcome = ApprovalResolutionCoordinator(fixed).resolveQuestionApproval(
                 sessionId = item.sessionId,
                 approvalId = approval.id,
                 questionIndex = event.questionIndex,
                 optionIndex = event.optionIndex,
                 customAnswer = event.customAnswer,
             )
-            consumeResolution(event.itemId, outcome)
+            consumeResolutionForRepository(fixed, event.itemId, outcome)
         }
     }
 
@@ -366,10 +373,11 @@ class AttentionCenterViewModel(
         if (current.resolvingItemId != null) return
         val item = current.items.firstOrNull { it.id == event.itemId } ?: return
         val approval = item.approval ?: return
+        val fixed = currentRepository() ?: return
         mutableState.update { it.copy(resolvingItemId = event.itemId, error = null) }
         viewModelScope.launch {
-            val outcome = coordinator.resolveMultiChoiceQuestions(item.sessionId, approval.id, event.selections, event.customAnswers)
-            consumeResolution(event.itemId, outcome)
+            val outcome = ApprovalResolutionCoordinator(fixed).resolveMultiChoiceQuestions(item.sessionId, approval.id, event.selections, event.customAnswers)
+            consumeResolutionForRepository(fixed, event.itemId, outcome)
         }
     }
 
@@ -378,16 +386,27 @@ class AttentionCenterViewModel(
         if (current.resolvingItemId != null) return
         val item = current.items.firstOrNull { it.id == event.itemId } ?: return
         val approval = item.approval ?: return
+        val fixed = currentRepository() ?: return
         mutableState.update { it.copy(resolvingItemId = event.itemId, error = null) }
         viewModelScope.launch {
-            val outcome = coordinator.resolveQuestionsApproval(
+            val outcome = ApprovalResolutionCoordinator(fixed).resolveQuestionsApproval(
                 sessionId = item.sessionId,
                 approvalId = approval.id,
                 choices = event.choices,
                 customAnswer = event.customAnswer,
                 customAnswers = event.customAnswers,
             )
-            consumeResolution(event.itemId, outcome)
+            consumeResolutionForRepository(fixed, event.itemId, outcome)
+        }
+    }
+
+    private fun currentRepository(): SessionRepository? =
+        if (repository is SwitchingSessionRepository) repository.delegate.value else repository
+
+    private fun consumeResolutionForRepository(fixed: SessionRepository, itemId: String, outcome: ApprovalResolutionCoordinator.Outcome) {
+        if (currentRepository() === fixed) consumeResolution(itemId, outcome)
+        else mutableState.update { state ->
+            if (state.resolvingItemId == itemId) state.copy(resolvingItemId = null) else state
         }
     }
 
@@ -410,7 +429,7 @@ class AttentionCenterViewModel(
                 is ApprovalResolutionCoordinator.Outcome.RequiresSession -> state.copy(resolvingItemId = null)
                 is ApprovalResolutionCoordinator.Outcome.Failed -> state.copy(
                     resolvingItemId = null,
-                    error = outcome.message,
+                    error = if (outcome.outcomeUnknown) "审批结果尚未确认，请打开会话查看并核对原决定。" else outcome.message,
                 )
             }
         }

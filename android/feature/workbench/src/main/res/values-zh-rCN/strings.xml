@@ -25,6 +25,8 @@
 
     <string name="settings_sharing_agents">分享与智能助手</string>
     <string name="run_dock_stop">停止</string>
+    <string name="approval_outcome_unknown">决定可能已送达电脑。再次确认会使用原决定和原请求，不会提交新的选择。</string>
+    <string name="approval_recheck">重新确认原决定</string>
     <string name="run_dock_stop_description">停止任务</string>
     <string name="decision_select_one">请选择一项</string>
     <string name="decision_select_multiple">可选择多项</string>

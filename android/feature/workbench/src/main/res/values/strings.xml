@@ -25,6 +25,8 @@
 
     <string name="settings_sharing_agents">Sharing and agents</string>
     <string name="run_dock_stop">Stop</string>
+    <string name="approval_outcome_unknown">The decision may have reached the computer. Recheck using the same decision and request before choosing again.</string>
+    <string name="approval_recheck">Recheck original decision</string>
     <string name="run_dock_stop_description">Stop run</string>
     <string name="decision_select_one">Select one</string>
     <string name="decision_select_multiple">Select any that apply</string>

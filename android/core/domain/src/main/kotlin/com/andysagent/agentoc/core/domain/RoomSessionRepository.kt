@@ -1371,7 +1371,7 @@ class RoomSessionRepository(
         // a future event before enabling its composer. Background sync owns waits.
         val durableResult = refreshEventsLocked(sessionId, waitForEvents = false)
         if (durableResult is RefreshResult.ResetRequired) return@withLock durableResult
-        refreshVisibleTimelineLocked(sessionId)
+        refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true)
     }
 
     override suspend fun loadOlderTimeline(sessionId: String): RefreshResult = sessionSyncMutex(sessionId).withLock {
@@ -1529,7 +1529,12 @@ class RoomSessionRepository(
         val engine = SessionSyncEngine(
             scope = sessionId,
             cursorStore = RoomCursorStore(dao),
-            eventSink = RoomEventSink(database, dao),
+            eventSink = RoomEventSink(database, dao) { scope ->
+                val activity = runActivityState.value[scope]
+                val state = (activity?.get("state") as? JsonPrimitive)?.contentOrNull?.lowercase()
+                if (state in setOf("starting", "queued", "working", "running", "streaming", "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision"))
+                    (activity?.get("runId") as? JsonPrimitive)?.contentOrNull else null
+            },
             replayProvider = ReplayProvider { scope, applied, _ ->
                 val replayResponse = requestDurableEventPage(eventPagePath(scope, applied, waitForEvents = false))
                 codec.decode(serializer<SessionEventsPageDto>(), replayResponse.body).events
@@ -1741,8 +1746,8 @@ class RoomSessionRepository(
             .distinctBy { it.dedupeKey() ?: "fingerprint:${it.sessionEventFingerprint()}" }
             .sortedBy { it.boundarySeq() }
         val firstNewSeq = events.minOfOrNull { it.startingSeq() }
-        val older = if (preserveLoadedHistory && firstNewSeq != null) {
-            visibleTimelineEvents[sessionId].orEmpty().filter { it.boundarySeq() < firstNewSeq }
+        val older = if (preserveLoadedHistory) {
+            visibleTimelineEvents[sessionId].orEmpty().filter { firstNewSeq == null || it.boundarySeq() < firstNewSeq }
         } else emptyList()
         val merged = older + events
         visibleTimelineEvents[sessionId] = merged
@@ -2751,9 +2756,39 @@ class RoomSessionRepository(
         return root["run"]?.jsonObject ?: root
     }
 
-    override suspend fun resumePendingOperations(): Int {
+    override suspend fun resumePendingOperations(): Int = resumePendingOperationsMatching { true }
+
+    private suspend fun approvalOperationMatcher(sessionId: String, approvalId: String): (PendingOperationEntity) -> Boolean {
+        val approval = dao.getApproval(sessionId, approvalId) ?: return { false }
+        val runId = approval.runId
+        val batchId = approval.batchId
+        val runtimePath = runId?.let { "/api/runs/${encode(it)}/approvals/${encode(approvalId)}" }
+        val confirmationPath = "/api/sessions/${encode(sessionId)}/confirmations/${encode(approvalId)}"
+        val actionPath = if (runId != null && batchId != null) "/api/runs/${encode(runId)}/approved-actions/${encode(batchId)}/resolve" else null
+        val categoryPrefix = if (runId != null && batchId != null) "/api/runs/${encode(runId)}/privileged-batches/${encode(batchId)}/categories/" else null
+        return { operation ->
+            (operation.kind == "runtime_approval" && operation.path == runtimePath) ||
+                (operation.kind == "confirmation" && operation.path == confirmationPath) ||
+                (operation.kind == "approved_actions" && operation.path == actionPath) ||
+                (operation.kind == "privileged_category" && categoryPrefix != null && operation.path.startsWith(categoryPrefix))
+        }
+    }
+
+    override suspend fun pendingApprovalIds(sessionId: String, approvalIds: List<String>): Set<String> {
+        val operations = dao.pendingOperations()
+        return approvalIds.filterTo(mutableSetOf()) { approvalId ->
+            val matches = approvalOperationMatcher(sessionId, approvalId)
+            operations.any(matches)
+        }
+    }
+
+    override suspend fun resumePendingApproval(sessionId: String, approvalId: String): Int =
+        resumePendingOperationsMatching(approvalOperationMatcher(sessionId, approvalId))
+
+    private suspend fun resumePendingOperationsMatching(matches: (PendingOperationEntity) -> Boolean): Int {
         var completed = 0
         for (snapshot in dao.pendingOperations()) {
+            if (!matches(snapshot)) continue
             if (!activePendingOperationIds.add(snapshot.requestId)) continue
             try {
                 val operation = dao.getPendingOperation(snapshot.requestId) ?: continue
@@ -2816,7 +2851,34 @@ class RoomSessionRepository(
                     if (operation.kind == "send_message" || operation.kind == "send_message_with_attachments") {
                         markFirstTurnAccepted(sessionIdFromPath(operation.path))
                     }
-                    dao.deleteOperation(operation.requestId)
+                    database.withTransaction {
+                        if (operation.kind == "runtime_approval") {
+                            val parts = operation.path.substringBefore('?').split('/').filter(String::isNotBlank)
+                            if (parts.size == 5 && parts[0] == "api" && parts[1] == "runs" && parts[3] == "approvals") {
+                                val runId = android.net.Uri.decode(parts[2])
+                                val approvalId = android.net.Uri.decode(parts[4])
+                                val root = runCatching { AgentocProtocol.json.parseToJsonElement(response.body) as? JsonObject }.getOrNull()
+                                val run = root?.get("run") as? JsonObject
+                                val sessionId = run?.string("sessionId")
+                                if (!sessionId.isNullOrBlank() && run?.string("id") == runId) {
+                                    val approval = dao.getApproval(sessionId, approvalId)
+                                    if (approval?.status == "pending" && approval.runId == runId) {
+                                        dao.upsertApprovals(listOf(approval.copy(status = "resolved", updatedAt = System.currentTimeMillis())))
+                                    }
+                                }
+                            }
+                        } else if (operation.kind == "confirmation") {
+                            val parts = operation.path.substringBefore('?').split('/').filter(String::isNotBlank)
+                            if (parts.size == 5 && parts[0] == "api" && parts[1] == "sessions" && parts[3] == "confirmations") {
+                                val sessionId = android.net.Uri.decode(parts[2])
+                                val approval = dao.getApproval(sessionId, android.net.Uri.decode(parts[4]))
+                                if (approval?.status == "pending" && approval.runId.isNullOrBlank()) {
+                                    dao.upsertApprovals(listOf(approval.copy(status = "resolved", updatedAt = System.currentTimeMillis())))
+                                }
+                            }
+                        }
+                        dao.deleteOperation(operation.requestId)
+                    }
                     completed += 1
                 } catch (error: Throwable) {
                     val recoverable = dao.getPendingOperation(operation.requestId) ?: operation
@@ -3093,6 +3155,7 @@ private class RoomCursorStore(private val dao: AgentoCDao) : CursorStore {
 private class RoomEventSink(
     private val database: AgentoCDatabase,
     private val dao: AgentoCDao,
+    private val activeRunId: (String) -> String? = { null },
 ) : AtomicEventSink {
     override suspend fun validate(scope: String, event: SessionEventDto): EventValidation {
         val eventId = event.storageEventId(scope)
@@ -3178,7 +3241,12 @@ private class RoomEventSink(
         }
         val session = dao.getSession(scope)
         if (session != null) {
-            val status = event.terminalRunState()?.let { if (it == "interrupted") "cancelled" else it } ?: when {
+            val terminal = event.terminalRunState()
+            val currentRunId = activeRunId(scope)
+            val isOtherRunTerminal = terminal != null && !event.runId.isNullOrBlank() &&
+                !currentRunId.isNullOrBlank() && event.runId != currentRunId
+            val status = (if (isOtherRunTerminal) null else terminal)?.let { if (it == "interrupted") "cancelled" else it } ?: when {
+                isOtherRunTerminal -> session.status
                 type.contains("approval_request") || type.contains("confirmation_request")
                     || type == "privileged_batch_request" || type == "approved_action_batch_request" -> "waiting_approval"
                 type.contains("approval_response") || type.contains("confirmation_response")

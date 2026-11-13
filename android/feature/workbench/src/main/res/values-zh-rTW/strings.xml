@@ -24,6 +24,8 @@
     <string name="voice_error_microphone_permission">請允許使用麥克風以進行語音辨識。</string>
 
     <string name="run_dock_stop">停止</string>
+    <string name="approval_outcome_unknown">決定可能已送達電腦。再次確認會使用原決定和原請求，不會提交新的選擇。</string>
+    <string name="approval_recheck">重新確認原決定</string>
     <string name="run_dock_stop_description">停止任務</string>
     <string name="decision_select_one">請選擇一項</string>
     <string name="decision_select_multiple">可選擇多項</string>

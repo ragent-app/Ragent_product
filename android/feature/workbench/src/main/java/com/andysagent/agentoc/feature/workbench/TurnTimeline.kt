@@ -140,14 +140,10 @@ fun TurnTimelineView(
         }
 
         if (turn.entries.isNotEmpty() || runActive) {
-            val (beforeFinal, finalEntries) = splitTurnEntries(turn.entries,
-                allowTerminalFallback = !runActive && turn.agentMessages.none { !it.completed })
-            // While a reply is being generated, render the ordered stream in
-            // the process area. Legacy terminal transcripts may lack a phase;
-            // only a completed reply at the end can be treated as final.
-            val hasFinal = turn.entries.any { it is TimelineItem.Message && it.messagePhase == "final_answer" }
-            val processEntries = if (runActive && !hasFinal) turn.entries else beforeFinal
-            val outsideEntries = if (runActive && !hasFinal) emptyList() else finalEntries
+            // Keep every conversation entry visible in chronological order;
+            // reasoning and tool activity remain available in Run Details.
+            val processEntries = emptyList<TimelineItem>()
+            val outsideEntries = turn.entries.filterNot { it is TimelineItem.Operation }
             var expanded by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(runActive) }
             var userToggled by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(false) }
             LaunchedEffect(runActive) { if (!runActive && !userToggled) expanded = false }
@@ -190,7 +186,7 @@ fun TurnTimelineView(
                     }
                 }
             }
-            outsideEntries.forEach { renderEntry(it) }
+            outsideEntries.filterNot { it is TimelineItem.Operation }.forEach { renderEntry(it) }
             return@Column
         }
 
@@ -206,9 +202,6 @@ fun TurnTimelineView(
                 onPlanAction = onPlanAction,
             )
         }
-
-        // Thinking remains available; tool-call records are omitted from chat.
-        turn.operationSummary?.operations?.filter { it.isReasoning }?.forEach { ThinkingRow(it) }
 
         // 6. Keep every distinct assistant message, including progress before
         // a final reply. Only an update to the same entity replaces its text.

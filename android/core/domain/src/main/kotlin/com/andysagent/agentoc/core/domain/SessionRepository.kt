@@ -457,6 +457,10 @@ interface SessionRepository {
         error("Run projections are not supported by this repository")
     }
     suspend fun resumePendingOperations(): Int
+    /** Approval decisions retained for retry or whose outcome is still unknown. */
+    suspend fun pendingApprovalIds(sessionId: String, approvalIds: List<String>): Set<String> = emptySet()
+    /** Retry only the retained decision for this approval, with its original request identity. */
+    suspend fun resumePendingApproval(sessionId: String, approvalId: String): Int = 0
 }
 
 sealed interface RefreshResult {

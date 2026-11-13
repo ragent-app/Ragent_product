@@ -89,6 +89,7 @@ internal fun shouldAcceptRunProjection(current: RunMetricsUiState, runId: String
 internal fun latestTurnHasTerminalRun(items: List<TimelineItem>, pending: PendingTurnUiState?,
     sessionStatus: AgentRunStatus, metrics: RunMetricsUiState): Boolean {
     if (pending?.state == PendingTurnState.Sending || pending?.state == PendingTurnState.Accepted) return false
+    if (sessionStatus == AgentRunStatus.Working || sessionStatus == AgentRunStatus.WaitingApproval) return false
     val terminal = setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
     val runId = latestTurnRunId(items)
     val matchingRun = runId != null && runId == metrics.runId && metrics.status in terminal

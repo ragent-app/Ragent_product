@@ -20,6 +20,7 @@ import com.andysagent.agentoc.core.domain.HarnessCapabilityItem
 import com.andysagent.agentoc.core.domain.SessionRepository
 import com.andysagent.agentoc.core.domain.SessionRepositoryException
 import com.andysagent.agentoc.core.domain.isTerminalApprovalFailure
+import com.andysagent.agentoc.core.domain.isAmbiguousApprovalSubmission
 import com.andysagent.agentoc.core.domain.SwitchingSessionRepository
 import com.andysagent.agentoc.core.domain.newRequestId
 import com.andysagent.agentoc.core.protocol.WebAuthnProofDto
@@ -111,6 +112,8 @@ data class WorkbenchUiState(
     val selectedAgentId: String? = null,
     val approval: PermissionRequestUiState? = null,
     val approvalResolving: Boolean = false,
+    val approvalOutcomeUnknown: Boolean = false,
+    val approvalRechecking: Boolean = false,
     val pairingOpen: Boolean = false,
     val pairingUri: String = "",
     val pairingDeviceName: String = "Android device",
@@ -471,6 +474,8 @@ data class ChatUiState(
     val selectedAgentId: String? = null,
     val approval: PermissionRequestUiState? = null,
     val resolvingApprovalId: String? = null,
+    val approvalOutcomeUnknownId: String? = null,
+    val approvalRechecking: Boolean = false,
     val initialTurnEntry: Boolean = false,
     val isLoading: Boolean = false,
     val loadingOlder: Boolean = false,
@@ -704,6 +709,7 @@ class ChatViewModel(
     /** An open tablet detail is dismissed only by an explicit navigation action. */
     var preserveSelectedSessionOnRefresh: Boolean = false
     private val stopRequests = mutableMapOf<Pair<SessionRepository, String>, PendingStopRequest>()
+    private val uncertainApprovals = mutableMapOf<Pair<SessionRepository, String>, String>()
     private val approvalResolutionLock = Any()
     private val sessionDrafts = mutableMapOf<Pair<SessionRepository, String>, String>()
     // A local echo belongs to one target repository and one session, including
@@ -855,7 +861,8 @@ class ChatViewModel(
                 if (fixed !== activeRepository()) return@collectLatest
                 knownSessions = sessions
                 if (fixed != null) sessions.filter {
-                    it.status !in setOf(SessionStatus.Working, SessionStatus.WaitingApproval)
+                    it.status !in setOf(SessionStatus.Working, SessionStatus.WaitingApproval) &&
+                        (it.id != mutableState.value.sessionId || activeRunActivityStatus(mutableState.value.serverRunActivity) == null)
                 }.forEach { stopRequests.remove(fixed to it.id) }
                 knownSessionsRepository = fixed
                 val currentId = mutableState.value.sessionId
@@ -884,7 +891,7 @@ class ChatViewModel(
                             sessionId = selected.id,
                             sessionTitle = selected.title.ifBlank { "New session" },
                             selectedAgentId = selected.templateId,
-                            runStatus = selected.status.toAgentStatus(),
+                            runStatus = activeRunActivityStatus(serverRunActivity) ?: selected.status.toAgentStatus(),
                             queuedMessages = selected.queuedMessages.map(::toQueuedMessageUiState),
                             acceptedTurns = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId in queueIds },
                         )
@@ -931,6 +938,8 @@ class ChatViewModel(
                             activeDecision = null,
                             approval = null,
                             resolvingApprovalId = null,
+                            approvalOutcomeUnknownId = null,
+                            approvalRechecking = false,
                             queuedMessages = emptyList(),
                             editingTurnId = null,
                             editingTurnText = null,
@@ -1882,11 +1891,14 @@ class ChatViewModel(
 
     private fun submitDecision(questionId: String) {
         val currentDecision = mutableState.value.activeDecision ?: return
-        if (currentDecision.id != questionId || currentDecision.isSubmitted || currentDecision.isSubmitting) return
+        if (currentDecision.id != questionId || currentDecision.isSubmitted || currentDecision.isSubmitting ||
+            mutableState.value.approvalOutcomeUnknownId != null) return
         val sessionId = mutableState.value.sessionId ?: return
+        val fixed = selectedRepository ?: return
+        if (fixed !== activeRepository()) return
+        val generation = sessionGeneration
 
         if (currentDecision.questionGroups.size > 1 || currentDecision.questionGroups.any { it.isMultiSelect }) {
-            val fixed = selectedRepository ?: return
             val choices = currentDecision.questionGroups.indices.map { currentDecision.selectedByQuestion[it] ?: -1 }
             val selections = currentDecision.questionGroups.indices.map { index ->
                 if (currentDecision.questionGroups[index].isMultiSelect) currentDecision.multiSelectedByQuestion[index].orEmpty().sorted()
@@ -1900,11 +1912,14 @@ class ChatViewModel(
                 val outcome = if (currentDecision.questionGroups.any { it.isMultiSelect })
                     coordinator.resolveMultiChoiceQuestions(sessionId, currentDecision.approvalId, selections, answers)
                 else coordinator.resolveQuestionsApproval(sessionId, currentDecision.approvalId, choices, customAnswers = answers)
-                if (!isCurrentSession(sessionId) || mutableState.value.activeDecision?.id != questionId) return@launch
+                if (outcome is ApprovalResolutionCoordinator.Outcome.Failed && outcome.outcomeUnknown) {
+                    uncertainApprovals[fixed to sessionId] = currentDecision.approvalId
+                }
+                if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation) || mutableState.value.activeDecision?.id != questionId) return@launch
                 when (outcome) {
                     ApprovalResolutionCoordinator.Outcome.Submitted -> {
                         updateState { copy(activeDecision = currentDecision.copy(isSubmitting = false, isSubmitted = true)) }
-                        refreshSession(sessionId)
+                        launch { refreshSession(sessionId, generation) }
                     }
                     ApprovalResolutionCoordinator.Outcome.Stale -> {
                         updateState {
@@ -1916,9 +1931,16 @@ class ChatViewModel(
                             )
                         }
                     }
+                    is ApprovalResolutionCoordinator.Outcome.Failed -> {
+                        if (outcome.outcomeUnknown) {
+                            updateState { copy(approvalOutcomeUnknownId = currentDecision.approvalId, error = null) }
+                            launch { refreshSession(sessionId, generation) }
+                        } else {
+                            updateState { copy(activeDecision = currentDecision.copy(isSubmitting = false, submissionError = outcome.message)) }
+                        }
+                    }
                     else -> {
                         val message = when (outcome) {
-                            is ApprovalResolutionCoordinator.Outcome.Failed -> outcome.message
                             ApprovalResolutionCoordinator.Outcome.Stale -> "This request is no longer pending."
                             else -> "This request requires additional verification."
                         }
@@ -1950,7 +1972,7 @@ class ChatViewModel(
                 val requestId = newRequestId()
                 val runId = currentDecision.runId
                 if (runId != null) {
-                    repository.resolveRuntimeApproval(
+                    fixed.resolveRuntimeApproval(
                         runId = runId,
                         approvalId = currentDecision.approvalId,
                         decision = "approve",
@@ -1959,7 +1981,7 @@ class ChatViewModel(
                         requestId = requestId,
                     )
                 } else {
-                    repository.decideConfirmation(
+                    fixed.decideConfirmation(
                         sessionId = sessionId,
                         confirmationId = currentDecision.approvalId,
                         decision = "approve",
@@ -1967,24 +1989,25 @@ class ChatViewModel(
                     )
                 }
                 try {
-                    repository.retireStaleApproval(sessionId, currentDecision.approvalId)
+                    fixed.retireStaleApproval(sessionId, currentDecision.approvalId)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Throwable) {
                     // The server already accepted the answer; cache cleanup is best-effort.
                 }
+                if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation) || mutableState.value.activeDecision?.id != questionId) return@launch
                 updateState {
                     copy(activeDecision = currentDecision.copy(isSubmitting = false, isSubmitted = true))
                 }
-                refreshSession(sessionId)
+                launch { refreshSession(sessionId, generation) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 if (error.isTerminalApprovalFailure()) {
-                    try { refreshSession(sessionId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {}
-                    try { repository.retireStaleApproval(sessionId, currentDecision.approvalId) }
+                    try { fixed.retireStaleApproval(sessionId, currentDecision.approvalId) }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Throwable) {}
+                    if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation)) return@launch
                     updateState {
                         copy(
                             activeDecision = activeDecision?.takeUnless { it.id == questionId },
@@ -1993,8 +2016,18 @@ class ChatViewModel(
                             error = null,
                         )
                     }
+                    launch { refreshSession(sessionId, generation) }
                     return@launch
                 }
+                if (error.isAmbiguousApprovalSubmission() || isRecoverableConnectionError(error)) {
+                    uncertainApprovals[fixed to sessionId] = currentDecision.approvalId
+                    if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                        updateState { copy(approvalOutcomeUnknownId = currentDecision.approvalId, error = null) }
+                        launch { refreshSession(sessionId, generation) }
+                    }
+                    return@launch
+                }
+                if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation) || mutableState.value.activeDecision?.id != questionId) return@launch
                 updateState {
                     copy(
                         activeDecision = currentDecision.copy(
@@ -2036,6 +2069,8 @@ class ChatViewModel(
                 hasOlder = false,
                 approval = null,
                 resolvingApprovalId = null,
+                approvalOutcomeUnknownId = null,
+                approvalRechecking = false,
                 error = null,
                 isLoading = false,
                 queuedMessages = emptyList(),
@@ -2128,6 +2163,8 @@ class ChatViewModel(
                 hasOlder = false,
                 approval = null,
                 resolvingApprovalId = null,
+                approvalOutcomeUnknownId = null,
+                approvalRechecking = false,
                 error = null,
                 isLoading = false,
                 queuedMessages = emptyList(),
@@ -2212,6 +2249,8 @@ class ChatViewModel(
                 historyLoading = !initialTurnVisible,
                 approval = null,
                 resolvingApprovalId = null,
+                approvalOutcomeUnknownId = uncertainApprovals[fixed to sessionId],
+                approvalRechecking = false,
                 error = null,
                 queuedMessages = selectedSession?.queuedMessages?.map(::toQueuedMessageUiState).orEmpty(),
                 activeDecision = null,
@@ -2245,7 +2284,19 @@ class ChatViewModel(
             launch {
                 fixed.observeRunActivity(sessionId).collectLatest { activity ->
                     if (isCurrentSession(sessionId, generation)) {
-                        updateState { copy(serverRunActivity = activity) }
+                        val activityStatus = activeRunActivityStatus(activity)
+                        updateState {
+                            val summaryStatus = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
+                            copy(serverRunActivity = activity,
+                                runStatus = activityStatus ?: if (activity?.stringValue("state") == "idle" &&
+                                    pendingTurn == null && acceptedTurns.isEmpty()) {
+                                    summaryStatus?.takeUnless { it == AgentRunStatus.Working || it == AgentRunStatus.WaitingApproval }
+                                        ?: AgentRunStatus.Idle
+                                } else runStatus)
+                        }
+                        if (activityStatus != null) {
+                            activity?.stringValue("runId")?.let { loadRunProjection(sessionId, it, generation) }
+                        }
                         // A terminal status may arrive after the last timeline
                         // item without changing the timeline itself. Refresh
                         // the run when the server transitions to idle so the
@@ -2328,13 +2379,15 @@ class ChatViewModel(
                         )
                     }
                     fetchHistoricalDurations(fixed, sessionId, generation, items)
-                    items.asSequence().mapNotNull { item -> when (item) {
+                    val activityRunId = mutableState.value.serverRunActivity
+                        ?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+                    (activityRunId ?: items.asSequence().mapNotNull { item -> when (item) {
                         is TimelineItem.Message -> item.runId
                         is TimelineItem.Operation -> item.runId
                         is TimelineItem.Plan -> item.runId
                         is TimelineItem.Notice -> null
                     } }
-                        .lastOrNull()
+                        .lastOrNull())
                         ?.let { runId ->
                             val now = System.currentTimeMillis()
                             val last = lastRunProjectionRequest
@@ -2349,6 +2402,14 @@ class ChatViewModel(
                 fixed.observePendingApprovals(sessionId).collectLatest { receivedApprovals ->
                     if (!isCurrentSession(sessionId, generation)) return@collectLatest
                     val approvals = com.andysagent.agentoc.core.model.withoutBatchApprovalShadows(receivedApprovals)
+                    val key = fixed to sessionId
+                    val retainedIds = fixed.pendingApprovalIds(sessionId, approvals.map { it.id })
+                    if (!isCurrentSession(sessionId, generation)) return@collectLatest
+                    if (uncertainApprovals[key] == null) {
+                        approvals.firstOrNull { it.id in retainedIds }?.let { uncertainApprovals[key] = it.id }
+                    }
+                    val uncertainId = uncertainApprovals[key]
+                    if (uncertainId != null && approvals.none { it.id == uncertainId }) uncertainApprovals.remove(key)
                     val decisionApproval = approvals.firstOrNull { it.toDecisionQuestionUiState() != null }
                     val approval = approvals.firstOrNull { it.id != decisionApproval?.id }?.toUiState()
                     val decision = decisionApproval?.toDecisionQuestionUiState()
@@ -2358,12 +2419,16 @@ class ChatViewModel(
                         }
                         copy(
                             approval = approval,
-                            activeDecision = decision?.let { next -> previous?.let {
-                                next.copy(selectedIndices = it.selectedIndices, writeInText = it.writeInText,
-                                    selectedByQuestion = it.selectedByQuestion, multiSelectedByQuestion = it.multiSelectedByQuestion, customByQuestion = it.customByQuestion,
-                                    isSubmitted = it.isSubmitted, isSubmitting = it.isSubmitting, submissionError = it.submissionError)
-                            } ?: next },
+                            activeDecision = decision?.let { next ->
+                                val merged = previous?.let {
+                                    next.copy(selectedIndices = it.selectedIndices, writeInText = it.writeInText,
+                                        selectedByQuestion = it.selectedByQuestion, multiSelectedByQuestion = it.multiSelectedByQuestion, customByQuestion = it.customByQuestion,
+                                        isSubmitted = it.isSubmitted, isSubmitting = it.isSubmitting, submissionError = it.submissionError)
+                                } ?: next
+                                if (uncertainApprovals[key] == next.approvalId) merged.copy(isSubmitting = true) else merged
+                            },
                             resolvingApprovalId = resolvingApprovalId?.takeIf { it == approval?.id },
+                            approvalOutcomeUnknownId = uncertainApprovals[key],
                         )
                     }
                 }
@@ -2471,7 +2536,9 @@ class ChatViewModel(
             try {
                 if (!isCurrentSession(sessionId, generation)) return@launch
                 val projection = fixed.loadRunProjection(runId)
-                if (isCurrentSession(sessionId, generation) && latestTimelineRunId(mutableState.value.timelineItems) == runId) {
+                val state = mutableState.value
+                val activeRunId = state.serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+                if (isCurrentSession(sessionId, generation) && (activeRunId ?: latestTimelineRunId(state.timelineItems)) == runId) {
                     updateRunMetricsFromProjection(projection, runId)
                     completedRunDuration(projection)?.let { fixed.saveRunDuration(sessionId, runId, it) }
                 }
@@ -2546,23 +2613,35 @@ class ChatViewModel(
         val usage = projection["usage"] as? JsonObject
         updateState {
             val incomingStatus = state?.toRunStatus()
-            if (!shouldAcceptRunProjection(runMetrics, runId, incomingStatus)) return@updateState this
-            copy(runMetrics = runMetrics.copy(
+            val activeRunId = serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+            if (activeRunId != runId && !shouldAcceptRunProjection(runMetrics, runId, incomingStatus)) return@updateState this
+            val previous = if (runMetrics.runId == runId) runMetrics else RunMetricsUiState()
+            copy(runMetrics = previous.copy(
                 runId = runId,
                 phase = projection.stringValue("phase"),
                 provider = projection.stringValue("provider"),
                 model = projection.stringValue("model"),
                 runtimeFamily = projection.stringValue("runtimeFamily"),
                 failureReason = projection.stringValue("failureReason") ?: projection.stringValue("error"),
-                durationFormatted = duration?.let(::formatDuration) ?: runMetrics.durationFormatted,
-                promptTokens = (projection.longValue("promptTokens") ?: usage?.longValue("promptTokens"))?.toInt() ?: runMetrics.promptTokens,
-                completionTokens = (projection.longValue("completionTokens") ?: usage?.longValue("completionTokens"))?.toInt() ?: runMetrics.completionTokens,
-                status = incomingStatus ?: runMetrics.status,
+                durationFormatted = duration?.let(::formatDuration) ?: previous.durationFormatted,
+                promptTokens = (projection.longValue("promptTokens") ?: usage?.longValue("promptTokens"))?.toInt() ?: previous.promptTokens,
+                completionTokens = (projection.longValue("completionTokens") ?: usage?.longValue("completionTokens"))?.toInt() ?: previous.completionTokens,
+                status = (if (activeRunId == runId) activeRunActivityStatus(serverRunActivity) else null)
+                    ?: incomingStatus ?: previous.status,
             ))
         }
     }
 
     private fun JsonObject.stringValue(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
+    private fun activeRunActivityStatus(activity: JsonObject?): AgentRunStatus? {
+        if (activity?.stringValue("runId") == null) return null
+        return when (activity.stringValue("state")?.lowercase()) {
+            "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision" -> AgentRunStatus.WaitingApproval
+            "starting", "queued", "working", "running", "streaming" -> AgentRunStatus.Working
+            else -> null
+        }
+    }
 
     private fun JsonObject.longValue(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
 
@@ -2954,7 +3033,8 @@ class ChatViewModel(
         val sessionId = current.sessionId ?: return
         val fixed = activeRepository() ?: return
         if (fixed !== selectedRepository || current.connection != AgentConnectionStatus.Connected ||
-            current.runStatus !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval)) return
+            (current.runStatus !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) &&
+                current.approval == null && current.activeDecision?.isSubmitted != false)) return
         val key = fixed to sessionId
         if (key in stopRequests) return
         val pending = PendingStopRequest(StopRequestState.AwaitingConfirmation)
@@ -2999,9 +3079,12 @@ class ChatViewModel(
 
     private fun resolveApproval(approvalId: String, approve: Boolean) {
         val sessionId = mutableState.value.sessionId ?: return
+        val fixed = selectedRepository ?: return
+        if (fixed !== activeRepository()) return
+        val generation = sessionGeneration
         val accepted = synchronized(approvalResolutionLock) {
             val current = mutableState.value
-            if (current.resolvingApprovalId != null ||
+            if (current.resolvingApprovalId != null || current.approvalOutcomeUnknownId != null ||
                 (current.approval?.id != approvalId && current.activeDecision?.id != approvalId)) {
                 false
             } else {
@@ -3014,9 +3097,10 @@ class ChatViewModel(
         }
         if (!accepted) return
         viewModelScope.launch {
+            var decisionSent = false
             try {
                 val decision = if (approve) "approve" else "deny"
-                val pending = repository.findPendingApproval(sessionId, approvalId)
+                val pending = fixed.findPendingApproval(sessionId, approvalId)
                     ?.takeIf { it.status == "pending" } ?: error("This request is no longer pending.")
                 val runId = pending.runId
                 val batchId = pending.batchId
@@ -3047,7 +3131,7 @@ class ChatViewModel(
                     val resolutionRequestId = newRequestId()
                     val proof = if (selectedHostActionIds.isNotEmpty()) {
                         val provider = passkeyProvider ?: error("Passkey approval requires the Android system credential provider")
-                        val challenge = repository.createApprovedActionWebAuthnChallenge(
+                        val challenge = fixed.createApprovedActionWebAuthnChallenge(
                             runId = runId,
                             batchId = batchId,
                             selectedActionIds = selectedHostActionIds,
@@ -3055,7 +3139,8 @@ class ChatViewModel(
                         )
                         provider(challenge.toString())
                     } else null
-                    repository.resolveApprovedActionBatchWithProof(
+                    decisionSent = true
+                    fixed.resolveApprovedActionBatchWithProof(
                         sessionId = sessionId,
                         runId = runId,
                         batchId = batchId,
@@ -3092,7 +3177,7 @@ class ChatViewModel(
                         // required (safe default for persisted approvals).
                         val proof = if (checkedOpIds.isNotEmpty() && pending.passkeyRequired) {
                             val provider = passkeyProvider ?: error("Passkey approval requires the Android system credential provider")
-                            val challenge = repository.createPrivilegedCategoryWebAuthnChallenge(
+                            val challenge = fixed.createPrivilegedCategoryWebAuthnChallenge(
                                 runId = runId,
                                 batchId = batchId,
                                 category = category,
@@ -3101,7 +3186,8 @@ class ChatViewModel(
                             )
                             provider(challenge.toString())
                         } else null
-                        repository.resolvePrivilegedCategory(
+                        decisionSent = true
+                        fixed.resolvePrivilegedCategory(
                             sessionId = sessionId,
                             runId = runId,
                             batchId = batchId,
@@ -3112,29 +3198,39 @@ class ChatViewModel(
                         )
                     }
                 } else if (runId != null) {
-                    repository.resolveRuntimeApproval(runId, approvalId, decision)
+                    decisionSent = true
+                    fixed.resolveRuntimeApproval(runId, approvalId, decision)
                 } else {
-                    repository.decideConfirmation(sessionId, approvalId, decision)
+                    decisionSent = true
+                    fixed.decideConfirmation(sessionId, approvalId, decision)
                 }
                 try {
-                    repository.retireStaleApproval(sessionId, approvalId)
+                    fixed.retireStaleApproval(sessionId, approvalId)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Throwable) {
                     // Keep the acknowledged server decision successful even if local cleanup fails.
                 }
-                refreshSession(sessionId)
+                if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                    updateState {
+                        copy(approval = approval?.takeUnless { it.id == approvalId },
+                            activeDecision = activeDecision?.takeUnless { it.id == approvalId },
+                            resolvingApprovalId = resolvingApprovalId?.takeUnless { it == approvalId })
+                    }
+                    launch { refreshSession(sessionId, generation) }
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 if (error.isTerminalApprovalFailure()) {
                     try {
-                        repository.retireStaleApproval(sessionId, approvalId)
+                        fixed.retireStaleApproval(sessionId, approvalId)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Throwable) {
                         // The terminal server result still makes this local approval unusable.
                     }
+                    if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation)) return@launch
                     updateState {
                         copy(
                             approval = approval?.takeUnless { it.id == approvalId },
@@ -3143,9 +3239,18 @@ class ChatViewModel(
                             error = null,
                         )
                     }
-                    try { repository.refreshEvents(sessionId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {}
+                    try { fixed.refreshEvents(sessionId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {}
                     return@launch
                 }
+                if (decisionSent && (error.isAmbiguousApprovalSubmission() || isRecoverableConnectionError(error))) {
+                    uncertainApprovals[fixed to sessionId] = approvalId
+                    if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                        updateState { copy(approvalOutcomeUnknownId = approvalId, error = null) }
+                        launch { refreshSession(sessionId, generation) }
+                    }
+                    return@launch
+                }
+                if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation)) return@launch
                 mutableState.update { state ->
                     state.copy(activeDecision = state.activeDecision?.let {
                         if (it.id == approvalId) it.copy(submissionError = error.message ?: "Approval could not be resolved") else it
@@ -3154,7 +3259,7 @@ class ChatViewModel(
                 showError(error, "Approval could not be resolved")
             } finally {
                 mutableState.update { state ->
-                    if (state.resolvingApprovalId == approvalId) state.copy(resolvingApprovalId = null,
+                    if (selectedRepository === fixed && isCurrentSession(sessionId, generation) && state.resolvingApprovalId == approvalId) state.copy(resolvingApprovalId = null,
                         activeDecision = state.activeDecision?.let {
                             if (it.id == approvalId) it.copy(isSubmitting = false) else it
                         }) else state
@@ -3167,9 +3272,24 @@ class ChatViewModel(
         val fixed = activeRepository() ?: return
         val sessionId = mutableState.value.sessionId
         val generation = sessionGeneration
-        updateState { copy(error = null) }
+        val hasUncertainApproval = sessionId != null && uncertainApprovals.containsKey(fixed to sessionId)
+        if (hasUncertainApproval && mutableState.value.approvalRechecking) return
+        updateState { copy(error = null, approvalRechecking = hasUncertainApproval) }
         viewModelScope.launch {
             try {
+                val uncertainId = sessionId?.let { uncertainApprovals[fixed to it] }
+                if (sessionId != null && uncertainId != null) {
+                    val acknowledged = fixed.resumePendingApproval(sessionId, uncertainId)
+                    if (acknowledged > 0) {
+                        uncertainApprovals.remove(fixed to sessionId)
+                        if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                            updateState { copy(approvalOutcomeUnknownId = null,
+                                activeDecision = activeDecision?.let { decision ->
+                                    if (decision.approvalId == uncertainId) decision.copy(isSubmitting = false, isSubmitted = true) else decision
+                                }) }
+                        }
+                    }
+                }
                 fixed.refreshSessions()
                 // A successful explicit recheck restores the ability to stop
                 // a task that the computer still reports as running. It never
@@ -3186,6 +3306,10 @@ class ChatViewModel(
                 throw cancelled
             } catch (error: Throwable) {
                 if (activeRepository() === fixed && sessionGeneration == generation) showError(error, "Sessions could not be loaded")
+            } finally {
+                if (selectedRepository === fixed && sessionGeneration == generation && mutableState.value.sessionId == sessionId) {
+                    updateState { copy(approvalRechecking = false) }
+                }
             }
         }
     }
