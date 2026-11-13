@@ -309,11 +309,11 @@ test('cancellation persists request without pretending live Run has terminated; 
   const retry = await route(v, `/${run.id}/cancel`, { method: 'POST', body });
   assert.equal(retry.body.disposition, 'already_terminal'); assert.equal(retry.body.run.state, 'cancelled');
 });
-test('cancellation refuses changed active Run instead of cancelling its successor', async () => {
+test('cancellation targets the specified Run without cancelling its successor', async () => {
   const v = await seed(); const original = await makeRun(v); const successor = await makeRun(v); await active(v, successor);
   const r = await route(v, `/${original.id}/cancel`, { method: 'POST', body: { version: 1, expiresAt: new Date(Date.now() + 10000).toISOString() } });
-  assert.equal(r.status, 409); assert.equal(r.body.code, 'RUN_IDENTITY_CONFLICT');
-  assert.equal((await runs.getRun(original.id)).cancelRequested, false); assert.equal((await runs.getRun(successor.id)).cancelRequested, false);
+  assert.equal(r.status, 200); assert.equal(r.body.disposition, 'cancellation_requested');
+  assert.equal((await runs.getRun(original.id)).cancelRequested, true); assert.equal((await runs.getRun(successor.id)).cancelRequested, false);
 });
 test('expired, oversize and unsupported cancellation bodies never create effects', async () => {
   const v = await seed(); const run = await makeRun(v); await active(v, run);

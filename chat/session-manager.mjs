@@ -264,6 +264,7 @@ import {
   isTerminalRunState,
   listRunIds,
   listRunIndexEntries,
+  listDurableSessionRunIndexEntries,
   materializeRunSpoolLine,
   readRunSpoolDelta,
   readRunSpoolRecords,
@@ -2529,8 +2530,9 @@ async function flushQueuedFollowUps(sessionId) {
   const promise = (async () => {
     clearFollowUpFlushTimer(sessionId);
 
-    const rawSession = await findSessionMeta(sessionId);
+    let rawSession = await findSessionMeta(sessionId);
     if (!rawSession) return false;
+    rawSession = (await reconcileSessionActiveRuns(rawSession)).meta;
 
     if (rawSession.activeRunId) {
       const activeRun = await flushDetachedRunIfNeeded(sessionId, rawSession.activeRunId) || await getRun(rawSession.activeRunId);
@@ -3370,6 +3372,7 @@ function timelineBundleKeyFor(sessionId, historyMeta, activeRunId, run) {
 
 async function getSessionTimelineBundleInternal(sessionId, options = {}) {
   let sessionMeta = options?.sessionMeta || await findSessionMeta(sessionId);
+  sessionMeta = (await reconcileSessionActiveRuns(sessionMeta)).meta;
   let activeRunId = typeof sessionMeta?.activeRunId === 'string' ? sessionMeta.activeRunId.trim() : '';
   let synchronizedActiveRun = false;
   if (activeRunId) {
@@ -7040,7 +7043,55 @@ function normalizeSessionReviewedAt(value) {
   return Number.isFinite(time) ? new Date(time).toISOString() : '';
 }
 
+// Compatibility selection for concurrent Runs: retain a live pointer; if it
+// is absent or terminal, select the newest live Run (id breaks timestamp ties).
+// Run status is authoritative; the Session pointer is only a projection.
+async function reconcileSessionActiveRuns(meta) {
+  if (!meta?.id) return { meta, runs: [] };
+  const entries = await listDurableSessionRunIndexEntries(meta.id);
+  // Failed Runs can reopen during auth recovery; status can reach disk just
+  // before its index append, so hydrate failed summaries as well.
+  const ids = new Set(entries.filter(entry =>
+    !isTerminalRunState(entry.state) || entry.state === 'failed').map(entry => entry.id));
+  if (meta.activeRunId) ids.add(meta.activeRunId);
+  const runs = (await Promise.all([...ids].map(id => getRun(id)))).filter(run =>
+    run && run.sessionId === meta.id && !isTerminalRunState(run.state) &&
+    !(run.appApiMessageQueue && run.state === 'queued'));
+  runs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    || String(b.id).localeCompare(String(a.id)));
+  const result = await withSessionsMetaMutation(async (rows, save) => {
+    const index = rows.findIndex(row => row.id === meta.id);
+    if (index < 0) return null;
+    const current = rows[index];
+    const pointed = current.activeRunId ? await getRun(current.activeRunId) : null;
+    if (pointed && pointed.sessionId === meta.id && !isTerminalRunState(pointed.state) &&
+        !(pointed.appApiMessageQueue && pointed.state === 'queued')) {
+      if (!runs.some(run => run.id === pointed.id)) runs.push(pointed);
+      return current;
+    }
+    let replacement = null;
+    for (const candidate of runs) {
+      const latest = await getRun(candidate.id);
+      if (latest && latest.sessionId === meta.id && !isTerminalRunState(latest.state) &&
+          !(latest.appApiMessageQueue && latest.state === 'queued')) {
+        replacement = latest.id;
+        break;
+      }
+    }
+    if ((current.activeRunId || null) === replacement) return current;
+    const draft = { ...current, updatedAt: nowIso() };
+    if (replacement) draft.activeRunId = replacement;
+    else delete draft.activeRunId;
+    rows[index] = draft;
+    await save(rows, { immediate: true, durable: true });
+    return draft;
+  });
+  return { meta: result || meta, runs };
+}
+
 async function enrichSessionMeta(meta, options = {}) {
+  const active = await reconcileSessionActiveRuns(meta);
+  meta = active.meta;
   const runtimeState = sessionRuntimeStateById.get(meta.id);
   const hierarchy = buildSessionHierarchyProjection(meta, options.hierarchyIndex);
   const listSummary = options.listSummary === true;
@@ -7125,6 +7176,7 @@ async function enrichSessionMeta(meta, options = {}) {
       queuedCount,
       authRecovery: runActivity.authRecovery,
     }),
+    activeRuns: active.runs.map(run => ({ id: run.id, state: run.state, createdAt: run.createdAt || null })),
     ...(delegationProjection ? {
       delegationSummary: {
         total: delegationProjection.total,
@@ -9017,6 +9069,8 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
     return changed;
   });
   sessionChanged = sessionChanged || finalizedMeta.changed;
+  const remainingActive = await reconcileSessionActiveRuns(finalizedMeta.meta);
+  if ((remainingActive.meta?.activeRunId || '') !== (finalizedMeta.meta?.activeRunId || '')) sessionChanged = true;
   if (staleClaudeResumeDetected && finalizedMeta.changed) {
     await appendEvent(sessionId, statusEvent('Cleared stale Claude resume id — next message will continue from Ragent history.'));
     historyChanged = true;
@@ -9510,6 +9564,9 @@ async function reconcileOrphanDetachedRuns() {
         schedulePreparingRun(run.sessionId, runId);
         continue;
       }
+      // Concurrent derived Runs remain independently observable even when
+      // another Run is the Session's compatibility selection.
+      observeDetachedRun(run.sessionId, runId);
       const anchorMs = Date.parse(
         run.runnerHeartbeatAt || run.updatedAt || run.createdAt || '',
       );
@@ -9555,7 +9612,9 @@ async function syncDetachedRun(sessionId, runId) {
 }
 
 export async function startDetachedRunObservers() {
-  const allSessions = await loadSessionsMeta();
+  let allSessions = await loadSessionsMeta();
+  for (const meta of allSessions) await reconcileSessionActiveRuns(meta);
+  allSessions = await loadSessionsMeta();
   // A prior process can exit after a provider marks a Run terminal but before
   // the historical projection supplies finalizedAt. Reclaim those durable
   // account slots before rehydrating queued work, otherwise every later AgY
@@ -9831,6 +9890,7 @@ export async function getSessionReadSnapshot(sessionId, { includeRun = true } = 
   // cannot silently turn a missing or malformed meta.json into empty history.
   let sessionMeta = await findSessionMeta(sessionId);
   if (!sessionMeta) return null;
+  sessionMeta = (await reconcileSessionActiveRuns(sessionMeta)).meta;
   let lastFingerprint = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const historyMeta = await loadMeta(sessionId, { strict: true });
@@ -13188,6 +13248,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
 
   let activeRun = null;
   let hasActiveRun = false;
+  sessionMeta = (await reconcileSessionActiveRuns(sessionMeta)).meta;
   const hasPendingCompact = sessionRuntimeStateById.get(sessionId)?.pendingCompact === true;
   const activeRunId = typeof sessionMeta?.activeRunId === 'string' ? sessionMeta.activeRunId : null;
   const isPreparingRunContinuation = Boolean(preparationRunId && activeRunId === preparationRunId);
@@ -15664,18 +15725,21 @@ export async function submitPlanAction(sessionId, planId, options = {}) {
 
 export async function cancelActiveRun(sessionId, { expectedRunId = null, reconcile = true, beforeWrite = null, authorizeWrite = null } = {}) {
   const session = await findSessionMeta(sessionId);
-  if (expectedRunId !== null && session?.activeRunId && session.activeRunId !== expectedRunId) {
-    throw Object.assign(new Error("The active Run changed before cancellation"),
-      { code: "RUN_IDENTITY_CONFLICT", statusCode: 409 });
-  }
-  if (!session?.activeRunId) return null;
-  // Retain the identity across reconciliation: legacy metadata reads can be
-  // live aliases, and a newly active Run must never become this request's target.
-  const activeRunId = session.activeRunId;
+  if (!session) return null;
+  // An explicit Run target remains the target even if another concurrent Run
+  // owns the Session's legacy pointer. A Session-level stop still captures
+  // that pointer once, so it cannot switch to a later Run during reconciliation.
+  const activeRunId = expectedRunId !== null ? expectedRunId : session.activeRunId;
+  if (!activeRunId) return null;
   // Conditional effects must not await a reconciliation started outside
   // their metadata transaction. That observer may already await this lock.
-  const run = (reconcile ? await flushDetachedRunIfNeeded(sessionId, activeRunId) : null) || await getRun(activeRunId);
+  let run = await getRun(activeRunId);
   if (!run) return null;
+  if (run.id !== activeRunId || run.sessionId !== sessionId) {
+    throw Object.assign(new Error("Run identity changed before cancellation"),
+      { code: "RUN_IDENTITY_CONFLICT", statusCode: 409 });
+  }
+  if (reconcile) run = await flushDetachedRunIfNeeded(sessionId, activeRunId) || run;
   if (run.id !== activeRunId || run.sessionId !== sessionId) {
     throw Object.assign(new Error("Run identity changed before cancellation"),
       { code: "RUN_IDENTITY_CONFLICT", statusCode: 409 });

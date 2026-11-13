@@ -602,6 +602,34 @@ export function getRunIndexSnapshotForTests() {
   return [...runIndexById.values()].map((entry) => ({ ...entry }));
 }
 
+// Unlike the ordinary hot-path cache, this snapshot includes records appended
+// by another control process. The index lock prevents reading a partial append.
+let durableRunIndexSnapshot = null;
+let durableRunIndexStamp = '';
+export async function listDurableSessionRunIndexEntries(sessionId) {
+  await ensureRunIndex();
+  const stats = await statOrNull(RUN_INDEX_PATH);
+  const stamp = stats ? `${stats.mtimeMs}:${stats.size}` : '';
+  if (!durableRunIndexSnapshot || stamp !== durableRunIndexStamp) {
+    await withRunIndexFileLock(async () => {
+      const raw = await readFile(RUN_INDEX_PATH, 'utf8');
+      const parsed = parseRunIndexText(raw);
+      if (!parsed.headerSeen || parsed.invalidRecordSeen) throw new Error('Run index is invalid');
+      const bySession = new Map();
+      for (const entry of parsed.entries.values()) {
+        if (!entry.sessionId) continue;
+        const rows = bySession.get(entry.sessionId) || [];
+        rows.push(entry);
+        bySession.set(entry.sessionId, rows);
+      }
+      durableRunIndexSnapshot = bySession;
+      const current = await statOrNull(RUN_INDEX_PATH);
+      durableRunIndexStamp = current ? `${current.mtimeMs}:${current.size}` : '';
+    });
+  }
+  return durableRunIndexSnapshot.get(sessionId) || [];
+}
+
 // Return the small, durable Run summaries needed by queue/recovery paths. The
 // caller can filter before hydrating status.json/manifest.json, avoiding a
 // full Run-directory walk whenever a provider slot becomes available.
