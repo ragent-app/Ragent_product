@@ -66,11 +66,12 @@ async function makeProject(name, root) {
 
 async function makeTerminalRun({ project, sessionId, runId, result = {} }) {
   await ensureRunDirectory(runId);
+  const requestId = `req_${runId}`;
   await createRun({
-    status: { id: runId, sessionId, state: 'completed', contextInputTokens: 100, contextWindowTokens: 64000, normalizedLineCount: 5 },
+    status: { id: runId, sessionId, requestId, state: 'completed', contextInputTokens: 100, contextWindowTokens: 64000, normalizedLineCount: 5 },
     manifest: {
       sessionId,
-      requestId: `req_${runId}`,
+      requestId,
       projectId: project.id,
       executionScope: { projectId: project.id, sessionId, workspaceRevision: 1, git: { state: 'available', baseCommit: 'base', headCommit: 'head', dirty: false, partial: false } },
       executionScopeDigest: 'sha256:phase-scope',
