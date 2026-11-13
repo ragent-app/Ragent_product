@@ -215,6 +215,7 @@ export async function dispatchOrganizationPhase({
       },
       organizationId: organization.id,
       organizationNodeId: node.id,
+      organizationBindingGeneration: node.bindingGeneration,
     };
     const result = await runtimeOrchestrator.dispatch({
       rootSessionId: organization.rootSessionId,

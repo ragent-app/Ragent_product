@@ -1,7 +1,7 @@
 import { withDatabase, getCollaborationByIdempotencyKey } from './collaboration-store.mjs';
 import { getOrganization, getNode } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
-import { getRun, requestRunCancel } from './runs.mjs';
+import { getRun, getRunManifest, requestRunCancel } from './runs.mjs';
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
 import { getFactoryWorkItem, updateFactoryBinding } from './factory-control.mjs';
 import { reserveFactoryBudget, settleFactoryBudget } from './organization-governor.mjs';
@@ -78,6 +78,33 @@ export async function assertFactoryExecutionFence(context) {
   });
 }
 
+async function executionAuthorityRevoked(organizationId, item, binding) {
+  return withDatabase((db) => {
+    const org = db.prepare('SELECT * FROM organizations WHERE id=?').get(organizationId);
+    const node = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assigneeNodeId, organizationId);
+    if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || !node || node.retired_revision !== null
+        || node.binding_generation !== binding.bindingGeneration || !node.current_session_id
+        || org.current_revision !== item.contract?.organizationRevision) return true;
+    const paths = item.contract?.accessMode === 'read' ? [] : (Array.isArray(item.contract?.allowedPaths) ? item.contract.allowedPaths : []);
+    let nodeGrant;
+    try { nodeGrant = JSON.parse(node.grant_json || '{}'); } catch { return true; }
+    const nodePaths = Array.isArray(nodeGrant.writablePaths) ? nodeGrant.writablePaths : [];
+    if (paths.length && (nodeGrant.canWrite !== true || paths.some((path) => !nodePaths.some((root) => within(path, root))))) return true;
+    for (const capability of paths.length ? ['run', 'write'] : ['run']) {
+      const grant = db.prepare(`SELECT * FROM organization_grants WHERE organization_id=? AND node_id=?
+        AND capability=? AND revision<=? ORDER BY revision DESC,id DESC LIMIT 1`).get(organizationId, node.id, capability, org.current_revision);
+      if (!grant?.allow) return true;
+      let scope;
+      try { scope = JSON.parse(grant.scope_json || '{}'); } catch { return true; }
+      if ((scope.projectId && scope.projectId !== item.projectId)
+          || Object.keys(scope).some((key) => !['projectId', 'writablePaths'].includes(key))
+          || (capability === 'write' && Array.isArray(scope.writablePaths)
+            && paths.some((path) => !scope.writablePaths.some((root) => within(path, root))))) return true;
+    }
+    return false;
+  });
+}
+
 export function createFactoryExecutionAdapter({ organizationId, actor, orchestrator = getDefaultCollaborationOrchestrator() } = {}) {
   if (!organizationId || !actor) throw new Error('Factory adapter requires an organization and trusted actor');
   async function admit(item) {
@@ -139,14 +166,26 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     const binding = latest.bindings.find((entry) => entry.contractRevision === latest.contractRevision
       && entry.executionEpoch === latest.executionEpoch && entry.bindingGeneration === latest.bindingGeneration);
     if (!binding) return null;
+    const revoked = ['intent', 'running', 'unknown'].includes(binding.status)
+      && await executionAuthorityRevoked(organizationId, latest, binding);
     const org = await getOrganization(organizationId);
     const collaboration = known || (binding.collaborationId ? await orchestrator.get(binding.collaborationId)
       : await getCollaborationByIdempotencyKey(org.rootSessionId, binding.dispatchKey));
-    if (!collaboration && binding.status === 'intent' && latest.controlState === 'none' && lease) {
+    if (!collaboration && binding.status === 'intent' && latest.controlState === 'none' && lease && !revoked) {
       return dispatch({ item: latest, binding }, lease);
     }
-    if (!collaboration) return null;
+    if (!collaboration) {
+      if (revoked && binding.status !== 'unknown') return updateFactoryBinding({ organizationId, workItemId: latest.id,
+        expectedVersion: latest.rowVersion, contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
+        bindingGeneration: binding.bindingGeneration, action: 'block', payload: { reason: { code: 'authorization_revoked' } } }, actor);
+      return null;
+    }
     const attempt = collaboration.attempts.find((entry) => entry.runId);
+    if (revoked && !attempt?.runId && binding.status !== 'unknown') {
+      return updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
+        contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch, bindingGeneration: binding.bindingGeneration,
+        action: 'block', payload: { reason: { code: 'authorization_revoked' } } }, actor);
+    }
     const actualRun = attempt?.runId ? await getRun(attempt.runId) : null;
     if (actualRun && ['completed', 'failed', 'cancelled'].includes(actualRun.state)
         && collaboration.policy?.factoryExecution?.budgetKey) {
@@ -165,7 +204,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       }
       // Absence of a provider-total record is unknown, not zero: keep reserved.
     }
-    if ((latest.controlState === 'cancel_requested' || latest.controlState === 'pause_requested') && attempt?.runId) {
+    if ((latest.controlState === 'cancel_requested' || latest.controlState === 'pause_requested' || revoked) && attempt?.runId) {
       const run = actualRun;
       if (run?.state === 'cancelled' && attempt.state === 'cancelled') {
         return updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
@@ -181,6 +220,11 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         });
       }
       if (run && !['completed', 'failed', 'cancelled'].includes(run.state) && !run.cancelRequested) await requestRunCancel(attempt.runId);
+      if (revoked && binding.status !== 'unknown') {
+        await updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
+          contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch, bindingGeneration: binding.bindingGeneration,
+          action: 'block', payload: { reason: { code: 'authorization_revoked', runId: attempt.runId } } }, actor);
+      }
       return { cancellationRequested: true, runId: attempt.runId, terminalState: run?.state || 'unknown' };
     }
     if (binding.status === 'intent' && attempt?.runId) {
@@ -193,6 +237,10 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         const { bindFactoryValidationWorkspace } = await import('./factory-validation-workspace.mjs');
         await bindFactoryValidationWorkspace({ organizationId, item: bound.item, binding: bound.binding, attempt, actor });
       }
+      try {
+        const { recordAcceptedTeamMessageInputs } = await import('./organization-team-messages.mjs');
+        await recordAcceptedTeamMessageInputs({ sessionId: attempt.sessionId, runId: attempt.runId, manifest: await getRunManifest(attempt.runId) });
+      } catch (error) { console.error('[factory] Team message receipt pending:', error?.message || String(error)); }
       return bound;
     }
     if (binding.status === 'running' && attempt?.runId === binding.runId) {
@@ -200,6 +248,10 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         const { bindFactoryValidationWorkspace } = await import('./factory-validation-workspace.mjs');
         await bindFactoryValidationWorkspace({ organizationId, item: latest, binding, attempt, actor });
       }
+      try {
+        const { recordAcceptedTeamMessageInputs } = await import('./organization-team-messages.mjs');
+        await recordAcceptedTeamMessageInputs({ sessionId: attempt.sessionId, runId: attempt.runId, manifest: await getRunManifest(attempt.runId) });
+      } catch (error) { console.error('[factory] Team message receipt pending:', error?.message || String(error)); }
     }
     if (binding.status === 'running' && attempt?.state === 'succeeded' && attempt.runId === binding.runId) {
       const session = await getSession(attempt.sessionId);
