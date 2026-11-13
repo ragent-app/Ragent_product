@@ -9,6 +9,9 @@ import { getNode } from './organization-store.mjs';
 import { replaceManagedSession } from './organization-replan.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryRelease, getFactoryReleaseOperation } from './factory-release.mjs';
+import { setPositionProfile, addTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
+import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
+import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
 
@@ -40,9 +43,14 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const lifecycle = /^\/api\/organizations\/([^/]+)\/factory\/lifecycle(?:\/([^/]+)\/(finalize|cancel))?$/.exec(String(pathname || ''));
   const nodeRebind = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/rebind(?:\/([^/]+)\/(cancel))?$/.exec(String(pathname || ''));
   const release = /^\/api\/organizations\/([^/]+)\/factory\/releases\/(packages|authorizations|requests|operations)(?:\/([^/]+))?$/.exec(String(pathname || ''));
+  const team = /^\/api\/organizations\/([^/]+)\/factory\/team(?:\/(profiles|relations))?$/.exec(String(pathname || ''));
+  const handoffCreate = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/handoffs$/.exec(String(pathname || ''));
+  const handoffRead = /^\/api\/organizations\/([^/]+)\/factory\/handoffs\/([^/]+)$/.exec(String(pathname || ''));
+  const shadow = /^\/api\/organizations\/([^/]+)\/factory\/(shadow|readiness)(?:\/(sync))?$/.exec(String(pathname || ''));
+  const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !response && !acceptance && !lifecycle && !nodeRebind && !release) return false;
+  if (!match && !messages && !response && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts) return false;
   if (response) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== `organization.message.${response[3]}` || decodeURIComponent(response[1]) !== authSession.sessionId) {
       writeJson(res, 403, { error: 'Scoped message capability required' }); return true;
@@ -60,6 +68,40 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, 403, { error: 'Owner access required' }); return true;
   }
   try {
+    if (shadowAttempts) {
+      if (req.method!=='GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const url=new URL(req.url || pathname,'http://localhost');
+      const after=url.searchParams.get('after') || '0';
+      if (!/^\d+$/.test(after) || !Number.isSafeInteger(Number(after))) { writeJson(res,400,{error:'Invalid attempt cursor'}); return true; }
+      writeJson(res,200,await listFactoryShadowAttempts(decodeURIComponent(shadowAttempts[1]),decodeURIComponent(shadowAttempts[2]),{after:Number(after),limit:Number(url.searchParams.get('limit') || 50)},actor)); return true;
+    }
+    if (shadow) {
+      const organizationId=decodeURIComponent(shadow[1]), actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const url=new URL(req.url || pathname,'http://localhost'), options={cursor:text(url.searchParams.get('cursor')),limit:Number(url.searchParams.get('limit') || 50)};
+      if (req.method==='GET' && !shadow[3]) { writeJson(res,200,shadow[2]==='readiness' ? await getFactoryRolloutReadiness(organizationId,actor) : await listFactoryShadow(organizationId,options,actor)); return true; }
+      if (req.method!=='POST' || shadow[2]!=='shadow' || shadow[3]!=='sync') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,8192); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      writeJson(res,200,await syncFactoryShadow({organizationId,cursor:text(body.cursor),limit:body.limit},actor)); return true;
+    }
+    if (team || handoffCreate || handoffRead) {
+      const selected=team || handoffCreate || handoffRead, organizationId=decodeURIComponent(selected[1]);
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      await listFactoryWorkItems(organizationId,{limit:1},actor);
+      if (req.method==='GET' && team && !team[2]) { writeJson(res,200,await getTeamConfiguration(organizationId,actor)); return true; }
+      if (req.method==='GET' && handoffRead) { writeJson(res,200,await getFactoryTaskHandoff(organizationId,decodeURIComponent(handoffRead[2]),actor)); return true; }
+      if (req.method!=='POST' || handoffRead || (team && !team[2])) { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,32*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      if (!body || typeof body!=='object' || Array.isArray(body)) { writeJson(res,400,{error:'Request must be an object'}); return true; }
+      const input={...body,organizationId};
+      const result=handoffCreate ? await createFactoryTaskHandoff({...input,workItemId:decodeURIComponent(handoffCreate[2])},actor)
+        : team[2]==='profiles' ? await setPositionProfile(input,actor) : await addTeamRelation(input,actor);
+      writeJson(res,200,result); return true;
+    }
     if (release) {
       const organizationId=decodeURIComponent(release[1]);
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};

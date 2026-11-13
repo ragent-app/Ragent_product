@@ -786,6 +786,7 @@
           for (const item of list.items) button(content, `${item.contract?.objective || item.id} · ${item.state} · ${item.controlState}`, () => showItem(item.id));
           if (list.nextCursor) add(content, 'p', 'More items exist; this view shows the first page.');
           button(content, 'Team lifecycle', showLifecycle);
+          button(content, 'Positions and relationships', showTeamConfiguration);
           button(content, 'Refresh', showList);
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work items: ${error.message}`); button(content, 'Retry', showList); }
       };
@@ -816,6 +817,10 @@
           button(content, 'Increase priority', () => send('ChangePriority', { priority: item.priority + 1 }));
           button(content, 'Request pause', () => send('RequestPause'));
           button(content, 'Request cancel', () => send('RequestCancel'));
+          button(content, 'Create task handoff', () => {
+            const payload={commandId:root.crypto.randomUUID(),expectedVersion:item.rowVersion};
+            const submit=async () => { try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/handoffs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); receipt.textContent=`Handoff ${result.id} as of ${result.asOf}; stale: ${result.stale}.`; add(content,'pre',JSON.stringify(result.facts,null,2)); } catch(error) { receipt.textContent=`Handoff not confirmed: ${error.message}`; button(content,'Retry same handoff',submit); } }; submit();
+          });
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work item: ${error.message}`); button(content, 'All work items', showList); }
       };
       const showLifecycle = async () => {
@@ -853,6 +858,24 @@
             }
           }
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load team lifecycle: ${error.message}`); button(content, 'All work items', showList); }
+      };
+      const showTeamConfiguration = async () => {
+        content.replaceChildren(); add(content,'p','Loading team configuration…');
+        try {
+          const data=await request('/team'); content.replaceChildren(); button(content,'All work items',showList);
+          add(content,'h3',`Positions and relationships · organization revision ${data.organizationRevision}`);
+          add(content,'pre',JSON.stringify(data,null,2));
+          const field=(placeholder) => { const el=document.createElement('input'); el.placeholder=placeholder; content.appendChild(el); return el; };
+          const node=field('Node ID'), responsibility=field('Responsibility'), capabilities=field('Required capabilities, comma separated'), runtime=field('Preferred runtime'), alternatives=field('Alternative runtimes, comma separated'), capacity=field('Capacity');
+          const output=add(content,'p','Capability requirements (run, write, review, delegate) are checked against current grants at admission and during reconciliation; unknown requirements block admission. Each node remains limited to one active task. Runtime preferences are advisory and do not change grants or switch an active runtime.');
+          const submit=(path,payload) => { const run=async () => { try { const result=await request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); output.textContent=JSON.stringify(result); } catch(error) { output.textContent=`Not confirmed: ${error.message}`; button(content,'Retry same request',run); } }; run(); };
+          button(content,'Save position profile',() => { const id=node.value.trim(); const current=data.profiles.find(p=>p.nodeId===id); submit('/team/profiles',{commandId:root.crypto.randomUUID(),nodeId:id,expectedOrganizationRevision:data.organizationRevision,expectedProfileVersion:current?.version || 0,profile:{responsibility:responsibility.value,capabilityRequirements:capabilities.value.split(',').map(x=>x.trim()).filter(Boolean),runtimePreference:runtime.value,alternativeRuntimes:alternatives.value.split(',').map(x=>x.trim()).filter(Boolean),capacity:Number(capacity.value)}}); });
+          const from=field('From node ID'),to=field('To node ID');
+          const type=document.createElement('select'); for(const value of ['REVIEWS','CONSULTS']) { const option=document.createElement('option'); option.value=value; option.textContent=value; type.appendChild(option); } content.appendChild(type);
+          const required=document.createElement('input'); required.type='checkbox'; content.appendChild(required); add(content,'span','Propose required review');
+          button(content,'Add relationship',() => submit('/team/relations',{commandId:root.crypto.randomUUID(),fromNodeId:from.value.trim(),toNodeId:to.value.trim(),edgeType:type.value,requiredReview:required.checked,expectedOrganizationRevision:data.organizationRevision}));
+          add(content,'p','Required review remains a proposal; the impact report identifies contracts that need amendment.');
+        } catch(error) { content.replaceChildren(); add(content,'p',`Unable to load team configuration: ${error.message}`); button(content,'All work items',showList); }
       };
       await showList();
     }
