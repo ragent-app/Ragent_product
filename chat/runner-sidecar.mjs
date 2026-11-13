@@ -1656,6 +1656,7 @@ export async function createCodexAppServerRunState({
     mcpRequired: false,
     mcpRequiredServers: [],
     mcpAutoApproveServerNames: new Set(),
+    autoApproveCodexApps: false,
     mcpExpectedServerName: '',
     mcpRequiredToolNames: [],
     mcpStartupStatuses: Object.create(null),
@@ -2806,11 +2807,12 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     return null;
   }
   const managedMcp = readCodexAppServerManagedMcpRequest(parsed);
+  const codexApps = managedMcp?.mcpServerName === 'codex_apps'
+    && state.autoApproveCodexApps === true;
 
   if (managedMcp
-    && state.mcpRequired === true
+    && (codexApps || (state.mcpRequired === true && isAutoApprovedMcpServer(state, managedMcp.mcpServerName)))
     && state.startedTurn === true
-    && isAutoApprovedMcpServer(state, managedMcp.mcpServerName)
     && isCurrentCodexAppServerMcpRequest(approval, state)
     && !state.autoApprovedMcpRequestIds.has(approval.approvalId)) {
     const message = buildCodexAppServerApprovalResponseMessage(approval, 'approve');
@@ -2829,7 +2831,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
           providerMethod: approval.providerMethod || '',
           autoApproved: true,
           mcpServerName: managedMcp.mcpServerName,
-          reason: 'run-scoped managed MCP server',
+          reason: codexApps ? 'official Codex account app tool call' : 'run-scoped managed MCP server',
         },
       });
       return null;
@@ -3980,6 +3982,11 @@ async function main() {
     ? await readJsonIfPresent(join(runnerCodexHomeDir, 'auth.json'), readFile)
     : null;
   const codexOAuthRuntime = Boolean(runtimeAuth?.tokens && typeof runtimeAuth.tokens === 'object');
+  if (appServerState) {
+    appServerState.autoApproveCodexApps = codexOAuthRuntime && !readOnlyRequested
+      && !WORKBENCH_EXECUTION_POLICY && appServerState.interactionMode !== 'plan'
+      && appServerState.permissionMode !== 'plan';
+  }
   if (appServerState && WORKBENCH_EXECUTION_POLICY?.codexPermissionProfile) {
     // The operator profile supplies the approval policy through requirements.
     appServerState.agentocApprovalGate = false;
