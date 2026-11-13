@@ -1035,14 +1035,9 @@ class RoomSessionRepository(
                 )
                 dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
                 execute(ApiRequest("POST", path, body, requestId, requestId))
-                dao.deleteOperation(requestId)
+                acknowledgeDerivedTurn(operation)
             } catch (error: Throwable) {
-                val recoverable = dao.getPendingOperation(requestId) ?: operation
-                dao.upsertOperation(recoverable.copy(
-                    state = if (isPermanentClientFailure(error)) "failed" else "pending",
-                    updatedAt = System.currentTimeMillis(),
-                    lastError = error.message,
-                ))
+                persistOperationFailure(operation, error)
                 throw error
             }
         }
@@ -1464,6 +1459,10 @@ class RoomSessionRepository(
         var after = 0L
         var watermark: Long? = null
         var lastEventId: String? = null
+        val derivedIds = (dao.pendingOperations() + dao.acknowledgedOperations())
+            .filter { it.kind in DERIVED_TURN_KINDS && sessionIdFromPath(it.path) == sessionId }
+            .mapTo(mutableSetOf()) { it.requestId }
+        val derivedEvents = mutableListOf<SessionEventDto>()
         while (true) {
             val response = requestDurableEventPage(eventPagePath(sessionId, after, waitForEvents = false))
             val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
@@ -1477,6 +1476,7 @@ class RoomSessionRepository(
                 break
             }
             for (event in events) {
+                if (event.type == "run_regenerate" && event.requestId in derivedIds) derivedEvents.add(event)
                 check(event.startingSeq() <= after + 1 && event.boundarySeq() > after) {
                     "Timeline rebuild gap at ${after + 1}"
                 }
@@ -1501,6 +1501,15 @@ class RoomSessionRepository(
             dao.deleteSessionMessages(sessionId)
             dao.publishStagedMessages(sessionId, System.currentTimeMillis())
             dao.deleteSessionEventProjection(sessionId)
+            for (event in derivedEvents) {
+                val id = event.requestId ?: continue
+                dao.insertSessionEvent(SessionEventEntity(event.storageEventId(sessionId), sessionId,
+                    event.boundarySeq(), id, event.revision, event.clientId, event.type, event.fingerprint(), System.currentTimeMillis()))
+                val operation = dao.getPendingOperation(id)
+                if (operation != null && operation.kind in DERIVED_TURN_KINDS && sessionIdFromPath(operation.path) == sessionId) {
+                    dao.deleteOperation(id)
+                }
+            }
             dao.upsertCursor(SyncCursorEntity(sessionId, after, lastEventId, updatedAt = System.currentTimeMillis()))
             dao.markTimelineProjectionCurrent(sessionId)
             dao.clearStagedMessages(sessionId)
@@ -2764,6 +2773,45 @@ class RoomSessionRepository(
 
     override suspend fun resumePendingOperations(): Int = resumePendingOperationsMatching({ true })
 
+    override suspend fun pendingDerivedTurns(sessionId: String): List<PendingDerivedTurn> =
+        (dao.pendingOperations() + dao.acknowledgedOperations()).mapNotNull { operation ->
+            if (operation.kind !in DERIVED_TURN_KINDS || sessionIdFromPath(operation.path) != sessionId) return@mapNotNull null
+            val parent = runCatching {
+                val payload = AgentocProtocol.json.parseToJsonElement(operation.payload).jsonObject
+                if (operation.kind == "resend_edited_message_with_attachments") payload.string("parentRequestId") else payload.string("requestId")
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            PendingDerivedTurn(parent, operation.kind != "regenerate_message")
+        }.distinct()
+
+    override suspend fun reconcileDerivedTurn(sessionId: String, parentRequestId: String, edited: Boolean): Boolean {
+        val path = "/api/sessions/${encode(sessionId)}/${if (edited) "resend-edited" else "regenerate"}"
+        val kinds = if (edited) setOf("resend_edited_message", "resend_edited_message_with_attachments") else setOf("regenerate_message")
+        val matches: (PendingOperationEntity) -> Boolean = { operation ->
+            operation.path == path && operation.kind in kinds && runCatching {
+                val payload = AgentocProtocol.json.parseToJsonElement(operation.payload).jsonObject
+                (if (operation.kind == "resend_edited_message_with_attachments") payload.string("parentRequestId") else payload.string("requestId")) == parentRequestId
+            }.getOrDefault(false)
+        }
+        val operations = (dao.pendingOperations() + dao.acknowledgedOperations()).filter(matches)
+        if (operations.isEmpty()) return false
+        if (operations.any { it.state != "acknowledged" }) resumePendingOperationsMatching(matches)
+        refreshEvents(sessionId)
+        // Retained server run identity is authoritative even when an old event
+        // is outside the current history window; missing evidence is not failure.
+        for (operation in operations) {
+            val current = dao.getPendingOperation(operation.requestId) ?: continue
+            if (current.state != "acknowledged") continue
+            val result = try { loadMessageResult(sessionId, current.requestId) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Throwable) { continue }
+            if (result.string("sessionId") == sessionId && result.string("requestId") == current.requestId &&
+                !result.string("runId").isNullOrBlank() && result.string("state") != "unconfirmed") {
+                dao.deleteOperation(current.requestId)
+            }
+        }
+        return true
+    }
+
     private suspend fun approvalOperationMatcher(sessionId: String, approvalId: String): (PendingOperationEntity) -> Boolean {
         val approval = dao.getApproval(sessionId, approvalId) ?: return { false }
         val runId = approval.runId
@@ -2886,6 +2934,8 @@ class RoomSessionRepository(
                     }
                     if (operation.kind in setOf("approved_actions", "privileged_category")) {
                         acknowledgeBatchOperation(operation)
+                    } else if (operation.kind in DERIVED_TURN_KINDS) {
+                        acknowledgeDerivedTurn(operation)
                     }
                     database.withTransaction {
                         if (operation.kind == "runtime_approval") {
@@ -2913,19 +2963,14 @@ class RoomSessionRepository(
                                 }
                             }
                         }
-                        if (operation.kind !in setOf("approved_actions", "privileged_category")) {
+                        if (operation.kind !in setOf("approved_actions", "privileged_category") && operation.kind !in DERIVED_TURN_KINDS) {
                             dao.deleteOperation(operation.requestId)
                         }
                     }
                     completed += 1
                 } catch (error: Throwable) {
                     onFailure(error)
-                    val recoverable = dao.getPendingOperation(operation.requestId) ?: operation
-                    dao.upsertOperation(recoverable.copy(
-                        state = if (isPermanentClientFailure(error)) "failed" else "pending",
-                        updatedAt = System.currentTimeMillis(),
-                        lastError = error.message,
-                    ))
+                    persistOperationFailure(operation, error)
                     if (error is CancellationException) throw error
                 }
             } finally { activePendingOperationIds.remove(snapshot.requestId) }
@@ -3012,15 +3057,34 @@ class RoomSessionRepository(
             val response = action()
             if (kind == "send_message") markFirstTurnAccepted(scope)
             if (kind in setOf("approved_actions", "privileged_category")) acknowledgeBatchOperation(operation)
+            else if (kind in DERIVED_TURN_KINDS) acknowledgeDerivedTurn(operation)
             else dao.deleteOperation(requestId)
             response
         } catch (error: Throwable) {
-            dao.upsertOperation(operation.copy(
-                state = if (isPermanentClientFailure(error)) "failed" else "pending",
-                updatedAt = System.currentTimeMillis(),
-                lastError = error.message,
-            ))
+            persistOperationFailure(operation, error)
             throw error
+        }
+    }
+
+    private suspend fun persistOperationFailure(operation: PendingOperationEntity, error: Throwable) {
+        database.withTransaction {
+            val sessionId = sessionIdFromPath(operation.path)
+            if (operation.kind in DERIVED_TURN_KINDS && dao.getRegenerateEvent(sessionId, operation.requestId) != null) {
+                dao.deleteOperation(operation.requestId)
+                return@withTransaction
+            }
+            val current = dao.getPendingOperation(operation.requestId) ?: operation
+            if (current.state == "acknowledged") return@withTransaction
+            dao.upsertOperation(current.copy(state = if (isPermanentClientFailure(error)) "failed" else "pending",
+                updatedAt = System.currentTimeMillis(), lastError = error.message))
+        }
+    }
+
+    private suspend fun acknowledgeDerivedTurn(operation: PendingOperationEntity) {
+        val sessionId = sessionIdFromPath(operation.path)
+        database.withTransaction {
+            if (dao.getRegenerateEvent(sessionId, operation.requestId) != null) dao.deleteOperation(operation.requestId)
+            else dao.upsertOperation(operation.copy(state = "acknowledged", updatedAt = System.currentTimeMillis()))
         }
     }
 
@@ -3226,6 +3290,8 @@ private class RoomCursorStore(private val dao: AgentoCDao) : CursorStore {
     }
 }
 
+private val DERIVED_TURN_KINDS = setOf("regenerate_message", "resend_edited_message", "resend_edited_message_with_attachments")
+
 private class RoomEventSink(
     private val database: AgentoCDatabase,
     private val dao: AgentoCDao,
@@ -3256,7 +3322,7 @@ private class RoomEventSink(
                     eventId = event.storageEventId(scope),
                     sessionId = scope,
                     seq = event.boundarySeq(),
-                    entityId = event.entityId ?: event.messageId ?: event.operationId,
+                    entityId = if (event.type == "run_regenerate") event.requestId else event.entityId ?: event.messageId ?: event.operationId,
                     revision = event.revision,
                     clientId = event.clientId,
                     type = event.type,
@@ -3264,6 +3330,13 @@ private class RoomEventSink(
                     appliedAt = System.currentTimeMillis(),
                 ),
             )
+            if (event.type == "run_regenerate" && !event.requestId.isNullOrBlank()) {
+                val operation = dao.getPendingOperation(event.requestId)
+                if (operation != null && operation.kind in DERIVED_TURN_KINDS &&
+                    android.net.Uri.decode(operation.path.substringBefore('?').split('/').getOrNull(3).orEmpty()) == scope) {
+                    dao.deleteOperation(operation.requestId)
+                }
+            }
             dao.upsertCursor(SyncCursorEntity(
                 scope = cursor.scope,
                 lastAppliedSeq = cursor.lastAppliedSeq,

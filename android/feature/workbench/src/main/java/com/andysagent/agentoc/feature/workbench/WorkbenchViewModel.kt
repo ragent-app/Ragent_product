@@ -56,6 +56,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -713,10 +714,12 @@ class ChatViewModel(
     private val approvalRunIds = mutableMapOf<Triple<SessionRepository, String, String>, String>()
     private val uncertainApprovals = mutableMapOf<Pair<SessionRepository, String>, MutableSet<String>>()
     private val approvalResolutionLock = Any()
+    private val unresolvedDerivedTurns = mutableSetOf<Triple<SessionRepository, String, String>>()
     private val sessionDrafts = mutableMapOf<Pair<SessionRepository, String>, String>()
     // A local echo belongs to one target repository and one session, including
     // while a send finishes in the background after navigation.
     private val sessionPendingTurns = mutableMapOf<Pair<SessionRepository, String>, PendingTurnUiState>()
+    private val pendingTurnChange = MutableSharedFlow<Triple<SessionRepository, String, String>>(extraBufferCapacity = 16)
     private val sessionAcceptedTurns = mutableMapOf<Pair<SessionRepository, String>, List<PendingTurnUiState>>()
     private val sessionObservedRequests = mutableMapOf<Pair<SessionRepository, String>, Set<String>>()
     private var newSessionRequested = false
@@ -1422,18 +1425,35 @@ class ChatViewModel(
     private fun regenerateMessage(parentRequestId: String) {
         val current = mutableState.value
         val sessionId = current.sessionId ?: return
-        if (parentRequestId.isBlank() || current.runStatus == AgentRunStatus.Working) return
+        val fixed = selectedRepository ?: return
+        val generation = sessionGeneration
+        if (fixed !== activeRepository() || parentRequestId.isBlank() || current.runStatus == AgentRunStatus.Working) return
         updateState { copy(isLoading = true, error = null, runStatus = AgentRunStatus.Working) }
         viewModelScope.launch {
             try {
-                repository.regenerateMessage(sessionId, parentRequestId)
-                refreshSession(sessionId)
+                val key = Triple(fixed, sessionId, "regenerate:$parentRequestId")
+                val retained = fixed.reconcileDerivedTurn(sessionId, parentRequestId, edited = false)
+                if (retained || unresolvedDerivedTurns.remove(key)) {
+                    if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                        updateState { copy(error = "The previous request is being checked. Refresh before starting another regeneration.") }
+                    }
+                    return@launch
+                }
+                fixed.regenerateMessage(sessionId, parentRequestId)
+                if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) refreshSession(sessionId, generation)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
-                showError(error, "Message could not be regenerated")
+                if (error.isAmbiguousApprovalSubmission() || isRecoverableConnectionError(error)) {
+                    unresolvedDerivedTurns.add(Triple(fixed, sessionId, "regenerate:$parentRequestId"))
+                }
+                if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) showError(error, "Message could not be regenerated")
             } finally {
-                val status = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
-                    ?: AgentRunStatus.Idle
-                updateState { copy(isLoading = false, runStatus = status) }
+                if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                    val status = knownSessions.takeIf { knownSessionsRepository === fixed }
+                        ?.firstOrNull { it.id == sessionId }?.status?.toAgentStatus() ?: AgentRunStatus.Idle
+                    updateState { copy(isLoading = false, runStatus = status) }
+                }
             }
         }
     }
@@ -1446,7 +1466,8 @@ class ChatViewModel(
         val current = mutableState.value
         val sessionId = current.sessionId ?: return
         val editingSourceText = current.editingTurnText
-        val repositoryAtStart = selectedRepository
+        val repositoryAtStart = selectedRepository ?: return
+        if (repositoryAtStart !== activeRepository()) return
         val generation = sessionGeneration
         val prompt = editedText.trim()
         if (parentRequestId.isBlank() || prompt.isBlank()) return
@@ -1474,7 +1495,23 @@ class ChatViewModel(
             )
         }
         viewModelScope.launch {
+            var attempted = false
             try {
+                val key = Triple(repositoryAtStart, sessionId, "edit:$parentRequestId")
+                val retained = repositoryAtStart.reconcileDerivedTurn(sessionId, parentRequestId, edited = true)
+                if (retained || unresolvedDerivedTurns.remove(key)) {
+                    if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) {
+                        updateState {
+                            val untouched = composerText.isBlank() && editingTurnId == null && attachments.isEmpty()
+                            copy(composerText = if (untouched) prompt else composerText,
+                                editingTurnId = if (untouched) parentRequestId else editingTurnId,
+                                editingTurnText = if (untouched) editingSourceText else editingTurnText,
+                                attachments = if (untouched) replacementAttachments else attachments,
+                                error = "The previous edit is being checked. Refresh before submitting it again.")
+                        }
+                    }
+                    return@launch
+                }
                 val outboundAttachments = replacementAttachments.map { attachment ->
                     OutboundAttachment(
                         contentUri = attachment.localPath.orEmpty(),
@@ -1484,26 +1521,29 @@ class ChatViewModel(
                         assetId = attachment.assetId,
                     )
                 }
-                if (selection.effort == null && selection.model != null) repository.updateRuntimeSelection(
+                if (selection.effort == null && selection.model != null) repositoryAtStart.updateRuntimeSelection(
                     sessionId, selection.tool, selection.providerProfile, selection.model, null, selection.serviceTier,
                 )
-                repository.resendEditedMessage(
+                attempted = true
+                repositoryAtStart.resendEditedMessage(
                     sessionId = sessionId,
                     parentRequestId = parentRequestId,
                     prompt = prompt,
                     selection = selection,
                     attachments = outboundAttachments,
                 )
-                refreshSession(sessionId)
+                if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) refreshSession(sessionId, generation)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
+                if (attempted && (error.isAmbiguousApprovalSubmission() || isRecoverableConnectionError(error))) {
+                    unresolvedDerivedTurns.add(Triple(repositoryAtStart, sessionId, "edit:$parentRequestId"))
+                }
                 if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) {
                     updateState {
-                        copy(
-                            composerText = prompt,
-                            editingTurnId = parentRequestId,
-                            editingTurnText = editingSourceText,
-                            attachments = replacementAttachments,
-                        )
+                        val untouched = composerText.isBlank() && editingTurnId == null && attachments.isEmpty()
+                        if (untouched) copy(composerText = prompt, editingTurnId = parentRequestId,
+                            editingTurnText = editingSourceText, attachments = replacementAttachments) else this
                     }
                     showError(error, "Edited message could not be resent")
                 }
@@ -1709,15 +1749,16 @@ class ChatViewModel(
                 }
                 if (sessionPendingTurns[key]?.requestId == acceptedRequestId) {
                     sessionPendingTurns.remove(fixed to resolvedSessionId)
+                    pendingTurnChange.tryEmit(Triple(fixed, resolvedSessionId, acceptedRequestId))
                 }
-                if (isCurrentSession(resolvedSessionId) && selectedRepository === fixed) updateState {
+                if (isCurrentSession(resolvedSessionId, generation) && selectedRepository === fixed) updateState {
                     if (this.pendingTurn?.requestId == acceptedRequestId) {
                         copy(pendingTurn = null, acceptedTurns = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId in queuedIds }, historyLoading = false)
                     } else {
                         this
                     }
                 }
-                if (isCurrentSession(resolvedSessionId) && selectedRepository === fixed && sendAfterPendingTurn) {
+                if (isCurrentSession(resolvedSessionId, generation) && selectedRepository === fixed && sendAfterPendingTurn) {
                     sendAfterPendingTurn = false
                     sendMessage()
                 }
@@ -1742,9 +1783,10 @@ class ChatViewModel(
                 if (failedSessionId != null) {
                     if (sessionPendingTurns[fixed to failedSessionId]?.requestId != pendingTurn.requestId) return@launch
                     sessionPendingTurns[fixed to failedSessionId] = failed
+                    pendingTurnChange.tryEmit(Triple(fixed, failedSessionId, pendingTurn.requestId))
                 }
                 if (activeRepository() !== fixed || selectedRepository !== fixed ||
-                    (failedSessionId != null && mutableState.value.sessionId != failedSessionId) ||
+                    (failedSessionId != null && !isCurrentSession(failedSessionId, generation)) ||
                     (failedSessionId == null && (sessionGeneration != generation || mutableState.value.sessionId != null)) ||
                     mutableState.value.pendingTurn?.requestId != pendingTurn.requestId) return@launch
                 sendAfterPendingTurn = false
@@ -1756,7 +1798,7 @@ class ChatViewModel(
                 }
             } finally {
                 if (activeRepository() === fixed && selectedRepository === fixed &&
-                    (sessionId != null && mutableState.value.sessionId == sessionId ||
+                    (sessionId != null && isCurrentSession(sessionId, generation) ||
                         sessionId == null && mutableState.value.sessionId == null && sessionGeneration == generation)) {
                     val currentStatus = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus() ?: AgentRunStatus.Idle
                     updateState { copy(isLoading = this.pendingTurn?.state == PendingTurnState.Sending,
@@ -1781,10 +1823,11 @@ class ChatViewModel(
         }
     }
 
-    private fun forgetAcceptedQueuedMessage(fixed: SessionRepository, sessionId: String, requestId: String) {
+    private fun forgetAcceptedQueuedMessage(fixed: SessionRepository, sessionId: String, requestId: String, generation: Long? = null) {
         val key = fixed to sessionId
         sessionAcceptedTurns[key] = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId == requestId }
-        if (mutableState.value.sessionId == sessionId && activeRepository() === fixed) updateState {
+        if (selectedRepository === fixed && (generation == null && mutableState.value.sessionId == sessionId ||
+                generation != null && isCurrentSession(sessionId, generation))) updateState {
             copy(acceptedTurns = acceptedTurns.filterNot { it.requestId == requestId })
         }
     }
@@ -1792,7 +1835,8 @@ class ChatViewModel(
     private fun removeQueuedMessage(messageId: String) {
         val sessionId = mutableState.value.sessionId ?: return
         val fixed = activeRepository() ?: return
-        if (messageId.isBlank()) return
+        if (selectedRepository !== fixed || messageId.isBlank()) return
+        val generation = sessionGeneration
         viewModelScope.launch {
             try {
                 fixed.updateQueuedFollowUp(
@@ -1800,10 +1844,12 @@ class ChatViewModel(
                     action = com.andysagent.agentoc.core.domain.QueuedFollowUpAction.Delete,
                     requestId = messageId,
                 )
-                forgetAcceptedQueuedMessage(fixed, sessionId, messageId)
-                refreshSession(sessionId)
+                forgetAcceptedQueuedMessage(fixed, sessionId, messageId, generation)
+                if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) refreshSession(sessionId, generation)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
-                showError(error, "Queued follow-up could not be removed")
+                if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) showError(error, "Queued follow-up could not be removed")
             }
         }
     }
@@ -2267,6 +2313,28 @@ class ChatViewModel(
         }
         showCachedRuntime(fixed, sessionId, generation, editGeneration)
         selectedSessionJob = viewModelScope.launch {
+            launch {
+                pendingTurnChange.collectLatest { changed ->
+                    if (changed.first !== fixed || changed.second != sessionId || !isCurrentSession(sessionId, generation)) return@collectLatest
+                    val key = fixed to sessionId
+                    updateState {
+                        if (pendingTurn?.requestId != changed.third) this else {
+                            val pending = sessionPendingTurns[key]?.takeIf { it.requestId == changed.third }
+                            copy(pendingTurn = pending, isLoading = pending?.state == PendingTurnState.Sending,
+                                acceptedTurns = sessionAcceptedTurns[key].orEmpty(),
+                                error = if (pending?.state == PendingTurnState.Failed) "Message could not be sent: ${pending.error}" else error)
+                        }
+                    }
+                }
+            }
+            launch {
+                try {
+                    val pending = fixed.pendingDerivedTurns(sessionId)
+                    if (pending.isNotEmpty() && selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                        updateState { if (error == null) copy(error = "A previous edit or regeneration is awaiting confirmation. Recheck this session before repeating it.") else this }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+            }
             launch {
                 val restoredCatalog = if (mutableState.value.runtimeCatalog.tools.isEmpty()) {
                     try { fixed.loadRuntimeCatalog() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {
@@ -3350,6 +3418,14 @@ class ChatViewModel(
                                     if (decision.approvalId in cleared) decision.copy(isSubmitting = false) else decision
                                 })
                         }
+                    }
+                }
+                if (sessionId != null) {
+                    for (turn in fixed.pendingDerivedTurns(sessionId)) {
+                        fixed.reconcileDerivedTurn(sessionId, turn.parentRequestId, turn.edited)
+                    }
+                    if (fixed.pendingDerivedTurns(sessionId).isNotEmpty() && selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
+                        updateState { copy(error = "A previous edit or regeneration is still awaiting confirmation.") }
                     }
                 }
                 fixed.refreshSessions()

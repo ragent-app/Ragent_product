@@ -395,7 +395,7 @@ class TurnGroupProjector {
                 is TimelineItem.Message -> requestAnchor(item.requestId, item.runId)
                 is TimelineItem.Operation -> requestAnchor(null, item.runId)
                 is TimelineItem.Plan -> requestAnchor(null, item.runId)
-                is TimelineItem.Notice -> null
+                is TimelineItem.Notice -> requestAnchor(item.requestId, item.runId)
             }
             if (item is TimelineItem.Message && item.role == TimelineRole.User) current = anchor ?: "user:${item.id}"
             groups.getOrPut(anchor ?: current) { mutableListOf() }.add(item)

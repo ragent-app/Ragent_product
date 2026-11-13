@@ -175,6 +175,15 @@ class LiveTimelineProjector {
 
     private fun upsertRenderedEvent(event: SessionEventDto, renderSeq: Long) {
         if (event.source == "context_compaction_handoff" || event.type == "context_barrier") return
+        val statusError = event.type?.lowercase() == "status" && event.role?.lowercase() == "system" &&
+            event.textContent()?.trimStart()?.startsWith("error:", ignoreCase = true) == true
+        if (statusError) {
+            val key = renderKey(event)
+            renderedEvents[key] = TimelineEvent(
+                id = event.dedupeKey() ?: "live:${event.boundarySeq()}", seq = renderSeq,
+                type = "error", text = event.textContent(), requestId = event.requestId, runId = event.runId,
+            )
+        }
         event.terminalRunState()?.let { state ->
             event.runId?.takeIf(String::isNotBlank)?.let(terminalRunIds::add)
             messageStates.entries.toList().forEach { (id, message) ->
@@ -192,7 +201,7 @@ class LiveTimelineProjector {
             }
             return
         }
-        if (event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled")) return
+        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled")) return
         if (event.isTimelineMessage()) {
             val id = event.messageProjectionId()
             val before = messageStates[id] ?: textByEntity[id]?.let { baseline ->

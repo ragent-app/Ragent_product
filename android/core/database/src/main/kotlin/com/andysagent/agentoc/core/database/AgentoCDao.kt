@@ -144,6 +144,9 @@ interface AgentoCDao {
     @Query("SELECT * FROM session_events WHERE eventId = :eventId LIMIT 1")
     suspend fun getSessionEvent(eventId: String): SessionEventEntity?
 
+    @Query("SELECT * FROM session_events WHERE sessionId = :sessionId AND type = 'run_regenerate' AND entityId = :requestId LIMIT 1")
+    suspend fun getRegenerateEvent(sessionId: String, requestId: String): SessionEventEntity?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSessionEvent(event: SessionEventEntity): Long
 

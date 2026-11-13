@@ -78,6 +78,8 @@ sealed interface TimelineItem {
         override val id: String,
         override val seq: Long,
         val text: String,
+        val requestId: String? = null,
+        val runId: String? = null,
     ) : TimelineItem
 
     data class Plan(
@@ -398,7 +400,7 @@ class TimelineEngine {
             )
         }
         if (type.contains("approval") || type.contains("confirmation") || type.contains("error") || type.contains("system")) {
-            return TimelineItem.Notice(renderId, event.seq, event.text.orEmpty())
+            return TimelineItem.Notice(renderId, event.seq, event.text.orEmpty(), event.requestId, event.runId)
         }
             return TimelineItem.Message(
             id = renderId,

@@ -458,6 +458,9 @@ interface SessionRepository {
         error("Run projections are not supported by this repository")
     }
     suspend fun resumePendingOperations(): Int
+    suspend fun pendingDerivedTurns(sessionId: String): List<PendingDerivedTurn> = emptyList()
+    /** Reconcile an unresolved edit/regenerate using its original request identity. */
+    suspend fun reconcileDerivedTurn(sessionId: String, parentRequestId: String, edited: Boolean): Boolean = false
     /** Approval decisions retained for retry or whose outcome is still unknown. */
     suspend fun pendingApprovalIds(sessionId: String, approvalIds: List<String>): Set<String> = emptySet()
     /** Retry only the retained decision for this approval, with its original request identity. */
@@ -466,6 +469,8 @@ interface SessionRepository {
         if (resumePendingApproval(sessionId, approvalId) > 0) ApprovalRecoveryResult.Submitted
         else ApprovalRecoveryResult.Unknown
 }
+
+data class PendingDerivedTurn(val parentRequestId: String, val edited: Boolean)
 
 enum class ApprovalRecoveryResult { Submitted, Partial, Stale, Rejected, Missing, Sending, Unknown }
 
