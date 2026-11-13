@@ -33,13 +33,13 @@ outside the isolated test configuration.
 
 Desktop update checks compare the public release version and, for matching
 versions, the verified internal build marker. The current public version is
-0.0.1. A newer internal build can therefore be detected when the public version
+0.0.2. A newer internal build can therefore be detected when the public version
 does not change. Native package versions must increase for upgrades, including
 the MSI product version, Debian package version and macOS bundle build number.
 The in-app installer is present only in packages that include it; an older
 installation must first be upgraded manually.
 
-Linux x86-64 and macOS Apple Silicon candidate builds with a three-component
+Linux x86-64, Linux ARM64 and macOS Apple Silicon candidate builds with a three-component
 numeric public version produce an asset-specific `<artifact>.BUILDINFO.txt`
 marker from the finished artifact. Development versions with `+main` do not
 produce one. A release can include each marker in its notes after verifying the
