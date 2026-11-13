@@ -1,6 +1,6 @@
 # 阶段 0：现状收敛与执行底座前置修复
 
-状态：待实施。日期：2026-11-13。依据：[总方案](00-master-plan.zh.md)、[现状证据 E01–E18](current-state-evidence.zh.md)。后续：[阶段 1](phase-1-work-graph.zh.md)、[阶段 2](phase-2-execution.zh.md)。
+状态：方案部分已落地，缺项与验证状态见 [实施状态](implementation-status.zh.md)。日期：2026-11-13。依据：[总方案](00-master-plan.zh.md)、[现状证据 E01–E18](current-state-evidence.zh.md)。后续：[阶段 1](phase-1-work-graph.zh.md)、[阶段 2](phase-2-execution.zh.md)。
 
 ## 1. 阶段目标
 

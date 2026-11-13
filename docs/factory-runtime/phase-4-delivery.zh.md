@@ -1,6 +1,6 @@
 # 阶段 4：Workflow Formula、受控集成与交付体系
 
-状态：待实施。日期：2026-11-13。上位：[总方案](00-master-plan.zh.md)。前置：[阶段 2](phase-2-execution.zh.md) 的候选与基本验收、[阶段 3](phase-3-team-control.zh.md) 的指挥入口。后续：[阶段 5](phase-5-rollout.zh.md)。
+状态：方案部分已落地，缺项与验证状态见 [实施状态](implementation-status.zh.md)。日期：2026-11-13。上位：[总方案](00-master-plan.zh.md)。前置：[阶段 2](phase-2-execution.zh.md) 的候选与基本验收、[阶段 3](phase-3-team-control.zh.md) 的指挥入口。后续：[阶段 5](phase-5-rollout.zh.md)。
 
 ## 1. 目标与范围
 

@@ -1,6 +1,6 @@
 # 阶段 2：确定性调度、安全执行与验收恢复闭环
 
-状态：待实施。日期：2026-11-13。上位：[总方案](00-master-plan.zh.md)。前置：[阶段 0](phase-0-baseline.zh.md) 的执行门槛、[阶段 1](phase-1-work-graph.zh.md) 的模型协议。后续：[阶段 3](phase-3-team-control.zh.md)。
+状态：方案部分已落地，缺项与验证状态见 [实施状态](implementation-status.zh.md)。日期：2026-11-13。上位：[总方案](00-master-plan.zh.md)。前置：[阶段 0](phase-0-baseline.zh.md) 的执行门槛、[阶段 1](phase-1-work-graph.zh.md) 的模型协议。后续：[阶段 3](phase-3-team-control.zh.md)。
 
 ## 1. 阶段目标
 
