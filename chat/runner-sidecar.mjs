@@ -2820,6 +2820,8 @@ async function recordGateDecision(runId, state, approval, provider, gateDecision
 
 async function reviewRunGate(runId, state, approval, gate) {
   const mcpFacts = gate?.mcpFacts;
+  const unknown = reviewReasonCode => ({ ...gate, reviewStatus: 'unknown', reviewReasonCode });
+  if (!gate?.needsContextReview) return gate;
   const unknownTool = ['tool_semantics_unknown', 'windows_unrecognized_request'].includes(gate?.reasonCode)
     && approval?.providerMethod === 'can_use_tool' && typeof approval.params?.tool_name === 'string'
     && approval.params?.input && typeof approval.params.input === 'object' && !Array.isArray(approval.params.input);
@@ -2827,30 +2829,32 @@ async function reviewRunGate(runId, state, approval, gate) {
   if (unknownTool) {
     const target = approval.params.input.file_path || approval.params.input.path;
     if (target !== undefined) {
-      if (typeof target !== 'string' || !target || /[\0\r\n$*?{}]/.test(target)) return gate;
+      if (typeof target !== 'string' || !target || /[\0\r\n$*?{}]/.test(target)) return unknown('review_target_ambiguous');
       const targetRisk = classifyRisk({ toolName: 'Write', toolInput: { file_path: target },
         cwd: state.cwd, projectRoot: state.projectRoot, riskContext: state.riskContext });
-      if (targetRisk.tier === 'danger' || targetRisk.signals?.needsPrivilegedExecution) return gate;
+      if (targetRisk.tier === 'danger' || targetRisk.signals?.needsPrivilegedExecution) return unknown('review_target_prohibited');
       reviewRisk = targetRisk;
     } else reviewRisk = { tier: 'unknown', signals: { targetScope: 'unknown' } };
   }
-  if (!gate?.needsContextReview || (!mcpFacts && !unknownTool && !['command_semantics_unknown', 'windows_syntax_unsupported', 'shell_syntax_dynamic_or_unsupported'].includes(gate.reasonCode))
-      || state?.riskContextValid !== true || reviewRisk?.tier === 'danger'
-      || (['safe', 'conservative-auto'].includes(state?.riskMode) && reviewRisk?.tier === 'caution')
-      || reviewRisk?.signals?.needsPrivilegedExecution === true
-      || (!mcpFacts && !reviewRisk?.signals?.targetScope)
-      || (!mcpFacts && !unknownTool && (typeof gate.command !== 'string' || !gate.command))) return gate;
+  if (!mcpFacts && !unknownTool && ['tool_semantics_unknown', 'windows_unrecognized_request'].includes(gate.reasonCode)) return unknown('review_tool_input_missing');
+  if (!mcpFacts && !unknownTool && !['command_semantics_unknown', 'windows_syntax_unsupported', 'shell_syntax_dynamic_or_unsupported'].includes(gate.reasonCode)) return gate;
+  if (state?.riskContextValid !== true) return unknown('review_risk_context_invalid');
+  if (reviewRisk?.tier === 'danger' || reviewRisk?.signals?.needsPrivilegedExecution === true) return unknown('review_hard_risk');
+  if (['safe', 'conservative-auto'].includes(state?.riskMode) && reviewRisk?.tier === 'caution') return unknown('review_mode_requires_approval');
+  if (!mcpFacts && !reviewRisk?.signals?.targetScope) return unknown('review_target_scope_missing');
+  if (!mcpFacts && !unknownTool && (typeof gate.command !== 'string' || !gate.command)) return unknown('review_command_missing');
   if (gate.reasonCode === 'windows_syntax_unsupported' && approval.params?.tool_name === 'Bash'
-      && reviewRisk?.platform !== 'powershell') return gate;
+      && reviewRisk?.platform !== 'powershell') return unknown('review_platform_unavailable');
   if (!state.reviewChannel) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_unavailable' };
   // Do not transmit common credential-bearing commands or user input. The
   // reviewer receives only the operation, task and already-attested scope.
   const task = typeof state.prompt === 'string' ? state.prompt : '';
   const command = mcpFacts ? JSON.stringify(mcpFacts) : unknownTool ? JSON.stringify({ tool: approval.params.tool_name, input: approval.params.input }) : gate.command;
-  if (!task || task.length > 12000 || command.length > 12000
-      || /(?:api[_-]?key|access[_-]?token|password|secret)['"]?\s*[:=]\s*['"]?[^\s'";,}]{4,}|authorization['"]?\s*:\s*['"]?\S+\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(`${task}\n${command}`)) return gate;
+  if (!task) return unknown('review_task_missing');
+  if (task.length > 12000 || command.length > 12000) return unknown('review_context_too_large');
+  if (/(?:api[_-]?key|access[_-]?token|password|secret)['"]?\s*[:=]\s*['"]?[^\s'";,}]{4,}|authorization['"]?\s*:\s*['"]?\S+\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(`${task}\n${command}`)) return unknown('review_context_sensitive');
   const channel = state.reviewChannel;
-  if (channel.runId !== runId || channel.turnId !== state.requestId || !channel.sessionId) return gate;
+  if (channel.runId !== runId || channel.turnId !== state.requestId || !channel.sessionId) return unknown('review_channel_binding_invalid');
   const context = { task, command, workspace: state.riskContext.trustedWorkspaceRoot,
     cwd: state.cwd, riskTier: reviewRisk?.tier || 'unknown', targetScope: reviewRisk?.signals?.targetScope || 'unknown',
     platform: reviewRisk?.platform || process.platform, ruleReasonCode: gate.reasonCode,
