@@ -77,6 +77,8 @@ Linux 候选 `c5bb0cfc` 的独立 QA 会话 `ce8612aff95823f962c5eadb92e93c1b` �
 
 Linux 后续修复 `b8aba048` 已部署为 `0.0.84+main.b8aba048`，针对本次发现的 provider-home 准备和跨服务 socket 问题。真实 Codex 会话 `e096cace9d00bb6b601aa44435f81c30`、Run `run_d51e2504a7a52b9ff08defaf` 经服务端确认由 running 到 completed、primary 清空；三星显示助手正文、停止按钮退场。该运行未出现审批，不能作为审批或精准停止验收。之前的启动失败继续保留，另一次在专用目录 `.codex/config.toml` 权限处失败，手机显示真实错误；仅专用目录权限已调整。
 
+该专用目录的空 `.codex` 曾因现有 TemporaryFileSystem 产生 root:root、0750 权限而阻止访问；只对该 QA 目录做了局部缓解，其他新项目仍有此风险，不能称全局修复。Linux 旧 lifecycle fixture 因缺少新增必需的 `status` 未通过；现有 broker/reconciler 检查通过不代表全部检查通过。部署和 0.0.82 回滚证据位于 Linux `/home/pinggu/agentoc-build/candidate-b8aba048/deployment-evidence.txt`。
+
 ## Linux 真实审批与停止结果
 
 真实审批退场和审批期间带草稿停止尚未完成。此前 Codex 的真实命令被风险分类为 caution，recommended 模式自动批准，因此没有人工审批卡；safe 模式可将其提升为人工审批，但会话级设置需要已登录 owner Web 身份，当前尚待登录。不能将无审批的完成、失败启动或本机模拟夹具记为审批通过。
