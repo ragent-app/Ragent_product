@@ -11,7 +11,8 @@ across devices while the execution host remains under the user's control.
 
 Desktop packages are available from the [download page](https://www.agentoncloud.com/download.html)
 and [GitHub Releases](https://github.com/ragent-app/Ragent_product/releases/latest):
-Windows 11 x86-64, macOS 13 or later on Apple Silicon, and Ubuntu 24.04 x86-64.
+Windows 11 x86-64, macOS 13 or later on Apple Silicon, and Ubuntu 24.04 on
+x86-64 and ARM64. The current public release is 0.0.2.
 Desktop updates compare the public version and internal build identity; versions
 installed before the in-app updater must first be updated manually.
 
@@ -19,7 +20,8 @@ installed before the in-app updater must first be updated manually.
 
 - Run a work session on a computer and follow it from the web workbench or
   Android client, with streamed responses and session history. The Android app
-  is in closed testing.
+  is in closed testing on Google Play; a separately signed Android APK is also
+  available from GitHub Releases.
 - Integrate agent runtimes, including Codex and Claude, through Harness and
   provider adapters; supported features and installed versions vary.
 - Manage projects, files, runtime settings and approval requests on the host.

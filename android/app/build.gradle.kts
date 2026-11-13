@@ -110,7 +110,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = playVersionCode ?: 99999
-        versionName = playVersionName ?: "0.0.1"
+        versionName = playVersionName ?: "0.0.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

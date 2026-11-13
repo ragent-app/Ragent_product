@@ -1,6 +1,6 @@
 # Linux desktop
 
-The Debian package targets Ubuntu 24.04 x86-64. It includes the
+The Debian package targets Ubuntu 24.04 x86-64 and ARM64. It includes the
 local service, desktop manager, Node runtime, P2P host and the pinned Codex and
 Claude runtimes. Availability and validation of a particular package are stated
 in its release notes; a source build alone is not a published release.

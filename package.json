@@ -1,6 +1,6 @@
 {
   "name": "agentoc",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "AI workbench for super-individuals: orchestrate agents and distribute agentic-native apps",
   "type": "module",
   "license": "Apache-2.0",
