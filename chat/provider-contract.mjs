@@ -543,9 +543,9 @@ function findPermissionModeByField(capabilities, field, value) {
 
 // Privileged-approval gate (design §13–§14, Path G). Claude Code 2.1.247
 // accepts `default` for an AgentoC-controlled bidirectional gate:
-// ordinary/full-auto runs use bypassPermissions, while safe/recommended runs
-// enter default so the sidecar can auto-allow ordinary work and surface only
-// danger-tier operations for the owner.
+// gated safe/recommended and full-auto runs enter default so the sidecar can
+// evaluate provider approval requests; full-auto rejects requests that need
+// a human decision, while approval mode can surface them to the owner.
 const PRIVILEGED_GATED_MODES = Object.freeze({
   'claude-stream-json-bidi': 'default',
   'codex-app-server-json': 'on-request-danger-full-access',
@@ -558,10 +558,8 @@ export function getGatedPermissionModeId(runtimeFamily) {
 }
 
 function getProfileGatedPermissionModeId(runtimeFamily) {
-  // App Server project trust creates a per-command approval boundary on every
-  // supported host. Keep this separate from the sandbox, which controls what
-  // the command can reach after Ragent responds to the approval request.
-  if (runtimeFamily === 'codex-app-server-json') return 'untrusted-danger-full-access';
+  // Codex on-request forwards the approvals it requests to the Ragent gate;
+  // the provider does not guarantee a callback for every command.
   return getGatedPermissionModeId(runtimeFamily);
 }
 

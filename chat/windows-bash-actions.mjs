@@ -168,7 +168,7 @@ export function splitLiteralCompound(command) {
   return { segments, operators };
 }
 
-function isReadOnlyStdinFilter(command) {
+export function isReadOnlyStdinFilter(command) {
   const words = parseLiteralBashWords(command);
   if (!words?.length) return false;
   const [program, ...args] = words;

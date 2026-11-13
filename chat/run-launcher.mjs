@@ -350,7 +350,12 @@ export async function prepareDetachedRunnerProvider(runId, {
     await updateRunManifest(runId, (current) => ({
       ...current,
       nativeRuntimeSnapshot: snapshot,
-    })).catch(() => null);
+    })).catch(async () => {
+      // The run can continue, but an advisory reviewer must not silently
+      // resolve a fresh provider profile when the frozen selection was lost.
+      await updateRun(runId, current => current ? { ...current,
+        approvalReviewAvailability: 'provider_snapshot_missing' } : current).catch(() => null);
+    });
     if (Number.isSafeInteger(snapshot.credentialVersion)
         || trimString(snapshot.credentialInstanceId)) {
       await updateRun(runId, (current) => {

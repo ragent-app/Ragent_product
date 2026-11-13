@@ -31,6 +31,7 @@ import {
   normalizeRunAuthRecovery,
 } from '../lib/provider-runtime/run-auth-recovery.mjs';
 import { createRunAuthRecoveryCapability } from './run-auth-recovery-capability.mjs';
+import { createRunReviewCapability } from './run-review-capability.mjs';
 import { currentMessageExecution } from './message-execution-context.mjs';
 import { withCurrentMessageScope } from './session-meta-store.mjs';
 import { sessionApiError } from './session-api-mutation-contract.mjs';
@@ -984,6 +985,10 @@ export function runAuthRecoveryCapabilityPath(runId) {
   return join(runDir(runId), 'auth-recovery.cap');
 }
 
+export function runReviewCapabilityPath(runId) {
+  return join(runDir(runId), 'approval-review.cap');
+}
+
 export function runSessionControlCapabilityPath(runId) {
   return join(runDir(runId), SESSION_CONTROL_CAPABILITY_TOKEN_FILE);
 }
@@ -1765,6 +1770,7 @@ export async function createRun({ status, manifest }, { authorizePublication } =
     sessionId: run.sessionId,
     turnId,
   });
+  const reviewCapability = createRunReviewCapability({ runId: run.id, sessionId: run.sessionId, turnId });
   const browserMcpEnabled = sanitizedBaseManifest?.options?.browserMcpEnabled === true
     || sanitizedBaseManifest?.browserMcpEnabled === true;
   const browserCapability = browserMcpEnabled
@@ -1776,11 +1782,16 @@ export async function createRun({ status, manifest }, { authorizePublication } =
     : null;
   const manifestOptions = { ...(sanitizedBaseManifest.options || {}) };
   if (!browserMcpEnabled) delete manifestOptions.browserChannel;
-  const persistedManifest = (recoveryCapability || browserCapability || preparedSessionControl.hasChannel)
+  const persistedManifest = (recoveryCapability || reviewCapability || browserCapability || preparedSessionControl.hasChannel)
     ? {
       ...sanitizedBaseManifest,
       options: {
         ...manifestOptions,
+        ...(reviewCapability ? { runReviewChannel: {
+          version: reviewCapability.version, endpoint: reviewCapability.endpoint,
+          runId: reviewCapability.runId, sessionId: reviewCapability.sessionId, turnId: reviewCapability.turnId,
+          tokenHash: reviewCapability.tokenHash, tokenFile: 'approval-review.cap', expiresAt: reviewCapability.expiresAt,
+        } } : {}),
         ...(recoveryCapability ? {
           runAuthRecoveryChannel: {
             version: recoveryCapability.version,
@@ -1825,6 +1836,10 @@ export async function createRun({ status, manifest }, { authorizePublication } =
       if (await statOrNull(runStatusPath(run.id))) throw runPublicationError('RUN_ALREADY_EXISTS', 409);
       await authorizePublication?.();
       await writeSessionControlSecrets(run.id, preparedSessionControl);
+      if (reviewCapability) {
+        await writeTextAtomic(runReviewCapabilityPath(run.id), `${reviewCapability.token}\n`,
+          await runFileWriteOptions(run.id, { mode: 0o600, durable: true }));
+      }
       if (recoveryCapability) {
         await writeTextAtomic(
           runAuthRecoveryCapabilityPath(run.id),

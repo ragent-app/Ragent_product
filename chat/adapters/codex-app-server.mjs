@@ -40,9 +40,9 @@ export function buildCodexAppServerProjectTrustArgs(cwd) {
   return ['-c', `projects={${JSON.stringify(projectRoot)}={trust_level="untrusted"}}`];
 }
 
-export function buildCodexAppServerArgs({ cwd, agentocApprovalGate = false } = {}) {
+export function buildCodexAppServerArgs({ cwd, agentocApprovalGate = false, permissionMode = '' } = {}) {
   const args = ['app-server', '--stdio'];
-  if (agentocApprovalGate === true) args.push(...buildCodexAppServerProjectTrustArgs(cwd));
+  if (agentocApprovalGate === true && typeof permissionMode === 'string' && (permissionMode === 'untrusted' || permissionMode.startsWith('untrusted-'))) args.push(...buildCodexAppServerProjectTrustArgs(cwd));
   return args;
 }
 

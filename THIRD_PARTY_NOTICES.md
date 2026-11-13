@@ -6,6 +6,7 @@ and asset review is still in progress and this list is not yet complete.
 
 | Component | Location | License and attribution |
 | --- | --- | --- |
+| sh-syntax | npm dependency (`node_modules/sh-syntax/`) | MIT; copyright 2021 UnTS. License distributed in `node_modules/sh-syntax/LICENSE`. Includes a WASM shell parser based on mvdan/sh, BSD-3-Clause, copyright 2016 Daniel Martí; see `third_party_licenses/mvdan-sh-BSD-3-Clause.txt`. |
 | Three.js | `static/vendor/` | MIT; see `third_party_licenses/three.js-MIT.txt` and `static/vendor/THREE-LICENSE.txt`. |
 | marked | `static/marked.min.js` | MIT; see `third_party_licenses/marked-MIT.txt`. |
 | QR Code Generator | `static/qr-creator.min.js` | MIT; the notice and license are embedded in the file. |

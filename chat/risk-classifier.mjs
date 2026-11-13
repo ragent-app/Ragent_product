@@ -103,6 +103,14 @@ const READ_ONLY_SYSTEM_PROGRAMS = new Set([
   'column', 'paste', 'join', 'fold', 'fmt', 'pr', 'expand', 'unexpand',
 ]);
 
+// Reuse the classifier's existing program families when deciding whether
+// command semantics are known; an unrecognized name is review, not denial.
+export function isRecognizedRiskProgram(program) {
+  const name = normalizedProgramName(program);
+  return READ_ONLY_SYSTEM_PROGRAMS.has(name) || SYSTEM_PATH_MUTATING_PROGRAMS.has(name)
+    || PATH_MUTATING_PROGRAMS.has(name) || NETWORK_PROGRAMS.has(name);
+}
+
 // Same set under sudo: `sudo cat /etc/hosts` is still a plain read.
 const SUDO_READ_ONLY_PROGRAMS = READ_ONLY_SYSTEM_PROGRAMS;
 

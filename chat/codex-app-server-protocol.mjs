@@ -65,12 +65,11 @@ export function isCodexAppServerRagentApprovalGateEnabled({ riskMode, permission
 }
 
 function buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate) {
-  // Ragent-gated runs derive the stricter approval policy from project trust.
-  // The explicit approvalPolicy value "untrusted" was retired in Codex 0.149.
+  // Explicit untrusted is retired in Codex 0.149 and is derived from project trust.
   if (permissionPolicy.approvalPolicy === 'untrusted' && agentocApprovalGate !== true) {
     throw new Error('Codex untrusted permission mode requires a Run-scoped project trust gate');
   }
-  if (agentocApprovalGate === true) return {};
+  if (agentocApprovalGate === true && permissionPolicy.approvalPolicy === 'untrusted') return {};
   return { approvalPolicy: permissionPolicy.approvalPolicy || 'never' };
 }
 
@@ -85,7 +84,8 @@ function normalizeCodexWorkspacePath(value) {
 export function validateCodexAppServerApprovalContext({ response, cwd, permissionMode } = {}) {
   const projectRoot = normalizeCodexWorkspacePath(cwd);
   const result = response && typeof response === 'object' ? response : {};
-  if (result.approvalPolicy !== 'untrusted') {
+  const permissionPolicy = resolveCodexAppServerPermissionPolicy({ permissionMode });
+  if (result.approvalPolicy !== (permissionPolicy.approvalPolicy || 'never')) {
     return { ok: false, reasonCode: 'CODEX_APPROVAL_POLICY_UNVERIFIED' };
   }
   if (result.approvalsReviewer !== 'user') {
@@ -99,7 +99,6 @@ export function validateCodexAppServerApprovalContext({ response, cwd, permissio
     return { ok: false, reasonCode: 'CODEX_APPROVAL_WORKSPACE_ROOT_UNVERIFIED' };
   }
 
-  const permissionPolicy = resolveCodexAppServerPermissionPolicy({ permissionMode });
   const expectedSandboxType = permissionPolicy.sandbox === 'workspace-write'
     ? 'workspaceWrite'
     : permissionPolicy.sandbox === 'read-only'
@@ -133,7 +132,7 @@ export function buildCodexAppServerThreadOptions({
     throw new TypeError('Codex named permission configuration requires a named profile');
   }
   const projectRoot = typeof cwd === 'string' ? cwd.trim() : '';
-  const scopedProjectTrust = agentocApprovalGate === true && projectRoot
+  const scopedProjectTrust = agentocApprovalGate === true && permissionPolicy.approvalPolicy === 'untrusted' && projectRoot
     && (isAbsolute(projectRoot) || win32.isAbsolute(projectRoot))
     ? { projects: { [projectRoot]: { trust_level: 'untrusted' } } }
     : {};

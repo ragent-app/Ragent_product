@@ -29,6 +29,7 @@ import { classifyPrivilegedOperation } from './privileged-classifier.mjs';
 import { parsePrivilegedSentinel } from './privileged-sentinel.mjs';
 import { classifyRisk, RISK_TIER } from './risk-classifier.mjs';
 import { decideClaudeToolApproval } from './claude-tool-policy.mjs';
+import { assessPosixShellSyntax } from './posix-shell-ast.mjs';
 
 export const PRIVILEGED_GATE_DECISION = Object.freeze({
   PASS: 'pass',
@@ -130,8 +131,8 @@ function classifyCodexFileChangeRisk(approval, options) {
   if (!entries) {
     return {
       complete: false,
-      risk: { tier: RISK_TIER.DANGER, confidence: 'unknown', platform: 'file_change',
-        signals: { reasons: ['Codex file-change details are unavailable'], needsPrivilegedExecution: true, targetPaths: [] } },
+      risk: { tier: 'unknown', confidence: 'unknown', platform: 'file_change',
+        signals: { reasons: ['Codex file-change details are unavailable'], needsPrivilegedExecution: false, targetPaths: [] } },
     };
   }
 
@@ -349,7 +350,7 @@ function readGateToolContext(approval) {
  * @param {object} [options.riskContext]   Frozen admission-time path context.
  * @returns {{decision:string, reason:string, command?:string, risk?:object, sentinel?:object|null, op?:object}}
  */
-export function decideRiskGate(approval, options = {}) {
+function decideRiskGateCore(approval, options = {}) {
   const requestedRiskMode = trimString(options.riskMode);
   const riskMode = requestedRiskMode === 'full-auto' ? 'recommended'
     : requestedRiskMode === 'conservative-auto' ? 'safe'
@@ -361,8 +362,18 @@ export function decideRiskGate(approval, options = {}) {
     return { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'not an approval request' };
   }
 
+  const gateParams = approval.params || {};
+  if (gateParams.networkApprovalContext || gateParams.network_approval_context || gateParams.additionalPermissions || gateParams.additional_permissions
+      || gateParams.input?.dangerouslyDisableSandbox === true) {
+    const reason = 'additional permissions require owner approval';
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason, reasonCode: 'permission_expansion',
+      risk: { tier: RISK_TIER.DANGER, confidence: 'high', reasons: [{ code: 'permission_expansion', message: reason }],
+        signals: { reasons: [reason] } } };
+  }
+
   if (hasAmbiguousCommandArgv(approval)) {
-    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: 'command argument boundaries require owner review' };
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: 'command argument boundaries require context review',
+      decisionClass: 'review_needed', reasonCode: 'command_arguments_ambiguous' };
   }
 
   const { toolName, toolInput, command } = readGateToolContext(approval);
@@ -387,15 +398,6 @@ export function decideRiskGate(approval, options = {}) {
 
   const reasonText = `risk ${risk.tier}: ${(risk.signals?.reasons || []).join('; ') || 'no reason'}`;
 
-  const params = approval.params || {};
-  if (params.networkApprovalContext || params.network_approval_context || params.additionalPermissions || params.additional_permissions
-      || params.input?.dangerouslyDisableSandbox === true) {
-    const reason = 'additional permissions require owner approval';
-    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason, command,
-      risk: { ...risk, tier: RISK_TIER.DANGER, confidence: 'high', reasons: [{ code: 'permission_expansion', message: reason }],
-        signals: { ...risk.signals, reasons: [reason] } } };
-  }
-
   const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode });
   if (claudeToolDecision) return { ...claudeToolDecision, command, risk: claudeToolDecision.risk };
 
@@ -406,7 +408,8 @@ export function decideRiskGate(approval, options = {}) {
     if (!codexFileChange.complete || fileRisk.tier === RISK_TIER.DANGER
         || fileRisk.signals?.needsPrivilegedExecution === true
         || (fileRisk.tier === RISK_TIER.CAUTION && riskMode === 'safe')) {
-      return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${fileReason}; Codex file change requires owner review`, command: '', risk: fileRisk };
+      return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${fileReason}; Codex file change requires owner review`, command: '', risk: fileRisk,
+        ...(!codexFileChange.complete ? { decisionClass: 'review_needed', reasonCode: 'file_change_incomplete' } : {}) };
     }
     return { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: fileReason, command: '', risk: fileRisk };
   }
@@ -428,6 +431,10 @@ export function decideRiskGate(approval, options = {}) {
   // writes to the owner. Danger-tier requests always require owner review.
   if (!realCommand) {
     if (isKnownFileGate(approval, toolName)) {
+      if (toolName && !trimString(toolInput.file_path || toolInput.path || toolInput.notebook_path)) {
+        return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: 'file target requires context review', command: '', risk,
+          decisionClass: 'review_needed', reasonCode: 'file_target_unspecified' };
+      }
       if (risk.tier === RISK_TIER.DANGER || risk.signals?.needsPrivilegedExecution === true) {
         return {
           decision: PRIVILEGED_GATE_DECISION.PROMPT,
@@ -443,10 +450,16 @@ export function decideRiskGate(approval, options = {}) {
     }
     return {
       decision: PRIVILEGED_GATE_DECISION.PROMPT,
-      reason: `${reasonText}; unknown non-command gate requires owner approval`,
+      reason: `${reasonText}; unknown non-command gate requires context review`,
       command: '',
-      risk,
+      risk, decisionClass: 'review_needed', reasonCode: 'tool_semantics_unknown',
     };
+  }
+
+  if (!sentinel?.valid && risk.tier !== RISK_TIER.DANGER && risk.signals?.needsPrivilegedExecution !== true
+      && (risk.facts?.unknownProgram === true || risk.signals?.complex === true)) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; command semantics require context review`, command, risk,
+      decisionClass: 'review_needed', reasonCode: 'command_semantics_unknown' };
   }
 
   if (!sentinel?.valid && risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
@@ -479,4 +492,63 @@ export function decideRiskGate(approval, options = {}) {
       risk,
     },
   };
+}
+
+// Preserve the existing gate decision for callers while making uncertainty
+// explicit. Context review never converts a hard authorization into a grant.
+export function annotateGateDecision(result, stage = 'risk_classification') {
+  if (!result || typeof result !== 'object') return result;
+  const decisionClass = result.decisionClass || (result.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW ? 'allow'
+    : result.decision === PRIVILEGED_GATE_DECISION.PASS ? 'ask' : 'ask');
+  return { ...result, decisionClass, needsContextReview: decisionClass === 'review_needed',
+    reasonCode: result.reasonCode || result.risk?.reasons?.[0]?.code || (decisionClass === 'allow' ? 'ordinary_operation' : 'approval_required'),
+    stage: result.stage || stage };
+}
+
+// Necessary, not sufficient: callers must separately bind the reviewed input,
+// executable/tool identity and all affected targets to independently verified facts.
+export function isContextReviewOverrideForbidden(result) {
+  return !result || result.decisionClass !== 'review_needed'
+    || result.needsContextReview !== true
+    || result.risk?.tier === RISK_TIER.DANGER
+    || result.risk?.signals?.needsPrivilegedExecution === true
+    || result.risk?.signals?.targetScope === 'protected-control';
+}
+
+export function decideRiskGate(approval, options = {}) {
+  return annotateGateDecision(decideRiskGateCore(approval, options));
+}
+
+// Asynchronous AST path for real runs; the synchronous API stays compatible
+// with existing callers. The original hard decision is never weakened.
+export async function decideRiskGateWithSyntax(approval, options = {}) {
+  const initial = decideRiskGate(approval, options);
+  const { command, toolName } = readGateToolContext(approval);
+  if (!command || (toolName && toolName !== 'Bash') || initial.reasonCode === 'command_arguments_ambiguous'
+      || initial.decisionClass === 'ask'
+      || initial.decisionClass === 'deny') return initial;
+  const syntax = await assessPosixShellSyntax(command);
+  const syntaxFacts = { parser: 'mvdan-sh-wasm', complete: syntax.complete, reasonCode: syntax.reasonCode,
+    nodeTypes: syntax.nodeTypes || [], commandCount: syntax.commandCount || 0 };
+  if (!syntax.complete) return annotateGateDecision({ ...initial, syntaxFacts, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+    decisionClass: 'review_needed', reasonCode: syntax.reasonCode,
+    reason: 'shell syntax needs context review' }, 'posix_ast');
+  const decisions = syntax.commands.map(part => {
+    const params = approval.params || {};
+    const rewritten = toolName === 'Bash'
+      ? { ...approval, params: { ...params, input: { ...params.input, command: part } } }
+      : { ...approval, params: { ...params, command: part } };
+    return decideRiskGate(rewritten, options);
+  });
+  const hard = decisions.find(item => item.decisionClass === 'deny' || item.decisionClass === 'ask');
+  if (hard) return annotateGateDecision({ ...hard, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+    reason: 'a shell command requires approval', command }, 'posix_ast');
+  const unknown = decisions.find(item => item.needsContextReview);
+  if (unknown) return annotateGateDecision({ ...unknown, command, syntaxFacts }, 'posix_ast');
+  if (!syntax.classifiedLiterals?.every(Boolean)) return annotateGateDecision({ ...initial, command, syntaxFacts,
+    decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
+    reasonCode: 'command_semantics_unknown', reason: 'shell command semantics require context review' }, 'posix_ast');
+  return annotateGateDecision({ ...initial, decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
+    decisionClass: 'allow', reasonCode: 'shell_commands_classified',
+    reason: 'all literal shell commands independently classified', command, syntaxFacts }, 'posix_ast');
 }

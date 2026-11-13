@@ -936,7 +936,7 @@ try {
   assert.equal(planRun.providerCapabilities?.supportsSteer, true);
   assert.equal(planRun.providerCapabilities?.supportsInterrupt, true);
   assert.equal(planRun.providerCapabilities?.supportsExternalUsageProjection, false);
-  assert.equal(planRun.permissionMode, 'untrusted-danger-full-access');
+  assert.equal(planRun.permissionMode, 'on-request-danger-full-access');
   let approvalRequest;
   try {
     approvalRequest = await waitForApprovalRequest(port, session.id);
@@ -967,8 +967,7 @@ try {
   }, 'Run-scoped Codex project trust process arguments');
   const processArgs = processStart.agentocFixtureProcessArgs || [];
   const trustOverride = processArgs.find((arg) => typeof arg === 'string' && arg.startsWith('projects='));
-  assert.ok(processArgs.includes('-c') && trustOverride?.includes('trust_level="untrusted"'),
-    'Ragent-gated Codex must start with a Run-scoped project trust override');
+  assert.equal(trustOverride, undefined, 'on-request runs do not force untrusted project trust');
   assert.equal(approvalRequest.kind, 'command');
   assert.equal(approvalRequest.command, 'sudo systemctl restart agentoc-fixture');
   assert.equal(approvalRequest.runId, planRun.id);
@@ -976,7 +975,7 @@ try {
   assert.equal(approvalRequest.runtimeFamily, 'codex-app-server-json');
   assert.equal(approvalRequest.providerCapabilities?.supportsSteer, true);
   assert.equal(approvalRequest.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(approvalRequest.permissionMode, 'untrusted-danger-full-access');
+  assert.equal(approvalRequest.permissionMode, 'on-request-danger-full-access');
   const approvalRes = await request(
     port,
     'POST',
@@ -991,14 +990,14 @@ try {
   assert.equal(approvalRes.json.run.runtimeFamily, 'codex-app-server-json');
   assert.equal(approvalRes.json.run.providerCapabilities?.supportsSteer, true);
   assert.equal(approvalRes.json.run.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(approvalRes.json.run.permissionMode, 'untrusted-danger-full-access');
+  assert.equal(approvalRes.json.run.permissionMode, 'on-request-danger-full-access');
   const approvalResponse = await waitForApprovalResponse(port, session.id, approvalRequest.approvalId);
   assert.equal(approvalResponse.decision, 'approved');
   assert.equal(approvalResponse.provider, 'codex');
   assert.equal(approvalResponse.runtimeFamily, 'codex-app-server-json');
   assert.equal(approvalResponse.providerCapabilities?.supportsSteer, true);
   assert.equal(approvalResponse.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(approvalResponse.permissionMode, 'untrusted-danger-full-access');
+  assert.equal(approvalResponse.permissionMode, 'on-request-danger-full-access');
   const terminalPlan = await waitForRunTerminal(port, planRun.id);
   assert.equal(terminalPlan.state, 'completed');
   assert.equal(terminalPlan.codexThreadId, 'thread-fake-plan');
@@ -1006,7 +1005,7 @@ try {
   assert.equal(terminalPlan.runtimeFamily, 'codex-app-server-json');
   assert.equal(terminalPlan.providerCapabilities?.supportsSteer, true);
   assert.equal(terminalPlan.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(terminalPlan.permissionMode, 'untrusted-danger-full-access');
+  assert.equal(terminalPlan.permissionMode, 'on-request-danger-full-access');
   const terminalPlanWithTurn = await waitForRunAppServerTurn(port, planRun.id, 'turn-req-app-server-plan');
   assert.equal(terminalPlanWithTurn.appServerTurnId, 'turn-req-app-server-plan');
   await waitForSessionCodexThread(port, session.id, 'thread-fake-plan');
@@ -1025,10 +1024,8 @@ try {
   assert.equal(planTurnStart.params.effort, 'high');
   if (process.platform === 'win32') {
     assert.equal(planThreadStarts.length, 1, 'the gate must not send the retired untrusted policy value');
-    assert.equal(Object.hasOwn(planThreadStart.params, 'approvalPolicy'), false,
-      'the approval policy must be derived from the Run project trust');
-    assert.equal(Object.hasOwn(planTurnStart.params, 'approvalPolicy'), false,
-      'turn/start must not override the derived approval policy');
+    assert.equal(planThreadStart.params.approvalPolicy, 'on-request');
+    assert.equal(planTurnStart.params.approvalPolicy, 'on-request');
   }
   const approvalReply = recorded.find((message) => message.id === 'approval-1' && message.result);
   assert.ok(approvalReply, `provider should receive approval response; got ${JSON.stringify(recorded)}`);
@@ -1469,7 +1466,7 @@ try {
   assert.equal(appServerPlanEvent.runtimeFamily, 'codex-app-server-json');
   assert.equal(appServerPlanEvent.providerCapabilities?.supportsSteer, true);
   assert.equal(appServerPlanEvent.providerCapabilities?.supportsInterrupt, true);
-  assert.equal(appServerPlanEvent.permissionMode, 'untrusted-danger-full-access');
+  assert.equal(appServerPlanEvent.permissionMode, 'on-request-danger-full-access');
 
   await stopServer(server);
   server = await startServer({

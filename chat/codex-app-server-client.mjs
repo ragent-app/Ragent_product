@@ -566,7 +566,7 @@ async function runCodexAppServerForkRequest({
     return forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs, expectedAccountId });
   }
 
-  const args = ['app-server', '--stdio', ...(agentocApprovalGate ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
+  const args = ['app-server', '--stdio', ...(agentocApprovalGate && (permissionMode === 'untrusted' || String(permissionMode || '').startsWith('untrusted-')) ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
   const spawnSpec = buildPlatformSpawnSpec(command, args, {
     cwd: trimString(cwd) || process.cwd(),
     env,

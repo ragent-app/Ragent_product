@@ -3,6 +3,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const WINDOWS_APPROVAL_PAYLOAD_FILES = Object.freeze([
+  'chat/posix-shell-ast.mjs', 'chat/approval-context-review.mjs', 'chat/run-review-capability.mjs',
+  'chat/router-run-review-routes.mjs', 'chat/router.mjs', 'chat/runner-sidecar.mjs', 'chat/runs.mjs',
   'chat/approved-action-queue.mjs', 'chat/approval-equivalence.mjs', 'chat/windows-approval-gate.mjs', 'chat/windows-powershell-ast.mjs', 'chat/windows-powershell-actions.mjs',
   'chat/windows-bash-actions.mjs', 'chat/windows-ripgrep-bridge.mjs', 'chat/windows-claude-relative-operation-bridge.mjs', 'chat/windows-elevation-guidance.mjs', 'chat/windows-service-control.mjs', 'chat/windows-service-grant.mjs', 'chat/windows-service-proposal.mjs', 'chat/windows-service-activity.mjs', 'chat/windows-system-paths.mjs', 'chat/windows-winget-discovery.mjs',
   'chat/windows-managed-auto-install.mjs', 'chat/windows-msi-auto-install.mjs', 'chat/windows-auto-install-authorization.mjs', 'chat/windows-auto-install-bridge.mjs', 'chat/codex-managed-hook-setup.mjs',

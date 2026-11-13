@@ -76,6 +76,23 @@ const DEV_TASKS = new Map([
   ['dotnet', new Set(['build', 'test', 'restore', 'run', 'format'])], ['gradle', new Set(['build', 'test', 'assemble', 'check'])],
   ['mvn', new Set(['test', 'verify', 'package', 'compile'])], ['npx', new Set(['tsc', 'eslint', 'prettier', 'jest', 'vitest', 'vite', 'webpack'])],
 ]);
+// Shared recognized developer operations; classification still checks command
+// arguments and higher-risk signals separately.
+export function isRecognizedDeveloperTask(program, args) {
+  const name = String(program || '').toLowerCase().replace(/\.(?:exe|cmd|bat)$/, '');
+  if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
+  if (DEV_TASKS.get(name)?.has((args[0] || '').toLowerCase())) {
+    return name !== 'go' || !args.slice(1).some(arg => /^-exec(?:=|$)/i.test(arg));
+  }
+  if (!WORKSPACE_SCRIPT_RUNNERS.has(name)) return false;
+  const action = (args[0] || '').toLowerCase();
+  if (args.length === 1 && ['test','install','i','ci'].includes(action)) return true;
+  if (['install','i','add'].includes(action) && args.length > 1) {
+    return args.slice(1).every(value => /^[a-z0-9@][a-z0-9@/_.~^+\-\[\],=<>!]*$/i.test(value));
+  }
+  return action === 'run' && /^[a-z0-9][a-z0-9:_-]{0,127}$/i.test(args[1] || '');
+}
+
 const GET_COMMAND_TYPES = new Set(['alias', 'function', 'filter', 'cmdlet', 'externalscript', 'application', 'script', 'configuration', 'all']);
 const FILE_PARAMS = new Set(['path', 'literalpath', 'destination', 'value', 'itemtype', 'name', 'recurse', 'force', 'raw', 'encoding', 'filter', 'include', 'exclude', 'confirm']);
 const TEST_PATH_PARAMS = new Set([...FILE_PARAMS, 'pathtype']);

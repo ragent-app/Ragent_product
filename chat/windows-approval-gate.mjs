@@ -2,7 +2,7 @@ import path from 'node:path';
 import { analyzeWindowsFileChanges, analyzeWindowsPowerShell, decideWindowsPowerShellActions } from './windows-powershell-actions.mjs';
 import { analyzeWindowsBash, parseLiteralBashWords } from './windows-bash-actions.mjs';
 import { parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
-import { isKnownFileGate } from './privileged-gate.mjs';
+import { annotateGateDecision, isKnownFileGate } from './privileged-gate.mjs';
 import { resolveWindowsSystemPaths } from './windows-system-paths.mjs';
 import { decideClaudeToolApproval } from './claude-tool-policy.mjs';
 
@@ -128,7 +128,7 @@ async function readExplicitPowerShellWrapper(approval, options = {}) {
   return readWindowsPowerShellInvocation({ ...approval, params: { ...approval.params, command: argv } }, options);
 }
 
-export async function decideWindowsApproval(approval, state = {}, { analyze = analyzeWindowsPowerShell, analyzeFiles = analyzeWindowsFileChanges, invocationReader = readExplicitPowerShellWrapper } = {}) {
+async function decideWindowsApprovalCore(approval, state = {}, { analyze = analyzeWindowsPowerShell, analyzeFiles = analyzeWindowsFileChanges, invocationReader = readExplicitPowerShellWrapper } = {}) {
   const params = approval?.params || {};
   const toolName = text(params.tool_name);
   const mode = text(state.riskMode);
@@ -214,4 +214,17 @@ export async function decideWindowsApproval(approval, state = {}, { analyze = an
       reasons: [{ code: windowsReasonCode(decision.reason, result.complete), message: decision.reason }],
       actions: result.actions },
   };
+}
+
+export async function decideWindowsApproval(approval, state = {}, options = {}) {
+  const result = await decideWindowsApprovalCore(approval, state, options);
+  const code = result?.risk?.reasons?.[0]?.code;
+  // Unsupported semantics may be reviewed with additional trusted context;
+  // failed path, shell identity, permission or protection checks stay gated.
+  const unknownTool = code === 'windows_unrecognized_request' && approval?.providerMethod === 'can_use_tool'
+    && approval?.requestClass === 'tool_invocation';
+  if (result?.decision === 'prompt' && (code === 'windows_syntax_unsupported' || unknownTool)) {
+    return annotateGateDecision({ ...result, decisionClass: 'review_needed', reasonCode: code }, 'windows_classification');
+  }
+  return annotateGateDecision(result, 'windows_classification');
 }

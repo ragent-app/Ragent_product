@@ -153,6 +153,8 @@ import {
   createSessionControlRenewalAuthenticator,
 } from './session-control-capability.mjs';
 import { createRunAuthRecoveryAuthenticator } from './run-auth-recovery-capability.mjs';
+import { createRunReviewAuthenticator } from './run-review-capability.mjs';
+import { handleRunReviewRoute } from './router-run-review-routes.mjs';
 import {
   MANAGED_SESSION_INPUT_BYPASS,
   assertManagedInputAllowed,
@@ -214,6 +216,7 @@ const authenticateRunAuthRecovery = createRunAuthRecoveryAuthenticator({
   getRunImpl: getRun,
   getRunManifestImpl: getRunManifest,
 });
+const authenticateRunReview = createRunReviewAuthenticator({ getRunImpl: getRun, getRunManifestImpl: getRunManifest });
 
 function isLoopbackRequest(req) {
   const remoteAddress = trimString(req?.socket?.remoteAddress || req?.connection?.remoteAddress);
@@ -1624,6 +1627,8 @@ export async function handleRequest(req, res) {
   // local credential recovery.  This route must be handled before the owner
   // auth gate, and its authenticator enforces a strict loopback address.
   if (await handleTemporaryControlRunCheck({ req, res, pathname, writeJson })) return;
+  if (await handleRunReviewRoute({ req, res, pathname, writeJson, authenticate: authenticateRunReview,
+    getRun, getRunManifest })) return;
   if (await handleRunAuthRecoveryInternalRoutes({
     req,
     res,

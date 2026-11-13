@@ -107,8 +107,9 @@ export function decideClaudeToolApproval(approval, { riskMode = '' } = {}) {
   if (!reason) return null;
   const input = inputObject(approval);
   if (!validateKnownInput(toolName, input)) {
-    const risk = riskFor('danger', `unrecognized or incomplete ${toolName} input`);
-    return { decision: 'prompt', reason: `${risk.reasons[0].message}; owner approval required`, risk };
+    const risk = { ...riskFor('unknown', `unrecognized or incomplete ${toolName} input`), confidence: 'unknown' };
+    return { decision: 'prompt', reason: `${risk.reasons[0].message}; context review required`, risk,
+      decisionClass: 'review_needed', reasonCode: 'tool_input_incomplete' };
   }
 
   const tier = SAFE_TOOLS.has(toolName) ? 'safe' : 'caution';
