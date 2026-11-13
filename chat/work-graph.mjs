@@ -8,14 +8,14 @@ function authorize(db, organizationId, actor, capability) {
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
   if (!org) throw factoryError('FACTORY_NOT_FOUND', 'Organization not found', 404);
   if (org.state === 'archived' && capability !== 'factory.read') throw factoryError('FACTORY_CONFLICT', 'Archived organization is read-only', 409);
-  if (org.state === 'lifecycle_pending' && !['factory.read', 'factory.RequestPause', 'factory.RequestCancel', 'factory.execution'].includes(capability)) throw factoryError('FACTORY_CONFLICT', 'Organization lifecycle transition is pending', 409);
+  if (org.state === 'lifecycle_pending' && !['factory.read', 'factory.RequestPause', 'factory.RequestCancel', 'factory.execution', 'factory.shadow.sync'].includes(capability)) throw factoryError('FACTORY_CONFLICT', 'Organization lifecycle transition is pending', 409);
   required(actor?.principalId, 'authenticated principal');
   if (actor.kind === 'user' && actor.role === 'owner') return org;
   if (actor.kind === 'service' && actor.role === 'factory_scheduler') {
     const configuredOwner = String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID || '').trim();
     const allowedOrganizations = String(process.env.AGENTOC_FACTORY_ORGANIZATIONS || '').split(',').map(value => value.trim()).filter(Boolean);
     if (configuredOwner && actor.principalId === `factory-scheduler:${configuredOwner}` && allowedOrganizations.includes(organizationId)
-        && ['factory.read', 'factory.dispatch', 'factory.execution'].includes(capability)) return org;
+        && ['factory.read', 'factory.dispatch', 'factory.execution', 'factory.shadow.sync'].includes(capability)) return org;
     throw factoryError('FACTORY_FORBIDDEN', 'Factory service scope is not authorized', 403);
   }
   if (actor.kind !== 'node') throw factoryError('FACTORY_FORBIDDEN', 'Authenticated owner or authorized node required', 403);

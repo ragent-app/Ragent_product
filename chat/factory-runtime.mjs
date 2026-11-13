@@ -39,7 +39,10 @@ export function createFactoryRuntime({ env = process.env, onError = (error) => c
     try {
       for (const organizationId of organizationIds) {
         const adapter = createFactoryExecutionAdapter({ organizationId, actor });
-        const scheduler = createFactoryScheduler({ organizationId, actor, adapter, admissionEnabled: enabled, onError });
+        const observe = env.AGENTOC_FACTORY_SHADOW_SYNC_ENABLED === '1'
+          ? async () => (await import('./factory-shadow.mjs')).syncFactoryShadow({ organizationId, limit: 50, persistCursor: true }, actor)
+          : null;
+        const scheduler = createFactoryScheduler({ organizationId, actor, adapter, observe, admissionEnabled: enabled, onError });
         schedulers.push(scheduler);
         await scheduler.start();
         activeSchedulers.set(organizationId, scheduler);

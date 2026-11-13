@@ -26,6 +26,31 @@ function budgetReservationFor(contract) {
   return null;
 }
 
+// Profiles constrain admission; they never create permissions or select a runtime.
+function profileAllows(db, org, node) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_position_profiles'").get()) return true;
+  const row = db.prepare('SELECT profile_json FROM organization_position_profiles WHERE organization_id=? AND node_id=? ORDER BY version DESC LIMIT 1').get(org.id, node.id);
+  if (!row) return true;
+  let profile, nodeGrant;
+  try { profile = JSON.parse(row.profile_json); nodeGrant = JSON.parse(node.grant_json || '{}'); } catch { return false; }
+  if (!Number.isInteger(profile?.capacity) || profile.capacity < 1 || !Array.isArray(profile.capabilityRequirements)) return false;
+  for (const requirement of profile.capabilityRequirements) {
+    if (!['run', 'write', 'review', 'delegate'].includes(requirement)) return false;
+    if ((requirement === 'write' && nodeGrant.canWrite !== true)
+        || (requirement === 'review' && nodeGrant.canReview !== true)
+        || (requirement === 'delegate' && nodeGrant.canDelegate !== true)) return false;
+    const grant = db.prepare(`SELECT allow,scope_json FROM organization_grants WHERE organization_id=? AND node_id=?
+      AND capability=? AND revision<=? ORDER BY revision DESC,id DESC LIMIT 1`).get(org.id, node.id, requirement, org.current_revision);
+    if (!grant?.allow) return false;
+    let scope;
+    try { scope = JSON.parse(grant.scope_json || '{}'); } catch { return false; }
+    if ((scope.projectId && scope.projectId !== org.project_id)
+        || Object.keys(scope).some((key) => !['projectId', 'writablePaths'].includes(key))) return false;
+  }
+  // Existing atomic claim permits at most one active item per node.
+  return true;
+}
+
 // Called immediately before the existing outbox sends a Factory task. A lease
 // fences scheduling, while binding, authorization and reservation facts fence
 // the task; none of these facts claim to terminate a previous process.
@@ -45,7 +70,7 @@ export async function assertFactoryExecutionFence(context) {
         || binding.binding_generation !== context.bindingGeneration || node.binding_generation !== context.bindingGeneration
         || node.current_session_id !== context.managedSessionId || node.retired_revision !== null
         || ['archived', 'lifecycle_pending'].includes(org.state)
-        || org.current_revision !== context.organizationRevision) refuse('Factory dispatch fence or current authorization changed');
+        || org.current_revision !== context.organizationRevision || !profileAllows(db, org, node)) refuse('Factory dispatch fence or current authorization changed');
     const contractRow = db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?')
       .get(item.id, context.contractRevision);
     let contract, grant;
@@ -84,7 +109,7 @@ async function executionAuthorityRevoked(organizationId, item, binding) {
     const node = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assigneeNodeId, organizationId);
     if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || !node || node.retired_revision !== null
         || node.binding_generation !== binding.bindingGeneration || !node.current_session_id
-        || org.current_revision !== item.contract?.organizationRevision) return true;
+        || org.current_revision !== item.contract?.organizationRevision || !profileAllows(db, org, node)) return true;
     const paths = item.contract?.accessMode === 'read' ? [] : (Array.isArray(item.contract?.allowedPaths) ? item.contract.allowedPaths : []);
     let nodeGrant;
     try { nodeGrant = JSON.parse(node.grant_json || '{}'); } catch { return true; }
@@ -112,6 +137,12 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || !node || item.projectId !== org.projectId || item.contract?.organizationRevision !== org.currentRevision
         || node.organizationId !== organizationId || !node.currentSessionId || node.retiredRevision !== null) return { allowed: false, reason: 'binding_changed' };
     const session = await getSession(node.currentSessionId);
+    const profileAllowed = await withDatabase((db) => {
+      const currentOrg = db.prepare('SELECT * FROM organizations WHERE id=?').get(organizationId);
+      const currentNode = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assigneeNodeId, organizationId);
+      return !!currentOrg && !!currentNode && profileAllows(db, currentOrg, currentNode);
+    });
+    if (!profileAllowed) return { allowed: false, reason: 'position_capability_requirements_unmet' };
     const paths = item.contract.accessMode !== 'read' && Array.isArray(item.contract.allowedPaths) ? item.contract.allowedPaths : [];
     const granted = Array.isArray(node.grant?.writablePaths) ? node.grant.writablePaths : [];
     if (!session || session.sessionPlane !== 'organization' || !session.templateId || !session.tool || !session.model || !session.effort

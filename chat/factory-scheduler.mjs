@@ -7,7 +7,7 @@ import {
 
 // The lease fences claim authority, not the lifetime of an already launched Run.
 // An adapter is required to establish the runtime, budget and isolation facts.
-export function createFactoryScheduler({ organizationId, actor, adapter, admissionEnabled = true, pollMs = 2000, batchSize = 20, onError = () => {} } = {}) {
+export function createFactoryScheduler({ organizationId, actor, adapter, observe = null, admissionEnabled = true, pollMs = 2000, batchSize = 20, onError = () => {} } = {}) {
   if (!organizationId || !actor || !adapter || typeof adapter.admit !== 'function'
       || typeof adapter.dispatch !== 'function' || typeof adapter.reconcile !== 'function') {
     throw new Error('Factory scheduler requires organization, trusted actor, and execution adapter');
@@ -20,6 +20,7 @@ export function createFactoryScheduler({ organizationId, actor, adapter, admissi
   async function tick() {
     if (stopped || pending) return pending;
     pending = (async () => {
+      if (typeof observe === 'function') await observe().catch(onError);
       try {
         if (!admissionEnabled) throw Object.assign(new Error('Factory admission is disabled'), { code: 'FACTORY_ADMISSION_DISABLED' });
         lease = lease
