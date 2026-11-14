@@ -8,18 +8,30 @@
 
 `233094db` 增加受限 Run 的结构化阻塞提案和 owner 显式处置源码；真实提案、权限撤销及重启恢复尚未验证。
 
-用户已授权本机及指定 `pinggu` 开发实例验收。执行侧报告 Linux 部署的 `a6ee4851` 服务和 owner CLI 可用；初查没有组织与 project-workflow 数据库，后续真实组织规划已完成，图任务尚待执行。正式 owner API 的 Factory status、shadow 和 work-items 均返回 HTTP 200；后两者为空，status 显示控制和自动准入关闭、executionReadiness 未验证。空列表不证明历史迁移或任务闭环。最新工作树上的知识和后续 readiness 改动不在该部署版本中。分平台条件与现场证据分列于 [能力矩阵](capability-matrix.zh.md)。
+后续源码：`0b5da17a` 为 owner 增加单工作项、单专家的只读咨询及列表、对账、未发送请求恢复；意见关联实际 Run 与 ResultPacket，未核实的用量预留继续保留。`43b66938` 统一 claim、发送和运行撤权的 Grant 校验，并按冻结节点能力物化授权记录；不能从只读权限推导 run。`af3038e0` 增加受限单节点 reviewer 的 owner 授权修订，以及仅在可信发送前事实成立时记录未启动和释放预算的路径。`fde9e3be` 提供有界、尽力记录的 Factory API 403 观测，不是完整权限拒绝历史；`3ba8d118` 修正 Android 离线缓存的 Kotlin 函数体，离线缓存仍未编译。`43c9b9cd` 和 `64977acb` 为备份增加可选有界 Run 文件与已登记产物摘要观察，inventory 的缺失数据库标为未知；不复制 Run/产物，也不提供跨库与文件系统的原子检查点。这些增量尚无对应真实业务运行或恢复证据。
 
-Linux 真实规划的三次尝试：① `a6ee4851` 的 `run_5bec3b56ffc0b6d77ba0aa0f` 请求 untrusted-read-only，实际持久模式扩大为 on-request-danger-full-access，发现后定向取消并 finalized；可见 spool 仅有 rg/sed 读取命令。② 加只读修复 `bbd95785` 的 `run_79302a372bb5347b34aeadf5` 持久 untrusted-read-only，但 provider 回报 on-request/readOnly/no-network，因 `CODEX_APPROVAL_POLICY_UNVERIFIED` 在 prompt 前失败并 finalized。③ 同源码的 `run_4873b45058010066b2942c40` 显式 on-request-read-only，provider 确认 on-request/readOnly/network false/user reviewer/cwd，completed 并 finalized；创建真实组织 `org_158df796b2b874cefbe45bea` revision 1 和只读 reviewer，尚无 Attempt。此结果不证明 untrusted 审批或 Factory 闭环；Run 实际费用尚未知。
+`e582cd88` 持久化显式 Agent capabilities，`c524291b` 让 Web 如实显示未启动预留的对账结果。`af3038e0` 提交前交叉审查发现并修正未启动回执 INSERT 的列数与占位符一致性；这是静态审查，不是该恢复路径的运行验证。
+
+用户已授权本机及指定 `pinggu` 开发实例验收。执行侧报告 Linux 部署的 `a6ee4851` 服务和 owner CLI 可用；初查没有组织与 project-workflow 数据库，后续真实组织规划已完成。初次正式 owner API 查询时 Factory status、shadow 和 work-items 均返回 HTTP 200；后两者为空，status 显示控制和自动准入关闭、executionReadiness 未验证。空列表不证明历史迁移或任务闭环。最新工作树上的知识和后续 readiness 改动不在该部署版本中。分平台条件与现场证据分列于 [能力矩阵](capability-matrix.zh.md)。
+
+现场后续 shadow 同步返回 observed=0、changed=0；这是空历史读取的证据。真实图任务尝试发现规划节点的授权账本缺少 run，已有 claim 被阻断并留下 unknown binding；不能把该状态当作 Run 已启动或已停止。后续源码收紧准入并修复新节点授权物化，既有节点还需正式 owner 修订授权和对账。
+
+Linux 以正式 `64977acb` inventory 观察：collaborations 与 coordination 数据库可用，workflow 数据库 `source_unavailable`；executionBindings=1、runningAttempts=0、dispatchCommands=0，Attempt/Packet 关联为 `unknown_incomplete_index`，产物及外部效果未检查。指定实例 Run 根目录后，数据库引用范围内的 Run 观察为 `items=[]`，不等于扫描全部历史 Run。该调用 `copiesCreated=false`、`observational_only`，结果仅保留工具 stdout，未执行备份或 quick_check；零 Attempt/dispatch 不证明历史 unknown producer 已停止。此前将脚本单独置于临时目录的一次启动因缺相对导入而失败，未打开数据库，后改用正常目录执行。
+
+Linux 随后在 `a6ee4851` 基础及既有 `bbd95785`/`ecaad841`/`0f8bbb32`（仅 Goal INSERT）overlay 上追加 `af3038e0` 精确 12 个模块和 router 授权 hunk，共 13 个部署文件摘要匹配、服务 active，原文件备份可回退；不是整个当前工作树部署。正式 GET 返回 org version 3、revision 1、generation 1、能力 `[read]`、activeOrUnknownBindings=1、quiescence 未验证。owner 申请 `[read,run,review]` 被明确拒绝，原因是存在活动或未知 Factory 执行；重读状态不变。工作项仍为 blocked/authorization_revoked，binding 为 unknown 且无 Collaboration/Attempt/Run；预算 API 返回 Not Found，改用获授权的组织范围 SQLite 只读查询，revision 1 已计 runs/tokens/cost 为 0/0/0，预留为 1/20000/1，未释放。没有新 Run、未修改 Agent 或预算；这仅验证拒绝保护，不能视为授权修订成功或任务闭环。
+
+Windows 现有本机服务 `localhost:18673` 的 `/api/build-info` 返回 HTTP 200，报告 service `v0.0.76`、UI `mwfyxt4y`；进程来自 `G:/AgentoCapp/payload/chat-server.mjs`。Chrome 新建任务标签访问时，控制工具报 `Cannot read properties of undefined (reading timeoutMs)`，未取得页面状态，不能据此认定产品页面失败或通过。
+
+Linux 真实规划的三次尝试：① `a6ee4851` 的 `run_5bec3b56ffc0b6d77ba0aa0f` 请求 untrusted-read-only，实际持久模式扩大为 on-request-danger-full-access，发现后定向取消并 finalized；可见 spool 仅有 rg/sed 读取命令。② 加只读修复 `bbd95785` 的 `run_79302a372bb5347b34aeadf5` 持久 untrusted-read-only，但 provider 回报 on-request/readOnly/no-network，因 `CODEX_APPROVAL_POLICY_UNVERIFIED` 在 prompt 前失败并 finalized。③ 同源码的 `run_4873b45058010066b2942c40` 显式 on-request-read-only，provider 确认 on-request/readOnly/network false/user reviewer/cwd，completed 并 finalized；创建真实组织 `org_158df796b2b874cefbe45bea` revision 1 和只读 reviewer，当时尚无 Factory Attempt。此结果不证明 untrusted 审批或 Factory 闭环；Run 实际费用尚未知。
 
 本次相关源码提交按先后为 `cc06da9b`（Work Graph）、`3e6c635e`（执行与交付基础）、`1cb89b82`（团队控制与客户端）、`dfa35fba`（撤权与消息回执）、`f88f1dc3`（备份、画像约束与 shadow 观察）、`baf143c3`（受限独立审查意见与容量等）、`5ab7df32`（组合检查与集成、团队关系和交接）、`932f8b0b`（既有检查的 Run 身份契约对齐）、`ea0d9445`（单候选检查终态证据）、`442f4d09`（托管节点换绑时的 Run 准入栅栏）、`0d147ca4`（只读协商、Steering 与 P5 对账退休源码）、`d4b9ad77`（Factory 对账观察）、`2c297025`（隔离 launcher 的 owner 密码启动兼容）、`48cdfdae`（GitHub 发布与构建证明适配、托管 Session 身份修复）、`2777ca26`（本地任务受限 handoff 接入）；与之并行的其他提交不代表 Factory 全阶段完成。
 
 | 阶段 | 已实现（源码事实） | 缺实现 | 未验证 |
 | --- | --- | --- | --- |
 | 0 现状与前置 | 返工上下文持久化、托管 Session 绑定校验、Factory 候选先于回写、Android 组织投影包络修正 | 各平台真实只读/权限能力仍需按实际运行边界补齐 | 真实 Harness、服务重启和真实项目 |
-| 1 Work Graph | 加法 schema、契约/候选/决策、CAS、依赖/状态/控制、分页、事件及服务端授权；保留 legacy/shadow/active 标记；ResumeWork 可解除暂停控制，失败项目按 RetryWork 规则处理；已提交按页 Run/Packet 对账源码 | 仅显式组织归属的旧任务有分页 shadow 快照；缺归属历史不自动猜测 | 按页对账尚未真实执行；新图业务行为及迁移兼容尚无新 oracle |
+| 1 Work Graph | 加法 schema、契约/候选/决策、CAS、依赖/状态/控制、分页、事件及服务端授权；保留 legacy/shadow/active 标记；ResumeWork 可解除暂停控制，失败项目按 RetryWork 规则处理；已提交按页 Run/Packet 对账源码 | 仅显式组织归属的旧任务有分页 shadow 快照；缺归属历史不自动猜测 | 已执行空 shadow 同步；代表性历史按页对账、新图业务及迁移兼容尚无现场证据 |
 | 2 执行 | 服务端开关与组织白名单、受限服务主体、scheduler/adapter、预算预留/可证实时结算、共享 broker 任务栅栏、候选与派生验证工作区、定向取消及权限撤销处置 | 未知副作用的自动恢复/补偿不完整；缺可信用量时预算持续保留，不能宣称自动结算 | 真实进程、预算、取消、重启及恢复 |
-| 3 团队指挥 | owner 读写/回执、Web/Android 基础任务控制、节点消息与回复、生命周期与节点换绑；有界本地及签名远端任务交接、任务级显式知识引用源码 | 远端不传收件箱，亦不支持知识引用委派；全项目长期任务知识仍不完整；当前 Steering 为绑定 Run 的受控请求，其他 provider 明确 unsupported；交接的剩余预算等缺失事实保留 unknown | 远端交接与知识引用真实运行、新节点消息、活跃授权撤销、Android 真机、断线重连 |
+| 3 团队指挥 | owner 读写/回执、Web/Android 基础任务控制、节点消息与回复、生命周期与节点换绑；有界本地及签名远端任务交接、任务级显式知识引用、受控咨询源码 | 远端不传收件箱，亦不支持知识引用委派；全项目长期任务知识仍不完整；当前 Steering 为绑定 Run 的受控请求，其他 provider 明确 unsupported；交接的剩余预算等缺失事实保留 unknown | 咨询 Run/意见与跨库恢复、远端交接与知识引用、新节点消息、活跃授权撤销、Android 真机、断线重连 |
 | 4 工作流与交付 | 版本化公式、v2 受限独立审查意见、人工验收、注册检查、单候选及有序多候选组合的固定输入、派生验证、真实 Git commit 协议及不可变组合收据；包/授权/幂等发布操作；已提交源码支持显式 GitHub Release 与外部结果查询、签名构建证明校验、完整 draft 显式恢复 | PR 创建/更新/合并渠道（若采用 PR）及长期交付证据策略仍不完整；空/部分 draft 不自动补传，崩溃停在 sending/recovering 缺安全恢复入口；无已配置可信证明时发布受阻 | 独立审查、组合验证、真实项目集成、GitHub attestation/release 及恢复尚未贯通；未实际发布 |
 | 5 灰度与验收 | 加法表、准入开关/白名单、shadow 观察与对账、数据库备份源码、workspace 显式退休；按组织状态观测见 `cf722af1`，分平台条件见 [能力矩阵](capability-matrix.zh.md) | 全量历史事实、Run 文件与外部副作用的一致检查点及旧入口退出流程未完成；权限拒绝与 provider 停止结果缺完整收据 | Linux `a6ee4851` 已部署且服务可用；备份、真实灰度、任务重启恢复、跨平台和回退尚无完整证据 |
 先前 Windows 隔离批次未访问生产数据库、调用真实 Harness、重启服务、部署或发布，未创建测试；后续 Linux 开发实例的部署事实以上方记录为准。完成项需后续审阅及适用的现有可信检查支持。模板来自本仓库方案而非已证实的业务运行流程，不能将其称为已验证模板。
@@ -50,9 +62,9 @@ Windows G: 隔离环境既有检查：`tests/test-collaboration-store.mjs`、`te
 
 `AGENTOC_FACTORY_SHADOW_SYNC_ENABLED=1` 可在既有 observer 循环按组织白名单启用只读来源的分页 shadow 投影；默认关闭。水位与快照同事务写入，不启动 Run、不发消息、不把旧成功当验收。仅映射明确声明组织且同项目或项目缺失的 Collaboration；未关联组织及跨库 Run/Packet 的真实性仍需人工核对。完成一轮的时间不等于业务验收通过。
 
-备份工具只覆盖三个 SQLite 数据库，使用数据库写锁检查已知活动项；不复制 Run 文件或项目产物，也不证明外部副作用已停止。只读连接在 WAL 模式下仍可能创建或更新源目录的共享内存文件；工具未实际运行，不能据此声称恢复已验证。
+备份工具只复制三个 SQLite 数据库，使用数据库写锁检查已知活动项；inventory 允许数据库缺失并明确标未知，实际 backup 仍要求三个库存在。可选 Run 根目录时最多观察 100 个关联 Run，每文件读取上限 2 MiB，并记录文件摘要、publication 身份及缺失或截断；可选产物根目录仅观察已登记包，最多 50 件、总读取 32 MiB，额外限制于显式根目录，不替代当前发布授权。该观察不复制 Run 文件或项目产物，也不证明外部副作用已停止；数据库锁不冻结文件，跨时刻变化和跨库一致性不能视作原子。只读连接在 WAL 模式下仍可能创建或更新源目录的共享内存文件；新版已执行上述 inventory，产物观察未运行，backup/restore 尚未验证。
 
-本次工作区的存储约束：工作产物、临时目录及可变缓存留在 `G:/AgentoC`；这不是对产品其他用户的盘符要求。不清理其他并行任务或用户数据。此前 G: 降至约 1.78 GiB，曾停止构建和 API 验收；随后容量恢复，最近核查可用 12,218,535,936 字节（约 11.38 GiB），变化原因未确定；没有因空间变化扩大清理范围。此前组织投影、S22 临时目录和空 factory-check-work 目录已按用户授权清理。既有 run-publication 检查明确保留的 `G:/AgentoC/temp/agentoc-run-publication-92Nk4b` 含 72 个文件、68,961 字节；保留不等于完成清理。
+本次工作区的存储约束：工作产物、临时目录及可变缓存留在 `G:/AgentoC`；这不是对产品其他用户的盘符要求。不清理其他并行任务或用户数据。此前 G: 降至约 1.78 GiB，曾停止构建和 API 验收，随后一度恢复至约 11.38 GiB；最近通报 G: 约 6.15 GiB、可用内存约 608 MiB，变化原因未确定，没有因此扩大清理范围。此前组织投影、S22 临时目录和空 factory-check-work 目录已按用户授权清理。既有 run-publication 检查明确保留的 `G:/AgentoC/temp/agentoc-run-publication-92Nk4b` 含 72 个文件、68,961 字节；保留不等于完成清理。
 
 2026-11-14 的 P5 源码新增按组织分页对照真实 Run 与 ResultPacket 的页面回执，记录缺失、不一致及观察时间，跨库不保证原子；readiness 只展示已核页面，不推导整体就绪。显式 workspace 退休实现预览、引用与终态检查、持久冻结及恢复，同权限外部进程替换目录不受 OS 原子防护；涉及 privileged 批准历史时保守阻断，严格 history 读取可能触发现有 orphan 恢复。两项已静态交叉审查和语法检查，尚未在真实数据执行对账或删除。
 
