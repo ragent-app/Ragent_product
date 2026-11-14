@@ -923,15 +923,32 @@ function parseFileChangePatch(params) {
 
 function parseTokenUsage(tokenUsage) {
   if (!tokenUsage || typeof tokenUsage !== 'object') return [];
-  return [usageEvent({
-    contextTokens: Number.isFinite(tokenUsage.totalTokens) ? tokenUsage.totalTokens : undefined,
-    inputTokens: Number.isFinite(tokenUsage.inputTokens) ? tokenUsage.inputTokens : undefined,
-    outputTokens: Number.isFinite(tokenUsage.outputTokens) ? tokenUsage.outputTokens : undefined,
-    cachedInputTokens: Number.isFinite(tokenUsage.cachedInputTokens) ? tokenUsage.cachedInputTokens : undefined,
-    reasoningTokens: Number.isFinite(tokenUsage.reasoningOutputTokens) ? tokenUsage.reasoningOutputTokens : undefined,
-    contextWindowTokens: Number.isFinite(tokenUsage.contextWindow) ? tokenUsage.contextWindow : undefined,
+  // Current app-server reports cumulative thread totals and the last turn
+  // separately. Cached input is already included in input and total tokens.
+  const nested = tokenUsage.total && typeof tokenUsage.total === 'object' && !Array.isArray(tokenUsage.total);
+  const total = nested ? tokenUsage.total : tokenUsage;
+  const last = nested && tokenUsage.last && typeof tokenUsage.last === 'object' && !Array.isArray(tokenUsage.last)
+    ? Object.fromEntries(['totalTokens', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens']
+      .filter(key => Number.isFinite(tokenUsage.last[key]))
+      .map(key => [key, tokenUsage.last[key]]))
+    : null;
+  const event = usageEvent({
+    contextTokens: nested
+      ? (Number.isFinite(tokenUsage.last?.inputTokens) ? tokenUsage.last.inputTokens : undefined)
+      : (Number.isFinite(total.totalTokens) ? total.totalTokens : undefined),
+    inputTokens: Number.isFinite(total.inputTokens) ? total.inputTokens : undefined,
+    outputTokens: Number.isFinite(total.outputTokens) ? total.outputTokens : undefined,
+    cachedInputTokens: Number.isFinite(total.cachedInputTokens) ? total.cachedInputTokens : undefined,
+    reasoningTokens: Number.isFinite(total.reasoningOutputTokens) ? total.reasoningOutputTokens : undefined,
+    contextWindowTokens: Number.isFinite(tokenUsage.modelContextWindow) ? tokenUsage.modelContextWindow
+      : (Number.isFinite(tokenUsage.contextWindow) ? tokenUsage.contextWindow : undefined),
     contextSource: 'codex-app-server',
-  })];
+    ...(nested ? { usageScope: 'provider_thread_total' } : {}),
+  });
+  return [{ ...event,
+    ...(nested && Number.isFinite(total.totalTokens) ? { providerThreadTotalTokens: total.totalTokens } : {}),
+    ...(last && Object.keys(last).length ? { providerLastUsage: last } : {}),
+  }];
 }
 
 function parseTurnCompleted(params) {
