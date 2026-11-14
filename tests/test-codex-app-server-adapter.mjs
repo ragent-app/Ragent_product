@@ -36,7 +36,7 @@ import {
 } from '../chat/adapters/codex-app-server.mjs';
 
 assert.deepEqual(buildCodexAppServerArgs(), ['app-server', '--stdio']);
-assert.deepEqual(buildCodexAppServerArgs({ cwd: 'G:/QA/project', agentocApprovalGate: true }), [
+assert.deepEqual(buildCodexAppServerArgs({ cwd: 'G:/QA/project', agentocApprovalGate: true, permissionMode: 'untrusted-read-only' }), [
   'app-server', '--stdio', '-c', 'projects={"G:/QA/project"={trust_level="untrusted"}}',
 ]);
 assert.deepEqual(buildCodexAppServerProjectTrustArgs('G:\\QA\\Ragent "fixture"'), [
@@ -103,6 +103,7 @@ const mcpInventoryMessage = {
 };
 assert.deepEqual(readCodexAppServerMcpStatusList(mcpInventoryMessage), [{
   name: 'agentoc_actions_fixture',
+  runtimeStatus: null,
   schemaAvailable: true,
   toolNames: ['agentoc_request_actions'],
 }]);

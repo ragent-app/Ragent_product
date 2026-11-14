@@ -929,7 +929,7 @@ try {
     effort: 'high',
     // The fixture requests a destructive command (never actually executed),
     // so this profile must expose its approval card rather than auto-allow it.
-    permissionMode: 'untrusted-read-only',
+    permissionMode: 'on-request-danger-full-access',
   });
   assert.equal(planRun.provider, 'codex', JSON.stringify({ state: planRun.state, failureReason: planRun.failureReason }));
   assert.equal(planRun.runtimeFamily, 'codex-app-server-json');
