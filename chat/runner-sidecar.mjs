@@ -1674,6 +1674,10 @@ export async function createCodexAppServerRunState({
     mcpStatusRequestId: null,
     mcpStatusRequestAfterReady: false,
     mcpDiscoveryStarted: false,
+    mcpDiagnosticInventory: 'not-requested',
+    mcpDiagnosticTargetPresent: null,
+    mcpDiagnosticReadiness: null,
+    mcpDiagnosticReason: null,
     mcpReadyStatusObserved: false,
     mcpReady: false,
     mcpReadinessTimer: null,
@@ -2130,6 +2134,10 @@ function requestCodexAppServerMcpStatusList(proc, state, { force = false } = {})
   state.mcpStatusRequestId = requestId;
   state.mcpStatusRequestAfterReady = state.mcpReadyStatusObserved === true;
   state.mcpDiscoveryStarted = true;
+  state.mcpDiagnosticInventory = 'pending';
+  state.mcpDiagnosticTargetPresent = null;
+  state.mcpDiagnosticReadiness = null;
+  state.mcpDiagnosticReason = null;
   return true;
 }
 
@@ -2265,6 +2273,12 @@ async function failCodexAppServerMcpReadiness(runId, state, terminate, reasonCod
       codexMcpTools: state.mcpRequiredToolNames || [],
       codexMcpReadyStatusObserved: state.mcpReadyStatusObserved === true,
       codexMcpStatusRequestPending: Boolean(state.mcpStatusRequestId),
+      codexMcpInventoryObservation: state.mcpDiagnosticInventory,
+      codexMcpTargetPresent: state.mcpDiagnosticTargetPresent,
+      codexMcpInventoryReadiness: state.mcpDiagnosticReadiness,
+      codexMcpInventoryReason: state.mcpDiagnosticReason,
+      codexMcpReadinessElapsedMs: state.mcpReadinessStartedAt
+        ? Math.max(0, Date.now() - Date.parse(state.mcpReadinessStartedAt)) : null,
     },
   });
   try {
@@ -2278,6 +2292,7 @@ async function consumeCodexAppServerMcpStatusList(runId, state, proc, parsed, te
   const requestWasAfterReady = state.mcpStatusRequestAfterReady === true;
   state.mcpStatusRequestId = null;
   state.mcpStatusRequestAfterReady = false;
+  state.mcpDiagnosticInventory = parsed?.error ? 'error' : 'response';
   if (!state.mcpRequired) {
     if (state.providerReadOnly && (parsed?.error || !Array.isArray(parsed?.result?.data)
         || parsed.result.data.length !== 0 || !Object.hasOwn(parsed.result, 'nextCursor') || parsed.result.nextCursor !== null)) {
@@ -2307,12 +2322,16 @@ async function consumeCodexAppServerMcpStatusList(runId, state, proc, parsed, te
   }
   const inventory = readCodexAppServerMcpStatusList(parsed);
   if (!inventory) {
+    state.mcpDiagnosticInventory = 'invalid';
     await failCodexAppServerMcpReadiness(runId, state, terminate, 'MCP_DISCOVERY_INVALID');
     return true;
   }
   state.mcpInventory = inventory;
+  state.mcpDiagnosticTargetPresent = inventory.some(entry => entry.name === state.mcpExpectedServerName);
   state.mcpToolDefinitions = parsed.result.data;
   const readiness = getCodexAppServerMcpReadiness(state);
+  state.mcpDiagnosticReadiness = ['waiting', 'ready', 'failed'].includes(readiness.state) ? readiness.state : null;
+  state.mcpDiagnosticReason = ['MCP_DISCOVERY_PENDING', 'MCP_SERVER_DISCOVERY_PENDING', 'MCP_STARTUP_PENDING', 'MCP_READY_UNCONFIRMED'].includes(readiness.reasonCode) ? readiness.reasonCode : null;
   if (readiness.state === 'failed') {
     await failCodexAppServerMcpReadiness(runId, state, terminate, readiness.reasonCode);
     return true;
@@ -2430,6 +2449,10 @@ function recoverCodexAppServerFromStaleResume(proc, state) {
   state.mcpStatusRequestId = null;
   state.mcpStatusRequestAfterReady = false;
   state.mcpDiscoveryStarted = false;
+  state.mcpDiagnosticInventory = 'not-requested';
+  state.mcpDiagnosticTargetPresent = null;
+  state.mcpDiagnosticReadiness = null;
+  state.mcpDiagnosticReason = null;
   if (state.providerReadOnly) {
     state.mcpOptionalInventoryDone = false;
     if (state.mcpOptionalInventoryTimer) clearTimeout(state.mcpOptionalInventoryTimer);

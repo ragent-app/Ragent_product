@@ -35,3 +35,11 @@
 部署后的真实一次性提醒使用专用会话，provider 准备 ready/verified，Run completed 且退出码为 0；只读持久记录显示该 occurrence 的 execution 为 completed、delivery 为 published。专用会话中关联同一 Run 的 assistant 消息 seq 5 正文为“提醒验收成功。”，与请求一致。这验证一次真实回复的持久发布；未直接观察用户界面，也未证明周期提醒、重启恢复或 MCP 失败路径。
 
 随后 owner CLI 出现 `OBC_PEER_DISCONNECTED` 和 `OBC_TRANSPORT_FAILED`；只读健康端点返回 HTTP 503，owner activation 为 failed、code `OSV_RECOVERY_REFUSED`。两核心服务仍在运行；当前原因及恢复尚待确认，不能将 Run 成功视为 owner 通道持续健康。
+
+为保留 owner 恢复失败的后续诊断，正式部署 minor 0.0.84：源码 `acc74f99f2fce580e253f2fd5092e3ee05a2e062`，MSI SHA-256 `B1A6ADD2E3F341801966102BE55250EE33CDB5CAD6405CBC2401543105EB6050`；组件兼容检查及正式准入通过。升级前 drain 下 101 个索引和 Run 目录一致且均为终态；安装返回 3010，版本已注册，三个诊断文件 blob 与源码一致，两个服务恢复运行，drain 已解除。本事务记录重启后删除 MSI 回滚文件，未重启计算机。
+
+部署后一次正式 owner 健康检查为 listening/ready，CLI provider 读取成功。此次部署增加受限诊断信息，不改变恢复安全屏障，也不能证明此前 `OSV_RECOVERY_REFUSED` 的根因已修复；需在真实重现时读取新诊断。
+
+0.0.84 上创建的专用周期提醒按两次上限结束并自动禁用。首轮 Run 在 provider 准备 ready/verified 后出现真实 `MCP_READINESS_TIMEOUT`，execution failed、delivery unknown；持久 spool 记录 readiness 等待 15000 毫秒且未观察到 ready 状态。第二轮 Run completed、delivery published，正式 history API 返回同一 Run 的 assistant 消息 seq 13，正文为“周期提醒验收成功。”。两轮使用不同 requestId，均为一次尝试；未观察用户界面。这支持每轮请求和结果隔离；首轮失败意味着两轮全成功验收未通过，原因仍待定位，第二轮成功不代表首轮自动恢复。
+
+补充的 MCP 只读诊断将失败记录写入该 Run 的 spool，包含 inventory 状态、首个必需目标是否出现、受限就绪原因和等待时长，不改变就绪判断。现有 sidecar 检查在第 939 行权限模式断言失败；该用例输入与期望不一致，但未运行基线，不能据此断言失败与改动无关。排队验收未命中：背景 Run 先因 MCP 超时结束，后续提醒直接运行，不能视为 queued 已验证。
