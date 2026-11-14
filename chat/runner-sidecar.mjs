@@ -2597,7 +2597,8 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
   }
   state.providerStage = 'thread_started';
 
-  if (state.providerReadOnly && (state.mcpRequired || state.executionEnvironment || state.permissionMode !== 'never-read-only')) {
+  const providerReadOnlyMode = process.platform === 'linux' ? 'on-request-read-only' : 'never-read-only';
+  if (state.providerReadOnly && (state.mcpRequired || state.executionEnvironment || state.permissionMode !== providerReadOnlyMode)) {
     markCodexAppServerFailure(state, { error: { code: 'CODEX_READONLY_SCOPE_UNVERIFIED', message: 'Read-only thread configuration changed' } });
     proc.stdin?.end();
     return false;
@@ -2636,6 +2637,11 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
     }
   }
 
+  // Linux has no Windows sandbox readiness RPC. Its scope is verified from
+  // the actual thread response before the MCP and app inventories proceed.
+  if (state.providerReadOnly && process.platform === 'linux' && state.approvalPolicyVerified === true) {
+    state.providerReadOnlyReady = true;
+  }
   if (state.providerReadOnly && !state.providerReadOnlyReady) {
     if (!state.providerReadOnlyReadinessRequestId) {
       state.providerReadOnlyReadinessRequestId = state.nextControlRequestId++;
@@ -4254,7 +4260,7 @@ async function main() {
   // then fails with a self-describing channel error.
   const readOnlyRequested = manifest.executionScope?.accessMode === 'read'
     || manifest.options?.readOnlyRequired === true;
-  const providerReadOnly = process.platform === 'win32' && readOnlyRequested
+  const providerReadOnly = ['win32', 'linux'].includes(process.platform) && readOnlyRequested
     && isCodexAppServerFamily && manifest.tool === 'codex'
     && process.env.AGENTOC_CODEX_PROVIDER_READONLY === '1';
   if (readOnlyRequested) {
@@ -4336,7 +4342,7 @@ async function main() {
     captureRunBaseline: !readOnlyRequested,
   });
   const appServerManifest = isCodexAppServerFamily && (permissionMode || providerReadOnly)
-    ? { ...manifest, options: { ...(manifest.options || {}), permissionMode: providerReadOnly ? 'never-read-only' : permissionMode } }
+    ? { ...manifest, options: { ...(manifest.options || {}), permissionMode: providerReadOnly ? (process.platform === 'linux' ? 'on-request-read-only' : 'never-read-only') : permissionMode } }
     : manifest;
   const appServerState = isCodexAppServerFamily
     ? await createCodexAppServerRunState({
@@ -5946,7 +5952,8 @@ async function main() {
           version: 1, runtimeFamily: 'codex-app-server-json', enforcement: 'provider-negotiated',
           runId, threadId: appServerState.threadId, cwd: appServerState.cwd,
           executionScopeDigest: manifest.executionScopeDigest, sandbox: 'readOnly', networkAccess: false,
-          windowsSandboxReadiness: 'ready', mcpServers: 0, callableApps: 0, recordedAt: nowIso(),
+          ...(process.platform === 'win32' ? { windowsSandboxReadiness: 'ready' } : { sandboxReadiness: 'provider-thread-reported' }),
+          mcpServers: 0, callableApps: 0, recordedAt: nowIso(),
         } }));
         appServerState.providerReadOnlyAppsVerified = true;
         maybeStartCodexAppServerTurn(proc, appServerState, { method: 'thread/started', params: { thread: { id: appServerState.threadId } } });
