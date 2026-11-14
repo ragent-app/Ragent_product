@@ -1,3 +1,4 @@
+import { getOrganizationNodeGrantRevision, reviseOrganizationNodeGrant } from './organization-grant-revision.mjs';
 import { recordFactoryApiDenial, listFactoryApiDenials } from './factory-control-observations.mjs';
 import { startFactoryConsultation, getFactoryConsultation, listFactoryConsultations, reconcileFactoryConsultation, resumeFactoryConsultation } from './factory-consultation.mjs';
 import { getFactoryConcurrencyPolicy, setFactoryConcurrencyPolicy } from './factory-policy.mjs';
@@ -60,6 +61,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const retirement = /^\/api\/organizations\/([^/]+)\/factory\/retirement\/(preview|execute)$/.exec(String(pathname || ''));
   const denialObservations = /^\/api\/organizations\/([^/]+)\/factory\/observations\/denials$/.exec(String(pathname || ''));
   const consultation = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/consultations(?:\/([^/]+)(?:\/(reconcile|resume))?)?$/.exec(String(pathname || ''));
+  const nodeGrantRevision = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/grant-revision$/.exec(String(pathname || ''));
   const factoryPolicy = /^\/api\/organizations\/([^/]+)\/factory\/policy$/.exec(String(pathname || ''));
   const blockerSubmit = /^\/api\/sessions\/([^/]+)\/factory\/blocker-proposal$/.exec(String(pathname || ''));
   const blockerOwner = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/blocker-proposals(?:\/([^/]+)\/dispose)?$/.exec(String(pathname || ''));
@@ -91,7 +93,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
   let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
   try { if(directOrg) observedOrg=decodeURIComponent(directOrg[1]); } catch { observedOrg=''; }
@@ -162,6 +164,17 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
       const {expertNodeId,expectedVersion,question,deadline,budget,commandId,idempotencyKey}=body;
       writeJson(res,200,await startFactoryConsultation({organizationId,workItemId,expertNodeId,expectedVersion,question,deadline,budget,commandId,idempotencyKey},actor)); return true;
+    }
+    if (nodeGrantRevision) {
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const organizationId=decodeURIComponent(nodeGrantRevision[1]), nodeId=decodeURIComponent(nodeGrantRevision[2]);
+      if(req.method==='GET') { writeJson(res,200,await getOrganizationNodeGrantRevision(organizationId,nodeId,actor)); return true; }
+      if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
+      const {commandId,expectedOrganizationVersion,expectedRevision,expectedBindingGeneration,capabilities}=body;
+      writeJson(res,200,await reviseOrganizationNodeGrant({organizationId,nodeId,commandId,expectedOrganizationVersion,expectedRevision,expectedBindingGeneration,capabilities},actor)); return true;
     }
     if (factoryPolicy) {
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};

@@ -7,6 +7,10 @@ const within = (child, root) => {
 export function factoryGrantDenial(db, organization, node, item) {
   let grant;
   try { grant=JSON.parse(node.grant_json || '{}'); } catch { return 'Assignee grant is unreadable'; }
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_role_grant_versions'").get()) {
+    const version=db.prepare('SELECT grant_json,role_instance_id FROM organization_role_grant_versions WHERE organization_id=? AND node_id=? AND revision<=? ORDER BY revision DESC LIMIT 1').get(organization.id,node.id,organization.current_revision);
+    if (version && (version.role_instance_id!==node.role_instance_id || version.grant_json!==node.grant_json)) return 'Current role grant version does not match the node';
+  }
   const contract=item.contract || {}, declared=contract.accessMode;
   if (declared && !['read','write'].includes(declared)) return 'Unsupported access mode';
   const paths=Array.isArray(contract.allowedPaths) ? contract.allowedPaths : [];

@@ -778,7 +778,7 @@ export function createCollaborationOrchestrator(options = {}) {
         || node.currentSessionId !== managedSessionId
         || (Number.isInteger(collaboration.policy?.organizationBindingGeneration)
           && node.bindingGeneration !== collaboration.policy.organizationBindingGeneration)
-        || Number(managedTarget.organizationRevision) !== Number(collaboration.policy?.factoryConsultation ? node.createdRevision : organization.currentRevision)
+        || Number(managedTarget.organizationRevision) !== Number((collaboration.policy?.factoryConsultation || collaboration.policy?.factoryExecution) ? node.createdRevision : organization.currentRevision)
         || trim(managedTarget.organizationNodeId) !== expectedNodeId) {
         const error = new Error(`Managed Session target is not bound to this Organization task: ${task.id}`);
         error.code = 'COLLABORATION_MANAGED_SESSION_BINDING_INVALID';

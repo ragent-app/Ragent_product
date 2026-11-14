@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { factoryRead, factoryTransaction, factoryError, now, event } from './work-graph-store.mjs';
 import { authorize, selectItem, required, checkVersion } from './work-graph.mjs';
 import { findRunByRequest } from './runs.mjs';
 import { claimPendingDispatchCommands, completeAttemptDispatch, deferAttemptDispatch } from './collaboration-store.mjs';
 import { verifyFactoryResponsibilityFence } from './factory-responsibility-admission.mjs';
 import { profileAllows } from './factory-execution-adapter.mjs';
+import { releaseOrganizationBudgetReservation } from './organization-governor.mjs';
 
 function schema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS factory_reconciliation_failures (
@@ -17,6 +19,58 @@ function schema(db) {
     CREATE TABLE IF NOT EXISTS factory_reconciliation_receipts (
     command_id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, work_item_id TEXT NOT NULL,
     execution_epoch INTEGER NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL);`);
+}
+
+// Written only in the fresh caller's terminal transition transaction, before it
+// has entered any local or remote dispatch. It proves no Run was dispatched,
+// not that workspace preparation left no filesystem artifacts.
+function unstartedSchema(db) { db.exec(`CREATE TABLE IF NOT EXISTS factory_unstarted_receipts (
+ binding_id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, work_item_id TEXT NOT NULL,
+ contract_revision INTEGER NOT NULL, execution_epoch INTEGER NOT NULL, binding_generation INTEGER NOT NULL,
+ dispatch_key TEXT NOT NULL, budget_key TEXT NOT NULL, budget_revision INTEGER NOT NULL,
+ lease_owner_hash TEXT NOT NULL, lease_generation INTEGER NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL);
+ CREATE TRIGGER IF NOT EXISTS factory_unstarted_no_update BEFORE UPDATE ON factory_unstarted_receipts BEGIN SELECT RAISE(ABORT,'immutable receipt'); END;
+ CREATE TRIGGER IF NOT EXISTS factory_unstarted_no_delete BEFORE DELETE ON factory_unstarted_receipts BEGIN SELECT RAISE(ABORT,'immutable receipt'); END;`); }
+export function recordFreshUnstartedReceipt(db,info) {
+ unstartedSchema(db);
+ const binding=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=? AND work_item_id=?').get(info.bindingId,info.workItemId);
+ const item=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(info.workItemId,info.organizationId);
+ const org=db.prepare('SELECT * FROM organizations WHERE id=?').get(info.organizationId);
+ const lease=db.prepare('SELECT * FROM factory_scheduler_leases WHERE organization_id=?').get(info.organizationId);
+ if(!binding || !item || !org || binding.status!=='intent' || binding.run_id || binding.collaboration_id || binding.attempt_id || binding.task_id
+   || binding.dispatch_key!==info.dispatchKey || binding.contract_revision!==info.contractRevision || binding.execution_epoch!==info.executionEpoch
+   || binding.binding_generation!==info.bindingGeneration || item.state!=='claimed' || item.contract_revision!==info.contractRevision
+   || item.execution_epoch!==info.executionEpoch || item.binding_generation!==info.bindingGeneration || org.current_revision!==info.budgetRevision
+   || !lease || lease.owner_token!==info.leaseOwner || lease.generation!==info.leaseGeneration
+   || !Number.isFinite(Date.parse(lease.expires_at)) || Date.parse(lease.expires_at)<=Date.now()) return false;
+ if(db.prepare('SELECT 1 FROM collaborations WHERE root_session_id=? AND idempotency_key=?').get(org.root_session_id,info.dispatchKey)) return false;
+ const remoteTable=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='remote_factory_source_operations'").get();
+ if(remoteTable && db.prepare('SELECT 1 FROM remote_factory_source_operations WHERE source_factory_binding_id=?').get(binding.id)) return false;
+ let reservation;try { const row=db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(info.organizationId,info.budgetRevision); reservation=JSON.parse(row?.reservations_json || '{}')[info.budgetKey]; } catch { return false; }
+ if(info.budgetKey!==`factory:${binding.id}` || reservation?.state!=='reserved' || reservation.reservationId!==info.budgetKey || reservation.idempotencyKey!==info.budgetKey || reservation.factoryWorkItemId!==info.workItemId) return false;
+ db.prepare(`INSERT INTO factory_unstarted_receipts (binding_id,organization_id,work_item_id,contract_revision,execution_epoch,binding_generation,dispatch_key,budget_key,budget_revision,lease_owner_hash,lease_generation,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(binding.id,info.organizationId,info.workItemId,info.contractRevision,info.executionEpoch,info.bindingGeneration,info.dispatchKey,info.budgetKey,info.budgetRevision,createHash('sha256').update(info.leaseOwner).digest('hex'),info.leaseGeneration,'fresh_local_pre_dispatch',now());
+ return true;
+}
+export async function releaseFreshUnstartedReservation(organizationId,workItemId,executionEpoch,actor) {
+ const proof=await factoryRead(db=>{
+  authorize(db,organizationId,actor,'factory.read');
+  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_unstarted_receipts'").get()) return null;
+  const receipts=db.prepare('SELECT * FROM factory_unstarted_receipts WHERE organization_id=? AND work_item_id=? AND execution_epoch=? LIMIT 2').all(organizationId,workItemId,executionEpoch);
+  if(receipts.length!==1) return null;
+  const receipt=receipts[0];
+  const binding=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=? AND work_item_id=?').get(receipt.binding_id,workItemId);
+  let details;try { details=JSON.parse(binding?.details_json || '{}'); } catch { return null; }
+  if(!binding || binding.status!=='failed' || binding.run_id || binding.collaboration_id || binding.attempt_id || binding.task_id
+   || binding.dispatch_key!==receipt.dispatch_key || binding.contract_revision!==receipt.contract_revision || binding.execution_epoch!==receipt.execution_epoch
+   || binding.binding_generation!==receipt.binding_generation || receipt.source!=='fresh_local_pre_dispatch' || receipt.budget_key!==`factory:${binding.id}`
+   || details.terminalEvidenceRef!==`unstarted-receipt:${binding.id}`) return null;
+  let entry;try {entry=JSON.parse(db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(organizationId,receipt.budget_revision)?.reservations_json || '{}')[receipt.budget_key];}catch{return null;}
+  if(!entry || entry.factoryWorkItemId!==workItemId || entry.reservationId!==receipt.budget_key || entry.idempotencyKey!==receipt.budget_key || !['reserved','released'].includes(entry.state)) return null;
+  return receipt;
+ });
+ if(!proof) return {state:'unavailable'};
+ const result=await releaseOrganizationBudgetReservation({organizationId,revision:proof.budget_revision,reservationId:proof.budget_key,idempotencyKey:proof.budget_key,reason:'verified_fresh_local_pre_dispatch'});
+ return {state:result.reservation?.state || 'unknown',replayed:result.replay===true};
 }
 
 export async function factoryReconciliationDue(organizationId,item,actor) {
@@ -198,7 +252,7 @@ async function reconcileAcceptedRun(input,actor,automatic) {
 // release a budget reservation, or adopt an old dispatch intent.
 export async function requestFactoryReconciliation(input,actor) {
   if(actor?.kind!=='user'||actor.role!=='owner') throw factoryError('FACTORY_FORBIDDEN','Owner access required',403);
-  return factoryTransaction(db => { schema(db); const org=required(input?.organizationId,'organizationId'); authorize(db,org,actor,'factory.read');
+  const outcome=await factoryTransaction(db => { schema(db); const org=required(input?.organizationId,'organizationId'); authorize(db,org,actor,'factory.read');
     const item=selectItem(db,org,required(input.workItemId,'workItemId')), commandId=required(input.commandId,'commandId');
     const prior=db.prepare('SELECT * FROM factory_reconciliation_receipts WHERE command_id=?').get(commandId);
     if(prior) { if(prior.organization_id!==org||prior.work_item_id!==item.id||prior.execution_epoch!==input.executionEpoch||prior.actor_id!==actor.principalId) throw factoryError('FACTORY_CONFLICT','Command identity conflicts'); return {requested:true,replayed:true}; }
@@ -206,6 +260,9 @@ export async function requestFactoryReconciliation(input,actor) {
     db.prepare('UPDATE factory_reconciliation_failures SET next_attempt_at=?,updated_at=? WHERE organization_id=? AND work_item_id=? AND execution_epoch=?').run(now(),now(),org,item.id,item.execution_epoch);
     db.prepare('INSERT INTO factory_reconciliation_receipts VALUES(?,?,?,?,?,?)').run(commandId,org,item.id,item.execution_epoch,actor.principalId,now());
     event(db,org,item.id,'ReconciliationRequested',{executionEpoch:item.execution_epoch,actorId:actor.principalId,commandId}); return {requested:true,replayed:false}; });
+  let unstartedBudget; try { unstartedBudget=await releaseFreshUnstartedReservation(input.organizationId,input.workItemId,input.executionEpoch,actor); }
+  catch { unstartedBudget={state:'pending',reason:'release_unavailable'}; }
+  return {...outcome,unstartedBudget};
 }
 
 // Recovery is separate from an observation request and requires an owner.

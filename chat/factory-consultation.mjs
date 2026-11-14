@@ -46,9 +46,12 @@ async function sessionFor(context) {
 }
 export async function assertFactoryConsultationFence(context,collaborationId='') {
  await sessionFor(context);
+ const {currentRevisedGrant,revisedGrantMatches}=await import('./factory-execution-adapter.mjs');
+ const revisedGrant=await currentRevisedGrant(context.organizationId,context.nodeId);
  return factoryRead(db=>{schema(db);const job=db.prepare('SELECT * FROM factory_consultations WHERE id=?').get(context.id);
   if(!job || !['sending','observing'].includes(job.state) || job.context_json!==encode(context)) fail('Consultation journal identity changed');
   current(db,context);
+  if(!revisedGrantMatches(db,context.organizationId,context.nodeId,revisedGrant)) fail('Expert Agent profile authority changed');
   if(collaborationId) {
    const c=db.prepare('SELECT root_session_id,idempotency_key,policy_json FROM collaborations WHERE id=?').get(collaborationId);
    if(!c || c.root_session_id!==context.rootSessionId || c.idempotency_key!==context.dispatchKey || JSON.stringify(decode(c.policy_json,{}).factoryConsultation)!==JSON.stringify(context)) fail('Consultation collaboration changed');
