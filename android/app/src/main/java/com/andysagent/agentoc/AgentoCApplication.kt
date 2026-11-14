@@ -335,7 +335,7 @@ class AndroidRuntimeGraph internal constructor(
     private val mutableLocalAccountLinkStates = MutableStateFlow<Map<String, String>>(emptyMap())
     val localAccountLinkStates: StateFlow<Map<String, String>> = mutableLocalAccountLinkStates.asStateFlow()
 
-    suspend fun localAccountLinkStatus(instanceId: String): LocalAccountLinkStatus {
+    internal suspend fun localAccountLinkStatus(instanceId: String): LocalAccountLinkStatus {
         val target = configStore.directory.first().computers.firstOrNull { it.instanceId == instanceId && it.localRuntime }
             ?: throw IllegalArgumentException("Local instance is unavailable")
         return withTargetRuntime(target.instanceId) { runtime ->
