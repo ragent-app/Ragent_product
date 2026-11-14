@@ -4,6 +4,14 @@
 
 更新：2026-11-14。源码：`G:/AgentoC/Ragent_product`，`main`。原始核查 HEAD `3628b2ef5f5627fe2118bda40691150c8d1da74f`；方案文档提交 `18250b9ccdb50ec05bd30d44cf2ff684a623b00a`。工作树含其他未提交修改，以下为本次工作状态，不把代码存在等同于真实运行通过。
 
+后续增量：`082be101` 增加发布直接进程完成回执与备份证据索引；`e6a39b38` 为远端委派固定不含收件箱的任务摘要；`a6ee4851` 支持 owner 显式逾期提醒。知识授权的合同栅栏和 dispatch 改动被并行提交 `e36fe334` 夹带，其余闭包在 `0c9719da`：owner 可把已有项目事实固定到单个任务，来源变化在发送前拒绝；远端带知识引用的任务目前拒绝，跨库检查与实际发送不原子。上述增量不等于真实业务验收。
+
+`233094db` 增加受限 Run 的结构化阻塞提案和 owner 显式处置源码；真实提案、权限撤销及重启恢复尚未验证。
+
+用户已授权本机及指定 `pinggu` 开发实例验收。执行侧报告 Linux 部署的 `a6ee4851` 服务和 owner CLI 可用；初查没有组织与 project-workflow 数据库，后续真实组织规划已完成，图任务尚待执行。正式 owner API 的 Factory status、shadow 和 work-items 均返回 HTTP 200；后两者为空，status 显示控制和自动准入关闭、executionReadiness 未验证。空列表不证明历史迁移或任务闭环。最新工作树上的知识和后续 readiness 改动不在该部署版本中。分平台条件与现场证据分列于 [能力矩阵](capability-matrix.zh.md)。
+
+Linux 真实规划的三次尝试：① `a6ee4851` 的 `run_5bec3b56ffc0b6d77ba0aa0f` 请求 untrusted-read-only，实际持久模式扩大为 on-request-danger-full-access，发现后定向取消并 finalized；可见 spool 仅有 rg/sed 读取命令。② 加只读修复 `bbd95785` 的 `run_79302a372bb5347b34aeadf5` 持久 untrusted-read-only，但 provider 回报 on-request/readOnly/no-network，因 `CODEX_APPROVAL_POLICY_UNVERIFIED` 在 prompt 前失败并 finalized。③ 同源码的 `run_4873b45058010066b2942c40` 显式 on-request-read-only，provider 确认 on-request/readOnly/network false/user reviewer/cwd，completed 并 finalized；创建真实组织 `org_158df796b2b874cefbe45bea` revision 1 和只读 reviewer，尚无 Attempt。此结果不证明 untrusted 审批或 Factory 闭环；Run 实际费用尚未知。
+
 本次相关源码提交按先后为 `cc06da9b`（Work Graph）、`3e6c635e`（执行与交付基础）、`1cb89b82`（团队控制与客户端）、`dfa35fba`（撤权与消息回执）、`f88f1dc3`（备份、画像约束与 shadow 观察）、`baf143c3`（受限独立审查意见与容量等）、`5ab7df32`（组合检查与集成、团队关系和交接）、`932f8b0b`（既有检查的 Run 身份契约对齐）、`ea0d9445`（单候选检查终态证据）、`442f4d09`（托管节点换绑时的 Run 准入栅栏）、`0d147ca4`（只读协商、Steering 与 P5 对账退休源码）、`d4b9ad77`（Factory 对账观察）、`2c297025`（隔离 launcher 的 owner 密码启动兼容）、`48cdfdae`（GitHub 发布与构建证明适配、托管 Session 身份修复）、`2777ca26`（本地任务受限 handoff 接入）；与之并行的其他提交不代表 Factory 全阶段完成。
 
 | 阶段 | 已实现（源码事实） | 缺实现 | 未验证 |
@@ -11,16 +19,20 @@
 | 0 现状与前置 | 返工上下文持久化、托管 Session 绑定校验、Factory 候选先于回写、Android 组织投影包络修正 | 各平台真实只读/权限能力仍需按实际运行边界补齐 | 真实 Harness、服务重启和真实项目 |
 | 1 Work Graph | 加法 schema、契约/候选/决策、CAS、依赖/状态/控制、分页、事件及服务端授权；保留 legacy/shadow/active 标记；ResumeWork 可解除暂停控制，失败项目按 RetryWork 规则处理；已提交按页 Run/Packet 对账源码 | 仅显式组织归属的旧任务有分页 shadow 快照；缺归属历史不自动猜测 | 按页对账尚未真实执行；新图业务行为及迁移兼容尚无新 oracle |
 | 2 执行 | 服务端开关与组织白名单、受限服务主体、scheduler/adapter、预算预留/可证实时结算、共享 broker 任务栅栏、候选与派生验证工作区、定向取消及权限撤销处置 | 未知副作用的自动恢复/补偿不完整；缺可信用量时预算持续保留，不能宣称自动结算 | 真实进程、预算、取消、重启及恢复 |
-| 3 团队指挥 | owner 读写/回执、Web/Android 基础任务控制、节点消息与回复、生命周期与节点换绑；类型关系版本/停用和有界任务交接快照；已提交本地 dispatch 受限 node/工作项上下文接入源码，截断时 freshness 为 unknown_truncated | 远端上下文未接入，全项目长期任务知识仍不完整；当前 Steering 为绑定 Run 的受控请求，其他 provider 明确 unsupported；交接的剩余预算等缺失事实保留 unknown | 新节点消息、活跃授权撤销、Android 真机、断线重连 |
+| 3 团队指挥 | owner 读写/回执、Web/Android 基础任务控制、节点消息与回复、生命周期与节点换绑；有界本地及签名远端任务交接、任务级显式知识引用源码 | 远端不传收件箱，亦不支持知识引用委派；全项目长期任务知识仍不完整；当前 Steering 为绑定 Run 的受控请求，其他 provider 明确 unsupported；交接的剩余预算等缺失事实保留 unknown | 远端交接与知识引用真实运行、新节点消息、活跃授权撤销、Android 真机、断线重连 |
 | 4 工作流与交付 | 版本化公式、v2 受限独立审查意见、人工验收、注册检查、单候选及有序多候选组合的固定输入、派生验证、真实 Git commit 协议及不可变组合收据；包/授权/幂等发布操作；已提交源码支持显式 GitHub Release 与外部结果查询、签名构建证明校验、完整 draft 显式恢复 | PR 创建/更新/合并渠道（若采用 PR）及长期交付证据策略仍不完整；空/部分 draft 不自动补传，崩溃停在 sending/recovering 缺安全恢复入口；无已配置可信证明时发布受阻 | 独立审查、组合验证、真实项目集成、GitHub attestation/release 及恢复尚未贯通；未实际发布 |
-| 5 灰度与验收 | 加法表、服务端准入开关/白名单、关闭新准入时观察既有任务、按组织分页 shadow 快照、可选 bounded 观察循环与持久水位、状态读取；数据库备份工具具备锁定、活动操作检查、完整性检查及清单源码；跨库 shadow 页面对账及 workspace 显式退休源码已提交 | 全量历史事实、Run 文件与外部副作用的一致检查点、部署监控/分平台能力矩阵及旧入口退出流程未完成 | 备份工具尚未实际运行；尚无真实灰度、部署、重启、恢复、跨平台和回退证据 |
-本次未访问生产数据库、调用真实 Harness、重启服务、部署或发布，未创建测试。完成项需后续审阅及适用的现有可信检查支持。模板来自本仓库方案而非已证实的业务运行流程，不能将其称为已验证模板。
+| 5 灰度与验收 | 加法表、准入开关/白名单、shadow 观察与对账、数据库备份源码、workspace 显式退休；按组织状态观测见 `cf722af1`，分平台条件见 [能力矩阵](capability-matrix.zh.md) | 全量历史事实、Run 文件与外部副作用的一致检查点及旧入口退出流程未完成；权限拒绝与 provider 停止结果缺完整收据 | Linux `a6ee4851` 已部署且服务可用；备份、真实灰度、任务重启恢复、跨平台和回退尚无完整证据 |
+先前 Windows 隔离批次未访问生产数据库、调用真实 Harness、重启服务、部署或发布，未创建测试；后续 Linux 开发实例的部署事实以上方记录为准。完成项需后续审阅及适用的现有可信检查支持。模板来自本仓库方案而非已证实的业务运行流程，不能将其称为已验证模板。
 
 Windows G: 隔离环境既有检查：`tests/test-collaboration-store.mjs`、`tests/test-collaboration-orchestrator.mjs` 通过；collaboration-store 首轮因环境变量冲突失败，修正 G: 隔离环境后单次重跑通过。`tests/test-organization-provisioning.mjs` 通过 51 项。`tests/test-phase-gates.mjs` 曾在约 30 条断言后因 status 缺少与 manifest 相同的既有 requestId 而失败；仅为现有 helper 补齐该同值（未新增数据、断言或改变预期）后，单次通过 59 项，包括返工部分。`tests/test-run-publication.mjs` 单次通过 16/16。Windows 上另有两项既有检查各运行一次失败：`test-codex-app-server-adapter.mjs:39` 的默认 project trust 预期与当前实现不一致；`test-reviewer-readonly.mjs:145` 预期内建 bwrap 可用，而 Windows 未认证该能力。未修改断言，亦不证明新 provider 只读协商通过。这些结果不证明新 Factory、真实 Harness 或生产恢复。
+
+静态兼容判断：`9a232959` 有意把 Codex profile gate 改为 on-request，仅明确 untrusted 模式配置 project trust，并同步更新了部分但未更新全部断言；[adapter 旧断言](../../tests/test-codex-app-server-adapter.mjs) 与 [provider-contract 旧断言](../../tests/test-provider-contract.mjs) 因此仍期待旧行为，[旧 gate 方案](../approval-gate-adjustment-plan.md) 也未同步。该变更的源码明确 provider 不保证每条命令产生审批回调；真实风险体验仍需 provider 证据，本轮只读修复不改变无只读请求的默认策略。[reviewer 检查](../../tests/test-reviewer-readonly.mjs) 使用当前平台却期望 Linux bwrap 能力，Windows 失败不能证明 Linux 路径结果。[S22](../../tests/test-autonomous-organization-s22.mjs) 以不存在的 `session-old` 作为当前节点会话，而[换绑实现](../../chat/organization-replan.mjs)要求可核实会话及 Run 历史；fixture 不能证明真实换绑正确。未修改这些断言或新增替代测试。
 
 团队控制既有检查：`tests/test-chat-organization-view.mjs`、`tests/test-organization-projection-v2.mjs`（29 项断言）与 `tests/test-session-control-capability.mjs`（旧 root 范围）通过；这些不覆盖新增节点消息能力或真实执行。Android 离线 `:app:compileDebugKotlin` 在修正既有 G: debug keystore 路径及参数后通过；此前两次在编译前因签名路径及参数引用失败。该结果不证明 APK、设备或重连能力。上述检查在原基线与并行未提交修改组成的工作树上执行，不代表已发布版本。
 
 新增 FactoryWorkScreen 只读交付证据后，同一离线 Android Kotlin 编译再次通过（JDK 21 与既有 G: SDK、缓存和 keystore；165 项任务中 4 项执行、161 项已是最新），包含并行未提交源码；仅有既有弃用警告，不代表设备或真实运行通过。
+
+后续 `a6ee4851` 消息升级源码的 Android 离线 `:app:compileDebugKotlin` 通过（165 项任务：12 项执行、153 项已是最新）；此前使用另一缓存的首次尝试因离线 AGP 9.1.1 缺失在编译前失败。之后 `cfc20b5d` 新增的离线缓存五文件不在该编译范围内，尚无编译或设备证据。
 
 `tests/test-autonomous-organization-s22.mjs` 退出码 1：第 50 行的替换流程因当前 managed session 不存在而被要求先对账；该既有 fixture 使用虚构的 root 等标识，未修改 fixture 或预期。不能据此断言只是 fixture 问题，新增换绑行为的兼容性检查未通过；该检查注入不存在的 session-old，provisioning 检查也注入 mock factory，均不能覆盖真实 createSession metadata 和 owner rebind。安全边界未改，本轮未重跑或改 fixture，真实调用链仍需核查。`tests/test-session-control-renewal.mjs` 退出码 0，覆盖既有续期、路由及客户端重试，不证明新增 worker 能力范围。
 
