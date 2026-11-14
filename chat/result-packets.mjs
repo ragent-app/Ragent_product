@@ -37,6 +37,7 @@ import {
 import { executeMutation } from './mutation-coordinator.mjs';
 import { getProject } from './projects.mjs';
 import { getWorkspaceById } from './workspaces.mjs';
+import { assertRunPublication } from './run-publication-contract.mjs';
 
 export const RESULT_PACKET_SCHEMA_VERSION = 1;
 export const PACKET_STATES = new Set(['succeeded', 'failed', 'cancelled', 'partial', 'blocked']);
@@ -265,7 +266,7 @@ function revisionFromGit(git) {
 
 function normalizeProvenance(value) {
   const provenance = value && typeof value === 'object' ? value : {};
-  return {
+  const normalized = {
     executionScopeDigest: trimString(provenance.executionScopeDigest),
     baseRevision: provenance.baseRevision && typeof provenance.baseRevision === 'object'
       ? provenance.baseRevision
@@ -283,6 +284,13 @@ function normalizeProvenance(value) {
       ? [...new Set(provenance.inputPacketIds.map((id) => trimString(id)).filter(Boolean))]
       : [],
   };
+  const report=provenance.assistantReport;
+  if (report && report.source==='persisted_assistant_final' && Number.isSafeInteger(report.eventSeq) && report.eventSeq>0
+      && typeof report.providerMessageId==='string' && report.providerMessageId.length>0 && report.providerMessageId.length<=256
+      && /^[a-f0-9]{64}$/.test(report.contentHash || '')) {
+    normalized.assistantReport={source:'persisted_assistant_final',eventSeq:report.eventSeq,providerMessageId:report.providerMessageId,contentHash:report.contentHash};
+  }
+  return normalized;
 }
 
 // C4 consultation recommendation: the only model-owned part of the
@@ -451,6 +459,7 @@ export async function deriveExecutionPacketFromRun({
   parentPacketIds,
   taskKind,
   consultation,
+  assistantReport,
   now,
   deps = {},
 } = {}) {
@@ -477,6 +486,17 @@ export async function deriveExecutionPacketFromRun({
   }
   const manifest = (await getManifest(normalizedRunId)) || {};
   const result = (await getResult(normalizedRunId)) || {};
+  let reportProvenance;
+  if (assistantReport) {
+    if (run.state!=='completed' || !run.finalizedAt || !assertRunPublication(run,manifest)
+        || assistantReport.runId!==normalizedRunId || assistantReport.sessionId!==run.sessionId || assistantReport.requestId!==run.requestId
+        || !Number.isSafeInteger(assistantReport.eventSeq) || assistantReport.eventSeq<1 || typeof assistantReport.providerMessageId!=='string' || !assistantReport.providerMessageId || assistantReport.providerMessageId.length>256
+        || typeof assistantReport.content!=='string' || !assistantReport.content.trim() || Buffer.byteLength(assistantReport.content,'utf8')>32768
+        || createHash('sha256').update(assistantReport.content).digest('hex')!==assistantReport.contentHash) {
+      throw createWorkflowError('Final assistant report identity is invalid','FACTORY_REPORT_HISTORY_PENDING',409);
+    }
+    reportProvenance={eventSeq:assistantReport.eventSeq,providerMessageId:assistantReport.providerMessageId,contentHash:assistantReport.contentHash,source:'persisted_assistant_final'};
+  }
   const scope = manifest.executionScope && typeof manifest.executionScope === 'object'
     ? manifest.executionScope
     : {};
@@ -498,9 +518,9 @@ export async function deriveExecutionPacketFromRun({
       sessionId: trimString(sessionId) || trimString(run.sessionId) || trimString(manifest.sessionId),
       runId: normalizedRunId,
     },
-    summary: typeof result.summary === 'string' && result.summary
+    summary: assistantReport?.content || (typeof result.summary === 'string' && result.summary
       ? result.summary
-      : (typeof manifest.summary === 'string' ? manifest.summary : ''),
+      : (typeof manifest.summary === 'string' ? manifest.summary : '')),
     changedFiles: Array.isArray(result.changedFiles)
       ? result.changedFiles
       : (Array.isArray(manifest.changedFiles) ? manifest.changedFiles : []),
@@ -519,6 +539,7 @@ export async function deriveExecutionPacketFromRun({
       sourceSessionIds: [trimString(sessionId) || trimString(run.sessionId) || trimString(manifest.sessionId)].filter(Boolean),
       sourceRunIds: [normalizedRunId],
       inputPacketIds: [],
+      ...(reportProvenance ? {assistantReport:reportProvenance} : {}),
     },
     supersedesPacketId,
     // ResultPacket v2 additive org/phase context (constitution §7). These come
@@ -569,6 +590,7 @@ export async function createExecutionPacket({
   parentPacketIds,
   taskKind,
   consultation,
+  assistantReport,
   now,
   deps = {},
 } = {}) {
@@ -595,6 +617,7 @@ export async function createExecutionPacket({
     parentPacketIds,
     taskKind,
     consultation,
+    assistantReport,
     now,
     deps,
   });

@@ -24,13 +24,14 @@ import {
   getRun,
   getRunManifest,
   getRunResult,
+  getRunAcceptanceEvidence,
   listRunIds,
   requestRunCancel,
 } from './runs.mjs';
-import { loadHistory, findLatestAssistantMessage } from './history.mjs';
+import { loadHistory, findLatestAssistantMessage, forEachStoredEvent } from './history.mjs';
 import { assertRunPublication } from './run-publication-contract.mjs';
 import { createGitWorktree, validateWorkspacePlan } from './collaboration-workspace.mjs';
-import { createExecutionPacket, getResultPacket } from './result-packets.mjs';
+import { createExecutionPacket, getResultPacket, listExecutionPacketsForRuns } from './result-packets.mjs';
 import { resultPacketPrompt } from './delegation-result.mjs';
 import { decideGate, completePhase } from './phase-gates.mjs';
 import {
@@ -134,6 +135,31 @@ function latestAssistantReport(history = []) {
     blockers: [],
     acceptanceNotes: [],
   };
+}
+
+// An assistant report is model output, not test or acceptance evidence. Read
+// only a unique final message bound to this finalized Run and its request.
+async function finalFactoryReport(run, manifest) {
+  const pending=reason=>Object.assign(new Error(`Factory report history unavailable: ${reason}`),{code:'FACTORY_REPORT_HISTORY_PENDING'});
+  if (!run?.id || !run.sessionId || !run.requestId || run.state!=='completed' || !run.finalizedAt || !assertRunPublication(run,manifest)) throw pending('run_publication');
+  const matches=[]; let visited=0;
+  await forEachStoredEvent(run.sessionId,event=>{
+    if (++visited>100000) return false;
+    if (event?.type==='message' && event.role==='assistant' && event.runId===run.id && event.messagePhase==='final_answer') matches.push(event);
+    if (matches.length>8) return false;
+  },{strict:true});
+  if(visited>100000 || !matches.length || matches.length>8) throw pending('final_message_count_or_scan_limit');
+  const providerId=matches[0].providerMessageId;
+  if(typeof providerId!=='string' || !providerId || matches.some(event=>event.providerMessageId!==providerId || event.requestId!==run.requestId || !Number.isSafeInteger(event.seq))) throw pending('final_message_identity');
+  let report=null;
+  for(const event of matches) {
+    const message=await findLatestAssistantMessage(run.sessionId,{strict:true,includeBodies:true,match:value=>value.seq===event.seq && value.runId===run.id && value.requestId===run.requestId});
+    if(!message || message.bodyLoaded!==true || message.bodyTruncated || typeof message.content!=='string' || !message.content.trim() || Buffer.byteLength(message.content,'utf8')>32768) throw pending('final_message_body');
+    const hash=createHash('sha256').update(message.content).digest('hex');
+    if(report && report.contentHash!==hash) throw pending('conflicting_final_messages');
+    report={sessionId:run.sessionId,runId:run.id,requestId:run.requestId,eventSeq:event.seq,providerMessageId:providerId,contentHash:hash,content:message.content};
+  }
+  return report;
 }
 
 function buildEnvelope(run, result, manifest, attempt, session = null) {
@@ -1166,6 +1192,26 @@ export function createCollaborationOrchestrator(options = {}) {
       const result = await deps.getRunResult(runId) || run.result || null;
       const manifest = await deps.getRunManifest(runId);
       if (taskCollaboration.policy?.factoryConsultation && !run.finalizedAt) return false;
+      let factoryReport=null;
+      const factory=taskCollaboration.policy?.factoryExecution;
+      if(factory && run.state==='completed' && task?.accessMode==='read') {
+        const reportTask=await store.withDatabase(db=>{
+          const item=db.prepare('SELECT contract_revision FROM factory_work_items WHERE id=? AND organization_id=?').get(factory.workItemId,factory.organizationId);
+          const row=item && db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(factory.workItemId,item.contract_revision);
+          const contract=row && JSON.parse(row.contract_json);
+          return item?.contract_revision===factory.contractRevision && contract?.accessMode==='read' && contract?.resource?.readScope==='entire_project';
+        });
+        if(reportTask && !(await listExecutionPacketsForRuns([runId])).length) {
+          try {
+            const paired=await getRunAcceptanceEvidence(runId);
+            if(!paired || paired.sessionId!==currentAttempt.sessionId) throw new Error('paired_run');
+            factoryReport=await finalFactoryReport(paired,manifest);
+          } catch(error) {
+            if(error?.code==='FACTORY_REPORT_HISTORY_PENDING') throw error;
+            throw Object.assign(new Error('Factory report history unavailable: source_unreadable'),{code:'FACTORY_REPORT_HISTORY_PENDING'});
+          }
+        }
+      }
       const outcome = classifyAttemptOutcome(run, result);
       const reportLoader = typeof deps.loadRecentTurnHistory === 'function'
         ? deps.loadRecentTurnHistory
@@ -1248,6 +1294,7 @@ export function createCollaborationOrchestrator(options = {}) {
           revision: rework?.revision,
           phaseId: rework?.phaseId || '',
           parentPacketIds: rework?.parentPacketId ? [rework.parentPacketId] : [],
+          ...(factoryReport ? {assistantReport:factoryReport} : {}),
           ...(consultation ? {taskKind:'consultation',consultation:{recommendation:{opinion:opinion.slice(0,4000),truncated:opinion.length>4000}}} : {}),
           deps: {
             getRun: deps.getRun,
@@ -1376,7 +1423,7 @@ export function createCollaborationOrchestrator(options = {}) {
       // This ordering closes the race that orphaned successful children: an
       // arriving result always wins over a same-poll deadline scan.
       for (const task of collaboration.tasks) {
-        if (task.runId) await completeRun(task.runId).catch(() => {});
+        if (task.runId) await completeRun(task.runId).catch(error => { if(error?.code==='FACTORY_REPORT_HISTORY_PENDING') console.warn(`[collaboration] ${error.code}: ${error.message}`); });
       }
       const expired = expiredByCollaboration.get(collaboration.id) || [];
       for (const attempt of expired) {
