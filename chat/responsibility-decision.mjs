@@ -5,6 +5,7 @@ import { admitResponsibilityWorkflow } from './factory-responsibility-admission.
 import { ensureFactorySchema } from './work-graph-store.mjs';
 import { captureResponsibilityProject, verifyCurrentResponsibilityProject } from './responsibility-project.mjs';
 import { responsibilityProvider, validateProjectReportPolicy } from './responsibility-providers.mjs';
+import { isResponsibilityTriggerObservationCurrent } from './responsibility-trigger-bridge.mjs';
 
 // A deterministic CI decision is derived only from server-fetched facts and
 // the immutable owner policy. Manual and interval wakes remain observations.
@@ -80,7 +81,7 @@ async function processProjectReport(snapshot,lease) {
     const keys=['providerId','providerVersion','providerDigest','templateId','templateVersion','templateDigest','resource','nodeBindings','maxAttempts','maxCost'];
     proposal=Object.fromEntries(keys.map(key=>[key,policy[key]]));Object.assign(proposal,{projectFactId:fact.id,observationId:wakeId,observationDigest:observation.payload_digest});
     if(policy.providerId==='generic-planner') {proposal.history=await read(db=>{assertLease(db,wakeId,lease);return responsibilityHistory(db,r.id);});proposal.historyDigest=digest(proposal.history);}
-    decisionId=await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(r.id),w=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId),o=db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wakeId);if(!current||current.lifecycle!=='active'||current.revision!==wake.responsibility_revision||current.policy_revision!==wake.policy_revision||w?.state!=='pending'||w.decision_id||o?.payload_digest!==observation.payload_digest) return null;
+    decisionId=await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(r.id),w=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId),o=db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wakeId);if(!current||current.lifecycle!=='active'||current.revision!==wake.responsibility_revision||current.policy_revision!==wake.policy_revision||w?.state!=='pending'||w.decision_id||o?.payload_digest!==observation.payload_digest||!isResponsibilityTriggerObservationCurrent(db,current,o)) return null;
       ensureFactorySchema(db);if(hasActiveResponsibilityWork(db,r.id,wakeId)) return 'existing_work';if(proposal.history && digest(responsibilityHistory(db,r.id))!==proposal.historyDigest) return null;
       const id=newId('decision');db.prepare('INSERT INTO responsibility_decisions VALUES(?,?,?,?,?,?,?,?,?)').run(id,r.id,wakeId,r.revision,r.policy_revision,'approved',digest({observation:observation.payload_digest,policyRevision:r.policy_revision}),JSON.stringify(proposal),now());db.prepare("UPDATE responsibility_wakes SET state='deciding',decision_id=?,updated_at=? WHERE id=?").run(id,now(),wakeId);activity(db,r.id,'decision_approved',{wakeId,decisionId:id,providerId:policy.providerId});return id;});
     if(decisionId==='existing_work') return wait(wakeId,'existing_work',lease);if(!decisionId) return;

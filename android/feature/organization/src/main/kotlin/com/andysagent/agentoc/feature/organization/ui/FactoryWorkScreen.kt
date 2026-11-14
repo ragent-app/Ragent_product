@@ -37,6 +37,11 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     val base = "/api/organizations/${Uri.encode(organizationId)}/factory"
     var list by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var item by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var itemBudget by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var itemReconciliation by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var scopedObjective by remember(organizationId) { mutableStateOf("") }
+    var scopedPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var scopedPending by remember(organizationId) { mutableStateOf<Pair<String, JsonObject>?>(null) }
     var status by remember(organizationId) { mutableStateOf("Loading work items…") }
     var pending by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
@@ -45,6 +50,12 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     var responsibilityPolicy by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityPlans by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var capabilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var responsibilityFeatures by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var triggerBindings by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var triggerTime by remember(organizationId) { mutableStateOf("") }
+    var triggerInterval by remember(organizationId) { mutableStateOf("") }
+    var reviewTrigger by remember(organizationId) { mutableStateOf(false) }
+    var reviewedBindingAction by remember(organizationId) { mutableStateOf<Pair<JsonObject, String>?>(null) }
     var planCatalogDescriptors by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var reviewedPlan by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var proposal by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
@@ -109,6 +120,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
         status = "Loading responsibilities…"; item = null; responsibility = null; proposal = null
         val catalog = runCatching { responsibilityRequest("/capabilities?organizationId=${Uri.encode(organizationId)}") }.getOrNull()
         capabilities = catalog?.get("providers") as? JsonArray
+        responsibilityFeatures = catalog?.get("features") as? JsonObject
         planCatalogDescriptors = catalog?.get("planCatalogDescriptors") as? JsonArray
         runCatching { responsibilityRequest("?organizationId=${Uri.encode(organizationId)}") }.onSuccess {
             responsibilities = it["responsibilities"] as? JsonArray ?: JsonArray(emptyList()); status = "Responsibilities"
@@ -135,7 +147,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
     }
     suspend fun loadResponsibility(id: String) {
-        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false
+        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewedBindingAction = null; triggerBindings = null
         runCatching {
             val path = "/${Uri.encode(id)}"
             val response = responsibilityRequest(path)
@@ -143,6 +155,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             require(detail["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId)
             responsibilityPolicy = response["policy"] as? JsonObject
             responsibilityPlans = runCatching { responsibilityRequest("$path/plans")["plans"] as? JsonArray }.getOrNull()
+            if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) triggerBindings = runCatching { responsibilityRequest("$path/trigger-bindings")["bindings"] as? JsonArray }.getOrNull()
             reviewedPlan = null
             detail to responsibilityRequest("$path/activity")["activity"]!!.jsonArray
         }.onSuccess { (detail, activity) -> responsibility = detail; responsibilityActivity = activity; onResponsibilitySelected(id); status = "Responsibility" }
@@ -163,6 +176,14 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
         }.onSuccess { sessionContext = it }
         val resumeId = selectedResponsibilityId ?: sessionContext?.takeIf { it["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId }?.get("responsibilityId")?.jsonPrimitive?.contentOrNull
         if (resumeId == null) reload() else { loadResponsibilities(); loadResponsibility(resumeId) }
+    }
+    LaunchedEffect(organizationId, item?.get("id")) {
+        itemBudget = null; itemReconciliation = null; scopedPreview = null; scopedPending = null; scopedObjective = ""
+        val id = item?.get("id")?.jsonPrimitive?.contentOrNull
+        if (!id.isNullOrBlank()) {
+            itemReconciliation = runCatching { request("/work-items/${Uri.encode(id)}/reconcile") }.getOrNull()
+            itemBudget = runCatching { request("/work-items/${Uri.encode(id)}/budget") }.getOrNull()
+        }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TextButton(onClick = { if (responsibility != null) { onResponsibilitySelected(null); scope.launch { loadResponsibilities() } } else if (item != null || responsibilities != null) scope.launch { reload() } else onBack() }) { Text("Back") }
@@ -188,6 +209,30 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 Text("Responsibility ${current["lifecycle"]}; version ${current["rowVersion"]}; policy ${current["policyRevision"]}")
                 Text("A paused responsibility stops new admission; existing work may continue.")
                 Text("A stop request is not proof of stopping. Unknown or older active executions need reconciliation; a run that finished first remains pending review. Archived history is retained.")
+                if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) {
+                    Text("Scheduled responsibility wake: a schedule records a wake request; it does not prove work started. Only time-based schedules are available.")
+                    if (triggerBindings == null) Text("Schedules unavailable.")
+                    triggerBindings?.forEach { entry -> val binding=entry.jsonObject
+                        Text("Schedule ${binding["config"]} · ${binding["state"]} · delivery ${binding["delivery"] ?: "unknown"} · ${binding["lastError"] ?: ""}")
+                        val delivery = binding["delivery"] as? JsonObject
+                        if (delivery?.get("status")?.jsonPrimitive?.contentOrNull == "failed" && delivery["lastError"]?.jsonPrimitive?.contentOrNull == "Trigger binding is inactive") Text("暂停期间错过触发，等待恢复确认。请先恢复责任，再审阅恢复该日程。")
+                        listOf("revoke","recover").forEach { action -> TextButton(onClick = { reviewedBindingAction = binding to action }) { Text("Review $action schedule") } }
+                    }
+                    reviewedBindingAction?.let { (binding, action) ->
+                        Text("$action this schedule, version ${binding["version"]}? This does not establish that work has stopped.")
+                        TextButton(onClick = {
+                            val body=buildJsonObject { put("confirmed",true); put("expectedVersion",binding["version"]!!); put("idempotencyKey",UUID.randomUUID().toString()) }
+                            scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/trigger-bindings/${Uri.encode(binding["id"]!!.jsonPrimitive.content)}/$action",body); reviewedBindingAction = null }
+                        }) { Text("Confirm $action schedule") }
+                    }
+                    OutlinedTextField(triggerTime,{triggerTime=it;reviewTrigger=false},label={Text("Scheduled time (ISO with timezone)")})
+                    OutlinedTextField(triggerInterval,{triggerInterval=it;reviewTrigger=false},label={Text("Repeat minutes (blank for once)")})
+                    val interval=triggerInterval.toLongOrNull()
+                    if(!reviewTrigger) TextButton(enabled=triggerTime.isNotBlank() && (triggerInterval.isBlank() || interval?.let { it in 1L..525600L } == true),onClick={reviewTrigger=true}) { Text("Review schedule") }
+                    else { Text("Schedule $triggerTime${if(interval!=null) " every $interval minutes" else " once"}; a wake is not proof of execution.")
+                        TextButton(onClick={ val body=buildJsonObject { put("type","at_time"); put("scheduledAt",triggerTime); if(interval!=null)put("intervalMs",interval*60000); put("confirmed",true); put("expectedVersion",current["rowVersion"]!!); put("idempotencyKey",UUID.randomUUID().toString()) }; scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/trigger-bindings",body); reviewTrigger=false } }) { Text("Confirm schedule") }
+                    }
+                }
                 Text("Responsibility notifications through Android FCM are not supported. Activity remains available in the app.")
                 Text("Policy (not plan approval): ${responsibilityPolicy ?: "unavailable"}")
                 val planner = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "generic-planner" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
@@ -442,6 +487,27 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             TextButton(onClick = { scope.launch { reload() } }) { Text("Refresh") }
         } else {
             Text("${selected["contract"]?.jsonObject?.get("objective") ?: selected["id"]}")
+            val observation = itemReconciliation?.get("acceptedRunObservation") as? JsonObject
+            Text(if (observation?.get("state")?.jsonPrimitive?.contentOrNull == "found") "发现执行记录，等待系统核实关联。执行记录：${observation["expectedRunId"] ?: "未知"}；状态：${observation["runState"] ?: "未知"}。" else "暂未核实是否已执行。")
+            val reservation = itemBudget?.get("reservation") as? JsonObject
+            Text(if (reservation == null) "Budget facts unavailable; this does not prove work did not run." else "Budget ${reservation["state"] ?: "unavailable"}; reserved ${reservation["reserved"]?.takeUnless { it is JsonNull } ?: "unknown"}; actual usage ${if (itemBudget?.get("usageState")?.jsonPrimitive?.contentOrNull == "actual") reservation["actualUsage"]?.takeUnless { it is JsonNull } ?: "unknown" else "unknown"}; window ${reservation["window"]?.takeUnless { it is JsonNull } ?: "unknown"}. Admission estimates do not enforce a provider spending cap.")
+            OutlinedTextField(scopedObjective,{scopedObjective=it;scopedPreview=null},label={Text("新的此项工作目标")})
+            TextButton(enabled=scopedObjective.isNotBlank(),onClick={ scope.launch {
+                runCatching {
+                    val goalId=selected["goalId"]!!.jsonPrimitive.content; var cursor=""; var goal:JsonObject?=null
+                    for (page in 0 until 10) { val result=request("/goals?limit=200" + if(cursor.isNotEmpty()) "&cursor=${Uri.encode(cursor)}" else ""); goal=result["items"]?.jsonArray?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull==goalId }; cursor=result["nextCursor"]?.jsonPrimitive?.contentOrNull.orEmpty(); if(goal!=null || cursor.isEmpty()) break }
+                    val version=goal?.get("rowVersion")?.jsonPrimitive?.longOrNull ?: error("无法读取当前目标版本")
+                    val body=buildJsonObject { put("expectedVersion",version); put("rootWorkItemId",selected["id"]!!); put("objective",scopedObjective) }
+                    val preview=request("/goals/${Uri.encode(goalId)}/scoped-revision/preview",body)
+                    require(preview["goalVersion"]?.jsonPrimitive?.longOrNull==version && preview["rootWorkItemId"]==selected["id"] && preview["objective"]?.jsonPrimitive?.contentOrNull==scopedObjective && preview["impactDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true) { "预览与请求不一致，请刷新" }
+                    preview
+                }.onSuccess { scopedPreview=it }.onFailure { status="无法审阅局部修改：${it.message}" }
+            } }) { Text("审阅局部目标修改") }
+            scopedPreview?.takeIf { it["rootWorkItemId"] == selected["id"] }?.let { preview ->
+                Text("仅修改此项工作目标，保留原权限与验收条件。新目标：${preview["objective"]}；目标版本：${preview["goalVersion"]}；受影响工作：${preview["items"]}。活动下游仅请求取消，不代表已停止；不受影响历史保留。")
+                TextButton(onClick={ val command=UUID.randomUUID().toString(); val body=buildJsonObject { put("expectedVersion",preview["goalVersion"]!!);put("rootWorkItemId",preview["rootWorkItemId"]!!);put("objective",preview["objective"]!!);put("impactDigest",preview["impactDigest"]!!);put("commandId",command);put("idempotencyKey",command) }; val path="/goals/${Uri.encode(preview["goalId"]!!.jsonPrimitive.content)}/scoped-revision/commit"; scopedPending=path to body; scope.launch { runCatching { request(path,body) }.onSuccess { scopedPending=null;scopedPreview=null;status="修改已记录，请刷新查看实际停止和工作状态。" }.onFailure { status="修改未确认：${it.message}" } } }) { Text("确认局部修改") }
+            }
+            scopedPending?.takeIf { it.second["rootWorkItemId"] == selected["id"] }?.let { (path,body) -> TextButton(onClick={scope.launch { runCatching { request(path,body) }.onSuccess {scopedPending=null;scopedPreview=null;status="修改已记录。"}.onFailure {status="修改未确认：${it.message}"} }}) { Text("使用同一请求重试") } }
             Text("State ${selected["state"]}; control ${selected["controlState"]}; priority ${selected["priority"]}; version ${selected["rowVersion"]}")
             listOf("contract", "dependencies", "bindings", "candidates", "decisions").forEach { Text("$it: ${selected[it] ?: "[]"}") }
             Text("Delivery evidence")

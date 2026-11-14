@@ -852,6 +852,36 @@
           add(content, 'p', `Responsibility ${item.lifecycle} · version ${item.rowVersion} · policy ${item.policyRevision}`);
           add(content, 'p', 'A paused responsibility stops new admission; existing work may continue.');
           add(content, 'p', 'A stop request is not proof of stopping. Unknown or older active executions must be reconciled; a run that finished first remains pending result review. Archived responsibilities retain their history.');
+          const triggerCatalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`).catch(() => null);
+          if (triggerCatalog?.features?.timeTriggerBridge === true) {
+            add(content, 'h4', 'Scheduled responsibility wake');
+            add(content, 'p', 'A schedule records a wake request; it does not prove work started. Only time-based schedules are available.');
+            const bindingsPath = `${path}/trigger-bindings`;
+            const submitBinding = (suffix, body) => {
+              const submit = async () => { try { const result = await responsibilityRequest(`${bindingsPath}${suffix}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); add(content,'p',`Schedule request recorded: ${JSON.stringify(result.binding || {})}`); button(content,'Refresh schedules',() => showResponsibility(id)); }
+                catch(error) { add(content,'p',`Schedule request not confirmed: ${error.message}`); button(content,'Retry same request',submit); } };
+              submit();
+            };
+            try {
+              const bindings = await responsibilityRequest(bindingsPath);
+              for (const binding of bindings.bindings || []) {
+                add(content,'p',`${binding.enabled ? 'enabled' : 'disabled'} · ${binding.state || 'unknown'} · ${JSON.stringify(binding.config || {})} · delivery ${binding.delivery?.status || 'unknown'} · ${binding.lastError || ''}`);
+                if (binding.delivery?.status === 'failed' && binding.delivery?.lastError === 'Trigger binding is inactive') add(content,'p','暂停期间错过触发，等待恢复确认。请先恢复责任，再审阅恢复该日程。');
+                for (const action of ['revoke','recover']) button(content, `${action} schedule`, () => {
+                  if (!root.confirm(`${action} this schedule, version ${binding.version}? This does not establish that work has stopped.`)) return;
+                  submitBinding(`/${encodeURIComponent(binding.id)}/${action}`, {confirmed:true,expectedVersion:binding.version,idempotencyKey:root.crypto.randomUUID()});
+                });
+              }
+              button(content,'Review new schedule',() => {
+                const scheduledAt=root.prompt('Scheduled time (ISO date and time with timezone)'); if (!scheduledAt || !Number.isFinite(Date.parse(scheduledAt))) return;
+                const raw=root.prompt('Repeat interval in minutes (blank for one time)',''); if(raw===null) return;
+                const minutes=raw.trim()===''?null:Number(raw); if(minutes!==null&&(!Number.isSafeInteger(minutes)||minutes<1||minutes>525600)) {add(content,'p','Interval must be a whole number from 1 to 525600 minutes.');return;}
+                const body={type:'at_time',scheduledAt,confirmed:true,expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID()}; if(minutes!==null)body.intervalMs=minutes*60000;
+                if(!root.confirm(`Create a schedule for ${scheduledAt}${minutes===null?'':` every ${minutes} minutes`}? A wake is not proof of execution.`))return;
+                submitBinding('',body);
+              });
+            } catch(error) { add(content,'p',`Schedules unavailable: ${error.message}`); }
+          }
           try {
             const notifications = await responsibilityRequest(`${path}/notifications`);
             add(content, 'h4', 'Responsibility notifications');
@@ -1127,8 +1157,34 @@
           if (!item.milestones?.some(m => m.milestone === 'integrated')) add(content, 'p', 'Integrated commit: unverified');
           add(content, 'p', 'Package availability and publication: unverified unless supported by a recorded delivery operation.');
           const reconcileStatus = add(content, 'p', 'Loading reconciliation state…');
-          try { const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`); reconcileStatus.textContent = `Reconciliation: ${state.state || 'unknown'}; observation continues: ${state.observationContinues ?? 'unknown'}; ${state.errorCode || ''}`; }
+          try { const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`); const observation = state.acceptedRunObservation; reconcileStatus.textContent = `${observation?.state === 'found' ? '发现执行记录，等待系统核实关联' : '暂未核实是否已执行'}。${observation?.expectedRunId ? `执行记录：${observation.expectedRunId}；状态：${observation.runState || '未知'}。` : ''} 对账状态：${state.state || '未知'}。` ; }
           catch (error) { reconcileStatus.textContent = `Reconciliation state unavailable: ${error.message}`; }
+          const budgetStatus = add(content, 'p', 'Loading budget facts…');
+          try { const budget = await request(`/work-items/${encodeURIComponent(item.id)}/budget`); const reservation = budget.reservation || {};
+            budgetStatus.textContent = `Budget: ${reservation.state || 'unavailable'} · reserved ${reservation.reserved == null ? 'unknown' : JSON.stringify(reservation.reserved)} · actual usage ${budget.usageState === 'actual' && reservation.actualUsage != null ? JSON.stringify(reservation.actualUsage) : 'unknown'} · window ${reservation.window ? JSON.stringify(reservation.window) : 'unknown'}. Admission estimates do not enforce a provider spending cap; unavailable facts do not prove work did not run.`;
+          } catch (error) { budgetStatus.textContent = `Budget facts unavailable: ${error.message}. This does not prove work did not run.`; }
+          button(content, '审阅局部目标修改', async () => {
+            try {
+              let cursor = '', goal = null;
+              for (let page = 0; page < 10 && !goal; page++) {
+                const goals = await request(`/goals?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+                goal = (goals.items || []).find(entry => entry.id === item.goalId);
+                if (!goals.nextCursor || goal) break; cursor = goals.nextCursor;
+              }
+              if (!goal || !Number.isSafeInteger(goal.rowVersion)) throw new Error('无法读取当前目标版本');
+              const objective = root.prompt('新的此项工作目标', item.contract?.objective || ''); if (!objective) return;
+              const base = `/goals/${encodeURIComponent(item.goalId)}/scoped-revision`;
+              const preview = await request(`${base}/preview`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:goal.rowVersion,rootWorkItemId:item.id,objective})});
+              if (preview.goalVersion !== goal.rowVersion || preview.rootWorkItemId !== item.id || preview.objective !== objective || !preview.impactDigest) throw new Error('预览与请求不一致，请刷新');
+              const summary = (preview.items || []).map(entry => `${entry.id} · ${entry.state} · ${entry.controlState} · 活动执行 ${entry.activeBindings?.length ?? '未知'}`).join('\n');
+              if (!root.confirm(`仅修改此项工作目标，保留原权限与验收条件。新目标：${preview.objective}\n目标版本：${preview.goalVersion}\n受影响工作：\n${summary}\n活动下游仅请求取消，不代表已停止；不受影响历史保留。确认提交？`)) return;
+              const commandId = root.crypto.randomUUID();
+              const body = {expectedVersion:preview.goalVersion,rootWorkItemId:preview.rootWorkItemId,objective:preview.objective,impactDigest:preview.impactDigest,commandId,idempotencyKey:commandId};
+              const submit = async () => { try { const result = await request(`${base}/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); add(content,'p',`修改已记录：${result.operation?.state || '未知'}。请刷新查看实际停止和工作状态。`); }
+                catch(error) { add(content,'p',`修改未确认：${error.message}`); button(content,'使用同一请求重试',submit); } };
+              await submit();
+            } catch (error) { add(content, 'p', `无法审阅局部修改：${error.message}`); }
+          });
           const receipt = add(content, 'p', '');
           button(content, 'Request reconciliation', () => {
             const body = { commandId:root.crypto.randomUUID(), expectedVersion:item.rowVersion, executionEpoch:item.executionEpoch };

@@ -1,5 +1,6 @@
 import { error, digest } from './responsibility-store.mjs';
 import { validateProjectReportPolicy } from './responsibility-providers.mjs';
+import { isResponsibilityTriggerObservationCurrent } from './responsibility-trigger-bridge.mjs';
 
 // Called inside the caller's existing transaction/fence; no I/O or transaction is started here.
 export function verifyResponsibilityAuthority(db, input) {
@@ -19,7 +20,7 @@ export function verifyResponsibilityAuthority(db, input) {
     if(input.observationId!==wake.id || proposal.observationId!==wake.id || input.observationDigest!==proposal.observationDigest || input.projectFactId!==proposal.projectFactId) deny('Report decision identity mismatch');
     if(policy.providerId==='generic-planner' && (!Array.isArray(input.history)||input.history.length>30||input.historyDigest!==proposal.historyDigest||digest(input.history)!==input.historyDigest||digest(proposal.history)!==input.historyDigest)) deny('Planner history mismatch');
     const observation=db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wake.id);
-    if(!observation || !['manual','interval'].includes(observation.kind) || observation.payload_digest!==input.observationDigest || digest(JSON.parse(observation.payload_json))!==observation.payload_digest) deny('Report observation is unavailable');
+    if(!observation || !['manual','interval'].includes(observation.kind) || observation.payload_digest!==input.observationDigest || digest(JSON.parse(observation.payload_json))!==observation.payload_digest || !isResponsibilityTriggerObservationCurrent(db,r,observation)) deny('Report observation is unavailable');
     const fact=db.prepare('SELECT * FROM responsibility_project_facts WHERE id=?').get(input.projectFactId);
     if(!fact || fact.organization_id!==r.organization_id || fact.project_id!==r.project_id) deny('Report project fact mismatch');
     return {responsibilityId:r.id,organizationId:r.organization_id,projectId:r.project_id,responsibilityRevision:r.revision,policyRevision:r.policy_revision,providerId:provider.id,providerVersion:provider.version,providerDigest:provider.digest,observationId:wake.id,observationDigest:observation.payload_digest,projectFactId:fact.id,policy};

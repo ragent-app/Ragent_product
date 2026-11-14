@@ -21,6 +21,7 @@ const TRIGGER_STATUS_CANCELLED = 'cancelled';
 const TRIGGER_TYPE_AT_TIME = 'at_time';
 const TRIGGER_TYPE_EVENT = 'event';
 const TRIGGER_ACTION_SESSION_MESSAGE = 'session_message';
+const TRIGGER_ACTION_RESPONSIBILITY_WAKE = 'responsibility_wake';
 // `deliveryMode` records the observed delivery result (run/queued/status).
 // Keep the intended input semantics separate so a control-plane event can
 // never accidentally become a user transcript message.
@@ -213,7 +214,7 @@ function normalizeStoredTrigger(value) {
   return {
     id,
     triggerType,
-    actionType: TRIGGER_ACTION_SESSION_MESSAGE,
+    actionType: raw.actionType === TRIGGER_ACTION_RESPONSIBILITY_WAKE ? TRIGGER_ACTION_RESPONSIBILITY_WAKE : TRIGGER_ACTION_SESSION_MESSAGE,
     status,
     enabled,
     title: trimString(raw.title),
@@ -354,7 +355,7 @@ function isClaimStale(trigger, nowMs = Date.now()) {
 function isDueTrigger(trigger, nowMs = Date.now()) {
   if (!trigger?.enabled) return false;
   if (trigger?.triggerType !== TRIGGER_TYPE_AT_TIME) return false;
-  if (trigger?.actionType !== TRIGGER_ACTION_SESSION_MESSAGE) return false;
+  if (![TRIGGER_ACTION_SESSION_MESSAGE,TRIGGER_ACTION_RESPONSIBILITY_WAKE].includes(trigger?.actionType)) return false;
   if (![TRIGGER_STATUS_PENDING, TRIGGER_STATUS_DELIVERING].includes(trigger?.status)) return false;
   if (trigger?.status === TRIGGER_STATUS_DELIVERING && !isClaimStale(trigger, nowMs)) return false;
   const scheduledAtMs = Date.parse(trigger?.scheduledAt || '');
@@ -390,7 +391,7 @@ function resolveRetryDelayMs(attempts) {
 }
 
 function isPermanentTriggerError(error) {
-  return ['SESSION_NOT_FOUND', 'TRIGGER_RUN_TERMINAL', 'TRIGGER_STATUS_UNCERTAIN', 'TRIGGER_RESULT_UNCERTAIN', 'TRIGGER_RESULT_CAPACITY'].includes(error?.code);
+  return ['SESSION_NOT_FOUND', 'TRIGGER_RUN_TERMINAL', 'TRIGGER_STATUS_UNCERTAIN', 'TRIGGER_RESULT_UNCERTAIN', 'TRIGGER_RESULT_CAPACITY','RESPONSIBILITY_TRIGGER_INACTIVE'].includes(error?.code);
 }
 
 function occurrenceRequestId(trigger, eventContext = null) {
@@ -581,6 +582,29 @@ export async function getTrigger(triggerId) {
   return cloneTrigger(triggers.find((trigger) => trigger.id === normalizedTriggerId) || null);
 }
 
+// Only the server-owned responsibility bridge calls this function; generic
+// trigger creation cannot select this action or change its binding.
+export async function ensureResponsibilityTrigger(binding) {
+  const config=JSON.parse(binding.config_json);
+  if(!validTriggerId(binding.trigger_id)||config.type!=='at_time'||!normalizeTimestamp(config.scheduledAt)) throw new Error('Invalid responsibility trigger binding');
+  return withTriggerMutation(async (triggers,saveTriggers)=>{
+    const existing=triggers.find(item=>item.id===binding.trigger_id);
+    if(existing) {
+      if(existing.actionType!==TRIGGER_ACTION_RESPONSIBILITY_WAKE||existing.sessionId!==binding.session_id) throw new Error('Trigger identity conflict');
+      if(existing.status===TRIGGER_STATUS_FAILED) { existing.status=TRIGGER_STATUS_PENDING;existing.enabled=true;existing.deliveryAttempts=0;existing.nextAttemptAt='';existing.lastError='';existing.updatedAt=nowIso();await saveTriggers(triggers); }
+      return cloneTrigger(existing);
+    }
+    const timestamp=nowIso();
+    const completed=!config.intervalMs&&binding.schedule_occurrence>0;
+    const trigger=normalizeStoredTrigger({id:binding.trigger_id,triggerType:TRIGGER_TYPE_AT_TIME,actionType:TRIGGER_ACTION_RESPONSIBILITY_WAKE,status:completed?TRIGGER_STATUS_DELIVERED:TRIGGER_STATUS_PENDING,enabled:!completed,sessionId:binding.session_id,text:'Responsibility wake',scheduledAt:binding.schedule_at,occurrence:binding.schedule_occurrence,recurrence:config.intervalMs?{type:'interval',intervalMs:config.intervalMs}:null,createdAt:timestamp,updatedAt:timestamp});
+    if(!trigger) throw new Error('Invalid responsibility trigger');
+    triggers.push(trigger);await saveTriggers(triggers);return cloneTrigger(trigger);
+  });
+}
+export async function stopResponsibilityTrigger(triggerId) {
+  return withTriggerMutation(async (triggers,saveTriggers)=>{const trigger=triggers.find(item=>item.id===triggerId);if(!trigger)return;if(trigger.actionType!==TRIGGER_ACTION_RESPONSIBILITY_WAKE) throw new Error('Trigger identity conflict');if(trigger.status!==TRIGGER_STATUS_CANCELLED||trigger.enabled){trigger.enabled=false;trigger.status=TRIGGER_STATUS_CANCELLED;trigger.claimedAt='';trigger.nextAttemptAt='';trigger.updatedAt=nowIso();await saveTriggers(triggers);}});
+}
+
 export async function createTrigger(input = {}) {
   const session = await assertWritableTargetSession(input.sessionId);
   const eventType = normalizeEventType(input.eventType || input.event?.type);
@@ -670,6 +694,7 @@ export async function updateTrigger(triggerId, patch = {}) {
     }
 
     const current = triggers[index];
+    if (current.actionType === TRIGGER_ACTION_RESPONSIBILITY_WAKE) throw new Error('Responsibility triggers require owner binding management');
     if (current.status === TRIGGER_STATUS_DELIVERING && !isClaimStale(current)) {
       throw new Error('Trigger is currently delivering');
     }
@@ -843,6 +868,7 @@ export async function deleteTrigger(triggerId) {
       deletedTrigger = null;
       return;
     }
+    if (triggers[index].actionType === TRIGGER_ACTION_RESPONSIBILITY_WAKE) throw new Error('Responsibility triggers require owner binding management');
     deletedTrigger = cloneTrigger(triggers[index]);
     triggers.splice(index, 1);
     await saveTriggers(triggers);
@@ -891,6 +917,8 @@ async function markTriggerDelivered(triggerId, deliveryResult) {
     if (index === -1) return;
     const current = triggers[index];
     const isEvent = current.triggerType === TRIGGER_TYPE_EVENT;
+    if(current.actionType===TRIGGER_ACTION_RESPONSIBILITY_WAKE&&(!current.enabled||current.status!==TRIGGER_STATUS_DELIVERING)) return;
+    if(current.actionType===TRIGGER_ACTION_RESPONSIBILITY_WAKE&&(current.occurrence!==deliveryResult?.expectedOccurrence||current.deliveryAttempts!==deliveryResult?.expectedAttempt)) return;
     const repeatingEvent = isEvent && current.repeat === true;
     const recurrence = current.recurrence;
     const nextOccurrence = Math.max(0, Number(current.occurrence) || 0) + 1;
@@ -919,7 +947,7 @@ async function markTriggerDelivered(triggerId, deliveryResult) {
         : {}),
     };
     if (recurrence && !isEvent && !recurrenceComplete) {
-      next.scheduledAt = new Date(Date.parse(deliveredAt) + recurrence.intervalMs).toISOString();
+      next.scheduledAt = deliveryResult?.nextScheduledAt || new Date(Date.parse(deliveredAt) + recurrence.intervalMs).toISOString();
       next.deliveredAt = '';
       next.runId = '';
       next.deliveryMode = '';
@@ -944,6 +972,7 @@ async function markTriggerDeliveryFailure(triggerId, error, attemptCount = 1) {
     const index = triggers.findIndex((trigger) => trigger.id === normalizedTriggerId);
     if (index === -1) return;
     const current = triggers[index];
+    if(current.actionType===TRIGGER_ACTION_RESPONSIBILITY_WAKE&&(!current.enabled||current.status!==TRIGGER_STATUS_DELIVERING||current.deliveryAttempts!==attemptCount)) return;
     const next = {
       ...current,
       status: exhausted ? TRIGGER_STATUS_FAILED : TRIGGER_STATUS_PENDING,
@@ -985,6 +1014,13 @@ function renderTriggerText(trigger, eventContext = null) {
 }
 
 async function deliverTrigger(trigger, eventContext = null) {
+  if (trigger.actionType === TRIGGER_ACTION_RESPONSIBILITY_WAKE) {
+    if(eventContext) throw new Error('Event responsibility triggers are unsupported');
+    const {deliverResponsibilityTrigger}=await import('./responsibility-trigger-bridge.mjs');
+    const outcome=await deliverResponsibilityTrigger(trigger);
+    await markTriggerDelivered(trigger.id,{nextScheduledAt:outcome.nextScheduledAt,expectedOccurrence:trigger.occurrence,expectedAttempt:trigger.deliveryAttempts});
+    return outcome;
+  }
   const session = await assertWritableTargetSession(trigger.sessionId);
   const requestId = occurrenceRequestId(trigger, eventContext);
   const inputMode = normalizeInputMode(trigger.inputMode);
@@ -1090,6 +1126,10 @@ async function attemptTriggerDelivery(triggerId) {
     await deliverTrigger(trigger);
     return await getTrigger(trigger.id);
   } catch (error) {
+    if(trigger.actionType===TRIGGER_ACTION_RESPONSIBILITY_WAKE) {
+      await markTriggerDeliveryFailure(trigger.id,error,trigger.deliveryAttempts||1);
+      return getTrigger(trigger.id);
+    }
     const requestId = occurrenceRequestId(trigger);
     const run = await findRunByRequest(trigger.sessionId, requestId);
     const published = await hasPublishedReply(trigger.sessionId, requestId, run, null);
@@ -1206,6 +1246,8 @@ export async function processDueTriggersNow() {
   if (triggerTickPromise) return triggerTickPromise;
 
   triggerTickPromise = (async () => {
+    try { const {reconcileResponsibilityTriggerBindings}=await import('./responsibility-trigger-bridge.mjs'); await reconcileResponsibilityTriggerBindings(); }
+    catch(error) { console.error(`[triggers] responsibility binding reconciliation unavailable: ${error.message}`); }
     const nowMs = Date.now();
     const triggers = await loadTriggers();
     const historyCache = new Map();

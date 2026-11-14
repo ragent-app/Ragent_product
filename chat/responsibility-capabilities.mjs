@@ -18,6 +18,7 @@ export async function getResponsibilityCapabilities({ organizationId, projectId 
   const template = f => ({ id: f.id, version: f.version, digest: f.digest });
   return {
     schemaVersion: 1,
+    features: { timeTriggerBridge:true, timeTriggerTypes:['at_time'] },
     providers: [
       { id:'github-ci', version:1, available:true, templates:[template(ci)], requiredScope:'github_repository', approvalMode:'preauthorized_template_and_manual_result' },
       { ...PROJECT_REPORT_PROVIDER, available:true, reason:'Node must enforce project filesystem read-only; denied network isolation is not currently verified',

@@ -14,6 +14,7 @@ import { getResponsibilityCapabilities } from './responsibility-capabilities.mjs
 import { captureResponsibilityCodeBaseline } from './responsibility-code-baseline.mjs';
 import { listResponsibilityPlans, approveResponsibilityPlan } from './responsibility-plans.mjs';
 import { registerResponsibilityNotificationSubscription, revokeResponsibilityNotificationSubscription, getResponsibilityNotificationSettings, setResponsibilityNotificationSettings } from './responsibility-notifications.mjs';
+import { createResponsibilityTrigger, listResponsibilityTriggers, changeResponsibilityTrigger } from './responsibility-trigger-bridge.mjs';
 
 function mutationSourceAllowed(req) {
   if(!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers?.['content-type']||''))) return false;
@@ -27,11 +28,13 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
   const review=/^\/api\/runs\/([^/]+)\/email-targets\/([^/]+)\/manual-review$/.exec(String(pathname||''));
   const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||''));
   const plans=/^\/api\/responsibilities\/([^/]+)\/plans(?:\/([^/]+)\/(approve))?$/.exec(String(pathname||''));
-  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!plans&&!notificationBinding) return false;
+  const triggerBinding=/^\/api\/responsibilities\/([^/]+)\/trigger-bindings(?:\/([^/]+)\/(revoke|recover))?$/.exec(String(pathname||''));
+  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!plans&&!notificationBinding&&!triggerBinding) return false;
   if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
   const actor=await resolveResponsibilityActor(req,authSession);
   if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
   try {
+    if(triggerBinding) {const id=decodeURIComponent(triggerBinding[1]);if(req.method==='GET'&&!triggerBinding[2]) {writeJson(res,200,await listResponsibilityTriggers(id,actor));return true;}if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}const result=triggerBinding[2]?await changeResponsibilityTrigger(id,decodeURIComponent(triggerBinding[2]),triggerBinding[3],body,actor):await createResponsibilityTrigger(id,body,actor);writeJson(res,200,result);return true;}
     const bearer=req?._bearerAuthSession;
     const registrationSupported=authSession?.principalKind==='trusted_device'&&bearer?.principalKind==='trusted_device'&&authSession.role==='owner'&&bearer.role==='owner'&&!authSession.workspaceAccess&&!!authSession.deviceId&&authSession.deviceId===bearer.deviceId&&!!authSession.accountId&&authSession.accountId===bearer.accountId&&!!authSession.bindingAuthorityRevision&&authSession.bindingAuthorityRevision===bearer.bindingAuthorityRevision;
     if(notificationBinding) {if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}if(notificationBinding[2]==='revoke') {writeJson(res,200,await revokeResponsibilityNotificationSubscription({...body,subscriptionId:notificationBinding[1]},actor));return true;}if(!registrationSupported) {writeJson(res,403,{code:'RESPONSIBILITY_DEVICE_BINDING_REQUIRED',error:'A verified paired owner device is required'});return true;}writeJson(res,200,await registerResponsibilityNotificationSubscription(body,actor,authSession));return true;}

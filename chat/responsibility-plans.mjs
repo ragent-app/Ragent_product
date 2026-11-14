@@ -6,6 +6,7 @@ import { getRunAcceptanceEvidence } from './runs.mjs';
 import { verifyFactoryReportEvidence } from './factory-report-evidence.mjs';
 import { compileFactoryPlanSteps } from './factory-workflow.mjs';
 import { admitResponsibilityPlan } from './factory-responsibility-admission.mjs';
+import { isResponsibilityTriggerObservationCurrent } from './responsibility-trigger-bridge.mjs';
 
 function fail(message) { throw error(message,409,'RESPONSIBILITY_PLAN_CONFLICT'); }
 function retryableItemError(e) { return (Number.isInteger(e?.statusCode)&&e.statusCode>=400&&e.statusCode<500)||['ENOENT','EACCES','EPERM','ETIMEDOUT'].includes(e?.code); }
@@ -47,7 +48,7 @@ export function verifyResponsibilityPlanAuthority(db,{planId,planDigest,approval
   if(digest(proposal)!==plan.proposal_digest||digest(policy.planCatalog)!==plan.catalog_digest) fail('Plan or catalog digest changed');
   for(const entry of policy.planCatalog||[]) {if(entry.capability==='project-code') {const repo=db.prepare('SELECT * FROM responsibility_repository_facts WHERE id=?').get(entry.repositoryFactId),baseline=db.prepare('SELECT * FROM responsibility_code_baselines WHERE id=?').get(entry.codeBaselineId);if(!repo||repo.project_id!==projectId||repo.repository!==entry.repository||!baseline||baseline.organization_id!==organizationId||baseline.project_id!==projectId||baseline.repository_fact_id!==repo.id||baseline.branch!==entry.targetBranch) fail('Authorized code baseline changed');} else if(entry.capability!=='project-report') fail('Unsupported catalog capability');}
   const observation=db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(plan.wake_id),fact=db.prepare('SELECT * FROM responsibility_project_facts WHERE id=?').get(plan.project_fact_id);
-  if(!observation||observation.payload_digest!==plan.observation_digest||digest(JSON.parse(observation.payload_json))!==observation.payload_digest||!fact||fact.organization_id!==organizationId||fact.project_id!==projectId) fail('Plan observation or project fact changed');
+  if(!observation||observation.payload_digest!==plan.observation_digest||digest(JSON.parse(observation.payload_json))!==observation.payload_digest||!isResponsibilityTriggerObservationCurrent(db,r,observation)||!fact||fact.organization_id!==organizationId||fact.project_id!==projectId) fail('Plan observation or project fact changed');
   validatePlan(proposal,policy);
   return {planId,approvalId,responsibilityId:r.id,wakeId:wake.id,responsibilityRevision:r.revision,policyRevision:r.policy_revision,organizationId,projectId,objective:r.objective,policy,plan:proposal,catalogDigest:plan.catalog_digest,planDigest:plan.proposal_digest,observationId:wake.id,observationDigest:observation.payload_digest,projectFactId:fact.id};
 }
