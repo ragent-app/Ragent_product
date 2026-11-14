@@ -53,6 +53,8 @@ import {
 const DEFAULT_POLL_MS = 1500;
 const MAX_REPORT_CHARS = 12000;
 const MAX_PROMPT_CHARS = 48000;
+// Dispatch resource bound in bytes, not a provider context-window estimate.
+const MAX_FACTORY_PROMPT_BYTES = 512 * 1024;
 const RESULT_PACKET_FETCH_CONCURRENCY = 8;
 const LEDGER_HEARTBEAT_MS = 60 * 1000;
 
@@ -190,14 +192,14 @@ function buildEnvelope(run, result, manifest, attempt, session = null) {
   };
 }
 
-function buildTaskPrompt(task, completedAttempts = []) {
+function buildTaskPrompt(task, completedAttempts = [], factoryPromptVersion = 1) {
   const inputs = completedAttempts.map((attempt) => ({
     taskId: attempt.taskId,
     state: attempt.state,
     envelope: attempt.envelope,
     report: attempt.report,
   }));
-  return clip([
+  const prompt = [
     'You are a bounded specialist in an Ragent collaboration.',
     `Task: ${task.objective}`,
     `Task id: ${task.id}`,
@@ -207,7 +209,18 @@ function buildTaskPrompt(task, completedAttempts = []) {
     inputs.length > 0 ? `Completed dependency results:\n${JSON.stringify(inputs, null, 2)}` : '',
     'Return a bounded result report; do not include a full transcript or private provider error.',
     resultPacketPrompt({ role: task.role }),
-  ].filter(Boolean).join('\n\n'), MAX_PROMPT_CHARS);
+  ].filter(Boolean).join('\n\n');
+  if (factoryPromptVersion !== 2) return clip(prompt, MAX_PROMPT_CHARS);
+  if (Buffer.byteLength(prompt, 'utf8') > MAX_FACTORY_PROMPT_BYTES) {
+    throw Object.assign(new Error('Factory dispatch prompt exceeds the 512 KiB resource limit'), { code:'FACTORY_CONTEXT_TOO_LARGE', statusCode:413 });
+  }
+  return prompt;
+}
+
+// Factory dispatch has exactly one task and no Collaboration dependencies.
+// Account for the possible task namespace before any Collaboration is made.
+export function assertFactoryTaskPromptFits(task) {
+  buildTaskPrompt({ ...task, id: `task_000000000000:${task.id}` }, [], 2);
 }
 
 function boundedPacketProjection(packet) {
@@ -986,7 +999,7 @@ export function createCollaborationOrchestrator(options = {}) {
       const requestId = makeRequestId(collaboration.id, task.id, reserved?.attemptNumber || Number(task.currentAttempt || 0) + 1);
       const prompt = buildTaskPrompt(task, collaboration.attempts.filter((item) => (
         item.state === 'succeeded' && collaboration.tasks.some((candidate) => candidate.id === item.taskId && task.dependsOn.includes(candidate.id))
-      )));
+      )), collaboration.policy?.factoryExecution?.promptContractVersion);
       const options = {
         templateId: app.id,
         tool: childTool,

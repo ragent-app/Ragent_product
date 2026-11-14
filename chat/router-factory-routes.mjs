@@ -516,12 +516,13 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const runtimeStatus = getFactoryRuntimeStatus(organizationId);
       result = { schemaVersion: 1, asOf: new Date().toISOString(), controlEnabled: process.env.AGENTOC_FACTORY_CONTROL_ENABLED === 'true', observationEnabled: true, pauseCancelAvailable: true, ...runtimeStatus, executionReadiness: 'not_verified' };
     }
-    else if (req.method === 'GET' && resource === 'work-items') result = id ? await getFactoryWorkItem(organizationId, id, actor) : await listFactoryWorkItems(organizationId, options, actor);
+    else if (req.method === 'GET' && resource === 'work-items') result = id ? await getFactoryWorkItem(organizationId, id, actor, {includeReport:true}) : await listFactoryWorkItems(organizationId, options, actor);
     else if (req.method === 'GET' && resource === 'goals' && !id) result = await listFactoryGoals(organizationId, options, actor);
     else if (req.method === 'GET' && resource === 'commands' && id) result = await getFactoryCommand(organizationId, id, actor);
     else if (req.method === 'POST' && ((resource === 'commands' && !id) || (resource === 'workflow' && ['preview', 'instantiate'].includes(id)))) {
       if (!mutationSourceAllowed(req)) { writeJson(res, 403, { code: 'FACTORY_SOURCE_DENIED', error: 'Request source or content type is not allowed' }); return true; }
-      const raw = await readBody(req, 64 * 1024);
+      // Bounded command transport limit; it is not a model context window.
+      const raw = await readBody(req, 256 * 1024);
       let body;
       try { body = JSON.parse(raw || '{}'); } catch { writeJson(res, 400, { error: 'Invalid JSON body' }); return true; }
       if (!body || typeof body !== 'object' || Array.isArray(body)) { writeJson(res, 400, { error: 'Command must be an object' }); return true; }
