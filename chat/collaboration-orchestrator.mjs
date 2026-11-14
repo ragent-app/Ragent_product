@@ -496,7 +496,10 @@ export function createCollaborationOrchestrator(options = {}) {
   async function prepareRecord(input = {}) {
     const root = await loadRoot({ rootSessionId: input.rootSessionId });
     const policy = input.policy || resolveSessionCollaborationPolicy(root, await deps.getApp(root.templateId));
-    assertManagerCanDelegate(policy, { childCount: Array.isArray(input.plan?.tasks) ? input.plan.tasks.length : 0, depth: root.delegationDepth || 0 });
+    // The policy helper checks the number already present before adding one;
+    // the compiler below separately bounds the complete submitted plan.
+    const proposedChildren = Array.isArray(input.plan?.tasks) ? input.plan.tasks.length : 0;
+    assertManagerCanDelegate(policy, { childCount: Math.max(0, proposedChildren - 1), depth: root.delegationDepth || 0 });
     let plan = compileCollaborationPlan(input.plan, policy);
     // S6 project binding: the project always comes from the existing session
     // binding (root.projectId or an explicit dispatch projectId) — never
