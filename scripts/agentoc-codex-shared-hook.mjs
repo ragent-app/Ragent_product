@@ -1,8 +1,17 @@
 #!/usr/bin/env node
 import { connect } from 'node:net';
 
-const denied = code => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
-  permissionDecisionReason: `The Ragent Windows operation check is unavailable. Retry after the session reconnects. (${code})` } });
+const diagnosticFields = ['routerPresent', 'ownerAtObservation', 'routerAtObservation', 'turnPresent', 'sourceMatch',
+  'runPrefixMatch', 'runIdMatch', 'eventMatch', 'handlerMatch', 'modeMatch', 'statusMatch', 'expired', 'claimed'];
+const diagnosticText = value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !['exact-turn', 'thread-only', 'none', 'ambiguous'].includes(value.candidateBasis)
+      || Object.keys(value).some(key => key !== 'candidateBasis' && !diagnosticFields.includes(key))
+      || diagnosticFields.some(key => value[key] !== undefined && value[key] !== null && typeof value[key] !== 'boolean')) return '';
+  return ` ${value.candidateBasis}:${diagnosticFields.map(key => value[key] === true ? '1' : value[key] === false ? '0' : '?').join('')}`;
+};
+const denied = (code, diagnostics) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
+  permissionDecisionReason: `The Ragent Windows operation check is unavailable. Retry after the session reconnects. (${code}${diagnosticText(diagnostics)})` } });
 const brokerCodes = new Set(['HOOK_OWNER_UNAVAILABLE', 'HOOK_CLAIM_UNMATCHED', 'HOOK_OWNER_TIMEOUT', 'HOOK_OWNER_DISCONNECTED', 'HOOK_EVALUATION_FAILED']);
 async function main() {
   const index = process.argv.indexOf('--socket');
@@ -36,7 +45,7 @@ async function main() {
         try {
           const message = JSON.parse(line);
           if (message?.method === 'account/rateLimits/updated' && !Object.hasOwn(message, 'id')) continue;
-          finish(message.result && typeof message.result === 'object' && !Array.isArray(message.result) ? message.result : denied(brokerCodes.has(message.code) ? message.code : 'HOOK_RESPONSE_INVALID'));
+          finish(message.result && typeof message.result === 'object' && !Array.isArray(message.result) ? message.result : denied(brokerCodes.has(message.code) ? message.code : 'HOOK_RESPONSE_INVALID', message.diagnostics));
         } catch { finish(denied('HOOK_RESPONSE_INVALID')); }
         return;
       }

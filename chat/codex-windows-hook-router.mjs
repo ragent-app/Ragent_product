@@ -7,9 +7,35 @@ export function createCodexWindowsHookRouter({ sourcePath, runIdPrefix, getOwner
     (win32.isAbsolute(value) ? win32.resolve(value).toLowerCase() : resolve(value)) : '';
   const expectedPath = normalize(sourcePath);
   const pending = new Map();
+  const diagnosticOutcomes = new Map();
   const key = (threadId, turnId, runId) => JSON.stringify([threadId, turnId, runId]);
-  const sweep = () => { for (const [id, entry] of pending) if (entry.expires <= now()) pending.delete(id); };
+  const recordOutcome = (id, state) => {
+    diagnosticOutcomes.delete(id); diagnosticOutcomes.set(id, { state, expires: now() + Math.max(ttlMs, 60_000) });
+    while (diagnosticOutcomes.size > 64) diagnosticOutcomes.delete(diagnosticOutcomes.keys().next().value);
+  };
+  const sweep = () => {
+    for (const [id, entry] of pending) if (entry.expires <= now()) { pending.delete(id); recordOutcome(id, 'expired'); }
+    for (const [id, entry] of diagnosticOutcomes) if (entry.expires <= now()) diagnosticOutcomes.delete(id);
+  };
   return {
+    inspectStarted(message) {
+      const params = message?.params || {}, run = params.run || {};
+      return {
+        turnPresent: Boolean(params.turnId), sourceMatch: Boolean(expectedPath && normalize(run.sourcePath) === expectedPath),
+        runPrefixMatch: typeof run.id === 'string' && run.id.startsWith(runIdPrefix),
+        eventMatch: run.eventName === 'preToolUse', handlerMatch: run.handlerType === 'command',
+        modeMatch: run.executionMode === 'sync', statusMatch: run.status === 'running',
+      };
+    },
+    inspectClaim(event, observedRunId) {
+      const id = key(event?.session_id, event?.turn_id, observedRunId), entry = pending.get(id);
+      const outcome = diagnosticOutcomes.get(id);
+      return {
+        runIdMatch: typeof event?.tool_use_id === 'string' && observedRunId === `${runIdPrefix}${event.tool_use_id}`,
+        expired: entry ? entry.expires <= now() : outcome ? outcome.state === 'expired' : null,
+        claimed: outcome ? outcome.state === 'claimed' : entry ? false : null,
+      };
+    },
     observe(message) {
       sweep();
       const params = message?.params || {};
@@ -21,7 +47,7 @@ export function createCodexWindowsHookRouter({ sourcePath, runIdPrefix, getOwner
           || run.eventName !== 'preToolUse' || run.handlerType !== 'command'
           || run.executionMode !== 'sync' || run.status !== 'running') return;
       const owner = getOwner?.(params.threadId);
-      if (owner && !owner.destroyed) pending.set(id, { owner, threadId: params.threadId, turnId: params.turnId, runId: run.id, expires: now() + ttlMs });
+      if (owner && !owner.destroyed) { diagnosticOutcomes.delete(id); pending.set(id, { owner, threadId: params.threadId, turnId: params.turnId, runId: run.id, expires: now() + ttlMs }); }
     },
     claim(event) {
       sweep();
@@ -35,6 +61,7 @@ export function createCodexWindowsHookRouter({ sourcePath, runIdPrefix, getOwner
       if (candidates.length !== 1) return null;
       const [id, entry] = candidates[0];
       pending.delete(id);
+      recordOutcome(id, 'claimed');
       return entry.owner;
     },
     release(owner) { for (const [id, entry] of pending) if (entry.owner === owner) pending.delete(id); },

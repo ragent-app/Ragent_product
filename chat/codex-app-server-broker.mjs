@@ -429,6 +429,13 @@ function runBroker() {
   const threadStartQueue = [];
   const pendingThreadReloads = new Map();
   const hookRouters = new Map();
+  // Bounded diagnostic observations only; never used to authorize a hook.
+  const hookObservations = [];
+  const pruneHookObservations = () => {
+    const cutoff = Date.now() - 60_000;
+    while (hookObservations.length && hookObservations[0].at < cutoff) hookObservations.shift();
+    while (hookObservations.length > 64) hookObservations.shift();
+  };
   const pendingHookCalls = new Map();
   const clientRunTags = new WeakMap();
   let activeThreadRequestId = null;
@@ -464,6 +471,15 @@ function runBroker() {
       return;
     }
     const threadId = readThreadId(message);
+    if (message?.method === 'hook/started' && threadId) {
+      pruneHookObservations();
+      const owner = threadOwners.get(threadId), router = owner && hookRouters.get(owner);
+      hookObservations.push({ at: Date.now(), threadId, turnId: trimString(message.params?.turnId),
+        runId: trimString(message.params?.run?.id), owner: owner || null,
+        ownerAtObservation: Boolean(owner && !owner.destroyed), routerAtObservation: Boolean(router),
+        flags: router?.inspectStarted(message) || null });
+      pruneHookObservations();
+    }
     if (message?.method === 'mcpServer/startupStatus/updated' && !threadId) {
       const owner = mcpStartupOwners.get(trimString(message.params?.name || message.params?.serverName || message.params?.server_name));
       if (owner) sendClient(owner.client, message);
@@ -731,14 +747,27 @@ function runBroker() {
     }
     if (message.type === 'agentoc-codex-windows-hook') {
       const event = message.event;
-      const deny = code => sendClient(client, { error: 'No matching active managed hook', code });
+      const deny = (code, diagnostics) => sendClient(client, { error: 'No matching active managed hook', code, ...(diagnostics ? { diagnostics } : {}) });
       const tryClaim = (remaining) => {
         if (client.destroyed) return;
         const owner = threadOwners.get(event?.session_id);
         const matched = owner && hookRouters.get(owner)?.claim(event);
         if (!matched) {
           if (remaining > 0) { const timer = setTimeout(() => tryClaim(remaining - 1), 50); timer.unref?.(); }
-          else deny(!owner || owner.destroyed ? 'HOOK_OWNER_UNAVAILABLE' : 'HOOK_CLAIM_UNMATCHED');
+          else {
+            pruneHookObservations();
+            const router = owner && hookRouters.get(owner);
+            const candidates = hookObservations.filter(entry => entry.threadId === event?.session_id && (!entry.owner || entry.owner === owner));
+            const exact = candidates.filter(entry => entry.turnId && entry.turnId === event?.turn_id);
+            const selected = exact.length === 1 ? exact[0] : !exact.length && candidates.length === 1 ? candidates[0] : null;
+            const candidateBasis = exact.length === 1 ? 'exact-turn' : exact.length > 1 || candidates.length > 1 ? 'ambiguous' : selected ? 'thread-only' : 'none';
+            const diagnostics = { candidateBasis, routerPresent: Boolean(router),
+              ownerAtObservation: selected?.ownerAtObservation ?? null, routerAtObservation: selected?.routerAtObservation ?? null,
+              turnPresent: selected ? Boolean(selected.turnId) : null };
+            if (candidateBasis === 'exact-turn' && selected?.flags) Object.assign(diagnostics, selected.flags,
+              router?.inspectClaim(event, selected.runId) || {});
+            deny(!owner || owner.destroyed ? 'HOOK_OWNER_UNAVAILABLE' : 'HOOK_CLAIM_UNMATCHED', diagnostics);
+          }
           return;
         }
         const id = `agentoc-hook-${nextRequestId++}`;
@@ -847,6 +876,11 @@ function runBroker() {
     });
     client.on('close', () => {
       clients.delete(client);
+      const closingThreads = new Set([...threadOwners].filter(([, owner]) => owner === client).map(([id]) => id));
+      for (let i = hookObservations.length - 1; i >= 0; i -= 1) {
+        const entry = hookObservations[i];
+        if (entry.owner === client || (!entry.owner && closingThreads.has(entry.threadId))) hookObservations.splice(i, 1);
+      }
       for (const [name, owner] of mcpStartupOwners) if (owner.client === client) mcpStartupOwners.delete(name);
       // Closing the client does not cancel Codex's native OAuth flow. Retain a
       // tombstone until completion/expiry so its notification cannot be sent
