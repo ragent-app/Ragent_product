@@ -44,7 +44,7 @@ function facts(db,bindingId,operationId) {
 }
 function checkedContract(facts,org,node) {
   const c=facts.payload.contract, paths=c?.allowedPaths;
-  if(c?.knowledgeRefs?.length) fail('Remote task knowledge delegation is not supported');
+  if(!Number.isSafeInteger(facts.payload.reservedTokens) || facts.payload.reservedTokens<=0) fail('Remote execution requires a reserved token budget');
   if(!c || typeof c.objective!=='string' || !c.objective.trim() || c.objective.length>4096 || c.accessMode!=='write'
       || !Array.isArray(paths) || !paths.length || paths.some(p=>typeof p!=='string'||!p||p.includes('\\')||/^(?:[A-Za-z]:|[\\/])/.test(p)||p.split('/').some(s=>!s||s==='.'||s==='..'))
       || !Array.isArray(c.acceptanceCriteria) || !c.acceptanceCriteria.length) fail('Only scoped writer contracts are supported');
@@ -62,13 +62,19 @@ function checkedContract(facts,org,node) {
   }
   return {objective:c.objective,acceptanceCriteria:[{id:'remote-execution-result',method:'manual'}],accessMode:'write',allowedPaths:paths,
     ...(typeof c.targetBranch==='string'?{targetBranch:c.targetBranch}:{}),...(typeof c.candidateScope==='string'?{candidateScope:c.candidateScope}:{}),
-    retry:{maxAttempts:1},budget:{maxCost:facts.payload.reservedCost},budgetReservation:{cost:facts.payload.reservedCost},organizationRevision:org.current_revision};
+    retry:{maxAttempts:1},budget:{maxCost:facts.payload.reservedCost,maxTokens:facts.payload.reservedTokens},
+    budgetReservation:{cost:facts.payload.reservedCost,tokens:facts.payload.reservedTokens},organizationRevision:org.current_revision};
 }
 // Invoked only by the authenticated target operation receiver. It creates a
 // local execution child, never a source acceptance decision or a second runner.
 export async function admitRemoteFactoryAttempt({binding,operation}={}) {
   if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true'||process.env.AGENTOC_FACTORY_SCHEDULER_ENABLED!=='1') fail('Target Factory admission is disabled');
   if(!binding?.id||!operation?.operationId) fail('Remote operation identity required');
+  const remoteKnowledge=await factoryRead(db=>remoteKnowledgeScope(facts(db,binding.id,operation.operationId)));
+  if(remoteKnowledge.knowledgeRefs.length) {
+    const {fetchLiveRemoteKnowledge}=await import('./factory-remote-knowledge.mjs');
+    await fetchLiveRemoteKnowledge(remoteKnowledge);
+  }
   const organizations=String(process.env.AGENTOC_FACTORY_ORGANIZATIONS || '').split(',').map(value=>value.trim()).filter(Boolean);
   if(!String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID || '').trim() || !organizations.includes(binding.organizationId)) fail('Target organization is not enabled for Factory');
   const session=await getSession(binding.sessionId);
@@ -101,6 +107,7 @@ export function verifyRemoteFactoryChild(db,item,{bindingGeneration=item.binding
   if(!parent) return null;
   if(requireDispatch && process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1') fail('Remote Factory dispatch is disabled');
   const f=facts(db,parent.bindingId,parent.operationId), b=f.binding;
+  if(requireDispatch && (!Number.isSafeInteger(f.payload.reservedTokens) || f.payload.reservedTokens<=0)) fail('Remote execution requires a reserved token budget');
   const link=db.prepare('SELECT * FROM factory_remote_children WHERE binding_id=? AND operation_id=? AND work_item_id=?').get(parent.bindingId,parent.operationId,item.id);
   if(!link || link.operation_digest!==f.operation.payload_digest || parent.bindingVersion!==b.version || parent.nodeGeneration!==bindingGeneration
       || b.node_generation!==bindingGeneration || b.organization_id!==item.organization_id || b.project_id!==item.project_id
@@ -108,7 +115,17 @@ export function verifyRemoteFactoryChild(db,item,{bindingGeneration=item.binding
       || parent.contractRevision!==f.operation.contract_revision || parent.executionEpoch!==f.operation.execution_epoch || parent.contractDigest!==f.contractDigest) fail('Remote child fence changed');
   return {bindingId:b.id,operationId:f.operation.operation_id,sessionId:b.session_id,organizationId:b.organization_id,
     expectedBaseHead:f.payload.expectedBaseHead,expectedBaseBranch:f.payload.expectedBaseBranch,expectedBaselineDigest:f.payload.expectedBaselineDigest,
-    allowedPaths:f.payload.contract.allowedPaths,taskSummary:f.payload.taskSummary || null,taskSummaryDigest:f.payload.taskSummaryDigest || null};
+    allowedPaths:f.payload.contract.allowedPaths,taskSummary:f.payload.taskSummary || null,taskSummaryDigest:f.payload.taskSummaryDigest || null,
+    ...remoteKnowledgeScope(f)};
+}
+function remoteKnowledgeScope(f) {
+  const refs=f.payload.contract?.knowledgeRefs || [];
+  if(!Array.isArray(refs) || refs.length>10) fail('Remote knowledge references invalid');
+  return {sourceBindingId:f.payload.sourceBindingId,sourceInstanceId:f.binding.source_instance_id,
+    sourcePublicKey:f.binding.source_public_key,sourceWorkItemId:f.payload.sourceWorkItemId,
+    sourceFactoryBindingId:f.operation.source_factory_binding_id,sourceContractRevision:f.operation.contract_revision,
+    sourceExecutionEpoch:f.operation.execution_epoch,sourceContractDigest:f.contractDigest,
+    operationId:f.operation.operation_id,knowledgeRefs:refs};
 }
 export async function assertRemoteTargetWorkspace(remote) {
   const {getOrganization}=await import('./organization-store.mjs');
@@ -263,12 +280,13 @@ export function verifySourceRemoteDelegation(db,input,actor) {
   const node=db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assignee_node_id,input.organizationId);
   if(!node||node.retired_revision!==null||node.binding_generation!==binding.binding_generation||['archived','lifecycle_pending'].includes(org.state)) fail('Source organization binding changed');
   const contract=JSON.parse(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(item.id,item.contract_revision)?.contract_json || '{}');
-  if(contract.knowledgeRefs?.length) fail('Remote task knowledge delegation is not supported');
   if(contract.organizationRevision!==org.current_revision||hash(contract)!==input.contractDigest||digest(contract)!==digest(input.payload?.contract)) fail('Source contract changed');
   const key=`factory:${binding.id}`, counter=db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(input.organizationId,contract.organizationRevision);
   const entry=JSON.parse(counter?.reservations_json || '{}')[key];
   if(!entry || entry.state!=='reserved'||input.payload?.sourceReservationId!==key||!Number.isFinite(input.payload?.reservedCost)
-      || input.payload.reservedCost<=0||input.payload.reservedCost>entry.delta?.cost) fail('Source budget reservation is unavailable');
+      || input.payload.reservedCost<=0||!Number.isFinite(entry.delta?.cost)||input.payload.reservedCost>entry.delta.cost
+      || !Number.isSafeInteger(input.payload?.reservedTokens)||input.payload.reservedTokens<=0
+      || !Number.isSafeInteger(entry.delta?.tokens)||input.payload.reservedTokens!==entry.delta.tokens) fail('Source budget reservation is unavailable');
   const grant=JSON.parse(node.grant_json || '{}'), paths=contract.accessMode==='read'?[]:(contract.allowedPaths || []);
   const within=(path,root)=>path===root||path.startsWith(`${root}/`);
   if(paths.length && (grant.canWrite!==true||!Array.isArray(grant.writablePaths)||paths.some(path=>!grant.writablePaths.some(root=>within(path,root))))) fail('Source write grant changed');

@@ -213,8 +213,12 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     : checkRunnerCapacity;
 
   const sessionKey = trimString(sessionId) || trimString(session?.id);
+  const { resolveFactoryRunBudget } = await import('./factory-run-budget.mjs');
+  const factoryBudget = await resolveFactoryRunBudget({ sessionId: sessionKey, requestId: trimString(manifest?.requestId),
+    runId: trimString(options.runId), managed: session?.sessionPlane === 'organization' });
   const requiresReadOnly = options.readOnlyRequired === true;
   const legacy = (reason) => {
+    if (factoryBudget) throw createAdmissionError('Factory budget requires a scoped Run', 'FACTORY_RUN_BUDGET_CONFLICT', 409, { reason });
     if (requiresReadOnly) {
       throw createAdmissionError('Read-only Run cannot use an unscoped legacy path', 'READ_ONLY_RUNTIME_UNAVAILABLE', 409, { reason });
     }
@@ -351,7 +355,7 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     // Bind the risk context into the same immutable snapshot/digest as the
     // execution scope. A later observer or sidecar cannot silently replace the
     // protected roots or the trusted workspace with caller-provided values.
-    snapshot = { ...snapshot, riskContext };
+    snapshot = { ...snapshot, riskContext, ...(factoryBudget ? { factoryBudget } : {}) };
     digest = computeExecutionScopeDigest(snapshot);
   } catch (error) {
     if (error?.code === 'PROJECT_SCOPE_ESCAPE') throw error;

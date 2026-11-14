@@ -69,7 +69,7 @@ export async function dispatchRemoteFactoryOperation(input,actor,{verifyExternal
       if(hash(saved)!==old.payload_digest || hash(withoutSummary(saved))!==hash(withoutSummary(canonical))) throw factoryError('REMOTE_CONFLICT','Operation identity reused',409);
       return {existing:true,binding:binding(b),canonical:saved}; }
     if(db.prepare('SELECT 1 FROM remote_factory_source_operations WHERE source_factory_binding_id=?').get(input.sourceFactoryBindingId)) throw factoryError('REMOTE_CONFLICT','Factory binding already delegated',409);
-    const sourceBinding=binding(b),ts=now();db.prepare('INSERT INTO remote_factory_source_operations VALUES(?,?,?,?,?,?,?, ?,?)').run(bindingId,operationId,input.sourceFactoryBindingId,digest,JSON.stringify({canonical,binding:sourceBinding}),'unknown',null,ts,ts);return {binding:sourceBinding,canonical}; });
+    const sourceBinding=binding(b),ts=now();db.prepare('INSERT INTO remote_factory_source_operations VALUES(?,?,?,?,?,?,?, ?,?)').run(bindingId,operationId,input.sourceFactoryBindingId,digest,JSON.stringify({canonical,binding:sourceBinding,sourceInstanceId:sourceId}),'unknown',null,ts,ts);return {binding:sourceBinding,canonical}; });
   if(prepared.existing) return {status:'unknown',operationId,reason:'query_required'};
   const evidence=await verifyExternal();
   if (!evidence || evidence.clean!==true || !/^[a-f0-9]{40,64}$/.test(text(evidence.baseHead)) || !text(evidence.baseBranch)

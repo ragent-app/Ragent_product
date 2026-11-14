@@ -143,6 +143,7 @@ import {
   flushRunSpool,
   getRun,
   getRunManifest,
+  requestRunCancel,
   isLinuxPeerResultRunner,
   linuxPeerResultClientOptions,
   readRunBrowserToken,
@@ -4341,8 +4342,34 @@ async function main() {
     // tree here adds substantial startup latency without a useful baseline.
     captureRunBaseline: !readOnlyRequested,
   });
-  const appServerManifest = isCodexAppServerFamily && (permissionMode || providerReadOnly)
-    ? { ...manifest, options: { ...(manifest.options || {}), permissionMode: providerReadOnly ? (process.platform === 'linux' ? 'on-request-read-only' : 'never-read-only') : permissionMode } }
+  const factoryBudget = manifest.executionScope?.factoryBudget || null;
+  if (factoryBudget && (factoryBudget.runId !== runId || factoryBudget.sessionId !== manifest.sessionId
+      || factoryBudget.requestId !== manifest.requestId || !manifest.executionScopeDigest
+      || computeExecutionScopeDigest(manifest.executionScope) !== manifest.executionScopeDigest
+      || !isCodexAppServerFamily || manifest.tool !== 'codex')) {
+    throw new Error('Factory budget Run identity or supported provider is unavailable');
+  }
+  const factoryFreshRecovery = Boolean(factoryBudget && manifest.options?.codexResume === true);
+  if (factoryFreshRecovery && !(typeof manifest.freshRecoveryPrompt === 'string' && manifest.freshRecoveryPrompt)) {
+    throw new Error('Factory budget requires a complete fresh-thread context');
+  }
+  if (factoryBudget) {
+    // One budgeted Run may create only one provider thread. After an
+    // interrupted sidecar launch we cannot infer a zero baseline again.
+    const start = await updateRun(runId, current => {
+      if (current.id !== runId || current.sessionId !== factoryBudget.sessionId || current.requestId !== factoryBudget.requestId
+          || ['completed','failed','cancelled'].includes(current.state)) return current;
+      if (current.factoryBudgetThreadStart) return { ...current, factoryBudgetRecoveryRequired: true };
+      if (current.cancelRequested) return current;
+      return { ...current, factoryBudgetThreadStart: { scopeDigest: manifest.executionScopeDigest, state: 'starting', startedAt: new Date().toISOString() } };
+    });
+    if (!start || start.factoryBudgetRecoveryRequired || start.cancelRequested || ['completed','failed','cancelled'].includes(start.state)
+        || start.factoryBudgetThreadStart?.scopeDigest !== manifest.executionScopeDigest) {
+      throw Object.assign(new Error('Factory budget thread start requires reconciliation'), { code: 'FACTORY_BUDGET_RECONCILIATION_REQUIRED' });
+    }
+  }
+  const appServerManifest = isCodexAppServerFamily && (permissionMode || providerReadOnly || factoryBudget)
+    ? { ...manifest, options: { ...(manifest.options || {}), ...(factoryBudget ? { codexResume: false, codexThreadId: '' } : {}), permissionMode: providerReadOnly ? (process.platform === 'linux' ? 'on-request-read-only' : 'never-read-only') : permissionMode } }
     : manifest;
   const appServerState = isCodexAppServerFamily
     ? await createCodexAppServerRunState({
@@ -4351,7 +4378,7 @@ async function main() {
       manifest: appServerManifest,
       cwd: resolvedFolder.cwd,
       codexHomeDir: runnerCodexHomeDir,
-      forceFreshRecovery: forceFreshCodexRecovery,
+      forceFreshRecovery: forceFreshCodexRecovery || factoryFreshRecovery,
     })
     : null;
   if (appServerState && providerReadOnly) appServerState.providerReadOnly = true;
@@ -5688,6 +5715,12 @@ async function main() {
       return;
     }
     if (appServerState && parsed && isCodexAppServerStaleResumeError(parsed, appServerState)) {
+      if (factoryBudget) {
+        await updateRun(runId, current => ({ ...current, factoryBudgetRecoveryRequired: true }));
+        markCodexAppServerFailure(appServerState, { error: { code: 'FACTORY_BUDGET_RECONCILIATION_REQUIRED', message: 'Budgeted Run cannot replace its provider thread' } });
+        await terminateManagedProcess();
+        return;
+      }
       const staleThreadId = appServerState.threadId;
       try {
         const accountSources = JSON.parse(process.env.AGENTOC_CODEX_ROLLOUT_SOURCES || '[]');
@@ -5817,6 +5850,51 @@ async function main() {
     const capturedTurnIdBeforeTerminal = activeAppServerEvent
       ? maybeCaptureCodexAppServerTurnId(appServerState, parsed)
       : '';
+    // A budgeted Run owns a fresh thread on the shared broker. Only an event
+    // from its actual active turn can authorize its cancellation. Provider
+    // totals already include cached input; cost is not supplied here.
+    if (factoryBudget && parsed?.method === 'thread/tokenUsage/updated' && appServerState?.startedTurn
+        && appServerState.threadId && parsed.params?.threadId === appServerState.threadId && parsed.params?.turnId) {
+      const total = parsed.params?.tokenUsage?.total?.totalTokens;
+      if (Number.isSafeInteger(total) && total >= 0) {
+        const prior = appServerState.factoryBudgetPendingUsage;
+        if (!prior || prior.turnId === parsed.params.turnId || appServerState.turnId === parsed.params.turnId) appServerState.factoryBudgetPendingUsage = {
+          turnId: parsed.params.turnId, total: Math.max(prior?.turnId === parsed.params.turnId ? prior.total : 0, total),
+        };
+      }
+    }
+    if (factoryBudget && appServerState?.startedTurn && appServerState.threadId && appServerState.turnId
+        && appServerState.factoryBudgetPendingUsage?.turnId === appServerState.turnId) {
+      const total = appServerState.factoryBudgetPendingUsage.total;
+      if (Number.isSafeInteger(total) && total >= 0 && factoryBudget.tokenLimit && total >= factoryBudget.tokenLimit
+          && !appServerState.factoryBudgetCancelRecorded) {
+        const saved = await updateRun(runId, current => {
+          if (current.id !== runId || current.sessionId !== factoryBudget.sessionId || current.requestId !== factoryBudget.requestId
+              || ['completed','failed','cancelled'].includes(current.state)) return current;
+          if (current.factoryBudgetCancel?.scopeDigest && current.factoryBudgetCancel.scopeDigest !== manifest.executionScopeDigest) return current;
+          return { ...current, cancelRequested: true, cancelRequestedAt: current.cancelRequestedAt || new Date().toISOString(),
+            factoryBudgetCancel: { scopeDigest: manifest.executionScopeDigest, threadId: appServerState.threadId,
+              turnId: appServerState.turnId, observedTokens: total, tokenLimit: factoryBudget.tokenLimit,
+              cost: null, costObservation: 'unknown', requestedAt: new Date().toISOString() } };
+        });
+        if (saved?.factoryBudgetCancel?.scopeDigest === manifest.executionScopeDigest && saved.cancelRequested === true) {
+          appServerState.factoryBudgetCancelRecorded = true;
+          try {
+            await requestRunCancel(runId, { authorizeWrite: current => {
+              if (current.id !== runId || current.sessionId !== factoryBudget.sessionId || current.requestId !== factoryBudget.requestId
+                  || ['completed','failed','cancelled'].includes(current.state)
+                  || current.factoryBudgetCancel?.scopeDigest !== manifest.executionScopeDigest) {
+                throw new Error('Factory budget cancellation no longer matches a live Run');
+              }
+            } });
+          } catch (error) {
+            // The durable request is already recorded. A concurrent terminal
+            // transition must not be rewritten as a new cancellation.
+            await logSidecarDiagnostic(runId, 'FACTORY_BUDGET_CANCEL_RECHECK', { message: String(error?.message || error) });
+          }
+        }
+      }
+    }
     const codexTerminalFrame = !!(
       appServerState
       && !foreignCodexThreadEvent
@@ -5990,7 +6068,7 @@ async function main() {
           // 客户端 400 形态不自动重试）→ 自动重发该 turn，避免用户看到 systemError。
           const retryCount = Number(appServerState.turnRetryCount) || 0;
           if (
-            retryCount < CODEX_APP_SERVER_TURN_RETRY_LIMIT
+            !factoryBudget && retryCount < CODEX_APP_SERVER_TURN_RETRY_LIMIT
             && /stream[_ ]truncated|no output was produced|finish_reason[\"':\s]*null|upstream_error/i.test(appServerState.failureReason)
           ) {
             appServerState.turnRetryCount = retryCount + 1;
@@ -6338,7 +6416,7 @@ async function main() {
   // duplicated and systemd still owns the whole recovery chain.
   const handoffToFreshCodexSidecar = async (currentRun) => {
     if (
-      !appServerState?.freshRecoveryRequested
+      factoryBudget || !appServerState?.freshRecoveryRequested
       || currentRun?.cancelRequested === true
       || currentRun?.state === 'completed'
       || currentRun?.state === 'failed'
@@ -7149,6 +7227,7 @@ if (isMainEntry) {
   main().catch((error) => {
     void (async () => {
       try {
+        if (error?.code === 'FACTORY_BUDGET_RECONCILIATION_REQUIRED') return;
         const current = await getRun(runId);
         await persistRunFailure(runId, error, {
           cancelled: current?.cancelRequested === true,
