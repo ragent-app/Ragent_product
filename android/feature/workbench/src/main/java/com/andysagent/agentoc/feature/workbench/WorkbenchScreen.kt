@@ -808,7 +808,16 @@ fun WorkbenchScreen(
         }
         if (state.chatOpen && state.sessionId != null && organizationTransport != null) {
             if (organizationOpen) {
+                val offlineAccount = accountsViewModel?.state?.collectAsState()?.value
+                val offlineTarget = state.chatTargetId ?: state.activeRemoteTargetId
+                val offlineScope = offlineAccount?.takeIf {
+                    it.hasVerifiedAccountSession &&
+                        it.deviceBindingStatus == com.andysagent.agentoc.feature.workbench.accounts.GoogleDeviceBindingStatus.Bound &&
+                        !offlineTarget.isNullOrBlank() && it.targetInstanceId == offlineTarget &&
+                        !it.accountId.isNullOrBlank() && !it.credentialId.isNullOrBlank() && !it.deviceId.isNullOrBlank()
+                }?.let { org.json.JSONArray(listOf(it.accountId, it.credentialId, it.deviceId, offlineTarget, state.sessionId)).toString() }
                 com.andysagent.agentoc.feature.organization.ui.ConnectedOrganizationScreen(
+                    offlineScope = offlineScope,
                     transport = organizationTransport,
                     sessionId = state.sessionId,
                     targetId = state.chatTargetId ?: state.activeRemoteTargetId,
