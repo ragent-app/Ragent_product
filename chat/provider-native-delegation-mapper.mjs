@@ -280,7 +280,7 @@ export function mapCodexProviderDelegationEvent(raw, context = {}) {
   return mapCodex(object(raw), context);
 }
 
-export function createProviderNativeDelegationMapper({ provider, runId, parentSessionId, timestamp } = {}) {
+export function createProviderNativeDelegationMapper({ provider, runId, parentSessionId, parentThreadId, timestamp } = {}) {
   const normalizedProvider = lower(provider);
   const context = { runId: text(runId), parentSessionId: text(parentSessionId), timestamp };
   const projector = createDelegationProjector();
@@ -288,15 +288,50 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
   // Stream-scoped registry of Task/Agent tool_use ids seen in this spool so
   // their matching tool_result frames can be linked back to a delegation.
   const taskToolUseIds = new Set();
+  const codexChildren = new Set();
+
+  function mapModernCodex(raw) {
+    const item = readCodexItem(raw);
+    if (lower(item.type) !== 'collabagenttoolcall' || !Array.isArray(item.receiverThreadIds)) return null;
+    const operation = codexOperation(item, raw);
+    const control = { type: 'delegation_control', control: operation || 'unknown', provider: 'codex', runId: context.runId };
+    const receivers = [...new Set(item.receiverThreadIds.map(text).filter(Boolean))];
+    const bound = text(parentThreadId) && text(item.senderThreadId) === text(parentThreadId);
+    const events = [];
+    const errors = [];
+    if (operation === 'spawn' && lower(raw?.method) === 'item/completed' && lower(item.status) === 'completed' && receivers.length) {
+      if (!bound) errors.push('delegation_parent_thread_unresolved');
+      else for (const child of receivers) {
+        if (codexChildren.has(child)) continue;
+        codexChildren.add(child);
+        events.push(observation({ provider: 'codex', raw, context, providerDelegationId: child,
+          childSessionId: child, kind: 'spawned', state: 'spawned' }));
+      }
+    }
+    if (bound && ['wait', 'close'].includes(operation)) {
+      const states = object(item.agentsStates);
+      for (const child of receivers) {
+        if (!codexChildren.has(child)) continue;
+        const status = lower(object(states[child]).status);
+        const state = ({ running: 'running', completed: 'completed', errored: 'failed', interrupted: 'interrupted' })[status];
+        if (!state) continue;
+        const identity = buildDelegationIdentity({ provider: 'codex', runId: context.runId, providerDelegationId: child });
+        if (projector.getState(identity.id) === state) continue;
+        events.push(observation({ provider: 'codex', raw, context, providerDelegationId: child,
+          childSessionId: child, kind: state, state }));
+      }
+    }
+    return { events, controls: [control], recognized: true, errors };
+  }
 
   function map(raw) {
     const mapped = normalizedProvider === 'claude'
       ? mapClaudeProviderDelegationEvent(raw, context, taskToolUseIds)
       : normalizedProvider === 'codex'
-        ? mapCodexProviderDelegationEvent(raw, context)
+        ? (mapModernCodex(raw) || mapCodexProviderDelegationEvent(raw, context))
         : { events: [], controls: [], recognized: false };
     const events = [];
-    const errors = [];
+    const errors = [...(mapped.errors || [])];
     for (const candidate of mapped.events) {
       const identity = buildDelegationIdentity(candidate);
       const nextSeq = (sequenceByDelegation.get(identity.id) || 0) + 1;

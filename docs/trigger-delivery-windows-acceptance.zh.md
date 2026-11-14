@@ -61,3 +61,9 @@
 控制面重启后的 pending 恢复已用专用单次提醒验证：到期前全量 Run 索引和目录 111/111 一致且均终态，正常重启仅 ControlPlane（PID 262640→247988），RunnerSupervisor PID 149628 保持运行。同一提醒在重启后自然到期，单次尝试后 Run completed、delivery published 并自动禁用；同一 Run 的持久 assistant 消息 seq 55 为“重启后提醒验收成功。”。这只验证 pending 调度恢复；排队和已受理 Run 的在途 tracking 重启恢复尚未命中。历史 `OSV_RECOVERY_REFUSED` 的根因尚未确定，后续健康恢复不证明根因修复；无 threadId 的 broker 通知路由也未在真实事件中单独验证。
 
 进一步验收捕获到真实 queued 提醒，并在背景专用 Run 仍运行、仅该 QA Run 活跃时正常重启 ControlPlane；Supervisor 保持原 PID。原 occurrence 重启后关联的 Run 长时间 accepted 且未启动，随后正式对账将其判为 failed/unknown，未重发。静态定位发现 queue flush 的 skipDispatch 同时阻止了 runner 启动；已将调度规划与内部不启动 runner 的选项分离。现有 session-dispatch 与单项 derived 检查通过，follow-up fixture 因 unknown Harness、resend 因 EXECUTION_SCOPE_STALE 未通过，不能称所有检查通过；修复须部署后重新验证。
+
+0.0.87 基于 `7a7cfcabbb22bc1b4d5228df3b18db5d9ee01e66` 正式 minor 安装，MSI SHA-256 `5704093FDCD123F1CE01FF0067FDF18C1DA386B2175C843A8FF1905A9753BA70`。安装返回 3010，注册版本及 session-manager 安装 blob 已核对，两服务运行且 drain 已解除。真实队列验收捕获 queued，原 occurrence 后续启动同 request 的 Run 并 completed/published、attempt 1；对应持久 assistant seq 92 正文为“队列修复恢复验收成功。”。该轮核重启条件时 Run 已终态，未重启，只验证队列自然推进，不证明在途重启恢复。
+
+随后单条真实只读审查提醒的 Run 已启动但很快 failed，触发结果为 failed/published，错误 `delegation_replay_invalid`；其持久回复存在不等于任务成功，此轮未重启。有限取证发现新版 Codex 的 wait 调用以工具调用 ID 被误当作子代理 ID；后续源码将带新协议 receiverThreadIds 的 wait 作为控制观测，保留已知活跃子代理安全屏障。随后同 Run 按已确认的父 thread 和 receiver 映射成功 spawn 及明确 child 终态；跨 Run 关联和真实 spawn 尚未验收。该修复尚需正式安装与真实验收。两项既有权限检查已按实际测试场景修正，作者分别运行通过，未更改产品权限策略。
+
+历史 owner `OSV_RECOVERY_REFUSED` 的首因、历史 major 回滚 Return 5 的原因、无 threadId 的 broker 通知真实覆盖及用户界面观察仍未闭环；pending 调度重启已验证，已受理 Run 的在途重启恢复仍未验证。所有结论以实际记录为限。

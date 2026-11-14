@@ -169,6 +169,12 @@ function normalizePriorRuntime(run) {
     : null;
 }
 
+function codexParentThreadId(run) {
+  const current = text(run?.appServerThreadId);
+  const persisted = text(run?.codexThreadId);
+  return current && persisted && current !== persisted ? '' : current || persisted;
+}
+
 // Terminal recovery must inspect the complete provider spool so a delegation
 // emitted early in a long Run is not hidden by the live tail reader. Keep only
 // mapped delegation evidence in memory; ordinary provider progress frames are
@@ -180,6 +186,7 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     provider,
     runId: text(run.id || run.runId),
     parentSessionId: text(run.sessionId || run.parentSessionId),
+    parentThreadId: codexParentThreadId(run),
   });
   const records = [];
   const seenRawKeys = new Set();
@@ -261,6 +268,7 @@ export function projectProviderNativeDelegation({
     provider,
     runId,
     parentSessionId,
+    parentThreadId: codexParentThreadId(run),
   });
   const events = [];
   const eventIds = new Set();
@@ -451,9 +459,14 @@ export function projectProviderNativeDelegation({
   } else if (!providerExited && missingSnapshotCount > 0) {
     decision = 'await_delegations';
     decisionReason = 'delegation_snapshot_missing';
+  } else if (!providerExited && errors.length > 0 && errors.every(error => error === 'delegation_parent_thread_unresolved')) {
+    decision = 'await_delegations';
+    decisionReason = 'delegation_parent_thread_unresolved';
   } else if (errors.length > 0 || !finalSnapshot.delegationSummary.valid) {
     decision = 'fail';
-    decisionReason = providerExited && finalSnapshot.activeDelegations > 0
+    decisionReason = errors.length > 0 && errors.every(error => error === 'delegation_parent_thread_unresolved')
+      ? 'delegation_parent_thread_unresolved'
+      : providerExited && finalSnapshot.activeDelegations > 0
       ? 'delegation_lost'
       : 'delegation_replay_invalid';
   } else if (finalSnapshot.delegationSummary.lostDelegations.length > 0) {
