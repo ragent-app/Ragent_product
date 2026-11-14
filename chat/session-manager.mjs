@@ -12461,6 +12461,14 @@ function resolveSessionProviderPermissionContract({
   });
   const unattendedProfile = sessionRiskMode === 'full-auto'
     || sessionRiskMode === 'conservative-auto';
+  if (['codex-json', 'codex-app-server-json'].includes(runtimeFamily)
+      && ['read-only', 'untrusted-read-only', 'on-request-read-only', 'on-failure-read-only', 'never-read-only'].includes(requestedPermissionMode)
+      && effectivePermissionPolicy?.sandbox !== 'read-only') {
+    const error = new Error('The requested read-only permission boundary cannot be enforced');
+    error.code = 'READ_ONLY_RUNTIME_REFUSED';
+    error.statusCode = 409;
+    throw error;
+  }
   if ((sessionRiskMode === 'conservative-auto'
       || (sessionRiskMode === 'full-auto' && (process.platform === 'win32' || requiresExplicitAcpAutoMode(runtimeFamily))))
       && !effectivePermissionPolicy) {

@@ -587,6 +587,23 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
   const requestedMode = normalizeProviderPermissionMode(capabilities, options.permissionMode);
   const riskMode = trimString(options.riskMode);
 
+  // An explicit Codex read-only boundary narrows every risk profile. Keep its
+  // own approval policy instead of replacing its sandbox with the gated
+  // full-access profile.
+  const requestedPolicy = requestedMode && capabilities.provider === 'codex'
+    ? findPermissionMode(capabilities, requestedMode) : null;
+  if (requestedPolicy?.sandbox === 'read-only') {
+    if (riskMode === 'conservative-auto') {
+      return cloneJson(findPermissionMode(capabilities, 'untrusted-read-only'));
+    }
+    if (['safe', 'recommended', 'full-auto'].includes(riskMode) || options.privilegedMode === true) {
+      const mode = requestedPolicy.approvalPolicy === 'untrusted'
+        ? requestedPolicy : findPermissionMode(capabilities, 'on-request-read-only');
+      return cloneJson(mode);
+    }
+    return cloneJson(requestedPolicy);
+  }
+
   // These ACP modes require a recognized autonomous product profile. Legacy
   // or malformed riskMode values must not inherit an autonomous default.
   if (['qwen-code-acp', 'kimi-code-acp'].includes(capabilities.runtimeFamily)
