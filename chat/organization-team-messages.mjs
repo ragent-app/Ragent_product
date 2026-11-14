@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { withDatabase } from './collaboration-store.mjs';
 import { ensureOrganizationMessageEnvelopeSchema } from './organization-messaging.mjs';
 import { assertOrganizationCapability } from './organization-runtime-capabilities.mjs';
+import { authorize } from './work-graph.mjs';
 
 const trim = value => typeof value === 'string' ? value.trim() : '';
 const fail = (message, statusCode = 400) => Object.assign(new Error(message), { code: 'TEAM_MESSAGE_INVALID', statusCode });
@@ -23,6 +24,11 @@ function schema(db) {
   CREATE TABLE IF NOT EXISTS organization_team_replies (
     reply_id TEXT PRIMARY KEY, message_id TEXT NOT NULL, run_id TEXT NOT NULL, node_id TEXT NOT NULL,
     body TEXT NOT NULL, idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(message_id,idempotency_key)
+  );
+  CREATE TABLE IF NOT EXISTS organization_team_message_escalations (
+    organization_id TEXT NOT NULL, source_message_id TEXT NOT NULL UNIQUE, idempotency_key TEXT NOT NULL,
+    actor_id TEXT NOT NULL, recipient_node_id TEXT NOT NULL, notice_message_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL, UNIQUE(organization_id,idempotency_key)
   );`);
   const columns = new Set(db.prepare('PRAGMA table_info(organization_team_delivery_receipts)').all().map(c => c.name));
   for (const [name, type] of [['work_item_id','TEXT'], ['execution_epoch','INTEGER'], ['binding_generation','INTEGER']]) {
@@ -92,7 +98,46 @@ function rowMessage(row) {
     body: row.body, visibility: row.visibility, envelopeId: row.envelope_id, deliveryState: row.delivery_state,
     respondBy: row.respond_by || null, reply: row.reply_body ? { body: row.reply_body, createdAt: row.reply_created_at } : null,
     requestState: row.request_type === 'required_response' ? (row.reply_body ? 'answered' : row.respond_by && row.respond_by <= new Date().toISOString() ? 'overdue' : row.delivery_state === 'pending' ? 'requested' : 'delivered') : null,
+    ...(row.escalation_message_id ? { escalation: { messageId: row.escalation_message_id, recipientNodeId: row.escalation_recipient_node_id, deliveryState: row.escalation_delivery_state || 'unknown' } } : {}),
     createdAt: row.created_at };
+}
+// An escalation is an explicit owner action and does not answer the request.
+// The reminder contains no original message body and uses the existing inbox.
+export async function escalateOverdueTeamMessage(input,actor) {
+  assertOrganizationCapability('internalEnvelopes','organization messaging is disabled');
+  if(actor?.kind!=='user' || actor?.role!=='owner' || !trim(actor.principalId)) throw fail('Owner access required',403);
+  const organizationId=trim(input?.organizationId), nodeId=trim(input?.recipientNodeId), messageId=trim(input?.messageId), key=trim(input?.idempotencyKey);
+  if(!organizationId || !nodeId || !messageId || !key || key.length>255) throw fail('Organization, recipient, message and idempotency key are required');
+  return withDatabase(db=>{ schema(db); db.exec('BEGIN IMMEDIATE'); try {
+    authorize(db,organizationId,actor,'factory.read');
+    const replay=db.prepare('SELECT * FROM organization_team_message_escalations WHERE organization_id=? AND idempotency_key=?').get(organizationId,key);
+    if(replay) {
+      const original=db.prepare('SELECT recipient_node_id FROM organization_team_messages WHERE organization_id=? AND message_id=?').get(organizationId,messageId);
+      if(replay.source_message_id!==messageId || replay.actor_id!==actor.principalId || original?.recipient_node_id!==nodeId) throw fail('Idempotency key belongs to a different escalation',409);
+      const notice=db.prepare('SELECT m.*,e.delivery_state FROM organization_team_messages m JOIN internal_envelopes e ON e.envelope_id=m.envelope_id WHERE m.message_id=?').get(replay.notice_message_id);
+      if(!notice) throw fail('Escalation receipt is unavailable',409);
+      db.exec('COMMIT'); return {sourceMessageId:messageId,message:rowMessage(notice),replayed:true};
+    }
+    const source=db.prepare(`SELECT m.*,n.parent_node_id,n.retired_revision,n.lifecycle_state,o.current_revision,o.state AS org_state,
+      EXISTS(SELECT 1 FROM organization_team_replies r WHERE r.message_id=m.message_id) AS answered
+      FROM organization_team_messages m JOIN organization_nodes n ON n.id=m.recipient_node_id AND n.organization_id=m.organization_id
+      JOIN organizations o ON o.id=m.organization_id WHERE m.organization_id=? AND m.recipient_node_id=? AND m.message_id=?`).get(organizationId,nodeId,messageId);
+    if(!source) throw fail('Request not found',404);
+    if(['archived','lifecycle_pending'].includes(source.org_state) || source.retired_revision!==null || ['retired','deleted'].includes(source.lifecycle_state)) throw fail('Organization or recipient is not active',409);
+    if(source.request_type!=='required_response' || !source.respond_by || !Number.isFinite(Date.parse(source.respond_by)) || Date.parse(source.respond_by)>Date.now() || source.answered) throw fail('Request is not overdue and unanswered',409);
+    if(db.prepare('SELECT 1 FROM organization_team_message_escalations WHERE source_message_id=?').get(messageId)) throw fail('Request was already escalated',409);
+    if(source.work_item_id && !db.prepare('SELECT 1 FROM factory_work_items WHERE id=? AND organization_id=? AND assignee_node_id=?').get(source.work_item_id,organizationId,nodeId)) throw fail('Request work item or assignment changed',409);
+    const manager=db.prepare("SELECT id,current_session_id FROM organization_nodes WHERE id=? AND organization_id=? AND retired_revision IS NULL AND COALESCE(lifecycle_state,'active') NOT IN ('retired','deleted')").get(source.parent_node_id,organizationId);
+    if(!manager || manager.id===nodeId) throw fail('Current manager is unavailable',409);
+    const noticeId=`msg_${randomUUID()}`, envelopeId=`env_${randomUUID()}`, created=new Date().toISOString();
+    const body=`An owner has escalated an overdue team response. Request ID: ${messageId}. Ask the owner for any details.`;
+    const digest=createHash('sha256').update(JSON.stringify({source:messageId,recipient:manager.id,actor:actor.principalId})).digest('hex');
+    db.prepare(`INSERT INTO internal_envelopes (envelope_id,organization_id,organization_revision,type,from_node_id,to_node_id,to_session_id,task_id,payload_ref_json,subject,delivery_state,delivery_generation,idempotency_key,created_at) VALUES (?,?,?,'OWNER_MESSAGE','@owner',?,?,NULL,?,?,'pending',0,?,?)`).run(envelopeId,organizationId,source.current_revision,manager.id,manager.current_session_id || null,JSON.stringify({messageId:noticeId}),'Overdue response reminder',`team:${noticeId}`,created);
+    db.prepare(`INSERT INTO organization_team_messages(message_id,organization_id,sender_kind,sender_principal,recipient_node_id,work_item_id,correlation_id,request_type,reply_to,body,visibility,idempotency_key,payload_digest,envelope_id,created_at,respond_by) VALUES (?,?, 'user', ?, ?, NULL, ?, 'information', NULL, ?, 'recipient', ?, ?, ?, ?, NULL)`).run(noticeId,organizationId,actor.principalId,manager.id,messageId,body,`escalation:${noticeId}`,digest,envelopeId,created);
+    db.prepare('INSERT INTO organization_team_message_escalations VALUES (?,?,?,?,?,?,?)').run(organizationId,messageId,key,actor.principalId,manager.id,noticeId,created);
+    const notice=db.prepare('SELECT m.*,e.delivery_state FROM organization_team_messages m JOIN internal_envelopes e ON e.envelope_id=m.envelope_id WHERE m.message_id=?').get(noticeId);
+    db.exec('COMMIT'); return {sourceMessageId:messageId,message:rowMessage(notice)};
+  } catch(error) { try { db.exec('ROLLBACK'); } catch {} throw error; } },{mutate:true});
 }
 export async function sendOwnerTeamMessage(input, actor) {
   assertOrganizationCapability('internalEnvelopes', 'organization messaging is disabled');
@@ -127,7 +172,7 @@ export async function listTeamMessages(organizationId, nodeId, limit = 50) {
   return withDatabase(db => {
     schema(db);
     if (!db.prepare('SELECT 1 FROM organization_nodes WHERE organization_id=? AND id=?').get(organizationId,nodeId)) throw fail('Recipient not found',404);
-    return db.prepare(`SELECT m.*,e.delivery_state,(SELECT body FROM organization_team_replies r WHERE r.message_id=m.message_id ORDER BY r.created_at DESC LIMIT 1) AS reply_body,(SELECT created_at FROM organization_team_replies r WHERE r.message_id=m.message_id ORDER BY r.created_at DESC LIMIT 1) AS reply_created_at FROM organization_team_messages m JOIN internal_envelopes e ON e.envelope_id=m.envelope_id WHERE m.organization_id=? AND m.recipient_node_id=? ORDER BY m.created_at DESC,m.message_id DESC LIMIT ?`).all(organizationId,nodeId,Math.max(1,Math.min(100,limit))).map(rowMessage);
+    return db.prepare(`SELECT m.*,e.delivery_state,(SELECT body FROM organization_team_replies r WHERE r.message_id=m.message_id ORDER BY r.created_at DESC LIMIT 1) AS reply_body,(SELECT created_at FROM organization_team_replies r WHERE r.message_id=m.message_id ORDER BY r.created_at DESC LIMIT 1) AS reply_created_at,(SELECT x.notice_message_id FROM organization_team_message_escalations x WHERE x.source_message_id=m.message_id) AS escalation_message_id,(SELECT x.recipient_node_id FROM organization_team_message_escalations x WHERE x.source_message_id=m.message_id) AS escalation_recipient_node_id,(SELECT ne.delivery_state FROM organization_team_message_escalations x JOIN organization_team_messages nm ON nm.message_id=x.notice_message_id JOIN internal_envelopes ne ON ne.envelope_id=nm.envelope_id WHERE x.source_message_id=m.message_id) AS escalation_delivery_state FROM organization_team_messages m JOIN internal_envelopes e ON e.envelope_id=m.envelope_id WHERE m.organization_id=? AND m.recipient_node_id=? ORDER BY m.created_at DESC,m.message_id DESC LIMIT ?`).all(organizationId,nodeId,Math.max(1,Math.min(100,limit))).map(rowMessage);
   });
 }
 

@@ -2085,17 +2085,23 @@
       add('h2', `Messages to ${node.displayName || node.id}`);
       const list = add('div', 'Loading…');
       const field = document.createElement('textarea'); field.maxLength = 4000; field.placeholder = 'Informational message'; screen.appendChild(field);
+      const deadline = document.createElement('input'); deadline.type = 'datetime-local'; deadline.setAttribute('aria-label', 'Reply deadline (optional)'); screen.appendChild(deadline);
+      const task = document.createElement('input'); task.placeholder = 'Work item ID (optional)'; task.setAttribute('aria-label', 'Work item ID'); screen.appendChild(task);
       const receipt = add('p', 'Messages are queued for the node; delivery does not mean a reply.');
       const path = `/api/organizations/${encodeURIComponent(organizationId)}/factory/nodes/${encodeURIComponent(node.id)}/messages`;
       const fetcher = root.agentocFetch || fetch;
-      const request = async options => { const res = await fetcher(path, { credentials: 'same-origin', cache: 'no-store', ...options }); const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data; };
+      const request = async (options, target = path) => { const res = await fetcher(target, { credentials: 'same-origin', cache: 'no-store', ...options }); const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data; };
       const refresh = async () => {
-        try { const data = await request(); list.replaceChildren(); for (const message of data.messages) { const p = document.createElement('p'); p.textContent = `${message.createdAt} · ${message.deliveryState === 'delivered' ? 'Delivered to Run' : message.deliveryState} · ${message.requestState || 'information'} · ${message.body}${message.reply ? ` · Reply: ${message.reply.body}` : ''}`; list.appendChild(p); } if (!data.messages.length) list.textContent = 'No messages.'; }
+        try { const data = await request(); list.replaceChildren(); for (const message of data.messages) { const p = document.createElement('p'); p.textContent = `${message.createdAt} · ${message.deliveryState === 'delivered' ? 'Delivered to Run' : message.deliveryState} · ${message.requestState || 'information'} · ${message.body}${message.reply ? ` · Reply: ${message.reply.body}` : ''}${message.escalation ? ` · Escalation: ${message.escalation.deliveryState}` : ''}`; list.appendChild(p);
+          if(message.requestState==='overdue' && !message.escalation) { const action=document.createElement('button'); action.type='button'; action.className='org-btn org-btn--secondary'; action.textContent='Escalate to manager'; list.appendChild(action); let key=null; action.addEventListener('click',async()=>{ key ||= root.crypto.randomUUID(); action.disabled=true; try { const result=await request({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idempotencyKey:key})},`${path}/${encodeURIComponent(message.messageId)}/escalate`); receipt.textContent=`Escalation ${result.message.messageId}: ${result.message.deliveryState}; original request remains unanswered.`; await refresh(); } catch(error) { receipt.textContent=`Escalation not confirmed: ${error.message}. Retry uses the same request.`; action.disabled=false; } }); }
+        } if (!data.messages.length) list.textContent = 'No messages.'; }
         catch (error) { list.textContent = `Unable to load messages: ${error.message}`; }
       };
       const send = requestType => {
         const body = field.value.trim(); if (!body) return;
         const command = { body, requestType, idempotencyKey: root.crypto.randomUUID() };
+        if(task.value.trim()) command.workItemId=task.value.trim();
+        if(requestType==='required_response' && deadline.value) { const date=new Date(deadline.value); if(!Number.isFinite(date.getTime())) {receipt.textContent='Reply deadline is invalid.';return;} command.respondBy=date.toISOString(); }
         const submit = async () => { try { const data = await request({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) }); receipt.textContent = `Message ${data.message.messageId}: ${data.message.deliveryState}`; field.value = ''; await refresh(); }
           catch (error) { receipt.textContent = `Not confirmed: ${error.message}. Retry uses the same message ID.`; button('Retry same message', submit); } };
         submit();

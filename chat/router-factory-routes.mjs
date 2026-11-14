@@ -1,7 +1,7 @@
 // Owner-facing Work Graph interface. Managed session input is never exposed here.
 import { readBody } from '../lib/utils.mjs';
 import { executeFactoryCommand, getFactoryCommand, getFactoryWorkItem, listFactoryGoals, listFactoryWorkItems } from './factory-control.mjs';
-import { listTeamMessages, sendOwnerTeamMessage, respondToTeamMessage } from './organization-team-messages.mjs';
+import { listTeamMessages, sendOwnerTeamMessage, respondToTeamMessage, escalateOverdueTeamMessage } from './organization-team-messages.mjs';
 import { compileFactoryWorkflow, instantiateFactoryWorkflow } from './factory-workflow.mjs';
 import { decideFactoryManualAcceptance, decideFactoryCheckAcceptance } from './factory-acceptance.mjs';
 import { beginOrganizationLifecycle, getOrganizationLifecycleInfo, beginNodeRebind, finishNodeRebind, cancelNodeRebind } from './organization-session-lifecycle.mjs';
@@ -75,8 +75,9 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const shadow = /^\/api\/organizations\/([^/]+)\/factory\/(shadow|readiness)(?:\/(sync))?$/.exec(String(pathname || ''));
   const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
+  const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reconcileResume && !reconcileVerify && !goalRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !reconcileResume && !reconcileVerify && !goalRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   if (reviewOpinion) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -318,6 +319,16 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const actor = { kind: 'user', role: 'owner', principalId: text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner' };
       const result = await decideFactoryManualAcceptance({ ...body, organizationId: decodeURIComponent(acceptance[1]), workItemId: decodeURIComponent(acceptance[2]) }, actor);
       writeJson(res, 200, result); return true;
+    }
+    if (escalateMessage) {
+      const organizationId=decodeURIComponent(escalateMessage[1]), nodeId=decodeURIComponent(escalateMessage[2]);
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      await listFactoryWorkItems(organizationId,{limit:1},actor);
+      if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(!mutationSourceAllowed(req)) { writeJson(res,403,{code:'FACTORY_SOURCE_DENIED',error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      writeJson(res,200,await escalateOverdueTeamMessage({organizationId,recipientNodeId:nodeId,messageId:decodeURIComponent(escalateMessage[3]),idempotencyKey:body?.idempotencyKey},actor)); return true;
     }
     if (messages) {
       const organizationId = decodeURIComponent(messages[1]), nodeId = decodeURIComponent(messages[2]);
