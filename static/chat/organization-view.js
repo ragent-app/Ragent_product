@@ -1271,7 +1271,7 @@
           const receipt = add(content, 'p', '');
           button(content, 'Request reconciliation', () => {
             const body = { commandId:root.crypto.randomUUID(), expectedVersion:item.rowVersion, executionEpoch:item.executionEpoch };
-            const submit = async () => { try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); receipt.textContent=`Reconciliation request ${result.requested ? 'recorded' : 'not confirmed'}; refresh for observed facts.`; } catch(error) { receipt.textContent=`Reconciliation not confirmed: ${error.message}`; button(content,'Retry same reconciliation request',submit); } }; submit();
+            const submit = async () => { try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const budget=result.unstartedBudget; const budgetNote=!budget ? '' : budget.state==='released' ? ' The verified unstarted reservation was released.' : budget.state==='unavailable' ? ' No verified unstarted-release receipt is available.' : ' Reservation release remains pending reconciliation.'; receipt.textContent=`Reconciliation request ${result.requested ? 'recorded' : 'not confirmed'}; refresh for observed facts.${budgetNote}`; } catch(error) { receipt.textContent=`Reconciliation not confirmed: ${error.message}`; button(content,'Retry same reconciliation request',submit); } }; submit();
           });
           const send = (type, payload = {}) => {
             const token = root.crypto.randomUUID();
