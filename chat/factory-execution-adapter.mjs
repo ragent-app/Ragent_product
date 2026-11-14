@@ -31,6 +31,14 @@ function budgetReservationFor(contract) {
   if (Number.isInteger(budget?.maxTokens) && budget.maxTokens > 0) return { tokens: budget.maxTokens };
   return null;
 }
+// Notification evidence is narrower than a generic terminal update: it must
+// identify a real finalized Run and its failed, same-binding attempt.
+function verifiedFailedAttemptNotice(db,current,item,attempt,run,collaborationId) {
+  if(!run?.runPublication||!run.finalizedAt||!['completed','failed','cancelled'].includes(run.state)||run.id!==attempt?.runId||run.sessionId!==attempt.sessionId||attempt.state!=='failed'||attempt.failureKind==='unknown_outcome') return null;
+  const saved=db.prepare('SELECT a.state,a.run_id,a.session_id,a.failure_kind,t.collaboration_id,c.idempotency_key FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id WHERE a.id=? AND a.task_id=?').get(attempt.id,item.id);
+  if(saved?.state!=='failed'||saved.failure_kind==='unknown_outcome'||saved.run_id!==run.id||saved.session_id!==run.sessionId||saved.collaboration_id!==collaborationId||saved.idempotency_key!==current.dispatchKey||(current.runId&&current.runId!==run.id)||(current.attemptId&&current.attemptId!==attempt.id)||(current.collaborationId&&current.collaborationId!==collaborationId)) return null;
+  return 'run';
+}
 
 // Profiles constrain admission; they never create permissions or select a runtime.
 export function profileAllows(db, org, node) {
@@ -252,6 +260,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         if (freshClaim) {
           try {
             await updateFactoryBinding({ ...base, action: 'fail', payload: { terminalEvidenceRef: `unstarted:${binding.id}` } }, actor, {
+              verifyBudgetDenied: () => error?.code==='ORG_BUDGET_EXCEEDED',
               verifyTerminal: ({ db, binding: saved, payload }) => {
                 const counter = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_budget_counters'").get()
                   ? db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(organizationId,item.contract.organizationRevision) : null;
@@ -436,6 +445,12 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
             targetRunState:terminal.runState,targetAttemptState:terminal.attemptState,signedReceipt:terminal.signed};
           return updateFactoryBinding({organizationId,workItemId:latest.id,expectedVersion:latest.rowVersion,
             contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,action,payload},actor,{
+            verifyFailureNotice:({db,binding:current,payload:verified})=>{
+              const raw=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(latest.id,organizationId);
+              const saved=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=?').get(current.id);
+              const actual=raw&&saved&&verifyRemoteTerminalReceipt(db,raw,saved,sourceId);
+              return actual?.attemptState==='failed' && actual.runId===terminal.runId && actual.runState===verified.targetRunState && JSON.stringify(actual.signed)===JSON.stringify(verified.signedReceipt) ? 'remote' : null;
+            },
             verifyTerminal:({db,binding:current,payload:verified})=>{
               const raw=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(latest.id,organizationId);
               const saved=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=?').get(current.id);
@@ -536,6 +551,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
           contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
           bindingGeneration: binding.bindingGeneration, action,
           payload: action==='fail'?{terminalEvidenceRef:`run:${attempt.runId}`}:{stopEvidenceRef:`run:${attempt.runId}`} }, actor, {
+          verifyFailureNotice: ({db,binding:current,item}) => verifiedFailedAttemptNotice(db,current,item,attempt,run,collaboration.id),
           verifyTerminal: ({ db, binding: current, payload }) => {
             const actual = db.prepare('SELECT state,run_id,failure_kind FROM collaboration_attempts WHERE id=? AND task_id=?')
               .get(attempt.id, attempt.taskId);
@@ -587,6 +603,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
         bindingGeneration: binding.bindingGeneration, action,
         payload: action === 'fail' ? { terminalEvidenceRef: evidenceRef } : { stopEvidenceRef: evidenceRef } }, actor, {
+        verifyFailureNotice: ({db,binding:current,item}) => verifiedFailedAttemptNotice(db,current,item,attempt,actualRun,collaboration.id),
         verifyTerminal: ({ db, binding: current, payload }) => {
           const actual = db.prepare('SELECT state,run_id,failure_kind FROM collaboration_attempts WHERE id=? AND task_id=?').get(attempt.id, attempt.taskId);
           return actual?.state === attempt.state && actual.failure_kind !== 'unknown_outcome' && actual.run_id === attempt.runId && current.runId === attempt.runId

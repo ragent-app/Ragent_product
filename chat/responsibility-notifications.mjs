@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS responsibility_notification_settings (responsibility_
 CREATE TABLE IF NOT EXISTS responsibility_notification_bindings (endpoint_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL, device_id TEXT NOT NULL, account_id TEXT NOT NULL, authority_revision TEXT NOT NULL, enabled INTEGER NOT NULL, version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS responsibility_notification_outbox (event_id TEXT NOT NULL, responsibility_id TEXT NOT NULL, owner_id TEXT NOT NULL, endpoint_hash TEXT NOT NULL, settings_version INTEGER NOT NULL, binding_version INTEGER NOT NULL, type TEXT NOT NULL, state TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(event_id,owner_id,endpoint_hash));`;
 function ensureSchema(db) { db.exec(schema); if (!db.prepare('PRAGMA table_info(responsibility_notification_bindings)').all().some(c=>c.name==='credential_hash')) db.exec('ALTER TABLE responsibility_notification_bindings ADD COLUMN credential_hash TEXT'); }
-const important = new Set(['plan_proposed','planning_needs_input','planning_invalid_output','plan_admission_blocked','planning_evidence_blocked','decision_waiting','budget_blocked','workflow_completed']);
+const important = new Set(['plan_proposed','planning_needs_input','planning_invalid_output','plan_admission_blocked','planning_evidence_blocked','decision_waiting','budget_blocked','execution_attempt_failed','workflow_completed']);
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode, code:'RESPONSIBILITY_NOTIFICATION_CONFLICT' });
 const stamp = () => new Date().toISOString();
 const owner = actor => { if (actor?.kind !== 'user' || actor?.role !== 'owner' || !actor.principalId) throw fail('Owner required',403); return actor.principalId; };

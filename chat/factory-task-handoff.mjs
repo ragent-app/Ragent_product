@@ -73,7 +73,31 @@ export function remoteFactoryTaskSummary(db,input,maxBytes) {
   if(Buffer.byteLength(encode(summary),'utf8')>maxBytes) throw factoryError('REMOTE_INVALID','Remote task context exceeds payload limit',400);
   return summary;
 }
-function publicHandoff(db,row,item,org) { const facts=decode(row.snapshot_json,{}); const current=item && (facts.workerScope ? workerRefs(db,row.organization_id,row.work_item_id,item.contract_revision,item.execution_epoch,facts.workerScope.nodeId) : sourceRefs(db,row.organization_id,row.work_item_id,item.contract_revision,item.execution_epoch)); return {id:row.id,organizationId:row.organization_id,workItemId:row.work_item_id,contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,organizationRevision:row.organization_revision,asOf:row.created_at,sourceVersion:row.row_version,stale:!item || (!facts.workerScope && facts.sourceRefs?.truncated === true) || item.row_version!==row.row_version || item.contract_revision!==row.contract_revision || item.execution_epoch!==row.execution_epoch || org.current_revision!==row.organization_revision || (facts.workerScope && (item.assignee_node_id!==facts.workerScope.nodeId || item.binding_generation!==facts.workerScope.bindingGeneration)) || JSON.stringify(current)!==JSON.stringify(facts.sourceRefs),freshness:facts.workerScope && (facts.sourceRefs?.truncated || facts.contractTruncated || facts.blockedReasonTruncated)?'unknown_truncated':'checked',facts,schemaVersion:1}; }
+function publicHandoff(db,row,item,org) {
+  const facts=decode(row.snapshot_json,{});
+  const current=item && (facts.workerScope ? workerRefs(db,row.organization_id,row.work_item_id,item.contract_revision,item.execution_epoch,facts.workerScope.nodeId) : sourceRefs(db,row.organization_id,row.work_item_id,item.contract_revision,item.execution_epoch));
+  const reasons=[];
+  if(!item) reasons.push('work_unavailable');
+  if(item && item.row_version!==row.row_version) reasons.push('work_version_changed');
+  if(item && item.contract_revision!==row.contract_revision) reasons.push('contract_revision_changed');
+  if(item && item.execution_epoch!==row.execution_epoch) reasons.push('execution_epoch_changed');
+  if(!org) reasons.push('organization_unavailable');
+  else if(org.current_revision!==row.organization_revision) reasons.push('organization_revision_changed');
+  if(item && facts.workerScope && item.assignee_node_id!==facts.workerScope.nodeId) reasons.push('assignee_changed');
+  if(item && facts.workerScope && item.binding_generation!==facts.workerScope.bindingGeneration) reasons.push('binding_generation_changed');
+  if(item && JSON.stringify(current)!==JSON.stringify(facts.sourceRefs)) reasons.push('source_refs_changed');
+  const live=item && itemRow(db,item);
+  const limited=!!(live && item.row_version===row.row_version && (encode(facts.contract)!==encode(live.contract) || encode(facts.blockedReason)!==encode(live.blockedReason)));
+  const truncated=!!(facts.sourceRefs?.truncated || current?.truncated || facts.contractTruncated || facts.blockedReasonTruncated || limited);
+  const unavailable=!facts.sourceRefs || facts.sourceRefs.unansweredMessageRefs==='unknown' || current?.unansweredMessageRefs==='unknown';
+  const unknownExecution=!!(current?.bindings?.some(binding=>binding.status==='unknown') || current?.failures?.some(failure=>failure.failure_kind==='unknown_outcome'));
+  if(truncated) reasons.push('source_data_truncated');
+  if(unavailable) reasons.push('source_data_unavailable');
+  if(unknownExecution) reasons.push('execution_outcome_unknown');
+  const stale=!item || (!facts.workerScope && facts.sourceRefs?.truncated === true) || item.row_version!==row.row_version || item.contract_revision!==row.contract_revision || item.execution_epoch!==row.execution_epoch || org?.current_revision!==row.organization_revision || (facts.workerScope && (item.assignee_node_id!==facts.workerScope.nodeId || item.binding_generation!==facts.workerScope.bindingGeneration)) || JSON.stringify(current)!==JSON.stringify(facts.sourceRefs);
+  const assessment=truncated||unavailable||unknownExecution||!item||!org?'unknown':stale?'stale':'current';
+  return {id:row.id,organizationId:row.organization_id,workItemId:row.work_item_id,contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,organizationRevision:row.organization_revision,asOf:row.created_at,sourceVersion:row.row_version,stale,staleReasons:reasons,assessment,assessesExecutionSafety:false,freshness:facts.workerScope && (facts.sourceRefs?.truncated || facts.contractTruncated || facts.blockedReasonTruncated)?'unknown_truncated':'checked',facts,schemaVersion:1};
+}
 
 // Internal dispatch path only. The caller must enforce the scheduler lease and
 // current grant fence immediately before and after this transaction.

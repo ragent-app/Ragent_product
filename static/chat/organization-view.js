@@ -1073,7 +1073,7 @@
           for (const criterion of item.successCriteria || []) add(content, 'p', criterion);
           add(content, 'h4', 'Activity');
           for (const entry of activity.activity || []) {
-            const message = entry.type === 'committed_git_unchanged' ? '已提交 Git 版本未变化，本次周期规划已跳过。' : entry.type === 'committed_git_changed_before_admission' ? '规划前后 Git 版本发生变化，本次未准入；需要重新观察。' : entry.type === 'decision_waiting' && entry.details?.reason === 'committed_git_observation_unavailable' ? '无法核实已提交 Git 版本，等待处理；不视为无变化。' : `${entry.type} · ${JSON.stringify(entry.details || {})}`;
+            const message = entry.type === 'budget_blocked' ? `预算准入被拒绝；不表示执行失败或已扣费。工作 ${entry.details?.workItemId || '未知'} · 执行代次 ${entry.details?.executionEpoch ?? '未知'} · 绑定 ${entry.details?.bindingId || '未知'}` : entry.type === 'execution_attempt_failed' ? `一次执行尝试已核实失败，不代表整个责任失败。工作 ${entry.details?.workItemId || '未知'} · 执行代次 ${entry.details?.executionEpoch ?? '未知'} · 绑定 ${entry.details?.bindingId || '未知'}` : entry.type === 'committed_git_unchanged' ? '已提交 Git 版本未变化，本次周期规划已跳过。' : entry.type === 'committed_git_changed_before_admission' ? '规划前后 Git 版本发生变化，本次未准入；需要重新观察。' : entry.type === 'decision_waiting' && entry.details?.reason === 'committed_git_observation_unavailable' ? '无法核实已提交 Git 版本，等待处理；不视为无变化。' : `${entry.type} · ${JSON.stringify(entry.details || {})}`;
             add(content, 'p', `${entry.createdAt} · ${message}`);
           }
           if (!activity.activity?.length) add(content, 'p', 'No activity recorded.');
@@ -1359,10 +1359,30 @@
               submit();
             });
           }
-          button(content, 'Create task handoff', () => {
-            const payload={commandId:root.crypto.randomUUID(),expectedVersion:item.rowVersion};
-            const submit=async () => { try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/handoffs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); receipt.textContent=`Handoff ${result.id} as of ${result.asOf}; stale: ${result.stale}.`; add(content,'pre',JSON.stringify(result.facts,null,2)); } catch(error) { receipt.textContent=`Handoff not confirmed: ${error.message}`; button(content,'Retry same handoff',submit); } }; submit();
+          let handoffPending = null, handoffBusy = false;
+          const handoffStatus = add(content,'p','');
+          add(content,'p','未确认请求的同键重试仅在此页面打开期间可用；离开或重载后不会自动重试，需先核查交接记录。');
+          const showHandoff = result => {
+            const label = result.assessment === 'current' ? '快照核对为当前' : result.assessment === 'stale' ? '快照已过期' : '快照无法完整核实';
+            handoffStatus.textContent = `${label} · ${result.asOf || '时间未知'} · 原因 ${JSON.stringify(result.staleReasons || [])}。快照核对不证明旧执行已停止或可以继续、重派。`;
+            add(content,'pre',JSON.stringify(result.facts || {},null,2));
+            button(content,'重新核对该快照',async()=>{try {showHandoff(await request(`/handoffs/${encodeURIComponent(result.id)}`));}catch(error){handoffStatus.textContent=`无法核对快照：${error.message}`;}});
+          };
+          const submitHandoff = async () => {
+            if (!handoffPending || handoffBusy) return;
+            handoffBusy = true;
+            try { const result=await request(`/work-items/${encodeURIComponent(item.id)}/handoffs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(handoffPending)});handoffPending=null;showHandoff(result); }
+            catch(error) {handoffStatus.textContent=`请求结果未确认：${error.message}。请使用相同请求重试。`;} finally {handoffBusy=false;}
+          };
+          button(content, '生成或刷新交接快照', async () => {
+            if (handoffBusy || handoffPending) {handoffStatus.textContent='先等待或使用相同请求重试未确认的交接。';return;}
+            if (!root.confirm('重新读取当前工作并生成交接快照？这不会停止旧执行或自动重派。')) return;
+            handoffBusy = true;
+            try {const latest=await request(`/work-items/${encodeURIComponent(item.id)}`);const version=latest.item?.rowVersion;if(!Number.isSafeInteger(version)) throw new Error('无法读取当前工作版本');handoffPending={commandId:root.crypto.randomUUID(),expectedVersion:version};}
+            catch(error) {handoffStatus.textContent=`无法读取当前工作：${error.message}`;} finally {handoffBusy=false;}
+            await submitHandoff();
           });
+          button(content,'使用相同交接请求重试',submitHandoff);
         } catch (error) { content.replaceChildren(); add(content, 'p', `Unable to load work item: ${error.message}`); button(content, 'All work items', showList); }
       };
       const showLifecycle = async () => {

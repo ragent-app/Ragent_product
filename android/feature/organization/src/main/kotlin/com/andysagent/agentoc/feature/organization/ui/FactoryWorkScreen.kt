@@ -39,6 +39,9 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     var item by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var itemBudget by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var itemReconciliation by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var handoff by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var handoffPending by remember(organizationId) { mutableStateOf<Pair<String, JsonObject>?>(null) }
+    var handoffBusy by remember(organizationId) { mutableStateOf(false) }
     var scopedObjective by remember(organizationId) { mutableStateOf("") }
     var scopedCriterion by remember(organizationId) { mutableStateOf("") }
     var scopedPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
@@ -449,7 +452,8 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 (current["successCriteria"] as? JsonArray)?.forEach { Text(it.jsonPrimitive.content) }
                 Text("Activity")
                 responsibilityActivity?.forEach { entry -> val activity = entry.jsonObject; val type = activity["type"]?.jsonPrimitive?.contentOrNull; val reason = (activity["details"] as? JsonObject)?.get("reason")?.jsonPrimitive?.contentOrNull
-                    val message = when { type == "committed_git_unchanged" -> "已提交 Git 版本未变化，本次周期规划已跳过。"; type == "committed_git_changed_before_admission" -> "规划前后 Git 版本发生变化，本次未准入；需要重新观察。"; type == "decision_waiting" && reason == "committed_git_observation_unavailable" -> "无法核实已提交 Git 版本，等待处理；不视为无变化。"; else -> "$type · ${activity["details"] ?: ""}" }
+                    val detail=activity["details"] as? JsonObject; val identity="工作 ${detail?.get("workItemId") ?: "未知"} · 执行代次 ${detail?.get("executionEpoch") ?: "未知"} · 绑定 ${detail?.get("bindingId") ?: "未知"}"
+                    val message = when { type == "budget_blocked" -> "预算准入被拒绝；不表示执行失败或已扣费。$identity"; type == "execution_attempt_failed" -> "一次执行尝试已核实失败，不代表整个责任失败。$identity"; type == "committed_git_unchanged" -> "已提交 Git 版本未变化，本次周期规划已跳过。"; type == "committed_git_changed_before_admission" -> "规划前后 Git 版本发生变化，本次未准入；需要重新观察。"; type == "decision_waiting" && reason == "committed_git_observation_unavailable" -> "无法核实已提交 Git 版本，等待处理；不视为无变化。"; else -> "$type · ${activity["details"] ?: ""}" }
                     Text("${activity["createdAt"]} · $message") }
                 val spokenActivity = responsibilityActivity.orEmpty().mapNotNull { entry ->
                     val row = entry as? JsonObject ?: return@mapNotNull null
@@ -594,6 +598,18 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             }
             multiPending?.let { (path,body) -> TextButton(onClick={scope.launch {runCatching {request(path,body)}.onSuccess {multiPending=null;multiPreview=null;status="修改已记录。"}.onFailure {status="修改未确认：${it.message}"}}}) { Text("使用同一多目标请求重试") } }
             Text("State ${selected["state"]}; control ${selected["controlState"]}; priority ${selected["priority"]}; version ${selected["rowVersion"]}")
+            Text("交接仅核对快照，不证明旧执行已停止，也不授权继续执行或自动重派。未确认请求的同键重试仅在本页面保留；离开后不会自动重试，需先核查交接记录。")
+            handoff?.let { snapshot ->
+                val label=when(snapshot["assessment"]?.jsonPrimitive?.contentOrNull) {"current"->"快照核对为当前";"stale"->"快照已过期";else->"快照无法完整核实"}
+                Text("$label · 原因 ${snapshot["staleReasons"] ?: "未知"} · ${snapshot["asOf"] ?: "时间未知"}\n${snapshot["facts"] ?: "事实不可用"}")
+                TextButton(enabled=!handoffBusy,onClick={snapshot["id"]?.jsonPrimitive?.contentOrNull?.let { handoffId -> handoffBusy=true;scope.launch {runCatching {request("/handoffs/${Uri.encode(handoffId)}")}.onSuccess {handoff=it}.onFailure {status="无法核对快照：${it.message}"};handoffBusy=false} }}) {Text("重新核对该快照")}
+            }
+            TextButton(enabled=!handoffBusy && handoffPending==null,onClick={handoffBusy=true;scope.launch {
+                runCatching {val id=selected["id"]!!.jsonPrimitive.content;val latest=request("/work-items/${Uri.encode(id)}")["item"]!!.jsonObject;val version=latest["rowVersion"]?.jsonPrimitive?.longOrNull ?: error("无法读取当前工作版本");"/work-items/${Uri.encode(id)}/handoffs" to buildJsonObject {put("expectedVersion",version);put("commandId",UUID.randomUUID().toString())}}
+                    .onSuccess { (path,body) -> handoffPending=path to body;runCatching {request(path,body)}.onSuccess {handoff=it;handoffPending=null}.onFailure {status="交接未确认，请使用相同请求重试：${it.message}"} }
+                    .onFailure {status="无法读取当前工作：${it.message}"};handoffBusy=false
+            }}) {Text("生成或刷新交接快照")}
+            handoffPending?.let { (path,body) -> TextButton(enabled=!handoffBusy,onClick={handoffBusy=true;scope.launch {runCatching {request(path,body)}.onSuccess {handoff=it;handoffPending=null}.onFailure {status="交接未确认：${it.message}"};handoffBusy=false}}) {Text("使用相同交接请求重试")} }
             listOf("contract", "dependencies", "bindings", "candidates", "decisions").forEach { Text("$it: ${selected[it] ?: "[]"}") }
             Text("Delivery evidence")
             val candidates = selected["candidates"] as? JsonArray ?: JsonArray(emptyList())

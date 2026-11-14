@@ -20,6 +20,8 @@
 4. **核对预算及回滚。** 验证实际 provider 用量归属、每日窗口、超额和重启对账；缺用量保留预留。现有预留/结算不是运行费用硬封顶：MVP 须明确选择只承诺准入预算，或先接入执行器/provider 可证明的硬限制后才提供硬封顶承诺。确认关闭责任和 Factory 新准入后仍按配置观察、取消与对账，已发生外效不能靠回滚撤销。完成条件：记录使用量或未知状态、能力选择、操作回执和回退结果。依据：`chat/organization-governor.mjs`、[验证与回滚](verification-and-rollout.zh.md)。
 5. **完成实际客户端和通知验收。** Web/Android 需用真实 owner、审批与任务状态验证生命周期、计划、活动和成果；Android 组织模块离线 Kotlin 编译已通过，但设备行为未验收。Web Push 默认关闭，须逐责任 opt-in 和已认证设备绑定；验证绑定、撤销、重复、冷启动和多窗口，provider 接受不等于已读。Android FCM 责任通知未接入。完成条件：关键待决事项和未知状态可读、请求与实际停止分开，且无未经授权的通知。依据：`static/chat/organization-view.js`、`chat/responsibility-notifications.mjs`、`static/sw.js`。
 
+通知源码覆盖可信预算拒绝（包括确认未启动的首次准入）与已核实的执行尝试失败；前者不代表已扣费或 Run 失败，后者不代表整个责任失败。推送默认关闭，真实推送和重启恢复尚未验收。
+
 代码收尾和上述真实证据均需完成，除非明确决定缩减相应 MVP 范围；这不意味着必须先支持所有设备、连接器或自动发布。真实项目、Harness、provider、CI、重启和推送尚未通过本轮业务验收；源码和语法检查不等于上线。
 
 ## 原 Phase 0–5 对照
@@ -38,7 +40,8 @@
 ## 后续扩展与待决事项
 
 - **通用任务与事件**：目前仅报告、本地代码和 CI 适配，不支持任意应用/连接器自动执行。通用事件过滤/水位及更多适配器按实际用途逐项补可信观察、资源授权、动作回执和恢复。依据：`chat/responsibility-runtime.mjs`、`chat/responsibility-events.mjs`。
-- **记忆与组织**：同项目可能冲突的事实支持 owner 查看来源、保留/更正/撤回及预览重建结果；候选不是真假判断，写入默认关闭，撤回不是物理擦除。语义同义识别、完整 User Memory 体验和真实恢复仍缺；执行者替换和 handoff 仍需验收。依据：`chat/responsibility-memory.mjs`、`chat/project-memory-store.mjs`。
+- **记忆与组织**：同项目可能冲突的事实支持 owner 查看来源、保留/更正/撤回及预览重建结果；候选不是真假判断，写入默认关闭，撤回不是物理擦除。交接快照可报告当前、过期或无法核实及原因；快照不证明旧执行停止或授权重派。语义同义识别、完整 User Memory 体验、换人和真实恢复仍缺验收。依据：`chat/responsibility-memory.mjs`、`chat/project-memory-store.mjs`、`chat/factory-task-handoff.mjs`。
+- 交接读取和创建路由使用已验证实例 owner 身份；真实 `proot_local` 配对身份须经现有私有凭据重验并配置稳定 owner ID。此修复不代表其他 Factory 路由均已审计，真实认证、换人、恢复和设备验收仍未完成。
 - **Goal-DAG 精确影响**：已支持多个互不依赖、已停止且非终态的根工作项修订 objective，并预览合并下游影响；可追加人工验收标准，但责任固定合同不支持，原标准和检查保留。全局目标变化仍整 Goal 保守失效；更一般的影响及可证明子集复用、真实并发和执行验收仍缺。依据：`chat/factory-goal-revision.mjs`。
 - **跨设备和连接器**：单权威远端与固定授权单文件传输已有源码但未做双实例验收；设备隔离/授权不能从在线状态推断。邮件未知效果需人工核查，Calendar 仅特定事件身份支持查询回执；GitHub/Gmail/Calendar/Drive 尚非完整统一动作能力矩阵。依据：`chat/remote-factory-source.mjs`、`chat/remote-file-transfer.mjs`、`lib/connector-action-dispatcher.mjs`。
 - **语音和移动体验**：当前是手动 ASR 草稿、同一路径审阅及显式 TTS；免手持连续对话、打断/跨设备续接和 Android FCM 按产品需要继续，不能把现有草稿入口描述为完整语音自治。依据：`android/feature/organization`、[阶段 F](phase-f-voice-experience.zh.md)。

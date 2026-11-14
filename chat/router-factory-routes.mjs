@@ -23,6 +23,8 @@ import { setFactoryTaskKnowledge } from './factory-task-knowledge.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
 import { requestFactoryReconciliation, getFactoryReconciliation, resumeFactoryReconciliation, verifyFactoryAcceptedRun, getFactoryBudgetObservation } from './factory-reconciliation.mjs';
 import { resolveResponsibilityActor } from './responsibility-actor.mjs';
+import { authenticateProotRequest } from '../lib/proot-local-pairing.mjs';
+import { getAuthSession } from '../lib/auth.mjs';
 import { submitFactoryReviewOpinion, reconcileFactoryReviewOpinion } from './factory-review-opinions.mjs';
 import { enqueueFactoryIntegration, materializeFactoryIntegration, attachFactoryCombinationValidation, refreshFactoryIntegrationQueue, getFactoryIntegrationQueue, listFactoryIntegrationQueue } from './factory-integration-queue.mjs';
 import { registerFactoryCombinationCheck, reconcileFactoryCombinationCheck, registerFactoryCheck, reconcileFactoryCheck } from './factory-checks.mjs';
@@ -33,6 +35,29 @@ import { reconcileFactoryShadow, listFactoryShadowReconciliation } from './facto
 import { previewFactoryRetirement, retireFactoryWorkspace } from './factory-evidence-retention.mjs';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
+
+// A handoff contains task context and requires the instance owner, not an
+// owner-shaped delegated principal. Preserve the authenticated local proot
+// owner path without granting that exception to other Factory routes.
+async function resolveHandoffOwner(req,authSession) {
+  if(authSession?.role!=='owner' || authSession.workspaceAccess || authSession.targetRuntime || authSession.temporaryControlAdapter
+      || ['target_runtime_gateway','run_capability','temporary_device','provisional_device'].includes(authSession.principalKind)) return null;
+  if(authSession.principalKind==='owner' && authSession.authMethod==='proot_local') {
+    const bearer=req?._bearerAuthSession,owner=text(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID);
+    if(!owner || bearer?.role!=='owner' || bearer.principalKind!=='owner' || bearer.authMethod!=='proot_local' || !await authenticateProotRequest(req)) return null;
+    return {kind:'user',role:'owner',principalId:owner};
+  }
+  if(['local_web','proot_cli'].includes(authSession.authMethod)) {
+    const owner=text(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID);
+    // Local-web auto-auth applies only to HTML, never /api/ paths; requiring
+    // the actual API request ensures getAuthSession rechecks the cookie.
+    if(!owner || !String(req?.url||'').startsWith('/api/') || req?._bearerAuthSession || authSession.principalKind || authSession.scope || req?.headers?.['x-agentoc-target-grant']) return null;
+    const current=getAuthSession(req);
+    if(current?.role!=='owner' || current.authMethod!==authSession.authMethod || current.principalKind || current.scope || current.workspaceAccess || current.targetRuntime) return null;
+    return {kind:'user',role:'owner',principalId:owner};
+  }
+  return resolveResponsibilityActor(req,authSession);
+}
 
 function mutationSourceAllowed(req) {
   if (!/^application\/json(?:\s*;|\s*$)/i.test(text(req.headers?.['content-type']))) return false;
@@ -358,7 +383,8 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     }
     if (team || handoffCreate || handoffRead) {
       const selected=team || handoffCreate || handoffRead, organizationId=decodeURIComponent(selected[1]);
-      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const actor=handoffCreate || handoffRead ? await resolveHandoffOwner(req,authSession) : {kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      if(!actor) {writeJson(res,403,{error:'Verified instance owner required'});return true;}
       await listFactoryWorkItems(organizationId,{limit:1},actor);
       if (req.method==='GET' && team && !team[2]) { const value=new URL(req.url || pathname,'http://localhost').searchParams.get('relationVersion'); if(value!==null && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))) { writeJson(res,400,{error:'Invalid relationship version'}); return true; } writeJson(res,200,await getTeamConfiguration(organizationId,actor,value===null?{}:{atRelationVersion:Number(value)})); return true; }
       if (req.method==='GET' && handoffRead) { writeJson(res,200,await getFactoryTaskHandoff(organizationId,decodeURIComponent(handoffRead[2]),actor)); return true; }
