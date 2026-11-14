@@ -95,6 +95,7 @@ export async function createManagedSessionForNode(input = {}) {
     organizationNodeId,
     roleInstanceId,
     organizationRevision,
+    agentId: text(agentId),
     parentNodeId,
     parentSessionId: controllerSessionId,
     controllerSessionId,

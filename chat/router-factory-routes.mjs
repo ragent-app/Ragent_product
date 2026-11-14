@@ -5,10 +5,11 @@ import { listTeamMessages, sendOwnerTeamMessage, respondToTeamMessage } from './
 import { compileFactoryWorkflow, instantiateFactoryWorkflow } from './factory-workflow.mjs';
 import { decideFactoryManualAcceptance, decideFactoryCheckAcceptance } from './factory-acceptance.mjs';
 import { beginOrganizationLifecycle, getOrganizationLifecycleInfo, beginNodeRebind, finishNodeRebind, cancelNodeRebind } from './organization-session-lifecycle.mjs';
-import { getNode } from './organization-store.mjs';
+import { getNode, getRoleInstance, getRevision } from './organization-store.mjs';
+import { normalizeAppId } from './apps.mjs';
 import { replaceManagedSession } from './organization-replan.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
-import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryRelease, getFactoryReleaseOperation } from './factory-release.mjs';
+import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryRelease, getFactoryReleaseOperation, reconcileFactoryGithubRelease, resumeFactoryGithubRelease } from './factory-release.mjs';
 import { setPositionProfile, addTeamRelation, retireTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
 import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
@@ -67,6 +68,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const lifecycle = /^\/api\/organizations\/([^/]+)\/factory\/lifecycle(?:\/([^/]+)\/(finalize|cancel))?$/.exec(String(pathname || ''));
   const nodeRebind = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/rebind(?:\/([^/]+)\/(cancel))?$/.exec(String(pathname || ''));
   const release = /^\/api\/organizations\/([^/]+)\/factory\/releases\/(packages|authorizations|requests|operations)(?:\/([^/]+))?$/.exec(String(pathname || ''));
+  const releaseReconcile = /^\/api\/organizations\/([^/]+)\/factory\/releases\/operations\/([^/]+)\/(reconcile|resume)$/.exec(String(pathname || ''));
   const team = /^\/api\/organizations\/([^/]+)\/factory\/team(?:\/(profiles|relations|retire-relation))?$/.exec(String(pathname || ''));
   const handoffCreate = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/handoffs$/.exec(String(pathname || ''));
   const handoffRead = /^\/api\/organizations\/([^/]+)\/factory\/handoffs\/([^/]+)$/.exec(String(pathname || ''));
@@ -74,7 +76,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reconcileResume && !reconcileVerify && !goalRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!match && !messages && !response && !reviewOpinion && !reconcile && !reconcileResume && !reconcileVerify && !goalRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   if (reviewOpinion) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -102,6 +104,18 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, 403, { error: 'Owner access required' }); return true;
   }
   try {
+    if (releaseReconcile) {
+      if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const input={organizationId:decodeURIComponent(releaseReconcile[1]),operationId:decodeURIComponent(releaseReconcile[2])};
+      if (releaseReconcile[3]==='resume') {
+        if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+        const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+        writeJson(res,200,await resumeFactoryGithubRelease({...input,idempotencyKey:body?.idempotencyKey},actor)); return true;
+      }
+      writeJson(res,200,await reconcileFactoryGithubRelease(input,actor)); return true;
+    }
     if (steer || steerReceipt || shadowReconciliation || retirement) {
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       const organizationId=decodeURIComponent((steer || steerReceipt || shadowReconciliation || retirement)[1]);
@@ -261,10 +275,18 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
         throw Object.assign(new Error('Binding changed; replacement outcome requires reconciliation'),{statusCode:409});
       }
       const previous=node?.currentSessionId ? await getSession(node.currentSessionId) : null;
-      if (!node || node.organizationId!==organizationId || !previous?.templateId || !previous?.tool) throw Object.assign(new Error('Existing node runtime is unavailable; replacement remains pending'),{statusCode:409});
+      if (!node || node.organizationId!==organizationId || !previous?.tool) throw Object.assign(new Error('Existing node runtime is unavailable; restore the session or cancel the pending replacement'),{statusCode:409});
+      const role = node.roleInstanceId ? await getRoleInstance(node.roleInstanceId) : null;
+      const revision = await getRevision(organizationId,node.createdRevision);
+      const candidates = Array.isArray(revision?.compiled?.nodes) ? revision.compiled.nodes.filter(entry=>entry.stableKey===node.stableKey) : [];
+      // Provisioning pins resolver.selectedAgentId; replan add historically
+      // pins agentId first. The bound RoleInstance selects the persisted fact.
+      const frozenAgents = [text(candidates[0]?.resolver?.selectedAgentId),text(candidates[0]?.agentId)].filter(Boolean);
+      const frozenAgent = text(role?.agentId);
+      if (revision?.state!=='frozen' || candidates.length!==1 || !frozenAgent || !frozenAgents.includes(frozenAgent) || !role || role.organizationId!==organizationId || role.organizationNodeId!==nodeId || role.organizationRevision!==node.createdRevision || role.stableKey!==node.stableKey || role.role!==node.nodeRole || previous.sessionPlane!=='organization' || previous.organizationId!==organizationId || previous.organizationNodeId!==nodeId || previous.roleInstanceId!==role.id || previous.organizationRevision!==node.createdRevision || (previous.templateId && normalizeAppId(previous.templateId)!==normalizeAppId(frozenAgent))) throw Object.assign(new Error('Managed Agent identity is inconsistent or unavailable; restore the session and frozen role facts or cancel the pending replacement'),{statusCode:409});
       const result=await replaceManagedSession({organizationId,nodeId,expectedBindingGeneration:expectedGeneration,replacementKey:commandId,rebindCommandId:commandId}, {
         createManagedSession: input => createManagedSessionForNode({ ...input, stableKey:node.stableKey, role:node.nodeRole, sessionClass:node.sessionClass,
-          agentId:previous.templateId, roleInstanceId:node.roleInstanceId, parentNodeId:node.parentNodeId, parentSessionId:previous.parentSessionId,
+          agentId:frozenAgent, roleInstanceId:node.roleInstanceId, parentNodeId:node.parentNodeId, parentSessionId:previous.parentSessionId,
           runtime:{tool:previous.tool,model:previous.model,effort:previous.effort,providerProfile:previous.providerProfile} }),
       });
       writeJson(res,200,await finishNodeRebind({organizationId,nodeId,commandId,result:{sessionId:result.sessionId,bindingGeneration:result.node.bindingGeneration}})); return true;
