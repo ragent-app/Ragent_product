@@ -1246,7 +1246,7 @@ export async function processDueTriggersNow() {
   if (triggerTickPromise) return triggerTickPromise;
 
   triggerTickPromise = (async () => {
-    try { const {reconcileResponsibilityTriggerBindings}=await import('./responsibility-trigger-bridge.mjs'); await reconcileResponsibilityTriggerBindings(); }
+    try { const {reconcileResponsibilityTriggerBindings}=await import('./responsibility-trigger-bridge.mjs'); await reconcileResponsibilityTriggerBindings(); const {processResponsibilityTriggerEvents}=await import('./responsibility-trigger-events.mjs'); await processResponsibilityTriggerEvents(); }
     catch(error) { console.error(`[triggers] responsibility binding reconciliation unavailable: ${error.message}`); }
     const nowMs = Date.now();
     const triggers = await loadTriggers();

@@ -4,10 +4,12 @@
 
 后续工作区增量增加时间触发绑定、正向执行对账、预算事实展示和有限局部修订源码；这些增量的提交身份以实际提交记录为准，尚未通过真实运行或重启验收。
 
+截至 `ecaad841085f944c43a4fd08a42256dfbb97726c`，已提交的后续增量另包含受授权项目事实引用、Android 组织离线视图、只读 sandbox 配置和 Factory 并发设置源码；这些不等于完整 User Memory、跨平台隔离证明或真实设备验收。正在并行编辑的未提交内容不计入该基线。
+
 ## MVP 代码收尾：延期须明确缩减范围
 
-- **Trigger 责任桥**：`at_time` 与可选周期的责任绑定、occurrence 身份及跨存储恢复已有源码接线；暂停期间错过的触发需恢复责任后由 owner 明确恢复。事件型 Trigger 桥仍未实现，时间桥真实重复投递与重启验收仍缺。依据：`chat/responsibility-trigger-bridge.mjs`、`chat/triggers.mjs`。
-- **资料变化指纹**：当前周期规划没有受权限约束的持久资料指纹和变化比较，等待后仍可能重复调用模型并消耗预算；需定义手动唤醒和政策变更例外并验证重启后的水位。依据：`chat/responsibility-decision.mjs`、`chat/responsibility-plans.mjs`。
+- **Trigger 责任桥**：时间绑定与可选周期，以及仅组织根会话 `run_terminal` 的事件绑定已接入源码。事件从绑定创建后尽力扫描保留索引，发现前删除或未索引的执行可能遗漏，只有发现并入库后才持久；回执满时需核对并重新绑定观察起点。暂停期间错过的时间触发需恢复责任后由 owner 明确恢复。其他事件来源、真实投递与重启验收仍缺。依据：`chat/responsibility-trigger-bridge.mjs`、`chat/responsibility-trigger-events.mjs`、`chat/triggers.mjs`。
+- **资料变化指纹**：可选的 `committedGitChangesOnly` 仅对周期/时间唤醒比较本地已提交 Git HEAD 和分支；不覆盖未提交、未跟踪、忽略文件或外部资料，瞬时变化可能遗漏。手动和执行结果唤醒绕过，观察不可用时等待。完整资料变化检测仍缺，真实水位与重启验收未完成。依据：`chat/responsibility-git-observation.mjs`、`chat/responsibility-decision.mjs`。
 - **原可靠性约束与范围决定**：权威否定受理查询及安全自动恢复、运行成本硬封顶尚未完整实现。未知时不得强行重派；若 MVP 接受人工核实或只承诺准入预算，须明确记录范围决定，否则须先补可证明的对应能力。目标失效后继续执行的安全栅栏仍须验证。
 
 ## MVP 真实验收与放行

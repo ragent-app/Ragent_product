@@ -872,7 +872,7 @@
           const triggerCatalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`).catch(() => null);
           if (triggerCatalog?.features?.timeTriggerBridge === true) {
             add(content, 'h4', 'Scheduled responsibility wake');
-            add(content, 'p', 'A schedule records a wake request; it does not prove work started. Only time-based schedules are available.');
+            add(content, 'p', 'A trigger records a wake request; it does not prove work started.');
             const bindingsPath = `${path}/trigger-bindings`;
             const submitBinding = (suffix, body) => {
               const submit = async () => { try { const result = await responsibilityRequest(`${bindingsPath}${suffix}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); add(content,'p',`Schedule request recorded: ${JSON.stringify(result.binding || {})}`); button(content,'Refresh schedules',() => showResponsibility(id)); }
@@ -883,6 +883,10 @@
               const bindings = await responsibilityRequest(bindingsPath);
               for (const binding of bindings.bindings || []) {
                 add(content,'p',`${binding.enabled ? 'enabled' : 'disabled'} · ${binding.state || 'unknown'} · ${JSON.stringify(binding.config || {})} · delivery ${binding.delivery?.status || 'unknown'} · ${binding.lastError || ''}`);
+                if (binding.config?.type === 'event') add(content,'p',`来源：组织根会话中保留的执行记录，创建后开始观察。来源状态 ${binding.source?.status || '未知'}；待处理 ${binding.pendingCount ?? '未知'}。发现前已删除或漏索引的记录可能遗漏；发现后才持久化。${binding.source?.lastError || ''}`);
+                if (binding.config?.type === 'event' && binding.source?.lastError === 'receipt_capacity') add(content,'p','历史回执已达容量上限；普通恢复无法释放历史。请先核对未收区间，再撤销并重新绑定新的观察起点；可能存在遗漏。');
+                if (binding.config?.type === 'event' && binding.source?.lastError === 'pending_capacity') add(content,'p','待处理队列已满，队列排空后会继续观察。');
+                if (binding.config?.type === 'event' && ['source_unavailable','retention_gap'].includes(binding.source?.status)) add(content,'p','来源不可用或可能存在未观察区间；请核对来源和历史后再审阅恢复，不能假设没有遗漏。');
                 if (binding.delivery?.status === 'failed' && binding.delivery?.lastError === 'Trigger binding is inactive') add(content,'p','暂停期间错过触发，等待恢复确认。请先恢复责任，再审阅恢复该日程。');
                 for (const action of ['revoke','recover']) button(content, `${action} schedule`, () => {
                   if (!root.confirm(`${action} this schedule, version ${binding.version}? This does not establish that work has stopped.`)) return;
@@ -896,6 +900,10 @@
                 const body={type:'at_time',scheduledAt,confirmed:true,expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID()}; if(minutes!==null)body.intervalMs=minutes*60000;
                 if(!root.confirm(`Create a schedule for ${scheduledAt}${minutes===null?'':` every ${minutes} minutes`}? A wake is not proof of execution.`))return;
                 submitBinding('',body);
+              });
+              if (triggerCatalog.features.eventTriggerBridge === true) button(content,'审阅根会话执行结果触发',() => {
+                if (!root.confirm('从此绑定创建后开始，尽力观察组织根会话中保留的已结束执行记录；发现前已删除或漏索引的记录可能遗漏，发现后才持久化。此触发不授予额外权限，也不保证执行已启动。确认创建？')) return;
+                submitBinding('',{type:'event',eventType:'run_terminal',source:{kind:'root_session'},observeFrom:'binding_created',confirmed:true,expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID()});
               });
             } catch(error) { add(content,'p',`Schedules unavailable: ${error.message}`); }
           }
@@ -931,6 +939,15 @@
             for (const receipt of notifications.receipts || []) add(content,'p',`${receipt.type} · ${receipt.state} · ${receipt.updatedAt} (provider status, not proof of reading)`);
           } catch { add(content, 'p', 'Responsibility notification settings unavailable.'); }
           add(content, 'p', `Policy (not a plan approval): ${JSON.stringify(detail.policy || {})}`);
+          if (triggerCatalog?.features?.committedGitChangesOnly === true && ['generic-planner','project-report'].includes(detail.policy?.providerId)) {
+            const enabled = detail.policy.committedGitChangesOnly === true;
+            add(content,'p',`已提交 Git 版本变化条件：${enabled ? '开启' : '关闭'}。仅周期及时间触发比较本地已提交 HEAD 与分支；未提交、未跟踪、忽略文件及网络资料不在范围内，瞬时 A→B→A 可能漏过。手动唤醒和执行结果触发不受此条件限制；游离 HEAD 或无法读取时等待，不视为无变化。`);
+            button(content, enabled ? '审阅关闭 Git 变化条件' : '审阅启用 Git 变化条件', () => {
+              if (!root.confirm(`${enabled ? '关闭' : '启用'}此条件？这会更新责任政策，不授予额外工具权限。`)) return;
+              const {digest, ...policy} = detail.policy;
+              submitCommand('', {policy:{...policy,committedGitChangesOnly:!enabled},expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID()}, 'PATCH');
+            });
+          }
           try {
             const catalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`);
             const planner = (catalog.providers || []).find(p => p.id === 'generic-planner' && p.version === 1 && p.available === true);
@@ -1055,7 +1072,10 @@
           add(content, 'h4', 'Success criteria');
           for (const criterion of item.successCriteria || []) add(content, 'p', criterion);
           add(content, 'h4', 'Activity');
-          for (const entry of activity.activity || []) add(content, 'p', `${entry.createdAt} · ${entry.type} · ${JSON.stringify(entry.details || {})}`);
+          for (const entry of activity.activity || []) {
+            const message = entry.type === 'committed_git_unchanged' ? '已提交 Git 版本未变化，本次周期规划已跳过。' : entry.type === 'committed_git_changed_before_admission' ? '规划前后 Git 版本发生变化，本次未准入；需要重新观察。' : entry.type === 'decision_waiting' && entry.details?.reason === 'committed_git_observation_unavailable' ? '无法核实已提交 Git 版本，等待处理；不视为无变化。' : `${entry.type} · ${JSON.stringify(entry.details || {})}`;
+            add(content, 'p', `${entry.createdAt} · ${message}`);
+          }
           if (!activity.activity?.length) add(content, 'p', 'No activity recorded.');
           // Observe only while this owner view is open. The initial drain is a
           // baseline, so historical activity is never replayed as a notification.

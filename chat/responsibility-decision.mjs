@@ -1,4 +1,4 @@
-import { read, transaction, activity, newId, now, digest } from './responsibility-store.mjs';
+import { read, transaction, activity, activityOnce, newId, now, digest } from './responsibility-store.mjs';
 import { captureResponsibilityRepository, verifyCurrentResponsibilityRepository } from './responsibility-repository.mjs';
 import { isGithubFailureCurrent } from './github-ci-observer.mjs';
 import { admitResponsibilityWorkflow } from './factory-responsibility-admission.mjs';
@@ -6,6 +6,7 @@ import { ensureFactorySchema } from './work-graph-store.mjs';
 import { captureResponsibilityProject, verifyCurrentResponsibilityProject } from './responsibility-project.mjs';
 import { responsibilityProvider, validateProjectReportPolicy } from './responsibility-providers.mjs';
 import { isResponsibilityTriggerObservationCurrent } from './responsibility-trigger-bridge.mjs';
+import { observeResponsibilityCommittedGitHead } from './responsibility-git-observation.mjs';
 
 // A deterministic CI decision is derived only from server-fetched facts and
 // the immutable owner policy. Manual and interval wakes remain observations.
@@ -19,8 +20,8 @@ function hasActiveResponsibilityWork(db,id,currentWakeId) {
     if(item.state==='review') {
       if(hasExecutions && db.prepare('SELECT 1 FROM responsibility_plans p JOIN responsibility_plan_executions e ON e.plan_id=p.id WHERE p.wake_id=? LIMIT 1').get(item.wake_id)) continue;
       const outcome=db.prepare('SELECT kind,next_check_at FROM responsibility_planning_outcomes WHERE wake_id=?').get(item.wake_id);
-      if(outcome?.kind==='wait' && ((Number.isFinite(Date.parse(outcome.next_check_at)) && Date.parse(outcome.next_check_at)<=Date.now())||observation?.kind==='manual'||current?.responsibility_revision!==item.responsibility_revision)) continue;
-      if(['needs_input','invalid_output'].includes(outcome?.kind) && (observation?.kind==='manual'||current?.responsibility_revision!==item.responsibility_revision)) continue;
+      if(outcome?.kind==='wait' && ((Number.isFinite(Date.parse(outcome.next_check_at)) && Date.parse(outcome.next_check_at)<=Date.now())||['manual','event'].includes(observation?.kind)||current?.responsibility_revision!==item.responsibility_revision)) continue;
+      if(['needs_input','invalid_output'].includes(outcome?.kind) && (['manual','event'].includes(observation?.kind)||current?.responsibility_revision!==item.responsibility_revision)) continue;
     }
     return true;
   }
@@ -71,21 +72,26 @@ async function processProjectReport(snapshot,lease) {
   if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
   const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
   const observation=await read(db=>{assertLease(db,wakeId,lease);return db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wakeId);});
-  if(!observation||!['manual','interval'].includes(observation.kind)) return wait(wakeId,'unsupported_observation',lease);
+  if(!observation||!['manual','interval','event'].includes(observation.kind)) return wait(wakeId,'unsupported_observation',lease);
   const active=await read(db=>{assertLease(db,wakeId,lease);return hasActiveResponsibilityWork(db,r.id,wakeId);});
   if(active) return wait(wakeId,'existing_work',lease);
-  let proposal,decisionId=wake.decision_id;
+  const gitCondition=policy.committedGitChangesOnly===true&&observation.kind==='interval';
+  let proposal,decisionId=wake.decision_id,gitObservation=null;
   if(d) {proposal=JSON.parse(d.proposal_json);await verifyCurrentResponsibilityProject(proposal.projectFactId);}
   else {
     const fact=await captureResponsibilityProject(r.organization_id,r.project_id);
+    if(gitCondition) {try {gitObservation=await observeResponsibilityCommittedGitHead(fact.id);}catch {return wait(wakeId,'committed_git_observation_unavailable',lease);}}
     const keys=['providerId','providerVersion','providerDigest','templateId','templateVersion','templateDigest','resource','nodeBindings','maxAttempts','maxCost'];
     proposal=Object.fromEntries(keys.map(key=>[key,policy[key]]));Object.assign(proposal,{projectFactId:fact.id,observationId:wakeId,observationDigest:observation.payload_digest});
+    if(gitObservation) proposal.gitObservationDigest=gitObservation.digest;
     if(policy.providerId==='generic-planner') {proposal.history=await read(db=>{assertLease(db,wakeId,lease);return responsibilityHistory(db,r.id);});proposal.historyDigest=digest(proposal.history);}
     decisionId=await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(r.id),w=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId),o=db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wakeId);if(!current||current.lifecycle!=='active'||current.revision!==wake.responsibility_revision||current.policy_revision!==wake.policy_revision||w?.state!=='pending'||w.decision_id||o?.payload_digest!==observation.payload_digest||!isResponsibilityTriggerObservationCurrent(db,current,o)) return null;
       ensureFactorySchema(db);if(hasActiveResponsibilityWork(db,r.id,wakeId)) return 'existing_work';if(proposal.history && digest(responsibilityHistory(db,r.id))!==proposal.historyDigest) return null;
-      const id=newId('decision');db.prepare('INSERT INTO responsibility_decisions VALUES(?,?,?,?,?,?,?,?,?)').run(id,r.id,wakeId,r.revision,r.policy_revision,'approved',digest({observation:observation.payload_digest,policyRevision:r.policy_revision}),JSON.stringify(proposal),now());db.prepare("UPDATE responsibility_wakes SET state='deciding',decision_id=?,updated_at=? WHERE id=?").run(id,now(),wakeId);activity(db,r.id,'decision_approved',{wakeId,decisionId:id,providerId:policy.providerId});return id;});
-    if(decisionId==='existing_work') return wait(wakeId,'existing_work',lease);if(!decisionId) return;
+      if(gitObservation) {const project=db.prepare('SELECT * FROM responsibility_project_facts WHERE id=?').get(fact.id);if(!project||project.organization_id!==r.organization_id||project.project_id!==r.project_id||project.digest!==gitObservation.projectFactDigest) return null;const previous=db.prepare("SELECT g.observation_digest FROM responsibility_git_observations g JOIN responsibility_work_links l ON l.wake_id=g.wake_id AND l.decision_id=g.decision_id WHERE g.responsibility_id=? AND g.responsibility_revision=? AND g.policy_revision=? AND g.project_fact_id=? AND (EXISTS(SELECT 1 FROM responsibility_plans p WHERE p.wake_id=g.wake_id) OR EXISTS(SELECT 1 FROM responsibility_planning_outcomes o WHERE o.wake_id=g.wake_id AND o.kind IN ('wait','needs_input')) OR (?='project-report' AND EXISTS(SELECT 1 FROM factory_work_items w WHERE w.goal_id=l.goal_id AND w.state='completed'))) ORDER BY l.rowid DESC LIMIT 1").get(r.id,r.revision,r.policy_revision,fact.id,policy.providerId);if(previous?.observation_digest===gitObservation.digest) {db.prepare("UPDATE responsibility_wakes SET state='unchanged',updated_at=? WHERE id=? AND state='pending'").run(now(),wakeId);activityOnce(db,r.id,`committed_git_unchanged:${r.revision}:${r.policy_revision}:${gitObservation.digest}`,'committed_git_unchanged',{wakeId});return 'unchanged';}}
+      const id=newId('decision');db.prepare('INSERT INTO responsibility_decisions VALUES(?,?,?,?,?,?,?,?,?)').run(id,r.id,wakeId,r.revision,r.policy_revision,'approved',digest({observation:observation.payload_digest,policyRevision:r.policy_revision,gitObservationDigest:gitObservation?.digest||null}),JSON.stringify(proposal),now());if(gitObservation) db.prepare('INSERT INTO responsibility_git_observations VALUES(?,?,?,?,?,?,?,?,?)').run(wakeId,r.id,r.revision,r.policy_revision,id,fact.id,JSON.stringify(gitObservation),gitObservation.digest,now());db.prepare("UPDATE responsibility_wakes SET state='deciding',decision_id=?,updated_at=? WHERE id=?").run(id,now(),wakeId);activity(db,r.id,'decision_approved',{wakeId,decisionId:id,providerId:policy.providerId});return id;});
+    if(decisionId==='unchanged') return;if(decisionId==='existing_work') return wait(wakeId,'existing_work',lease);if(!decisionId) return;
   }
+  if(gitCondition) {let latest;try {latest=await observeResponsibilityCommittedGitHead(proposal.projectFactId);}catch {return wait(wakeId,'committed_git_observation_unavailable',lease);}if(latest.digest!==proposal.gitObservationDigest) {await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId);if(current?.state==='deciding'&&current.decision_id===decisionId) {db.prepare("UPDATE responsibility_wakes SET state='superseded',updated_at=? WHERE id=?").run(now(),wakeId);activity(db,r.id,'committed_git_changed_before_admission',{wakeId,decisionId});}});return;}}
   const actor={kind:'service',role:'responsibility_admission',principalId:`responsibility-admission:${owner}`};
   const result=await admitResponsibilityWorkflow({...proposal,organizationId:r.organization_id,projectId:r.project_id,responsibilityId:r.id,responsibilityRevision:r.revision,policyRevision:r.policy_revision,wakeId,decisionId,wakeLeaseOwnerToken:lease.ownerToken,wakeLeaseGeneration:lease.generation,commandId:`responsibility:${decisionId}`,idempotencyKey:`responsibility:${decisionId}`},actor);
   await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId);if(current?.state==='deciding'&&current.decision_id===decisionId){db.prepare("UPDATE responsibility_wakes SET state='admitted',updated_at=? WHERE id=?").run(now(),wakeId);activity(db,r.id,'workflow_admitted',{wakeId,decisionId,goalId:result.goal.id,workflowInstanceId:result.instance.id});}});

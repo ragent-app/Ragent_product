@@ -55,6 +55,8 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     var triggerTime by remember(organizationId) { mutableStateOf("") }
     var triggerInterval by remember(organizationId) { mutableStateOf("") }
     var reviewTrigger by remember(organizationId) { mutableStateOf(false) }
+    var reviewRunTrigger by remember(organizationId) { mutableStateOf(false) }
+    var reviewGitCondition by remember(organizationId) { mutableStateOf(false) }
     var reviewedBindingAction by remember(organizationId) { mutableStateOf<Pair<JsonObject, String>?>(null) }
     var planCatalogDescriptors by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var reviewedPlan by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
@@ -147,7 +149,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
     }
     suspend fun loadResponsibility(id: String) {
-        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewedBindingAction = null; triggerBindings = null
+        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null
         runCatching {
             val path = "/${Uri.encode(id)}"
             val response = responsibilityRequest(path)
@@ -210,10 +212,16 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 Text("A paused responsibility stops new admission; existing work may continue.")
                 Text("A stop request is not proof of stopping. Unknown or older active executions need reconciliation; a run that finished first remains pending review. Archived history is retained.")
                 if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) {
-                    Text("Scheduled responsibility wake: a schedule records a wake request; it does not prove work started. Only time-based schedules are available.")
+                    Text("触发只记录唤醒请求，不代表工作已经启动。")
                     if (triggerBindings == null) Text("Schedules unavailable.")
                     triggerBindings?.forEach { entry -> val binding=entry.jsonObject
                         Text("Schedule ${binding["config"]} · ${binding["state"]} · delivery ${binding["delivery"] ?: "unknown"} · ${binding["lastError"] ?: ""}")
+                        if ((binding["config"] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull == "event") Text("来源：组织根会话中保留的执行记录，创建后开始观察。来源状态 ${binding["source"] ?: "未知"}；待处理 ${binding["pendingCount"] ?: "未知"}。发现前已删除或漏索引的记录可能遗漏；发现后才持久化。")
+                        val sourceError = (binding["source"] as? JsonObject)?.get("lastError")?.jsonPrimitive?.contentOrNull
+                        if (sourceError == "receipt_capacity") Text("历史回执已达容量上限；普通恢复无法释放历史。请先核对未收区间，再撤销并重新绑定新的观察起点；可能存在遗漏。")
+                        if (sourceError == "pending_capacity") Text("待处理队列已满，队列排空后会继续观察。")
+                        val sourceStatus = (binding["source"] as? JsonObject)?.get("status")?.jsonPrimitive?.contentOrNull
+                        if (sourceStatus in listOf("source_unavailable", "retention_gap")) Text("来源不可用或可能存在未观察区间；请核对来源和历史后再审阅恢复，不能假设没有遗漏。")
                         val delivery = binding["delivery"] as? JsonObject
                         if (delivery?.get("status")?.jsonPrimitive?.contentOrNull == "failed" && delivery["lastError"]?.jsonPrimitive?.contentOrNull == "Trigger binding is inactive") Text("暂停期间错过触发，等待恢复确认。请先恢复责任，再审阅恢复该日程。")
                         listOf("revoke","recover").forEach { action -> TextButton(onClick = { reviewedBindingAction = binding to action }) { Text("Review $action schedule") } }
@@ -232,9 +240,23 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                     else { Text("Schedule $triggerTime${if(interval!=null) " every $interval minutes" else " once"}; a wake is not proof of execution.")
                         TextButton(onClick={ val body=buildJsonObject { put("type","at_time"); put("scheduledAt",triggerTime); if(interval!=null)put("intervalMs",interval*60000); put("confirmed",true); put("expectedVersion",current["rowVersion"]!!); put("idempotencyKey",UUID.randomUUID().toString()) }; scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/trigger-bindings",body); reviewTrigger=false } }) { Text("Confirm schedule") }
                     }
+                    if (responsibilityFeatures?.get("eventTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) {
+                        if (!reviewRunTrigger) TextButton(onClick={reviewRunTrigger=true}) { Text("审阅根会话执行结果触发") }
+                        else { Text("从此绑定创建后开始，尽力观察组织根会话中保留的已结束执行记录；发现前已删除或漏索引的记录可能遗漏，发现后才持久化。此触发不授予额外权限，也不保证执行已启动。")
+                            TextButton(onClick={val body=buildJsonObject {put("type","event");put("eventType","run_terminal");put("source",buildJsonObject {put("kind","root_session")});put("observeFrom","binding_created");put("confirmed",true);put("expectedVersion",current["rowVersion"]!!);put("idempotencyKey",UUID.randomUUID().toString())};scope.launch {submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/trigger-bindings",body);reviewRunTrigger=false}}) { Text("确认创建执行结果触发") }
+                        }
+                    }
                 }
                 Text("Responsibility notifications through Android FCM are not supported. Activity remains available in the app.")
                 Text("Policy (not plan approval): ${responsibilityPolicy ?: "unavailable"}")
+                if (responsibilityFeatures?.get("committedGitChangesOnly")?.jsonPrimitive?.booleanOrNull == true && responsibilityPolicy?.get("providerId")?.jsonPrimitive?.contentOrNull in listOf("generic-planner", "project-report")) {
+                    val enabled = responsibilityPolicy?.get("committedGitChangesOnly")?.jsonPrimitive?.booleanOrNull == true
+                    Text("已提交 Git 版本变化条件：${if (enabled) "开启" else "关闭"}。仅周期及时间触发比较本地已提交 HEAD 与分支；未提交、未跟踪、忽略文件及网络资料不在范围内，瞬时 A→B→A 可能漏过。手动唤醒和执行结果触发不受此条件限制；游离 HEAD 或无法读取时等待，不视为无变化。")
+                    if (!reviewGitCondition) TextButton(onClick = { reviewGitCondition = true }) { Text(if (enabled) "审阅关闭 Git 变化条件" else "审阅启用 Git 变化条件") }
+                    else { Text("确认更新责任政策；此操作不授予额外工具权限。")
+                        TextButton(onClick = { val policy = buildJsonObject { responsibilityPolicy?.forEach { (key, value) -> if (key != "digest" && key != "committedGitChangesOnly") put(key, value) }; put("committedGitChangesOnly", !enabled) }; val body = buildJsonObject { put("policy", policy); put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }; scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}", body, "PATCH"); reviewGitCondition = false } }) { Text("确认更新条件") }
+                    }
+                }
                 val planner = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "generic-planner" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
                 val plannerTemplate = (planner?.get("templates") as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "agentoc-responsibility-planner" }
                 val reportDescriptor = planCatalogDescriptors?.mapNotNull { it as? JsonObject }?.firstOrNull { it["capability"]?.jsonPrimitive?.contentOrNull == "project-report" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
@@ -392,7 +414,9 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 }
                 (current["successCriteria"] as? JsonArray)?.forEach { Text(it.jsonPrimitive.content) }
                 Text("Activity")
-                responsibilityActivity?.forEach { Text("${it.jsonObject["createdAt"]} · ${it.jsonObject["type"]} · ${it.jsonObject["details"] ?: ""}") }
+                responsibilityActivity?.forEach { entry -> val activity = entry.jsonObject; val type = activity["type"]?.jsonPrimitive?.contentOrNull; val reason = (activity["details"] as? JsonObject)?.get("reason")?.jsonPrimitive?.contentOrNull
+                    val message = when { type == "committed_git_unchanged" -> "已提交 Git 版本未变化，本次周期规划已跳过。"; type == "committed_git_changed_before_admission" -> "规划前后 Git 版本发生变化，本次未准入；需要重新观察。"; type == "decision_waiting" && reason == "committed_git_observation_unavailable" -> "无法核实已提交 Git 版本，等待处理；不视为无变化。"; else -> "$type · ${activity["details"] ?: ""}" }
+                    Text("${activity["createdAt"]} · $message") }
                 val spokenActivity = responsibilityActivity.orEmpty().mapNotNull { entry ->
                     val row = entry as? JsonObject ?: return@mapNotNull null
                     val type = row["type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
