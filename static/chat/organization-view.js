@@ -1205,8 +1205,28 @@
           content.replaceChildren(); button(content, 'All work items', showList);
           add(content, 'h3', item.contract?.objective || item.id);
           add(content, 'p', `State ${item.state}; control ${item.controlState}; priority ${item.priority}; version ${item.rowVersion}; contract ${item.contractRevision}; as of ${asOf}`);
-          for (const [label, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', item.candidates], ['Decisions', item.decisions]]) {
+          for (const [label, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', (item.candidates || []).map(({report, ...candidate}) => candidate)], ['Decisions', item.decisions]]) {
             add(content, 'h4', label); add(content, 'pre', JSON.stringify(value || [], null, 2));
+          }
+          for (const candidate of item.candidates || []) {
+            const report = candidate.report;
+            if (!report) continue;
+            add(content, 'h4', `Report · candidate ${candidate.digest}`);
+            add(content, 'p', `Execution packet: ${report.packetState || 'unverified'}; model declaration: ${report.declaration?.status || 'unavailable'} (model assertion, not acceptance). Source: ${report.source}.`);
+            if (report.visibleText) add(content, 'pre', report.visibleText);
+            if (report.declaration?.status === 'valid') {
+              add(content, 'p', `Model-declared state: ${report.declaration.state}`);
+              if (report.declaration.summary) { add(content, 'p', 'Model-declared summary:'); add(content, 'pre', report.declaration.summary); }
+              for (const field of ['blockers', 'risks', 'unresolvedItems', 'tests', 'acceptanceNotes']) {
+                for (const entry of report.declaration[field] || []) add(content, 'p', `Model-declared ${field}: ${typeof entry === 'string' ? entry : JSON.stringify(entry)}`);
+              }
+            }
+            if (!report.readable) add(content, 'p', 'Readable report unavailable or source unverified.');
+            const decisions = (item.decisions || []).filter(decision => decision.candidateDigest === candidate.digest
+              && decision.contractRevision === candidate.contractRevision
+              && (decision.evidence || []).some(entry => entry.kind === 'owner_report_review'));
+            for (const decision of decisions) add(content, 'p', `Owner decision ${decision.criterionId}: ${decision.decision} · contract ${decision.contractRevision} · gate ${decision.gateGeneration}`);
+            if (!decisions.length) add(content, 'p', 'Owner decision: not recorded.');
           }
           add(content, 'h4', 'Delivery evidence');
           for (const candidate of item.candidates || []) add(content, 'p', `Candidate ${candidate.digest || 'unverified'} · contract ${candidate.contractRevision} · execution ${candidate.executionEpoch}`);
