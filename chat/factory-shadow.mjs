@@ -1,3 +1,4 @@
+import { factoryApiDenialSummary } from './factory-control-observations.mjs';
 // Historical Collaboration facts projected for inspection only. These records
 // are not Work Items, do not drive scheduling and cannot imply acceptance.
 import { factoryRead, factoryTransaction, factoryError, now, encode, decode, digest } from './work-graph-store.mjs';
@@ -35,7 +36,7 @@ function operationalObservation(db,organizationId) {
     duplicateBindingKeys:scalar(['factory_execution_bindings','factory_work_items'],"SELECT COUNT(*) AS count FROM (SELECT b.dispatch_key FROM factory_execution_bindings b JOIN factory_work_items w ON w.id=b.work_item_id WHERE w.organization_id=? GROUP BY b.dispatch_key HAVING COUNT(*)>1)"),
     pendingStopBindings:scalar(['factory_execution_bindings','factory_work_items'],"SELECT COUNT(*) AS count FROM factory_execution_bindings b JOIN factory_work_items w ON w.id=b.work_item_id WHERE w.organization_id=? AND w.control_state IN ('pause_requested','cancel_requested') AND b.status IN ('intent','running','unknown')"),
     blockedAuthorizationRevoked:scalar(['factory_work_items'],"SELECT COUNT(*) AS count FROM factory_work_items WHERE organization_id=? AND state='blocked' AND json_valid(blocked_json) AND json_extract(blocked_json,'$.code')='authorization_revoked'"),
-    permissionDenialEvents:{state:'not_available',reason:'No complete scoped denial receipt ledger'},
+    permissionDenialEvents:factoryApiDenialSummary(db,organizationId),
     providerStopConfirmation:{state:'not_available',reason:'Pending bindings alone do not prove a provider stop outcome'},
     limitations:['Counts do not establish worker termination, external outcomes, backup consistency or platform support.']};
 }

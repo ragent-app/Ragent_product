@@ -1,3 +1,4 @@
+import { recordFactoryApiDenial, listFactoryApiDenials } from './factory-control-observations.mjs';
 import { startFactoryConsultation, getFactoryConsultation, listFactoryConsultations, reconcileFactoryConsultation, resumeFactoryConsultation } from './factory-consultation.mjs';
 import { getFactoryConcurrencyPolicy, setFactoryConcurrencyPolicy } from './factory-policy.mjs';
 import { submitFactoryBlockerProposal, listFactoryBlockerProposals, disposeFactoryBlockerProposal } from './factory-blocker-proposals.mjs';
@@ -57,6 +58,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const steerReceipt = /^\/api\/organizations\/([^/]+)\/factory\/steer-commands\/([^/]+)$/.exec(String(pathname || ''));
   const shadowReconciliation = /^\/api\/organizations\/([^/]+)\/factory\/shadow-reconciliation(?:\/(reconcile))?$/.exec(String(pathname || ''));
   const retirement = /^\/api\/organizations\/([^/]+)\/factory\/retirement\/(preview|execute)$/.exec(String(pathname || ''));
+  const denialObservations = /^\/api\/organizations\/([^/]+)\/factory\/observations\/denials$/.exec(String(pathname || ''));
   const consultation = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/consultations(?:\/([^/]+)(?:\/(reconcile|resume))?)?$/.exec(String(pathname || ''));
   const factoryPolicy = /^\/api\/organizations\/([^/]+)\/factory\/policy$/.exec(String(pathname || ''));
   const blockerSubmit = /^\/api\/sessions\/([^/]+)\/factory\/blocker-proposal$/.exec(String(pathname || ''));
@@ -89,7 +91,16 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
+  let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
+  try { if(directOrg) observedOrg=decodeURIComponent(directOrg[1]); } catch { observedOrg=''; }
+  const realWriteJson=writeJson, denialWrites=[];
+  writeJson=(target,status,payload,...rest)=>{
+    if(status===403 && observedOrg) denialWrites.push(recordFactoryApiDenial(observedOrg).catch(()=>{}));
+    return realWriteJson(target,status,payload,...rest);
+  };
+  try {
   if (blockerSubmit) {
     if (req.method!=='POST' || authSession?.principalKind!=='run_capability' || authSession?.capabilityOperation!=='factory.blocker.propose' || decodeURIComponent(blockerSubmit[1])!==authSession.sessionId) { writeJson(res,403,{error:'Scoped work Run required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -132,6 +143,11 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       const input={...body,organizationId:decodeURIComponent(scopedRevision[1]),goalId:decodeURIComponent(scopedRevision[2])};
       writeJson(res,200,await (scopedRevision[3]==='preview'?previewFactoryScopedRevision(input,actor):reviseFactoryScopeWithImpact(input,actor)));return true;
+    }
+    if (denialObservations) {
+      if(req.method!=='GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      writeJson(res,200,await listFactoryApiDenials(decodeURIComponent(denialObservations[1]),actor)); return true;
     }
     if (consultation) {
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
@@ -460,4 +476,5 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, error?.code === 'BODY_TOO_LARGE' ? 413 : (error?.statusCode || 400), { error: error?.message || 'Factory request failed', ...(error?.code ? { code: error.code } : {}) });
   }
   return true;
+  } finally { await Promise.allSettled(denialWrites); }
 }
