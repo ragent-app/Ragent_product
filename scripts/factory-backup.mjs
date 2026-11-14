@@ -92,6 +92,7 @@ function inspect(databases) {
     organizationOperations: count(c, 'organization_operations', "state NOT IN ('completed','failed_terminal')", [], true),
     lifecycleOperations: count(c, 'organization_lifecycle_operations', "state='pending'", [], true),
     nodeRebindOperations: count(c, 'organization_node_rebind_operations', "state='pending'", [], true),
+    ownerInitialOrganizationOperations: count(c, 'owner_initial_organization_operations', "state NOT IN ('completed','failed_terminal','cancelled')", [], true),
     orchestrationCommands: count(c, 'orchestration_commands', "state IN ('pending','deferred','claimed','acknowledged')", [], true),
     // A published remote fact alone is not proof the local producer returned.
     releaseOperations: count(c, 'factory_release_operations', hasTable(c,'factory_release_producer_completions') && hasTable(c,'factory_release_recovery_commands')
@@ -127,7 +128,7 @@ function inspect(databases) {
     validationWorkspaces: rows(c, 'factory_validation_workspaces', 'SELECT id,validation_work_item_id,run_id,session_id,candidate_digest,state,provenance FROM factory_validation_workspaces ORDER BY id'),
   };
   return { schema, watermarks, active, references, referenceChecks:{attemptPacketLinks:packetLinks(references.runs,references.packets),releaseLinks:releaseLinks(references.releases,references.releaseProducerCompletions,references.releaseRecoveryCommands,references.releaseRecoveryCompletions),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
-    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands', 'factory_release_recovery_completions']
+    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'owner_initial_organization_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands', 'factory_release_recovery_completions']
       .map((name) => [name, !c ? 'source_unavailable' : hasTable(c, name) ? 'available' : 'absent_legacy_or_not_initialized'])) };
 }
 async function digestFile(path) {
