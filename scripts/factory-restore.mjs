@@ -65,6 +65,9 @@ async function loadBackup(source) {
       ['collaborationEvents','factoryEvents','workspaceEvents'].some(key => !Object.hasOwn(manifest.watermarks,key)) ||
       ['runs','packets','releasePackages','releases'].some(key => !manifest.references[key] || !Array.isArray(manifest.references[key].items) || typeof manifest.references[key].truncated !== 'boolean')) fail('Backup snapshot declaration is incomplete or active');
   if ((manifest.schema.collaborations.tables.includes('owner_initial_organization_operations') || Object.hasOwn(manifest.active,'ownerInitialOrganizationOperations')) && manifest.active.ownerInitialOrganizationOperations !== 0) fail('Owner organization operation state is unknown or active');
+  for (const [table,key] of [['remote_factory_source_operations','remoteSourceOperations'],['remote_factory_operations','remoteTargetUnknown']]) {
+    if ((manifest.schema.collaborations.tables.includes(table) || Object.hasOwn(manifest.active,key)) && manifest.active[key] !== 0) fail('Remote operation state is unknown or active');
+  }
   const sources = {};
   for (const name of NAMES) {
     const record = manifest.outputs[name];

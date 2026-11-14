@@ -9,6 +9,7 @@ import { lstat, mkdir, open, realpath, rm, statfs, writeFile } from 'node:fs/pro
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertRunPublication } from '../chat/run-publication-contract.mjs';
+import { verifyRemoteTerminalReceipt } from '../chat/factory-remote-terminal.mjs';
 
 const NAMES = ['collaborations', 'workflow', 'coordination'];
 const LIMIT = 5000;
@@ -79,8 +80,50 @@ function releaseLinks(operations, completions, recoveries, recoveryCompletions) 
       }) };
   }), limitation: 'Database references only: command return does not prove external effect or producer-tree quiescence.' };
 }
+// These are local journal relationships only. An absent or truncated source
+// cannot establish remote completion or a cross-instance checkpoint.
+function remoteLinks(operations, evidence) {
+  if ([operations,evidence].some(index => index.total === null || index.truncated))
+    return {status:'unknown_incomplete_index',items:[]};
+  const byOperation=new Map(evidence.items.map(row=>[JSON.stringify([row.source_binding_id,row.operation_id]),row]));
+  return {status:'indexed_local_relations',items:operations.items.map(row=>{
+    const fact=byOperation.get(JSON.stringify([row.binding_id,row.operation_id]));
+    return {bindingId:row.binding_id,operationId:row.operation_id,status:row.status,
+      receiptPresent:!!row.receipt_present,remoteEvidence:fact?'present':'missing',
+      candidateDigest:fact?.candidate_digest || null};
+  }),limitation:'Local journal and immutable evidence only; remote status and producer quiescence are not observed.'};
+}
+function optionalColumn(db, table, column) {
+  return hasTable(db,table) && db.prepare(`PRAGMA table_info(${table})`).all().some(row=>row.name===column) ? column : `NULL AS ${column}`;
+}
+// The admission receipt alone is not completion. Only new journals that froze
+// their independently loaded source identity can use the existing signed
+// terminal verifier; old, oversized, changed or incomplete records stay pending.
+function remoteSourceQuiescence(db) {
+  if (!db) return {pending:null,verified:0,examined:0,truncated:false,status:'source_unavailable'};
+  if (!hasTable(db,'remote_factory_source_operations')) return {pending:0,verified:0,examined:0,truncated:false,status:'absent_legacy_or_not_initialized'};
+  const total=count(db,'remote_factory_source_operations');
+  if (!hasTable(db,'factory_execution_bindings') || !hasTable(db,'factory_work_items'))
+    return {pending:total,verified:0,examined:0,truncated:total>0,status:'missing_binding_tables'};
+  const rows=db.prepare(`SELECT binding_id,operation_id,source_factory_binding_id,
+    length(CAST(request_json AS BLOB)) AS request_bytes,length(CAST(receipt_json AS BLOB)) AS receipt_bytes
+    FROM remote_factory_source_operations ORDER BY binding_id,operation_id LIMIT ${LIMIT}`).all();
+  let verified=0;
+  for (const row of rows) {
+    if (row.request_bytes===null || row.request_bytes>65536 || row.receipt_bytes===null || row.receipt_bytes>65536) continue;
+    const saved=db.prepare('SELECT request_json FROM remote_factory_source_operations WHERE binding_id=? AND operation_id=?').get(row.binding_id,row.operation_id);
+    let sourceId; try { sourceId=JSON.parse(saved?.request_json)?.sourceInstanceId; } catch { continue; }
+    if (typeof sourceId!=='string' || !/^inst_[a-f0-9]{32}$/.test(sourceId)) continue;
+    const binding=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=?').get(row.source_factory_binding_id);
+    if (!binding || ['intent','running','unknown'].includes(binding.status)) continue;
+    const item=db.prepare('SELECT * FROM factory_work_items WHERE id=?').get(binding.work_item_id);
+    if (item && verifyRemoteTerminalReceipt(db,item,binding,sourceId)) verified++;
+  }
+  return {pending:total-verified,verified,examined:rows.length,truncated:total>rows.length,status:'local_signed_terminal_facts',limitation:'Does not observe unrelated external effects or prove global quiescence.'};
+}
 function inspect(databases) {
   const c = databases.collaborations, w = databases.workflow, r = databases.coordination;
+  const remoteSource = remoteSourceQuiescence(c);
   const active = {
     executionBindings: count(c, 'factory_execution_bindings', "status IN ('intent','running','unknown')", [], true),
     runningAttempts: count(c, 'collaboration_attempts', "state='running' OR failure_kind='unknown_outcome'"),
@@ -98,6 +141,10 @@ function inspect(databases) {
     releaseOperations: count(c, 'factory_release_operations', hasTable(c,'factory_release_producer_completions') && hasTable(c,'factory_release_recovery_commands')
       ? "state NOT IN ('completed','failed_terminal','cancelled','unsupported') AND NOT (state='published' AND EXISTS (SELECT 1 FROM factory_release_producer_completions p WHERE p.operation_id=factory_release_operations.id AND p.organization_id=factory_release_operations.organization_id AND p.input_digest=factory_release_operations.input_digest AND p.producer='initial') AND NOT EXISTS (SELECT 1 FROM factory_release_recovery_commands r WHERE r.operation_id=factory_release_operations.id))"
       : "state NOT IN ('completed','failed_terminal','cancelled','unsupported')", [], true),
+    remoteSourceOperations: remoteSource.pending,
+    remoteTargetUnknown: count(c, 'remote_factory_operations', hasTable(c,'factory_work_items') && hasTable(c,'factory_remote_children')
+      ? "status <> 'accepted' OR work_item_id IS NULL OR NOT EXISTS (SELECT 1 FROM factory_remote_children child JOIN factory_work_items w ON w.id=child.work_item_id WHERE child.binding_id=remote_factory_operations.binding_id AND child.operation_id=remote_factory_operations.operation_id AND child.work_item_id=remote_factory_operations.work_item_id AND child.operation_digest=remote_factory_operations.payload_digest AND w.state IN ('review','completed','failed','cancelled'))"
+      : '1', [], true),
     workspaceLeases: count(r, 'workspace_leases', "state IN ('preparing','active','quarantined')"),
   };
   const schema = Object.fromEntries(NAMES.map((name) => [name, databases[name] ? {
@@ -118,6 +165,11 @@ function inspect(databases) {
     checks: evidenceRows(c, 'factory_check_operations', 'SELECT id,organization_id,work_item_id,validation_work_item_id,candidate_digest,criterion_id,action_id,action_digest,validation_run_id,workspace_id,state,evidence_json AS _evidence FROM factory_check_operations ORDER BY id'),
     combinationChecks: evidenceRows(c, 'factory_combination_checks', 'SELECT id,organization_id,queue_id,combination_digest,input_digest,base_head,action_id,action_digest,validation_work_item_id,run_id,workspace_id,state,evidence_json AS _evidence FROM factory_combination_checks ORDER BY id'),
     milestones: evidenceRows(c, 'factory_delivery_milestones', 'SELECT id,organization_id,work_item_id,contract_revision,execution_epoch,binding_generation,candidate_digest,milestone,operation_id,source_digest,result_digest,evidence_json AS _evidence FROM factory_delivery_milestones ORDER BY id'),
+    integrations: rows(c, 'factory_integration_operations', `SELECT id,organization_id,work_item_id,candidate_id,candidate_digest,expected_head,state,result_digest,${optionalColumn(c,'factory_integration_operations','commit_id')},${optionalColumn(c,'factory_integration_operations','tree_id')},created_at,updated_at FROM factory_integration_operations ORDER BY id`),
+    combinationCommits: rows(c, 'factory_combination_commits', 'SELECT id,organization_id,queue_id,expected_head,combination_digest,state,commit_id,tree_id,result_digest,created_at,updated_at FROM factory_combination_commits ORDER BY id'),
+    remoteSourceOperations: rows(c, 'remote_factory_source_operations', 'SELECT binding_id,operation_id,source_factory_binding_id,payload_digest,status,receipt_json IS NOT NULL AS receipt_present,created_at,updated_at FROM remote_factory_source_operations ORDER BY binding_id,operation_id'),
+    remoteTargetOperations: rows(c, 'remote_factory_operations', 'SELECT binding_id,operation_id,payload_digest,source_instance_id,binding_version,source_factory_binding_id,contract_revision,execution_epoch,status,work_item_id,attempt_id,run_id,created_at,updated_at FROM remote_factory_operations ORDER BY binding_id,operation_id'),
+    remoteEvidence: rows(c, 'factory_remote_evidence', 'SELECT id,source_binding_id,operation_id,work_item_id,contract_revision,execution_epoch,candidate_digest,created_at FROM factory_remote_evidence ORDER BY id'),
     combinationReceipts: rows(c, 'factory_combination_receipts', 'SELECT operation_id,organization_id,queue_id,input_digest,combination_digest,base_head,commit_id,tree_id,result_digest FROM factory_combination_receipts ORDER BY operation_id'),
     releasePackages: rows(c, 'factory_release_packages', 'SELECT id,organization_id,work_item_id,candidate_digest,integration_operation_id,source_commit,artifact_digest,artifact_bytes FROM factory_release_packages ORDER BY id'),
     releases: evidenceRows(c, 'factory_release_operations', 'SELECT id,organization_id,authorization_id,input_digest,state,result_json AS _evidence FROM factory_release_operations ORDER BY id'),
@@ -127,8 +179,8 @@ function inspect(databases) {
     retirements: rows(c, 'factory_retirement_operations', 'SELECT id,organization_id,kind,target_id,preview_digest,state FROM factory_retirement_operations ORDER BY id'),
     validationWorkspaces: rows(c, 'factory_validation_workspaces', 'SELECT id,validation_work_item_id,run_id,session_id,candidate_digest,state,provenance FROM factory_validation_workspaces ORDER BY id'),
   };
-  return { schema, watermarks, active, references, referenceChecks:{attemptPacketLinks:packetLinks(references.runs,references.packets),releaseLinks:releaseLinks(references.releases,references.releaseProducerCompletions,references.releaseRecoveryCommands,references.releaseRecoveryCompletions),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
-    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'owner_initial_organization_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands', 'factory_release_recovery_completions']
+  return { schema, watermarks, active, references, referenceChecks:{remoteSourceQuiescence:remoteSource,attemptPacketLinks:packetLinks(references.runs,references.packets),releaseLinks:releaseLinks(references.releases,references.releaseProducerCompletions,references.releaseRecoveryCommands,references.releaseRecoveryCompletions),remoteLinks:remoteLinks(references.remoteSourceOperations,references.remoteEvidence),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
+    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'owner_initial_organization_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands', 'factory_release_recovery_completions', 'remote_factory_source_operations', 'remote_factory_operations', 'factory_remote_evidence', 'factory_integration_operations']
       .map((name) => [name, !c ? 'source_unavailable' : hasTable(c, name) ? 'available' : 'absent_legacy_or_not_initialized'])) };
 }
 async function digestFile(path) {
@@ -254,10 +306,15 @@ export async function inventoryFactoryBackup({ sources, runsRoot, artifactRoot }
     }
     const existing=NAMES.map(name=>files[name]?.path).filter(Boolean);
     if(new Set(existing).size!==existing.length) fail('Source databases must be distinct');
-    for (const name of NAMES) databases[name] = files[name] ? openRead(files[name].path) : null;
+    for (const name of NAMES) {
+      databases[name] = files[name] ? openRead(files[name].path) : null;
+      if (databases[name]) databases[name].exec('BEGIN');
+    }
+    const startedAt = new Date().toISOString();
     const report = inspect(databases);
     report.referenceChecks.runFiles = await observeRunFiles(report.references.runs, runsRoot);
     report.referenceChecks.artifacts = await observeRegisteredArtifacts(databases.collaborations, artifactRoot);
+    report.observationWindow = {startedAt, completedAt:new Date().toISOString(), crossStoreAtomic:false, scope:'database_references_and_requested_files_only'};
     return { mode: 'inventory', copiesCreated: false, guarantee: 'observational_only',
       limitations: ['SQLite may create or update source WAL shared-memory sidecars even for read-only connections.'],
       sourceSizes: Object.fromEntries(NAMES.map((name) => [name, files[name]?.size ?? null])),
@@ -287,10 +344,12 @@ export async function createFactoryBackup({ sources, destination, allowedRoot, r
       locks[name] = new DatabaseSync(files[name].path, { timeout: 1000 });
       locks[name].exec('BEGIN IMMEDIATE');
     }
+    const startedAt = new Date().toISOString();
     const report = inspect(locks);
     assertKnownQuiescence(report);
     report.referenceChecks.runFiles = await observeRunFiles(report.references.runs, runsRoot);
     report.referenceChecks.artifacts = await observeRegisteredArtifacts(locks.collaborations, artifactRoot);
+    report.observationWindow = {startedAt, completedAt:new Date().toISOString(), crossStoreAtomic:false, scope:'database_references_and_requested_files_only'};
     for (const name of NAMES) {
       readers[name] = openRead(files[name].path);
       const output = join(target, `${name}.sqlite`);
