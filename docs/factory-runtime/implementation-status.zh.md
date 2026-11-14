@@ -1,5 +1,7 @@
 # Factory Runtime 实施状态
 
+后续缺口与验收顺序见 [剩余工作与验收清单](remaining-work.zh.md)。
+
 更新：2026-11-14。源码：`G:/AgentoC/Ragent_product`，`main`。原始核查 HEAD `3628b2ef5f5627fe2118bda40691150c8d1da74f`；方案文档提交 `18250b9ccdb50ec05bd30d44cf2ff684a623b00a`。工作树含其他未提交修改，以下为本次工作状态，不把代码存在等同于真实运行通过。
 
 本次相关源码提交按先后为 `cc06da9b`（Work Graph）、`3e6c635e`（执行与交付基础）、`1cb89b82`（团队控制与客户端）、`dfa35fba`（撤权与消息回执）、`f88f1dc3`（备份、画像约束与 shadow 观察）、`baf143c3`（受限独立审查意见与容量等）、`5ab7df32`（组合检查与集成、团队关系和交接）、`932f8b0b`（既有检查的 Run 身份契约对齐）、`ea0d9445`（单候选检查终态证据）、`442f4d09`（托管节点换绑时的 Run 准入栅栏）、`0d147ca4`（只读协商、Steering 与 P5 对账退休源码）、`d4b9ad77`（Factory 对账观察）、`2c297025`（隔离 launcher 的 owner 密码启动兼容）、`48cdfdae`（GitHub 发布与构建证明适配、托管 Session 身份修复）、`2777ca26`（本地任务受限 handoff 接入）；与之并行的其他提交不代表 Factory 全阶段完成。
