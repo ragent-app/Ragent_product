@@ -117,9 +117,12 @@ install -m 0755 "$ROOT/packaging/proot/install.sh" "$STAGE/install.sh"
 install -m 0755 "$ROOT/packaging/proot/termux-ragent" "$STAGE/termux-ragent"
 install -m 0644 "$ROOT/docs/android-proot.md" "$STAGE/README.md"
 printf '%s\n' "$VERSION" > "$STAGE/VERSION"
-if [ "${RAGENT_PROOT_CROSS_ASSEMBLY:-0}" = 1 ] && command -v cygpath >/dev/null; then
+if [ -n "${RAGENT_PROOT_PYTHON:-}" ]; then
+  PYTHON="$RAGENT_PROOT_PYTHON"
+elif [ "${RAGENT_PROOT_CROSS_ASSEMBLY:-0}" = 1 ] && command -v cygpath >/dev/null; then
   PYTHON=python
 elif command -v python3 >/dev/null 2>&1; then PYTHON=python3; else PYTHON=python; fi
+"$PYTHON" --version >/dev/null 2>&1 || { echo 'A working Python interpreter is required; set RAGENT_PROOT_PYTHON' >&2; exit 1; }
 "$PYTHON" "$ROOT/scripts/write-proot-identity.py" "$STAGE"
 "$PYTHON" "$ROOT/scripts/archive-proot.py" "$STAGE" "$RAGENT_PROOT_OUTPUT_DIR/$NAME.tar.gz"
 (cd "$RAGENT_PROOT_OUTPUT_DIR" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
