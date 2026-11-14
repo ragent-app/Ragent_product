@@ -1,3 +1,4 @@
+import { submitFactoryBlockerProposal, listFactoryBlockerProposals, disposeFactoryBlockerProposal } from './factory-blocker-proposals.mjs';
 // Owner-facing Work Graph interface. Managed session input is never exposed here.
 import { readBody } from '../lib/utils.mjs';
 import { executeFactoryCommand, getFactoryCommand, getFactoryWorkItem, listFactoryGoals, listFactoryWorkItems } from './factory-control.mjs';
@@ -54,6 +55,8 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const steerReceipt = /^\/api\/organizations\/([^/]+)\/factory\/steer-commands\/([^/]+)$/.exec(String(pathname || ''));
   const shadowReconciliation = /^\/api\/organizations\/([^/]+)\/factory\/shadow-reconciliation(?:\/(reconcile))?$/.exec(String(pathname || ''));
   const retirement = /^\/api\/organizations\/([^/]+)\/factory\/retirement\/(preview|execute)$/.exec(String(pathname || ''));
+  const blockerSubmit = /^\/api\/sessions\/([^/]+)\/factory\/blocker-proposal$/.exec(String(pathname || ''));
+  const blockerOwner = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/blocker-proposals(?:\/([^/]+)\/dispose)?$/.exec(String(pathname || ''));
   const response = /^\/api\/sessions\/([^/]+)\/organization\/messages\/([^/]+)\/(ack|reply)$/.exec(String(pathname || ''));
   const reviewOpinion = /^\/api\/sessions\/([^/]+)\/factory\/review-opinion$/.exec(String(pathname || ''));
   const reconcile = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
@@ -82,7 +85,15 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (blockerSubmit) {
+    if (req.method!=='POST' || authSession?.principalKind!=='run_capability' || authSession?.capabilityOperation!=='factory.blocker.propose' || decodeURIComponent(blockerSubmit[1])!==authSession.sessionId) { writeJson(res,403,{error:'Scoped work Run required'}); return true; }
+    if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+    try { const raw=await readBody(req,16384); const body=JSON.parse(raw || '{}'); const {kind,reason,suggestion,idempotencyKey}=body;
+      writeJson(res,200,await submitFactoryBlockerProposal({kind,reason,suggestion,idempotencyKey},authSession));
+    } catch(error) { writeJson(res,error?.code==='BODY_TOO_LARGE'?413:(error?.statusCode || 400),{error:error?.message || 'Proposal failed',...(error?.code?{code:error.code}:{})}); }
+    return true;
+  }
   if (reviewOpinion) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -117,6 +128,17 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       const input={...body,organizationId:decodeURIComponent(scopedRevision[1]),goalId:decodeURIComponent(scopedRevision[2])};
       writeJson(res,200,await (scopedRevision[3]==='preview'?previewFactoryScopedRevision(input,actor):reviseFactoryScopeWithImpact(input,actor)));return true;
+    }
+    if (blockerOwner) {
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const organizationId=decodeURIComponent(blockerOwner[1]), workItemId=decodeURIComponent(blockerOwner[2]);
+      if (req.method==='GET' && !blockerOwner[3]) { writeJson(res,200,await listFactoryBlockerProposals(organizationId,workItemId,actor)); return true; }
+      if (req.method!=='POST' || !blockerOwner[3]) { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled'}); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
+      const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
+      const {action,expectedProposalVersion,expectedWorkVersion,commandId,idempotencyKey}=body;
+      writeJson(res,200,await disposeFactoryBlockerProposal({organizationId,workItemId,proposalId:decodeURIComponent(blockerOwner[3]),action,expectedProposalVersion,expectedWorkVersion,commandId,idempotencyKey},actor)); return true;
     }
     if (taskKnowledge) {
       if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }

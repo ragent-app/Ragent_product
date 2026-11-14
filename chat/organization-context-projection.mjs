@@ -80,6 +80,7 @@ export async function buildOrganizationContextProjection({
   // durable message records. Projection does not acknowledge delivery.
   let inbox = [];
   let reviewCandidate = null;
+  let factoryWorkItem = null;
   if (target && session.id) {
     const bound = await getLiveOrganizationSessionReference(session.id);
     const direct = bound?.kind === 'node' && bound.organizationId === projection.organizationId && bound.nodeId === target.id;
@@ -88,6 +89,7 @@ export async function buildOrganizationContextProjection({
       inbox = await listTeamMessages(projection.organizationId, target.id, 20);
       if (factory) inbox = inbox.filter(message => !message.workItemId || message.workItemId === factory.workItemId);
       if (factory?.reviewOpinionAllowed === true) reviewCandidate = factory.reviewCandidate;
+      if (factory?.blockerProposalAllowed === true) factoryWorkItem = factory.workItemId;
     }
   }
   const pendingMessages = [];
@@ -100,6 +102,7 @@ export async function buildOrganizationContextProjection({
     ...context,
     pendingMessages,
     ...(reviewCandidate ? { reviewCandidate } : {}),
+    ...(factoryWorkItem ? { factoryWorkItem } : {}),
     organizationStatus: projection.state,
     projectionDigest: projection.digest,
   };
@@ -113,6 +116,7 @@ export function renderOrganizationContextProjection(context) {
     JSON.stringify(context),
     '</organization-status-projection>',
     ...(context.pendingMessages?.length ? ['For an inbox message included above, use `ragent team-message ack <messageId>` to acknowledge it, or `ragent team-message reply <messageId> --text <reply> --idempotency-key <stable-key>` to answer. Acknowledgment alone is not an answer.'] : []),
+    ...(context.factoryWorkItem ? ['To report a blocker without changing control state, use `ragent blocker-proposal --kind <dependency|permission|budget|requirement|other> --reason <text> --idempotency-key <stable-key>`. The owner must explicitly review it.'] : []),
     ...(context.reviewCandidate ? ['To submit a review opinion for the exact reviewCandidate above, use `ragent review-opinion --candidate-work-item <workItemId> --candidate-digest <digest> --contract-revision <contractRevision> --execution-epoch <executionEpoch> --verdict <pass|needs_changes|blocked> --reason <reason> --idempotency-key <stable-key>`. If the Run binding is not ready, retry the same request with the same key. A recorded opinion remains pending until the Run and ResultPacket are verified; it is not a test result.'] : []),
   ].join('\n');
 }

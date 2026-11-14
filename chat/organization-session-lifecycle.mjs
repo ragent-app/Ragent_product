@@ -206,6 +206,7 @@ export async function getFactoryMessageScope(sessionId, requestId) {
     }
     return { kind:'organization_message', organizationId:f.organizationId, nodeId:row.id, bindingGeneration:f.bindingGeneration, organizationRevision:f.organizationRevision,
       managedSessionId:f.managedSessionId, workItemId:f.workItemId, executionEpoch:f.executionEpoch, attemptId:rows[0].attempt_id,
+      blockerProposalAllowed:true,
       ...(reviewCandidate ? { reviewOpinionAllowed:true, reviewCandidate } : {}) };
   });
 }

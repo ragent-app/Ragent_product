@@ -447,6 +447,13 @@ switch (command) {
     break;
   }
 
+  case 'blocker-proposal': {
+    const { runBlockerProposalCommand } = await import(modulePath('lib/blocker-proposal-command.mjs'));
+    try { process.exitCode = await runBlockerProposalCommand(args); }
+    catch (error) { console.error(error.message || String(error)); process.exitCode = 1; }
+    break;
+  }
+
   case 'review-opinion': {
     const { runReviewOpinionCommand } = await import(modulePath('lib/review-opinion-command.mjs'));
     try { process.exitCode = await runReviewOpinionCommand(args); }

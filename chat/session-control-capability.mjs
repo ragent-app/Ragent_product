@@ -45,7 +45,8 @@ const OPERATIONS = Object.freeze([
 ]);
 const NODE_MESSAGE_OPERATIONS = Object.freeze(['organization.message.ack', 'organization.message.reply']);
 const REVIEW_OPERATION = 'factory.review.submit';
-const NODE_OPERATIONS = Object.freeze([...NODE_MESSAGE_OPERATIONS, REVIEW_OPERATION]);
+const BLOCKER_OPERATION = 'factory.blocker.propose';
+const NODE_OPERATIONS = Object.freeze([...NODE_MESSAGE_OPERATIONS, REVIEW_OPERATION, BLOCKER_OPERATION]);
 const OPERATION_SET = new Set([...OPERATIONS, ...NODE_OPERATIONS]);
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 
@@ -156,7 +157,7 @@ function hasFullKnownOperationSet(payload) {
 function capabilityPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, scope }) {
   return {
     version: SESSION_CONTROL_CAPABILITY_VERSION,
-    operations: scope ? [...NODE_MESSAGE_OPERATIONS, ...(scope.reviewOpinionAllowed === true && scope.workItemId ? [REVIEW_OPERATION] : [])] : [...OPERATIONS],
+    operations: scope ? [...NODE_MESSAGE_OPERATIONS, ...(scope.reviewOpinionAllowed === true && scope.workItemId ? [REVIEW_OPERATION] : []), ...(scope.blockerProposalAllowed === true && scope.workItemId ? [BLOCKER_OPERATION] : [])] : [...OPERATIONS],
     ...(scope ? { organizationMessageScope: scope } : {}),
     resource: { type: 'session_tree', id: sessionId },
     selection: { runId, turnId },
@@ -182,6 +183,7 @@ function renewalPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, sco
 export function sessionControlOperation(pathname, method) {
   const parts = String(pathname || '').split('/').filter(Boolean);
   const normalizedMethod = text(method).toUpperCase();
+  if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'factory' && parts[4] === 'blocker-proposal' && normalizedMethod === 'POST') return BLOCKER_OPERATION;
   if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'factory' && parts[4] === 'review-opinion' && normalizedMethod === 'POST') return REVIEW_OPERATION;
   if (parts.length === 7 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'organization' && parts[4] === 'messages' && normalizedMethod === 'POST') {
     if (parts[6] === 'ack') return 'organization.message.ack';
@@ -398,7 +400,8 @@ async function authenticateSessionControlDetailed(req, {
   if (NODE_OPERATIONS.includes(operation)) {
     if (decodeURIComponent(parts[2] || '') !== rootSessionId || !validMessageScope(payload.organizationMessageScope)
         || JSON.stringify(channel.scope) !== JSON.stringify(payload.organizationMessageScope)
-        || (operation === REVIEW_OPERATION && payload.organizationMessageScope.reviewOpinionAllowed !== true)) return invalidResult();
+        || (operation === REVIEW_OPERATION && payload.organizationMessageScope.reviewOpinionAllowed !== true)
+        || (operation === BLOCKER_OPERATION && payload.organizationMessageScope.blockerProposalAllowed !== true)) return invalidResult();
   } else if (operation === 'session.delegate' || operation === 'session.process.create') {
     if (decodeURIComponent(parts[2] || '') !== rootSessionId) return invalidResult();
   } else if ([

@@ -1156,6 +1156,24 @@
           for (const milestone of item.milestones || []) add(content, 'p', `${milestone.milestone} · candidate ${milestone.candidateDigest} · commit ${milestone.evidence?.commit || 'unverified'} · target ${milestone.target || 'unknown'}`);
           if (!item.milestones?.some(m => m.milestone === 'integrated')) add(content, 'p', 'Integrated commit: unverified');
           add(content, 'p', 'Package availability and publication: unverified unless supported by a recorded delivery operation.');
+          add(content, 'h4', 'Worker blocker proposals');
+          try {
+            const proposals = await request(`/work-items/${encodeURIComponent(item.id)}/blocker-proposals`);
+            if (!proposals.items?.length) add(content, 'p', 'No recorded blocker proposals.');
+            for (const proposal of proposals.items || []) {
+              add(content, 'p', `${proposal.kind}: ${proposal.reason} · ${proposal.state} · execution ${proposal.executionEpoch}${proposal.suggestion ? ` · Suggestion: ${proposal.suggestion}` : ''}`);
+              if (proposal.state !== 'pending') continue;
+              const disposition = action => {
+                if (!root.confirm(action === 'pause' ? 'Request a pause for this work? The proposal itself does not stop the Run.' : 'Dismiss this proposal without changing the work?')) return;
+                const token=root.crypto.randomUUID();
+                const body={action,expectedProposalVersion:proposal.version,expectedWorkVersion:item.rowVersion,commandId:token,idempotencyKey:token};
+                const submit=async()=>{try {const result=await request(`/work-items/${encodeURIComponent(item.id)}/blocker-proposals/${encodeURIComponent(proposal.id)}/dispose`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});add(content,'p',`Disposition ${result.state}; refresh for current work and stop facts.`);}catch(error){add(content,'p',`Disposition not confirmed: ${error.message}`);button(content,'Retry same disposition',submit);}};
+                submit();
+              };
+              button(content,'Dismiss proposal',()=>disposition('dismiss'));
+              button(content,'Request pause',()=>disposition('pause'));
+            }
+          } catch(error) { add(content,'p',`Blocker proposals unavailable: ${error.message}`); }
           const reconcileStatus = add(content, 'p', 'Loading reconciliation state…');
           try { const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`); const observation = state.acceptedRunObservation; reconcileStatus.textContent = `${observation?.state === 'found' ? '发现执行记录，等待系统核实关联' : '暂未核实是否已执行'}。${observation?.expectedRunId ? `执行记录：${observation.expectedRunId}；状态：${observation.runState || '未知'}。` : ''} 对账状态：${state.state || '未知'}。` ; }
           catch (error) { reconcileStatus.textContent = `Reconciliation state unavailable: ${error.message}`; }
