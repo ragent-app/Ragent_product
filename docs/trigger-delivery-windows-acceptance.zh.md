@@ -67,3 +67,9 @@
 随后单条真实只读审查提醒的 Run 已启动但很快 failed，触发结果为 failed/published，错误 `delegation_replay_invalid`；其持久回复存在不等于任务成功，此轮未重启。有限取证发现新版 Codex 的 wait 调用以工具调用 ID 被误当作子代理 ID；后续源码将带新协议 receiverThreadIds 的 wait 作为控制观测，保留已知活跃子代理安全屏障。随后同 Run 按已确认的父 thread 和 receiver 映射成功 spawn 及明确 child 终态；跨 Run 关联和真实 spawn 尚未验收。该修复尚需正式安装与真实验收。两项既有权限检查已按实际测试场景修正，作者分别运行通过，未更改产品权限策略。
 
 历史 owner `OSV_RECOVERY_REFUSED` 的首因、历史 major 回滚 Return 5 的原因、无 threadId 的 broker 通知真实覆盖及用户界面观察仍未闭环；pending 调度重启已验证，已受理 Run 的在途重启恢复仍未验证。所有结论以实际记录为限。
+
+0.0.89 基于 `0bab816e1012d3a6a2277758d8728051e0b8205b`，MSI SHA-256 `AF8343628259C975D40CDB4EC23DE393D68168B4E560DA7A4B45E56F9E189B9A`；基于实际安装 0.0.87 的组件兼容及正式准入通过。0.0.88 仅构建，未安装。0.0.89 安装返回 3010，两个 delegation 文件安装 blob 与提交一致、服务运行、drain 已解除。
+
+真实单次 Run 正在运行且 supervisor 已接管时，全量 Run 检查仅该 QA Run 活跃；随后仅 ControlPlane 重启，PID 290668→291788，Supervisor PID 290284 不变。同一 occurrence、同一 Run 最终 completed/published、attempt 1，提醒自动禁用。该 Run 的空 receiver wait 自然发生并完成，delegation decision 为 complete、canonical 数为 0；这验证该次在途关联恢复及空 wait，不证明真实 spawn 或跨 Run 子代理绑定。前文关于在途恢复未验证是当时状态，以本段结果更新。
+
+本次 assistant 先发表检查计划，最终答复明确表示 Windows operation check unavailable，未读取两个文件、无法给出代码依据或安全结论。因此交付和恢复有证据，但原本要求的源码审查未完成；日志仅能确认相关事件发生在控制面重启完成之前，实际 stop 发起时间未保留，不能据此排除重启期间发生。该错误的具体来源仍待诊断。历史 owner 恢复失败首因、broker 无 threadId 通知真实覆盖、真实 spawn 与跨 Run 绑定仍未闭环。

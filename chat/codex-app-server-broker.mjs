@@ -731,22 +731,22 @@ function runBroker() {
     }
     if (message.type === 'agentoc-codex-windows-hook') {
       const event = message.event;
-      const deny = () => sendClient(client, { error: 'No matching active managed hook' });
+      const deny = code => sendClient(client, { error: 'No matching active managed hook', code });
       const tryClaim = (remaining) => {
         if (client.destroyed) return;
         const owner = threadOwners.get(event?.session_id);
         const matched = owner && hookRouters.get(owner)?.claim(event);
         if (!matched) {
           if (remaining > 0) { const timer = setTimeout(() => tryClaim(remaining - 1), 50); timer.unref?.(); }
-          else deny();
+          else deny(!owner || owner.destroyed ? 'HOOK_OWNER_UNAVAILABLE' : 'HOOK_CLAIM_UNMATCHED');
           return;
         }
         const id = `agentoc-hook-${nextRequestId++}`;
-        const timer = setTimeout(() => { pendingHookCalls.delete(id); deny(); }, 60_000);
+        const timer = setTimeout(() => { pendingHookCalls.delete(id); deny('HOOK_OWNER_TIMEOUT'); }, 60_000);
         timer.unref?.();
         pendingHookCalls.set(id, { owner, client, timer });
         if (!sendClient(owner, { id, method: 'agentoc/windowsHook', params: { event } })) {
-          clearTimeout(timer); pendingHookCalls.delete(id); deny();
+          clearTimeout(timer); pendingHookCalls.delete(id); deny('HOOK_OWNER_DISCONNECTED');
         }
       };
       tryClaim(20);
@@ -757,7 +757,7 @@ function runBroker() {
       if (hookCall) {
         if (hookCall.owner !== client) return;
         clearTimeout(hookCall.timer); pendingHookCalls.delete(message.id);
-        sendClient(hookCall.client, message.error ? { error: 'Hook evaluation failed' } : { result: message.result });
+        sendClient(hookCall.client, message.error ? { error: 'Hook evaluation failed', code: 'HOOK_EVALUATION_FAILED' } : { result: message.result });
         return;
       }
       const request = pendingServerRequests.get(message.id);
@@ -856,7 +856,7 @@ function runBroker() {
       for (const [id, call] of pendingHookCalls) {
         if (call.client !== client && call.owner !== client) continue;
         clearTimeout(call.timer); pendingHookCalls.delete(id);
-        if (call.owner === client) sendClient(call.client, { error: 'Hook owner disconnected' });
+        if (call.owner === client) sendClient(call.client, { error: 'Hook owner disconnected', code: 'HOOK_OWNER_DISCONNECTED' });
       }
       for (let index = pendingThreadClients.length - 1; index >= 0; index -= 1) {
         if (pendingThreadClients[index] === client) pendingThreadClients.splice(index, 1);
