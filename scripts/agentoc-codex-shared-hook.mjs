@@ -18,21 +18,28 @@ async function main() {
   try { event = JSON.parse(raw); } catch { return denied('HOOK_INPUT_INVALID'); }
   return await new Promise(resolve => {
     const socket = connect(socketPath);
-    let buffer = '', finished = false;
+    let buffer = '', receivedBytes = 0, finished = false;
     const finish = value => { if (finished) return; finished = true; clearTimeout(timer); socket.destroy(); resolve(value); };
     const timer = setTimeout(() => finish(denied('HOOK_TIMEOUT')), 58_000);
     socket.on('connect', () => socket.write(`${JSON.stringify({ type: 'agentoc-codex-windows-hook', event })}\n`));
     socket.on('error', () => finish(denied('HOOK_SOCKET_ERROR')));
     socket.on('end', () => finish(denied('HOOK_PEER_CLOSED')));
     socket.on('data', chunk => {
+      receivedBytes += Buffer.byteLength(chunk, 'utf8');
       buffer += chunk.toString('utf8');
-      if (Buffer.byteLength(buffer, 'utf8') > 256 * 1024) { finish(denied('HOOK_RESPONSE_INVALID')); return; }
-      const newline = buffer.indexOf('\n');
-      if (newline < 0) return;
-      try {
-        const message = JSON.parse(buffer.slice(0, newline));
-        finish(message.result && typeof message.result === 'object' && !Array.isArray(message.result) ? message.result : denied(brokerCodes.has(message.code) ? message.code : 'HOOK_RESPONSE_INVALID'));
-      } catch { finish(denied('HOOK_RESPONSE_INVALID')); }
+      if (receivedBytes > 256 * 1024) { finish(denied('HOOK_RESPONSE_INVALID')); return; }
+      for (;;) {
+        const newline = buffer.indexOf('\n');
+        if (newline < 0) return;
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        try {
+          const message = JSON.parse(line);
+          if (message?.method === 'account/rateLimits/updated' && !Object.hasOwn(message, 'id')) continue;
+          finish(message.result && typeof message.result === 'object' && !Array.isArray(message.result) ? message.result : denied(brokerCodes.has(message.code) ? message.code : 'HOOK_RESPONSE_INVALID'));
+        } catch { finish(denied('HOOK_RESPONSE_INVALID')); }
+        return;
+      }
     });
   });
 }
