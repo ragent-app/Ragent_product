@@ -403,6 +403,20 @@ function runBroker() {
   const clients = new Set();
   const turnActivity = createCodexBrokerTurnActivity();
   const threadOwners = new Map();
+  const mcpStartupOwners = new Map();
+  const releaseMcpEntry = entry => {
+    for (const [name, owner] of mcpStartupOwners) if (owner === entry) mcpStartupOwners.delete(name);
+  };
+  const releaseMcpThread = threadId => {
+    for (const [name, owner] of mcpStartupOwners) if (owner.threadId === threadId) mcpStartupOwners.delete(name);
+  };
+  const bindMcpEntry = entry => {
+    const servers = entry.message.params?.config?.mcp_servers;
+    const names = servers && typeof servers === 'object' && !Array.isArray(servers) ? Object.keys(servers) : [];
+    if (names.some(name => mcpStartupOwners.has(name))) return false;
+    for (const name of names) mcpStartupOwners.set(name, entry);
+    return true;
+  };
   const pending = new Map();
   // OAuth completion is app-scoped and must return only to its initiating
   // connection. Serializing by name also supports older servers without a
@@ -450,6 +464,11 @@ function runBroker() {
       return;
     }
     const threadId = readThreadId(message);
+    if (message?.method === 'mcpServer/startupStatus/updated' && !threadId) {
+      const owner = mcpStartupOwners.get(trimString(message.params?.name || message.params?.serverName || message.params?.server_name));
+      if (owner) sendClient(owner.client, message);
+      return;
+    }
     if (message?.method === 'hook/started' || message?.method === 'hook/completed') {
       hookRouters.get(threadOwners.get(threadId))?.observe(message);
     }
@@ -501,9 +520,13 @@ function runBroker() {
         try { upstream.stdin.write(`${JSON.stringify({ id: reloadId, method: 'thread/unsubscribe', params: { threadId: entry.message.params.threadId } })}\n`); } catch {}
         return;
       }
-      pending.set(entry.id, { client: entry.client, clientId: entry.clientId });
+      if (!bindMcpEntry(entry)) {
+        sendClient(entry.client, { id: entry.clientId, error: { code: -32007, message: 'MCP server name already owned' } });
+        activeThreadRequestId = null; continue;
+      }
+      pending.set(entry.id, { client: entry.client, clientId: entry.clientId, mcpEntry: entry });
       pendingThreadClients.push(entry.client);
-      try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch {}
+      try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch { releaseMcpEntry(entry); }
       return;
     }
   };
@@ -531,9 +554,14 @@ function runBroker() {
         sendNextThreadRequest();
         return;
       }
-      pending.set(entry.id, { client: entry.client, clientId: entry.clientId });
+      releaseMcpThread(entry.message.params?.threadId);
+      if (!bindMcpEntry(entry)) {
+        sendClient(entry.client, { id: entry.clientId, error: { code: -32007, message: 'MCP server name already owned' } });
+        activeThreadRequestId = null; sendNextThreadRequest(); return;
+      }
+      pending.set(entry.id, { client: entry.client, clientId: entry.clientId, mcpEntry: entry });
       pendingThreadClients.push(entry.client);
-      try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch {}
+      try { upstream.stdin.write(`${JSON.stringify(entry.message)}\n`); } catch { releaseMcpEntry(entry); }
       return;
     }
     if (serverRequest) {
@@ -565,6 +593,11 @@ function runBroker() {
         }
       }
       const threadId = readResultThreadId(message);
+      if (request.mcpEntry) {
+        if (message.error || !threadId || request.client.destroyed) releaseMcpEntry(request.mcpEntry);
+        else request.mcpEntry.threadId = threadId;
+      }
+      if (!message.error && request.releaseThreadId) releaseMcpThread(request.releaseThreadId);
       if (threadId && !request.client.destroyed) {
         threadOwners.set(threadId, request.client);
         removePendingThreadClient(request.client);
@@ -783,7 +816,8 @@ function runBroker() {
         sendNextThreadRequest();
         return;
       }
-      pending.set(upstreamId, { client, clientId: message.id, ...(mcpOAuthName ? { mcpOAuthName } : {}) });
+      pending.set(upstreamId, { client, clientId: message.id, ...(mcpOAuthName ? { mcpOAuthName } : {}),
+        ...(message.method === 'thread/unsubscribe' && threadId ? { releaseThreadId: threadId } : {}) });
       if (mcpOAuthName) {
         const seconds = Number(message.params?.timeoutSecs);
         const lifetime = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 3600;
@@ -813,6 +847,7 @@ function runBroker() {
     });
     client.on('close', () => {
       clients.delete(client);
+      for (const [name, owner] of mcpStartupOwners) if (owner.client === client) mcpStartupOwners.delete(name);
       // Closing the client does not cancel Codex's native OAuth flow. Retain a
       // tombstone until completion/expiry so its notification cannot be sent
       // to a later request for the same server, including older no-loginId APIs.

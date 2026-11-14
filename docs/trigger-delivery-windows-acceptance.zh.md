@@ -43,3 +43,11 @@
 0.0.84 上创建的专用周期提醒按两次上限结束并自动禁用。首轮 Run 在 provider 准备 ready/verified 后出现真实 `MCP_READINESS_TIMEOUT`，execution failed、delivery unknown；持久 spool 记录 readiness 等待 15000 毫秒且未观察到 ready 状态。第二轮 Run completed、delivery published，正式 history API 返回同一 Run 的 assistant 消息 seq 13，正文为“周期提醒验收成功。”。两轮使用不同 requestId，均为一次尝试；未观察用户界面。这支持每轮请求和结果隔离；首轮失败意味着两轮全成功验收未通过，原因仍待定位，第二轮成功不代表首轮自动恢复。
 
 补充的 MCP 只读诊断将失败记录写入该 Run 的 spool，包含 inventory 状态、首个必需目标是否出现、受限就绪原因和等待时长，不改变就绪判断。现有 sidecar 检查在第 939 行权限模式断言失败；该用例输入与期望不一致，但未运行基线，不能据此断言失败与改动无关。排队验收未命中：背景 Run 先因 MCP 超时结束，后续提醒直接运行，不能视为 queued 已验证。
+
+为采集真实 MCP 启动失败的有限诊断，已将提交 `1be543829d32a21ed6091d1708e8429d2c8eb356` 构建为 minor 0.0.85，MSI SHA-256 `8098193FD4C4E46AAFC89E1AC087CD102065B077E84623FDB29170478A43E4E7`。组件兼容及正式准入通过；升级前 drain 下 105 个索引和 Run 目录一致且均为终态。安装返回 3010，0.0.85 已注册，安装的 sidecar blob 与提交一致，两核心服务运行、drain 已解除。本次日志记录重启后删除 MSI 回滚文件，未重启系统。该版本仅增加失败诊断，不声明 MCP 超时根因已修。
+
+0.0.85 上的一次专用真实提醒再次以 `MCP_READINESS_TIMEOUT` 失败，execution failed、delivery unknown。新增 spool 诊断显示 inventory 已响应、首个目标存在，但 readiness 仍为 waiting / `MCP_READY_UNCONFIRMED`，等待约 15002 毫秒且未观察到目标 ready 状态；这不证明目标进程未启动或其退出原因。当前 MCP 问题仍未解决。
+
+对 0.0.85 失败 Run 的既存 inventory 做限定投影，目标服务器的 `runtimeStatus` 为 `connected`，目标工具存在且其输入 schema 的类型为 object。该事实缩小了问题范围：等待 ready 并不表示目标服务器未连接。早先现场投影因枚举列表不完整将该值标为 other，后经完整枚举更正；不得据此推断运行时字段为对象。
+
+后续修正解析并评估 inventory 的 `connected` 状态，并限定关联合法 MCP 通知；这针对已观察到的 connected 状态未被使用的问题。现有 broker 检查通过；adapter 检查在第 39 行权限参数断言失败，未做基线复跑，不能称全项通过或断言归因。实际提醒链路须在部署后验收；broker 路由是否造成此前通知缺失仍未证实。

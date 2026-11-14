@@ -515,6 +515,7 @@ export function readCodexAppServerMcpStatusList(message) {
     const inventory = readMcpToolInventory(record.tools);
     return {
       name,
+      runtimeStatus: ['notStarted', 'starting', 'connected', 'authenticationRequired', 'failed', 'cancelled', 'disabled'].includes(record.runtimeStatus) ? record.runtimeStatus : null,
       schemaAvailable: inventory.schemaAvailable,
       toolNames: inventory.toolNames,
     };
@@ -551,6 +552,11 @@ export function evaluateCodexAppServerMcpReadiness({
   if (groupedRequirements.length > 0) {
     const readyServers = [];
     for (const requirement of groupedRequirements) {
+      const startup = trimString(statuses[requirement.name]).toLowerCase();
+      if (startup === 'failed') return { state: 'failed', reasonCode: 'MCP_STARTUP_FAILED', serverName: requirement.name };
+      if (startup === 'cancelled') return { state: 'failed', reasonCode: 'MCP_STARTUP_CANCELLED', serverName: requirement.name };
+    }
+    for (const requirement of groupedRequirements) {
       const target = records.find((entry) => entry?.name === requirement.name);
       const startup = trimString(statuses[requirement.name]).toLowerCase();
       if (startup === 'failed') return { state: 'failed', reasonCode: 'MCP_STARTUP_FAILED', serverName: requirement.name };
@@ -560,7 +566,7 @@ export function evaluateCodexAppServerMcpReadiness({
           ? { state: 'failed', reasonCode: 'MCP_SERVER_NOT_DISCOVERED', serverName: requirement.name }
           : { state: 'waiting', reasonCode: 'MCP_SERVER_DISCOVERY_PENDING', serverName: requirement.name };
       }
-      if (startup !== 'ready') {
+      if ((target.runtimeStatus && target.runtimeStatus !== 'connected') || (!target.runtimeStatus && startup !== 'ready')) {
         return { state: 'waiting', reasonCode: startup ? 'MCP_STARTUP_PENDING' : 'MCP_READY_UNCONFIRMED', serverName: requirement.name };
       }
       if (target.schemaAvailable !== true) {
@@ -602,7 +608,7 @@ export function evaluateCodexAppServerMcpReadiness({
       ? { state: 'failed', reasonCode: 'MCP_SERVER_NOT_DISCOVERED' }
       : { state: 'waiting', reasonCode: 'MCP_SERVER_DISCOVERY_PENDING' };
   }
-  if (startup !== 'ready') {
+  if ((target.runtimeStatus && target.runtimeStatus !== 'connected') || (!target.runtimeStatus && startup !== 'ready')) {
     return { state: 'waiting', reasonCode: startup ? 'MCP_STARTUP_PENDING' : 'MCP_READY_UNCONFIRMED' };
   }
   if (target.schemaAvailable !== true) {

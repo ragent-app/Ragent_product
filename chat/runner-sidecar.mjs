@@ -2156,7 +2156,10 @@ function areRequiredCodexMcpServersStartupReady(state) {
     (state?.mcpRequiredServers || []).map((server) => server?.name).filter(Boolean),
   )];
   return requiredNames.length > 0
-    && requiredNames.every((name) => state?.mcpStartupStatuses?.[name] === 'ready');
+    && requiredNames.every((name) => {
+      const runtimeStatus = state?.mcpInventory?.find((entry) => entry.name === name)?.runtimeStatus;
+      return state?.mcpStartupStatuses?.[name] === 'ready' && (!runtimeStatus || runtimeStatus === 'connected');
+    });
 }
 
 function clearCodexAppServerMcpStartupFallback(state) {
