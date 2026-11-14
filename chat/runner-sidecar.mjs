@@ -4350,7 +4350,14 @@ async function main() {
       || !isCodexAppServerFamily || manifest.tool !== 'codex')) {
     throw new Error('Factory budget Run identity or supported provider is unavailable');
   }
-  const factoryFreshRecovery = Boolean(factoryBudget && manifest.options?.codexResume === true);
+  // codexResume is also the default preference on a brand-new Session.
+  // The context producer records semantic mode when no native thread was
+  // resumed; only that explicit, threadless case already has a full prompt.
+  const factorySemanticStart = manifest.providerResumeMode === 'semantic'
+    && (manifest.options?.codexThreadId == null
+      || (typeof manifest.options.codexThreadId === 'string' && !manifest.options.codexThreadId.trim()))
+    && typeof manifest.prompt === 'string' && Boolean(manifest.prompt.trim());
+  const factoryFreshRecovery = Boolean(factoryBudget && manifest.options?.codexResume === true && !factorySemanticStart);
   if (factoryFreshRecovery && !(typeof manifest.freshRecoveryPrompt === 'string' && manifest.freshRecoveryPrompt)) {
     throw new Error('Factory budget requires a complete fresh-thread context');
   }
