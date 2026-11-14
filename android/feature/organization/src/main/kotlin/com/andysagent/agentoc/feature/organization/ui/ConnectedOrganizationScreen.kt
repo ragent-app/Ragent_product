@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -41,6 +42,7 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     val cache = remember(context) { OrganizationOfflineCache(context) }
     val connection by transport.connectionState.collectAsState()
     val scopeKey = remember(offlineScope) { offlineScope?.let { scope -> MessageDigest.getInstance("SHA-256").digest(scope.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) } }.orEmpty() }
+    val workStateHolder = rememberSaveableStateHolder()
     var ownerVerified by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var ownerGeneration by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
     var projectionGeneration by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
@@ -60,6 +62,7 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     var loaded by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var refresh by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(0) }
     var organizationId by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<String?>(null) }
+    var rootSessionId by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<String?>(null) }
     var workOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(selectedResponsibilityId != null) }
     var messagesOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var nodes by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
@@ -146,7 +149,7 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
                     val stillCurrent = offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration))
                     if (!stillCurrent) status = "Organization access changed. Refresh to check current authorization."
                     else if (projection == null) status = "No organization is available for this session."
-                    else { organizationViewModel.applyProjection(projection); organizationId = projection.organizationId; nodes = projection.nodes; projectionGeneration = requestGeneration; loaded = true }
+                    else { organizationViewModel.applyProjection(projection); organizationId = projection.organizationId; rootSessionId = projection.rootSessionId; nodes = projection.nodes; projectionGeneration = requestGeneration; loaded = true }
                 },
                 onFailure = { status = "Organization unavailable: ${it.message ?: "request failed"}" },
             )
@@ -210,7 +213,14 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
                 }
             }
         }
-        else if (loaded && workOpen && organizationId != null) FactoryWorkScreen(cachedTransport, organizationId!!, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, onBack = { workOpen = false })
+        else if (loaded && workOpen && organizationId != null) {
+            // Without a verified account/target scope, never restore another
+            // transport's pending owner request after a change of identity.
+            val workScope = "${targetId.orEmpty()}:${scopeKey.ifBlank { transportKey }}:$sessionId:${organizationId.orEmpty()}"
+            workStateHolder.SaveableStateProvider(workScope) {
+                FactoryTeamWorkspace(cachedTransport, organizationId!!, nodes, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, rootSessionId, scopeKey.isNotBlank(), onBack = { workOpen = false })
+            }
+        }
         else if (loaded && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })
         else if (loaded) {
             TextButton(onClick = { workOpen = true }) { Text("Work items") }
