@@ -1182,6 +1182,25 @@ export function createProjectMemoryStore(options = {}) {
       })));
   }
 
+  // Read one exact fact and its provenance together; callers decide whether
+  // the current state is suitable for their narrower authorization scope.
+  async function getFactForTask(projectId, factId, memoryVersion) {
+    return withDatabase(db => {
+      db.exec('BEGIN');
+      try {
+      const project=text(projectId,160), fact=text(factId,120), version=Number(memoryVersion);
+      const current=db.prepare('SELECT * FROM memory_facts WHERE project_id=? AND fact_id=?').get(project,fact);
+      const saved=db.prepare('SELECT * FROM memory_fact_versions WHERE project_id=? AND fact_id=? AND memory_version=?').get(project,fact,version);
+      if(!current || !saved) { db.exec('COMMIT'); return null; }
+      const sources=db.prepare('SELECT id,session_id,run_id,source_event_start,source_event_end FROM memory_fact_provenance WHERE project_id=? AND fact_id=? AND memory_version=? ORDER BY id LIMIT 11').all(project,fact,version);
+      const result={projectId:project,factId:fact,memoryVersion:version,factVersion:Number(saved.fact_version),factKey:saved.fact_key,
+        factValue:saved.fact_value,state:saved.fact_state,contestedBy:saved.contested_by || '',currentVersion:Number(current.current_version),
+        currentKey:current.fact_key,currentValue:current.fact_value,currentState:current.fact_state,currentContestedBy:current.contested_by || '',sources};
+      db.exec('COMMIT'); return result;
+      } catch(error) { rollback(db); throw error; }
+    });
+  }
+
   async function diffMemoryVersions(projectId, fromVersion, toVersion) {
     const from = await getMemoryVersion(projectId, fromVersion);
     const to = await getMemoryVersion(projectId, toVersion);
@@ -1450,6 +1469,7 @@ export function createProjectMemoryStore(options = {}) {
     getFactProvenance,
     listCurrentFacts,
     getFactHistory,
+    getFactForTask,
     reviseFact,
     getMemoryMutationReceipt,
     diffMemoryVersions,

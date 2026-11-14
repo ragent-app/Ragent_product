@@ -12,6 +12,7 @@ import { createManagedSessionForNode } from './organization-managed-session-fact
 import { registerFactoryReleasePackage, authorizeFactoryRelease, requestFactoryRelease, getFactoryReleaseOperation, reconcileFactoryGithubRelease, resumeFactoryGithubRelease } from './factory-release.mjs';
 import { setPositionProfile, addTeamRelation, retireTeamRelation, getTeamConfiguration } from './organization-team-configuration.mjs';
 import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
+import { setFactoryTaskKnowledge } from './factory-task-knowledge.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
 import { requestFactoryReconciliation, getFactoryReconciliation, resumeFactoryReconciliation, verifyFactoryAcceptedRun, getFactoryBudgetObservation } from './factory-reconciliation.mjs';
 import { resolveResponsibilityActor } from './responsibility-actor.mjs';
@@ -57,6 +58,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const reviewOpinion = /^\/api\/sessions\/([^/]+)\/factory\/review-opinion$/.exec(String(pathname || ''));
   const reconcile = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile$/.exec(String(pathname || ''));
   const budget = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/budget$/.exec(String(pathname || ''));
+  const taskKnowledge = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/knowledge$/.exec(String(pathname || ''));
   const reconcileResume = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/resume$/.exec(String(pathname || ''));
   const reconcileVerify = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/verify-accepted$/.exec(String(pathname || ''));
   const goalRevision = /^\/api\/organizations\/([^/]+)\/factory\/goals\/([^/]+)\/revision\/(preview|commit)$/.exec(String(pathname || ''));
@@ -80,7 +82,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   if (reviewOpinion) {
     if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' || authSession?.capabilityOperation !== 'factory.review.submit' || decodeURIComponent(reviewOpinion[1]) !== authSession.sessionId) { writeJson(res,403,{error:'Scoped review Run capability required'}); return true; }
     if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
@@ -115,6 +117,15 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       const input={...body,organizationId:decodeURIComponent(scopedRevision[1]),goalId:decodeURIComponent(scopedRevision[2])};
       writeJson(res,200,await (scopedRevision[3]==='preview'?previewFactoryScopedRevision(input,actor):reviseFactoryScopeWithImpact(input,actor)));return true;
+    }
+    if (taskKnowledge) {
+      if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(!mutationSourceAllowed(req)) { writeJson(res,403,{code:'FACTORY_SOURCE_DENIED',error:'Request source or content type is not allowed'}); return true; }
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
+      const {expectedVersion,commandId,idempotencyKey,refs}=body || {};
+      writeJson(res,200,await setFactoryTaskKnowledge({organizationId:decodeURIComponent(taskKnowledge[1]),workItemId:decodeURIComponent(taskKnowledge[2]),expectedVersion,commandId,idempotencyKey,refs},actor)); return true;
     }
     if (budget) {
       if (req.method !== 'GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }

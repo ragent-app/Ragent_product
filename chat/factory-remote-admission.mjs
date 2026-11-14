@@ -44,6 +44,7 @@ function facts(db,bindingId,operationId) {
 }
 function checkedContract(facts,org,node) {
   const c=facts.payload.contract, paths=c?.allowedPaths;
+  if(c?.knowledgeRefs?.length) fail('Remote task knowledge delegation is not supported');
   if(!c || typeof c.objective!=='string' || !c.objective.trim() || c.objective.length>4096 || c.accessMode!=='write'
       || !Array.isArray(paths) || !paths.length || paths.some(p=>typeof p!=='string'||!p||p.includes('\\')||/^(?:[A-Za-z]:|[\\/])/.test(p)||p.split('/').some(s=>!s||s==='.'||s==='..'))
       || !Array.isArray(c.acceptanceCriteria) || !c.acceptanceCriteria.length) fail('Only scoped writer contracts are supported');
@@ -262,6 +263,7 @@ export function verifySourceRemoteDelegation(db,input,actor) {
   const node=db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assignee_node_id,input.organizationId);
   if(!node||node.retired_revision!==null||node.binding_generation!==binding.binding_generation||['archived','lifecycle_pending'].includes(org.state)) fail('Source organization binding changed');
   const contract=JSON.parse(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(item.id,item.contract_revision)?.contract_json || '{}');
+  if(contract.knowledgeRefs?.length) fail('Remote task knowledge delegation is not supported');
   if(contract.organizationRevision!==org.current_revision||hash(contract)!==input.contractDigest||digest(contract)!==digest(input.payload?.contract)) fail('Source contract changed');
   const key=`factory:${binding.id}`, counter=db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(input.organizationId,contract.organizationRevision);
   const entry=JSON.parse(counter?.reservations_json || '{}')[key];
