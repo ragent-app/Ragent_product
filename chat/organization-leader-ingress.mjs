@@ -252,6 +252,14 @@ export async function processRootLeadershipProposal({
     if (!organization) return errorResult(error);
   }
 
+  // Explicit owner-authored organizations are revised only through owner
+  // controls; a concurrently completing leadership Run cannot amend them.
+  if (organization?.policy?.source === 'owner') {
+    return errorResult(Object.assign(new Error('Owner-authored organization requires an explicit owner revision'), {
+      code: 'ORG_OWNER_REVISION_REQUIRED',
+    }));
+  }
+
   try {
     const proposalKey = text(proposal.idempotencyKey || proposal.proposalId);
     const revisionIdempotencyKey = turnId
