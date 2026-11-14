@@ -131,6 +131,17 @@ export async function acceptRemoteFactoryOperation(input, principal, { admit } =
       || Buffer.byteLength(JSON.stringify(payload),'utf8')>32768) throw factoryError('REMOTE_INVALID','Operation identity, contract, budget or admission is invalid',400);
   const canonical={ bindingId,operationId,requestId,sourceFactoryBindingId,bindingVersion:input.bindingVersion,
     contractRevision:input.contractRevision,executionEpoch:input.executionEpoch,contractDigest,payload:input.payload };
+  if(Buffer.byteLength(JSON.stringify({...canonical,signature:input.signature}),'utf8')>32768) throw factoryError('REMOTE_INVALID','Signed remote operation exceeds its shared payload limit',400);
+  if(payload.taskSummary!==undefined) {
+    const s=payload.taskSummary, allowed=['schemaVersion','workItemId','contractRevision','executionEpoch','contractDigest','sourceVersion','organizationRevision','facts','omitted','truncated'];
+    const fields={dependencies:['predecessor_id','milestone','candidate_digest'],candidates:['id','digest','contract_revision','execution_epoch'],decisions:['id','criterion_id','decision','candidate_digest','contract_revision'],failures:['id','run_id','failure_kind']};
+    if(!s || typeof s!=='object' || Array.isArray(s) || Object.keys(s).some(k=>!allowed.includes(k)) || s.schemaVersion!==1
+        || !text(s.workItemId) || s.workItemId!==payload.sourceWorkItemId || s.contractRevision!==input.contractRevision || s.executionEpoch!==input.executionEpoch || s.contractDigest!==contractDigest
+        || !Number.isSafeInteger(s.sourceVersion) || !Number.isSafeInteger(s.organizationRevision) || s.organizationRevision!==payload.contract.organizationRevision
+        || !Array.isArray(s.omitted) || JSON.stringify(s.omitted)!==JSON.stringify(['inbox_messages','contract_duplicate']) || typeof s.truncated!=='boolean'
+        || !s.facts || Object.keys(s.facts).length!==4 || Object.keys(fields).some(k=>!Array.isArray(s.facts[k]) || s.facts[k].length>5 || s.facts[k].some(e=>!e || typeof e!=='object' || Array.isArray(e) || Object.keys(e).some(f=>!fields[k].includes(f)) || Object.values(e).some(v=>v!==null && typeof v!=='string' && !Number.isSafeInteger(v)) || Buffer.byteLength(JSON.stringify(e),'utf8')>300))
+        || hash(s)!==payload.taskSummaryDigest) throw factoryError('REMOTE_INVALID','Remote task summary is invalid',400);
+  } else if(payload.taskSummaryDigest!==undefined) throw factoryError('REMOTE_INVALID','Remote task summary digest has no content',400);
   const payloadDigest=hash(canonical);
   const claim=await factoryTransaction(db=>{schema(db); const row=db.prepare('SELECT * FROM remote_factory_bindings WHERE id=?').get(bindingId);
     if (!row || !row.enabled || Date.parse(row.expires_at)<=Date.now() || row.version!==input.bindingVersion || row.source_instance_id!==principal.sourceInstanceId

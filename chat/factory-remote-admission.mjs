@@ -107,7 +107,7 @@ export function verifyRemoteFactoryChild(db,item,{bindingGeneration=item.binding
       || parent.contractRevision!==f.operation.contract_revision || parent.executionEpoch!==f.operation.execution_epoch || parent.contractDigest!==f.contractDigest) fail('Remote child fence changed');
   return {bindingId:b.id,operationId:f.operation.operation_id,sessionId:b.session_id,organizationId:b.organization_id,
     expectedBaseHead:f.payload.expectedBaseHead,expectedBaseBranch:f.payload.expectedBaseBranch,expectedBaselineDigest:f.payload.expectedBaselineDigest,
-    allowedPaths:f.payload.contract.allowedPaths};
+    allowedPaths:f.payload.contract.allowedPaths,taskSummary:f.payload.taskSummary || null,taskSummaryDigest:f.payload.taskSummaryDigest || null};
 }
 export async function assertRemoteTargetWorkspace(remote) {
   const {getOrganization}=await import('./organization-store.mjs');

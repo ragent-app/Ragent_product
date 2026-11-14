@@ -7,6 +7,7 @@ import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protoc
 import { loadOrCreateInstanceIdentity } from '../lib/instance-identity.mjs';
 import { signRemoteFactoryDelegation, signRemoteFactoryCancellation } from './remote-factory-operations.mjs';
 import { verifySourceRemoteDelegation } from './factory-remote-admission.mjs';
+import { remoteFactoryTaskSummary } from './factory-task-handoff.mjs';
 import { proxyToTarget } from './router-target-runtime-routes.mjs';
 
 const text=value=>typeof value==='string'?value.trim():'';
@@ -56,9 +57,17 @@ export async function dispatchRemoteFactoryOperation(input,actor,{verifyExternal
     if(!b||!b.enabled||Date.parse(b.expires_at)<=Date.now()||b.organization_id!==input.organizationId||b.version!==input.bindingVersion
         || input.payload?.sourceBindingId!==b.id || input.payload?.sourceBindingVersion!==b.version) throw factoryError('REMOTE_FORBIDDEN','Source binding unavailable',403);
     verifySourceRemoteDelegation(db,input,actor);
-    const canonical={bindingId:b.target_binding_id,operationId,requestId:required(input.requestId,'requestId'),sourceFactoryBindingId:required(input.sourceFactoryBindingId,'sourceFactoryBindingId'),bindingVersion:b.target_binding_version,contractRevision:input.contractRevision,executionEpoch:input.executionEpoch,contractDigest:input.contractDigest,payload:input.payload};
+    const canonical={bindingId:b.target_binding_id,operationId,requestId:required(input.requestId,'requestId'),sourceFactoryBindingId:required(input.sourceFactoryBindingId,'sourceFactoryBindingId'),bindingVersion:b.target_binding_version,contractRevision:input.contractRevision,executionEpoch:input.executionEpoch,contractDigest:input.contractDigest,payload:{...input.payload,sourceWorkItemId:input.workItemId,taskSummary:null,taskSummaryDigest:'0'.repeat(64)}};
+    // Reserve space for the signature field and its encoded value on the wire.
+    const summaryBudget=32768-256-Buffer.byteLength(JSON.stringify(canonical),'utf8')+4;
+    canonical.payload.taskSummary=remoteFactoryTaskSummary(db,input,summaryBudget);
+    canonical.payload.taskSummaryDigest=hash(canonical.payload.taskSummary);
+    if(Buffer.byteLength(JSON.stringify(canonical),'utf8')>32768) throw factoryError('REMOTE_INVALID','Remote operation exceeds its shared payload limit',400);
     const digest=hash(canonical), old=db.prepare('SELECT * FROM remote_factory_source_operations WHERE binding_id=? AND operation_id=?').get(bindingId,operationId);
-    if(old) {if(old.payload_digest!==digest) throw factoryError('REMOTE_CONFLICT','Operation identity reused',409); return {existing:true,binding:binding(b),canonical};}
+    if(old) { const saved=JSON.parse(old.request_json).canonical;
+      const withoutSummary=value=>{const payload={...value.payload}; delete payload.taskSummary; delete payload.taskSummaryDigest; if(!saved.payload.sourceWorkItemId) delete payload.sourceWorkItemId; return {...value,payload};};
+      if(hash(saved)!==old.payload_digest || hash(withoutSummary(saved))!==hash(withoutSummary(canonical))) throw factoryError('REMOTE_CONFLICT','Operation identity reused',409);
+      return {existing:true,binding:binding(b),canonical:saved}; }
     if(db.prepare('SELECT 1 FROM remote_factory_source_operations WHERE source_factory_binding_id=?').get(input.sourceFactoryBindingId)) throw factoryError('REMOTE_CONFLICT','Factory binding already delegated',409);
     const sourceBinding=binding(b),ts=now();db.prepare('INSERT INTO remote_factory_source_operations VALUES(?,?,?,?,?,?,?, ?,?)').run(bindingId,operationId,input.sourceFactoryBindingId,digest,JSON.stringify({canonical,binding:sourceBinding}),'unknown',null,ts,ts);return {binding:sourceBinding,canonical}; });
   if(prepared.existing) return {status:'unknown',operationId,reason:'query_required'};
@@ -68,9 +77,16 @@ export async function dispatchRemoteFactoryOperation(input,actor,{verifyExternal
       || evidence.baseHead!==prepared.canonical.payload.expectedBaseHead || evidence.baseBranch!==prepared.canonical.payload.expectedBaseBranch) {
     throw factoryError('REMOTE_CONFLICT','Source repository baseline changed',409);
   }
-  await factoryRead(db=>{const current=db.prepare('SELECT * FROM remote_factory_source_bindings WHERE id=?').get(bindingId); if(!current||!current.enabled||current.version!==prepared.binding.version||Date.parse(current.expires_at)<=Date.now()) throw factoryError('REMOTE_FORBIDDEN','Source binding changed',403);return verifySourceRemoteDelegation(db,input,actor);});
+  const checkBeforeSend=()=>factoryRead(db=>{const current=db.prepare('SELECT * FROM remote_factory_source_bindings WHERE id=?').get(bindingId); if(!current||!current.enabled||current.version!==prepared.binding.version||Date.parse(current.expires_at)<=Date.now()) throw factoryError('REMOTE_FORBIDDEN','Source binding changed',403); verifySourceRemoteDelegation(db,input,actor);
+    const template={...prepared.canonical,payload:{...prepared.canonical.payload,taskSummary:null,taskSummaryDigest:'0'.repeat(64)}};
+    const summary=remoteFactoryTaskSummary(db,input,32768-256-Buffer.byteLength(JSON.stringify(template),'utf8')+4);
+    if(hash(summary)!==prepared.canonical.payload.taskSummaryDigest) throw factoryError('REMOTE_CONFLICT','Remote task context changed before sending',409);
+  });
+  await checkBeforeSend();
   const signed=await signRemoteFactoryDelegation(prepared.canonical),path=`/api/remote-factory/bindings/${prepared.binding.targetBindingId}/operations/${operationId}`;
-  try {const targetRevision=await readTargetRevision(prepared.binding.targetInstanceId);const {response,body}=await proxyToTarget({targetId:prepared.binding.targetInstanceId,requestId:input.requestId,idempotencyKey:input.requestId,method:'POST',path,operation:'factory.remote.accept',resourceId:prepared.binding.targetBindingId,expectedRevision:targetRevision,body:JSON.stringify({...prepared.canonical,signature:signed.signature}),headers:{'content-type':'application/json'}});
+  const signedBody=JSON.stringify({...prepared.canonical,signature:signed.signature});
+  if(Buffer.byteLength(signedBody,'utf8')>32768) throw factoryError('REMOTE_INVALID','Signed remote operation exceeds its shared payload limit',400);
+  try {const targetRevision=await readTargetRevision(prepared.binding.targetInstanceId);await checkBeforeSend();const {response,body}=await proxyToTarget({targetId:prepared.binding.targetInstanceId,requestId:input.requestId,idempotencyKey:input.requestId,method:'POST',path,operation:'factory.remote.accept',resourceId:prepared.binding.targetBindingId,expectedRevision:targetRevision,body:signedBody,headers:{'content-type':'application/json'}});
     if(!response.ok) throw new Error('Target admission unavailable'); const envelope=JSON.parse(body.toString('utf8')),receipt=verifyReceipt(envelope,prepared.binding,prepared.canonical,sourceId);
     await factoryTransaction(db=>{schema(db);db.prepare('UPDATE remote_factory_source_operations SET status=?,receipt_json=?,updated_at=? WHERE binding_id=? AND operation_id=?').run(receipt.status,JSON.stringify(envelope),now(),bindingId,operationId);});return receipt;
   } catch {return {status:'unknown',operationId,reason:'query_required'};}

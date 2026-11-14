@@ -51,6 +51,28 @@ function workerRefs(db,organizationId,workItemId,contractRevision,executionEpoch
   }
   return refs;
 }
+
+// Only task facts cross the instance boundary. Inbox contents and identifiers
+// are intentionally excluded; the signed operation owns this immutable copy.
+export function remoteFactoryTaskSummary(db,input,maxBytes) {
+  const item=selectItem(db,input.organizationId,input.workItemId);
+  const refs=sourceRefs(db,input.organizationId,item.id,item.contract_revision,item.execution_epoch,{skipMessages:true});
+  delete refs.unansweredMessageRefs;
+  const summary={schemaVersion:1,workItemId:item.id,contractRevision:item.contract_revision,executionEpoch:item.execution_epoch,
+    contractDigest:input.contractDigest,sourceVersion:item.row_version,organizationRevision:input.payload.contract.organizationRevision,
+    facts:{dependencies:[],candidates:[],decisions:[],failures:[]},omitted:['inbox_messages','contract_duplicate'],truncated:refs.truncated};
+  if(!Number.isSafeInteger(maxBytes) || Buffer.byteLength(encode(summary),'utf8')>maxBytes) throw factoryError('REMOTE_INVALID','Remote payload has no room for task context',400);
+  for(const key of Object.keys(summary.facts)) {
+    if(refs[key].length>5) summary.truncated=true;
+    for(const entry of refs[key].slice(0,5)) {
+      if(Buffer.byteLength(encode(entry),'utf8')>300) { summary.truncated=true; continue; }
+      summary.facts[key].push(entry);
+      if(Buffer.byteLength(encode(summary),'utf8')>maxBytes) { summary.facts[key].pop(); summary.truncated=true; }
+    }
+  }
+  if(Buffer.byteLength(encode(summary),'utf8')>maxBytes) throw factoryError('REMOTE_INVALID','Remote task context exceeds payload limit',400);
+  return summary;
+}
 function publicHandoff(db,row,item,org) { const facts=decode(row.snapshot_json,{}); const current=item && (facts.workerScope ? workerRefs(db,row.organization_id,row.work_item_id,item.contract_revision,item.execution_epoch,facts.workerScope.nodeId) : sourceRefs(db,row.organization_id,row.work_item_id,item.contract_revision,item.execution_epoch)); return {id:row.id,organizationId:row.organization_id,workItemId:row.work_item_id,contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,organizationRevision:row.organization_revision,asOf:row.created_at,sourceVersion:row.row_version,stale:!item || (!facts.workerScope && facts.sourceRefs?.truncated === true) || item.row_version!==row.row_version || item.contract_revision!==row.contract_revision || item.execution_epoch!==row.execution_epoch || org.current_revision!==row.organization_revision || (facts.workerScope && (item.assignee_node_id!==facts.workerScope.nodeId || item.binding_generation!==facts.workerScope.bindingGeneration)) || JSON.stringify(current)!==JSON.stringify(facts.sourceRefs),freshness:facts.workerScope && (facts.sourceRefs?.truncated || facts.contractTruncated || facts.blockedReasonTruncated)?'unknown_truncated':'checked',facts,schemaVersion:1}; }
 
 // Internal dispatch path only. The caller must enforce the scheduler lease and
