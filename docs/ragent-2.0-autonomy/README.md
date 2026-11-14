@@ -20,6 +20,7 @@
 - [架构、状态权威和模块边界](architecture-and-boundaries.zh.md)：所有阶段的设计约束。
 - [验证、灰度与回滚](verification-and-rollout.zh.md)：所有阶段的证据标准和发布规则。
 - [原完整方案与审计记录](../ragent-2.0-autonomy-revised-plan-2026-11-13.zh.md)：保留完整审计上下文，后续阶段执行细节在本目录维护；若调整共同架构或范围，需要同步总览和受影响文档。
+- [剩余工作与验收顺序](remaining-work.zh.md)：按注明的审计基线区分 MVP 放行、原 Phase 0–5 对照与后续扩展。
 
 按 A → B → C 推进 MVP。D–F 是后续路线，表中的依赖是接口与验收依赖，不代表必须把所有工作机械串行，也不授权自动启用、发布或新增测试。
 
