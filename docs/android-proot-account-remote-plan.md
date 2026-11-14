@@ -113,6 +113,12 @@
 
 ## 2026-11-14 构建与验收记录
 
-Android 候选 APK 来源 `a2f73a75ec0d9b45b8ae09d23effa177b56f8a78`；PRoot 候选包产品源码为 `8d11b66f5322161bb924b1c05002ee3e1fd24b63`，打包工具为 `4a8f1dd35d414607c5a5657e5038375a34ee085a`。该候选包 release ID 为 `0.0.2-5a889099b0e80fad`，SHA-256 为 `c40f9a911de74471cc940a81c2cf29695cbe93006f403f311f4a65fe310b18e6`。旧实例已停止，手机重启后候选包的 SHA-256 在设备上核对通过；解压期间 ADB 连接中断，尚未运行安装器或安装新 APK。账号联动、后台运行和异机远程能力的最终实机验收仍未完成。
+Android 首次实机 APK 来源 `a2f73a75ec0d9b45b8ae09d23effa177b56f8a78`；PRoot 产品源码为 `8d11b66f5322161bb924b1c05002ee3e1fd24b63`，打包工具为 `4a8f1dd35d414607c5a5657e5038375a34ee085a`。最初候选包 release ID 为 `0.0.2-5a889099b0e80fad`，SHA-256 为 `c40f9a911de74471cc940a81c2cf29695cbe93006f403f311f4a65fe310b18e6`。
 
-最终说明文档修订包的 README 来源为 `8948cd31f6be5baa87e4523eb01a07a76aef01ad`，release ID 为 `0.0.2-3b8b9bc00e1970c2`，归档 SHA-256 为 `65831b736a14d5f64ddd4f5d4102633ab0cf084583c17251de2d8dc2b19400da`。两个包的内容清单各有 9540 项，逐项比较仅 README 不同；release ID 和内容清单是由 README 派生的元数据。其余运行时文件的路径、大小和 SHA-256 一致。最终修订包尚未在设备上安装。
+最终说明文档修订包的 README 来源为 `8948cd31f6be5baa87e4523eb01a07a76aef01ad`，release ID 为 `0.0.2-3b8b9bc00e1970c2`，归档 SHA-256 为 `65831b736a14d5f64ddd4f5d4102633ab0cf084583c17251de2d8dc2b19400da`。两个包的内容清单各有 9540 项，逐项比较仅 README 不同；release ID 和内容清单是由 README 派生的元数据。其余运行时文件的路径、大小和 SHA-256 一致。最终修订包经原安装器在手机上安装成功，首次实机 APK 原位安装成功，数据保留。
+
+针对 Demo 连接遮罩的修复版 APK 源码为 `9795b473610d602de0e914bd6b60c034ac6e6d55`，文件为 `G:\AgentoC\.task-temp\android-delivery-9795b473\app-debug.apk`，SHA-256 为 `f308f1e32a652604cadc73f29c5eb2cd34f0931bbb1b3a2aa3e48c9177b29a03`。增量构建成功，405 项任务中 16 项执行、389 项复用；同签名原位安装成功并保留数据。安装后原分屏拆开，全屏一次本机请求显示运行环境不可用，未读到目录；新包本机目录和 Demo 遮罩修复尚未实机验证通过。
+
+旧 APK 的真实业务验收：手机账号与实例成功关联（active/g1），退出后实例为 signed_out/g2，P2P host 停止，本机 WebSocket 重新连接，真实 Ubuntu 目录可访问。关闭 Wi-Fi 和移动数据后，在 App 未登录、实例 signed_out/g2 的状态下重新进入并刷新本机工作区，真实目录仍可访问。实例反向登录入口出现新的隐私与语音使用协议，未代用户同意，反向登录尚未验证；独立远程设备传输和 provider sync 也尚未验证。P2P host 启动或信令日志不能证明独立远程业务通过。
+
+三星设备上旧 APK 分屏保持 Termux 可见时，本机业务通过。新 APK 全屏时，同一时刻采集到 Ragent 是唯一 top-resumed 且拥有焦点，TermuxService 的 FGS 为 true，但 `PARTIAL_WAKE_LOCK termux:service-wakelock` 为 `DISABLED`；Node 13774 和 PRoot 13362 进程仍在且处于 `freezer:/frozen`，实际目录请求显示运行环境不可用。因此，全屏后台运行未通过；该次锁未有效持有，不能据此判断有效持锁时是否仍冻结，也不能宣称持锁已解决后台保活。
