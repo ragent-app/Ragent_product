@@ -16,4 +16,22 @@
 
 修改后的源码 discovery 对 `G:/AgentoCapp` 做一次只读检查，返回 `OBD_ENDPOINT_UNAVAILABLE`：检查越过原祖先写入错误，但 live endpoint 未通过发现。所用源码脚本 SHA-256 为 `4E0FA1DC798A414E1BFACF12609884493B39094988C063F2A1F12593EA7EFC0C`，当前安装的 owner helper SHA-256 为 `F527633346B99E90328971D08C65F13299539FA7E276B051CB2200230E56FD58`。这是源码脚本对现有安装的检查结果，不代表现有安装已更新或 owner 通道可用。各产品根检查仍保留各自原有 ACL 掩码及其他对象身份、内容验证。
 
-真实 provider 成功回复、周期提醒、控制面重启恢复、MCP 超时和原始事故因果均未完成验收。隔离实例缺少正式 Windows supervisor；未以模拟 provider 或放宽身份校验替代。尚未推送或部署。
+真实 provider 成功回复、周期提醒、控制面重启恢复、MCP 超时和原始事故因果均未完成验收。隔离实例缺少正式 Windows supervisor；未以模拟 provider 或放宽身份校验替代。当时尚未推送或部署。
+
+## 正式升级尝试（2026-11-14）
+
+基于提交树 `082be1014990eddc942bbc7d676ffa4f524b4971` 构建 MSI 0.0.83，SHA-256 `2534E8A2E511C936B65E88FF524E3C8410E77F2EB8B5160D0B1B9B0332A774D0`。第一次构建因默认缓存的 PowerShell 7.6.6 压缩包摘要不符而失败；重新构建明确指定现有 verified 缓存，其摘要与项目固定值及官方发布摘要一致，未修改期望值。
+
+候选包正式 upgrade-admission 返回成功。进入产品维护 drain 并核对 Run 索引及状态后，执行同路径升级；旧包的 `ManagedRemoveGuard` 在 `RemoveExistingProducts` 中失败，MSI 返回 1603。旧注册 MSI 提取的原 bridge（SHA-256 `89DD08D89725A0FB880352306C6A014FF06A1D07AA1E81C2501BDD90FF83A7FB`）对相同安装路径执行一次源码标明只读的 remove-admission，返回 `OMI_INPUT_WRITABLE`；该码不能单独确定具体对象，也不能证明诊断与 MSI 操作令牌完全相同。
+
+已通过产品入口解除 drain；旧版 0.0.82 仍注册，两个核心服务仍以原 PID、身份和实例路径运行，三个关键载荷摘要与升级前一致。这些是局部连续性证据，不代表完整回滚：日志在 Broker 回滚动作执行时记录 `Error in rollback skipped. Return: 5`，具体原因未明。未修改 G 盘根 ACL，未再次安装。日志与候选包位于 `G:/AgentoC/_qa/msi-remediation-20261114/`；真实 provider、周期提醒和生产重启恢复仍未验收。
+
+同日评估并构建正式 minor 路线：冻结源码 `0c9719da100dc26034f3c801632e2b811517f237`，保留旧 ProductCode、使用 0.0.83，绑定旧 MSI SHA-256；minor MSI SHA-256 `9ED9EEF79C0FF071A98E205DDB06811CDC76ECB72096C7779DB90390A72FE04D`。构建自带的组件树检查通过，且确认不运行 RemoveExistingProducts；包内正式准入也通过。
+
+第一次 minor 安装在 ProcessComponents 失败（1603）：SecureRepair 根据已注册包名寻找 `AgentoC.msi`，候选目录没有该名称。按产品 Setup 的同内容别名机制建立硬链接并核对摘要后，重新进入 drain、核对 100 个索引及目录均为终态，再执行一次正式 minor 事务。MSI 返回 3010：升级成功但需要重启；日志记录的待重启操作为删除一个 MSI 回滚文件，不能据此推断系统其他待重启操作。未重启系统。新版本 0.0.83 已注册，两个服务恢复运行且实例路径和服务身份不变；安装的 triggers、run-launcher 和 discovery 文件的 Git blob 与冻结源码一致。已通过正式入口解除 drain。真实 provider 和提醒链路验收结果另行记录。
+
+新安装的 ServiceHost SHA-256 为 `EA4C3ECDE55528D0495CB18FE6DD33951A7A32D50769584E2199A85A2CFD3186`；MSI 事务完成且两个新服务进程运行，但未从包内独立提取 ServiceHost 做逐字节摘要比较。部署后正式安装 CLI 的 owner activation、discovery 和认证只读链路成功，provider 配置投影为 enabled/credentialOk，表示本地配置和凭据可读取，不能单独证明上游可用。
+
+部署后的真实一次性提醒使用专用会话，provider 准备 ready/verified，Run completed 且退出码为 0；只读持久记录显示该 occurrence 的 execution 为 completed、delivery 为 published。专用会话中关联同一 Run 的 assistant 消息 seq 5 正文为“提醒验收成功。”，与请求一致。这验证一次真实回复的持久发布；未直接观察用户界面，也未证明周期提醒、重启恢复或 MCP 失败路径。
+
+随后 owner CLI 出现 `OBC_PEER_DISCONNECTED` 和 `OBC_TRANSPORT_FAILED`；只读健康端点返回 HTTP 503，owner activation 为 failed、code `OSV_RECOVERY_REFUSED`。两核心服务仍在运行；当前原因及恢复尚待确认，不能将 Run 成功视为 owner 通道持续健康。

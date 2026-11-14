@@ -1086,7 +1086,11 @@ server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
     void ownerActivation.start({ instanceRoot: INSTANCE_ROOT, instanceId: cliTransport.instanceId,
       port: CHAT_PORT, host: CHAT_BIND_HOST }).catch((error) => {
       const code = /^(OSV|OBD|OBC)_[A-Z_]+$/.test(error?.code || '') ? error.code : 'OSV_UNAVAILABLE';
-      console.warn(`[owner-activation] ${code}`);
+      const reason = ['revision-changed', 'state-blocked', 'controller-state-mismatch'].includes(error?.recoveryReason) ? error.recoveryReason : null;
+      const state = ['idle', 'starting', 'ready', 'refreshing', 'stopping', 'stopped', 'cleanup-required', 'expired', 'failed'].includes(error?.recoveryState) ? error.recoveryState : null;
+      const recoveryCode = /^(?:OBC|OBD|OSV|OBP|OBS)_[A-Z_]+$/.test(error?.recoveryCode || '') ? error.recoveryCode : null;
+      const peer = /^(?:OBC|OSV)_[A-Z_]+$/.test(error?.peerFailure || '') ? error.peerFailure : null;
+      console.warn(`[owner-activation] ${code}${reason ? ` reason=${reason}` : ''}${state ? ` state=${state}` : ''}${recoveryCode ? ` lifecycle=${recoveryCode}` : ''}${peer ? ` peer=${peer}` : ''}`);
     });
   }
   stopAdaptiveConcurrency = startAdaptiveConcurrencyController({
