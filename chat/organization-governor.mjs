@@ -133,7 +133,7 @@ function subtract(left, right) {
 
 // Responsibility windows are dimensions of the same reservation transaction;
 // they do not replace the organization counter or accept model-reported usage.
-function responsibilityWindow(db, organizationId, workItemId, delta) {
+function responsibilityWindow(db, organizationId, workItemId, delta, automaticDimensions = [], priorReservations = []) {
   if (!workItemId || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_work_links'").get()) return null;
   const item=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(workItemId,organizationId);
   if (!item) throw governorError(ORG_BUDGET_INVALID,'Factory work item unavailable');
@@ -168,6 +168,17 @@ function responsibilityWindow(db, organizationId, workItemId, delta) {
   db.prepare('INSERT OR IGNORE INTO organization_responsibility_budget_windows VALUES(?,?,?,?,?)').run(link.responsibility_id,day,budget.timeZone,json(emptyTotals()),json(emptyTotals()));
   const row=db.prepare('SELECT * FROM organization_responsibility_budget_windows WHERE responsibility_id=? AND day=?').get(link.responsibility_id,day);
   const limits={}; if(budget.maxRuns!==undefined) limits.runs=budget.maxRuns; if(budget.maxTokens!==undefined) limits.tokens=budget.maxTokens; if(budget.maxCost!==undefined) limits.cost=budget.maxCost;
+  const totals=parse(row.totals_json,emptyTotals()), reserved=parse(row.reserved_json,emptyTotals());
+  for (const dimension of ['tokens', 'cost']) {
+    if (limits[dimension] === undefined) continue;
+    if (priorReservations.some(entry => entry.state !== 'released' && entry.state !== 'settled'
+        && entry.responsibilityScope?.responsibilityId === link.responsibility_id && entry.responsibilityScope?.day === day
+        && entry.unknownDimensions?.includes(dimension))) throw governorError(ORG_BUDGET_INVALID, `Unresolved ${dimension} usage prevents applying the responsibility budget`);
+    if (!automaticDimensions.includes(dimension)) continue;
+    const available = limits[dimension] - (totals[dimension] || 0) - (reserved[dimension] || 0);
+    if (!(available > 0)) throw governorError(ORG_BUDGET_EXCEEDED, `${dimension} budget exhausted`, 409, { dimension });
+    delta[dimension] = delta[dimension] > 0 ? Math.min(delta[dimension], available) : available;
+  }
   assertWithinBudget(parse(row.totals_json,emptyTotals()),parse(row.reserved_json,emptyTotals()),delta,limits);
   db.prepare('UPDATE organization_responsibility_budget_windows SET reserved_json=? WHERE responsibility_id=? AND day=?').run(json(add(parse(row.reserved_json,emptyTotals()),delta)),link.responsibility_id,day);
   return {responsibilityId:link.responsibility_id,day,timeZone:budget.timeZone,workItemId};
@@ -333,6 +344,8 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
   if (revisionNumber < 0) throw governorError(ORG_BUDGET_INVALID, 'revision is required', 400);
   const reservation = ensureIdentity(reservationId || `reservation:${key}`, 'reservationId');
   const normalizedDelta = normalizeDelta(delta);
+  const requestedDelta = { ...normalizedDelta };
+  const automaticDimensions = factoryWorkItemId ? ['tokens', 'cost'].filter(key => !Object.hasOwn(delta, key)) : [];
   const normalizedLimits = normalizeLimits(limits);
   const ttl = Number.isFinite(Number(reservationTtlMs)) ? Math.max(0, Math.min(24 * 60 * 60 * 1000, Number(reservationTtlMs))) : 0;
   const requestedExpiry = text(expiresAt);
@@ -348,7 +361,8 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
       const reservations = parse(current.reservations_json, {});
       const replay = reservations[key];
       if (replay) {
-        if (replay.reservationId !== reservation || JSON.stringify(replay.delta) !== JSON.stringify(normalizedDelta)
+        if (replay.reservationId !== reservation || JSON.stringify(replay.requestedDelta || replay.delta) !== JSON.stringify(requestedDelta)
+            || (replay.automaticDimensions && JSON.stringify(replay.automaticDimensions) !== JSON.stringify(automaticDimensions))
             || (replay.factoryWorkItemId && replay.factoryWorkItemId !== factoryWorkItemId)) {
           throw governorError(ORG_BUDGET_INVALID, 'idempotency key belongs to a different reservation', 409);
         }
@@ -358,14 +372,27 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
       const totals = parse(current.totals_json, emptyTotals());
       const reservedTotals = parse(current.reserved_json, emptyTotals());
       const allCounters = cumulativeAcrossRevisions
-        ? db.prepare('SELECT totals_json, reserved_json FROM organization_budget_counters WHERE organization_id = ?').all(orgId)
+        ? db.prepare('SELECT totals_json, reserved_json, reservations_json FROM organization_budget_counters WHERE organization_id = ?').all(orgId)
         : [current];
       const cumulative = allCounters.reduce((sum, row) => ({
         totals: add(sum.totals, parse(row.totals_json, emptyTotals())),
         reserved: add(sum.reserved, parse(row.reserved_json, emptyTotals())),
       }), { totals: emptyTotals(), reserved: emptyTotals() });
+      const reservationCounters = cumulativeAcrossRevisions ? allCounters
+        : db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id = ?').all(orgId);
+      const priorReservations = reservationCounters.flatMap(row => Object.values(parse(row.reservations_json, {})));
+      for (const dimension of ['tokens', 'cost']) {
+        if (effectiveLimits[dimension] === undefined) continue;
+        if (priorReservations.some(entry => entry.state !== 'released' && entry.state !== 'settled' && entry.unknownDimensions?.includes(dimension)))
+          throw governorError(ORG_BUDGET_INVALID, `Unresolved ${dimension} usage prevents applying the organization budget`);
+        if (automaticDimensions.includes(dimension)) {
+          const available = effectiveLimits[dimension] - cumulative.totals[dimension] - cumulative.reserved[dimension];
+          if (!(available > 0)) throw governorError(ORG_BUDGET_EXCEEDED, `${dimension} budget exhausted`, 409, { dimension });
+          normalizedDelta[dimension] = available;
+        }
+      }
+      const responsibilityScope = responsibilityWindow(db,orgId,factoryWorkItemId,normalizedDelta,automaticDimensions,priorReservations);
       assertWithinBudget(cumulative.totals, cumulative.reserved, normalizedDelta, effectiveLimits);
-      const responsibilityScope = responsibilityWindow(db,orgId,factoryWorkItemId,normalizedDelta);
       const nextReserved = add(reservedTotals, normalizedDelta);
       const nextReservations = {
         ...reservations,
@@ -373,6 +400,7 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
           reservationId: reservation,
           idempotencyKey: key,
           delta: normalizedDelta,
+          ...(automaticDimensions.length ? { requestedDelta, automaticDimensions, unknownDimensions: automaticDimensions.filter(key => normalizedDelta[key] === 0) } : {}),
           state: 'reserved',
           ...(factoryWorkItemId ? { factoryWorkItemId } : {}),
           ...(responsibilityScope ? { responsibilityScope } : {}),
@@ -428,6 +456,12 @@ export async function settleOrganizationBudget({ organizationId, revision, reser
         return { ...rowCounter(current), reservation: entry, replay: true };
       }
       if (entry.state !== 'reserved') throw governorError(ORG_BUDGET_INVALID, 'reservation is not settleable', 409);
+      for (const dimension of entry.automaticDimensions || []) {
+        const value = backendUsage[dimension];
+        if (!Object.hasOwn(backendUsage, dimension) || (dimension === 'tokens'
+          ? !Number.isSafeInteger(value) || value < 0 : !Number.isFinite(value) || value < 0))
+          throw governorError(ORG_BUDGET_INVALID, `Observed ${dimension} usage is required to settle the reservation`, 409);
+      }
       const totals = parse(current.totals_json, emptyTotals());
       const reserved = parse(current.reserved_json, emptyTotals());
       const nextReserved = subtract(reserved, entry.delta);
@@ -451,6 +485,10 @@ export async function settleOrganizationBudget({ organizationId, revision, reser
 }
 
 export async function settleFactoryBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage } = {}) {
+  if (!backendUsage || !Object.hasOwn(backendUsage, 'tokens') || !Object.hasOwn(backendUsage, 'cost')
+      || !Number.isSafeInteger(backendUsage.tokens) || backendUsage.tokens < 0
+      || !Number.isFinite(backendUsage.cost) || backendUsage.cost < 0)
+    throw governorError(ORG_BUDGET_INVALID, 'Factory settlement requires observed token and cost usage', 400);
   return settleOrganizationBudget({ organizationId, revision, reservationId, idempotencyKey, backendUsage,
     recordActualOverBudget: true });
 }

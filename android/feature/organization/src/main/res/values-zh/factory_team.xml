@@ -111,4 +111,9 @@
     <string name="factory_ux_project_unavailable">暂时无法确认当前项目，请重新连接并刷新后再保存。</string>
     <string name="factory_ux_prepared">准备就绪，由你决定是否开始。</string>
     <string name="factory_ux_waiting">等待中</string>
+    <string name="factory_ux_budget_optional">本任务未设置预算（可选）。</string>
+    <string name="factory_ux_budget_invalid">已保存的预算不完整，请检查后再开始。</string>
+    <string name="factory_ux_budget_unsaved">请保存两个数值，或清空后再开始。</string>
+    <string name="factory_ux_saved_tokens">Token 预留：%1$s</string>
+    <string name="factory_ux_saved_cost">费用预留：%1$s（未提供币种）</string>
 </resources>

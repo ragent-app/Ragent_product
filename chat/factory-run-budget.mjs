@@ -47,12 +47,17 @@ export async function resolveFactoryRunBudget({ sessionId, requestId, runId, man
     if (!reservation || reservation.state !== 'reserved' || reservation.reservationId !== context.budgetKey || reservation.factoryWorkItemId !== item.id) conflict('Factory budget reservation unavailable');
     const tokens = reservation.delta?.tokens;
     const cost = reservation.delta?.cost;
-    if (!Number.isSafeInteger(tokens) || tokens <= 0) conflict('Factory token limit is required; provider cost is not observable');
+    if (!Number.isSafeInteger(tokens) || tokens < 0 || (tokens === 0 && !reservation.unknownDimensions?.includes('tokens')))
+      conflict('Factory token reservation is invalid');
+    if (!Number.isFinite(cost) || cost < 0 || (cost === 0 && reservation.automaticDimensions && !reservation.unknownDimensions?.includes('cost')))
+      conflict('Factory cost reservation is invalid');
     return { schemaVersion: 1, organizationId: context.organizationId, workItemId: item.id, bindingId: binding.id,
       contractRevision: context.contractRevision, contractDigest: contract.digest, executionEpoch: context.executionEpoch,
       bindingGeneration: context.bindingGeneration, collaborationId: row.collaboration_id, attemptId: row.attempt_id,
       dispatchCommandId: row.command_id, sessionId, requestId, runId, reservationId: context.budgetKey,
       tokenLimit: Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null,
-      costLimit: Number.isFinite(cost) && cost > 0 ? cost : null, costObservation: 'unknown' };
+      costLimit: Number.isFinite(cost) && cost > 0 ? cost : null, costObservation: 'unknown',
+      ...(reservation.automaticDimensions ? { automaticDimensions: reservation.automaticDimensions,
+        unknownDimensions: reservation.unknownDimensions } : {}) };
   });
 }

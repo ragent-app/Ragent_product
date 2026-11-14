@@ -111,4 +111,9 @@
     <string name="factory_ux_project_unavailable">Unable to identify this project. Reconnect and refresh before saving.</string>
     <string name="factory_ux_prepared">Ready for your decision.</string>
     <string name="factory_ux_waiting">Waiting</string>
+    <string name="factory_ux_budget_optional">No task budget set (optional).</string>
+    <string name="factory_ux_budget_invalid">The saved budget is incomplete. Review it before starting.</string>
+    <string name="factory_ux_budget_unsaved">Save both values or clear both before starting.</string>
+    <string name="factory_ux_saved_tokens">Token reservation: %1$s</string>
+    <string name="factory_ux_saved_cost">Cost reservation: %1$s (currency not provided)</string>
 </resources>

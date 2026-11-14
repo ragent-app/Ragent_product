@@ -43,11 +43,24 @@ function within(path, root) {
 }
 function budgetReservationFor(contract) {
   const explicit = contract?.budgetReservation;
-  if (explicit && typeof explicit === 'object' && !Array.isArray(explicit)) return explicit;
   const budget = contract?.budget;
-  const cost=Number.isFinite(budget?.maxCost) && budget.maxCost>0 ? budget.maxCost : null;
-  const tokens=Number.isSafeInteger(budget?.maxTokens) && budget.maxTokens>0 ? budget.maxTokens : null;
+  const costValues = [explicit?.cost, budget?.maxCost].filter(value => Number.isFinite(value) && value > 0);
+  const tokenValues = [explicit?.tokens, budget?.maxTokens].filter(value => Number.isSafeInteger(value) && value > 0);
+  const cost=costValues.length ? Math.min(...costValues) : null;
+  const tokens=tokenValues.length ? Math.min(...tokenValues) : null;
   return cost || tokens ? { ...(cost ? {cost} : {}), ...(tokens ? {tokens} : {}) } : null;
+}
+function hasInvalidBudget(contract) {
+  for (const [field, tokenKey, costKey] of [['budgetReservation', 'tokens', 'cost'], ['budget', 'maxTokens', 'maxCost']]) {
+    if (!Object.hasOwn(contract || {}, field)) continue;
+    const value = contract[field];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+    const hasTokens = Object.hasOwn(value, tokenKey), hasCost = Object.hasOwn(value, costKey);
+    if ((field === 'budgetReservation' && !hasTokens && !hasCost)
+      || (hasTokens && (!Number.isSafeInteger(value[tokenKey]) || value[tokenKey] <= 0))
+      || (hasCost && (!Number.isFinite(value[costKey]) || value[costKey] <= 0))) return true;
+  }
+  return false;
 }
 // Notification evidence is narrower than a generic terminal update: it must
 // identify a real finalized Run and its failed, same-binding attempt.
@@ -261,9 +274,12 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         || (paths.length && (node.grant?.canWrite !== true || paths.some((path) => !granted.some((root) => within(path, root)))))) {
       return { allowed: false, reason: 'runtime_or_grant_unavailable' };
     }
-    if (!budgetReservationFor(item.contract)) return { allowed: false, reason: 'budget_reservation_required' };
-    if (!Number.isSafeInteger(budgetReservationFor(item.contract).tokens) || budgetReservationFor(item.contract).tokens<=0)
-      return { allowed: false, reason: 'observable_token_budget_required' };
+    if (hasInvalidBudget(item.contract)) return { allowed: false, reason: 'budget_reservation_invalid' };
+    const requestedBudget = budgetReservationFor(item.contract);
+    if (!item.source?.parentRemoteOperation && org.policy?.factoryRemoteBindings?.[node.id]
+        && (!Number.isSafeInteger(requestedBudget?.tokens) || requestedBudget.tokens <= 0
+          || !Number.isFinite(requestedBudget?.cost) || requestedBudget.cost <= 0))
+      return { allowed: false, reason: 'remote_budget_reservation_required' };
     const {getToolDefinitionAsync}=await import('../lib/tools.mjs');
     const toolDefinition=await getToolDefinitionAsync(session.tool);
     if(session.tool!=='codex' || toolDefinition?.runtimeFamily!=='codex-app-server-json')
