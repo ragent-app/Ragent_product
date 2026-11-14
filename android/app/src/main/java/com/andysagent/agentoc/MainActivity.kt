@@ -1194,7 +1194,10 @@ class MainActivity : ComponentActivity() {
                 val currentWorkbenchTargetId = temporaryControlTargetId ?: computerDirectory.activeTargetId
                 val usingLocalRuntime = computerDirectory.computers.any { it.instanceId == currentWorkbenchTargetId && it.localRuntime }
                 LaunchedEffect(localStartup != null, usingLocalRuntime, accountsState.isDemoAccount, accountsState.accountId, accountsState.status) {
-                    if (localStartup == null) return@LaunchedEffect
+                    if (localStartup == null) {
+                        demoConnection.deactivate()
+                        return@LaunchedEffect
+                    }
                     if (usingLocalRuntime) {
                         demoConnection.deactivate()
                     } else if (accountsState.isDemoAccount) {
