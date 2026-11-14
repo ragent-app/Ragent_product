@@ -53,6 +53,7 @@ fun GoogleSignInGuideScreen(
     onContinueWithBrowser: (() -> Unit)? = null,
     onContinueWithDemo: (() -> Unit)? = null,
     onLocalRuntime: () -> Unit = {},
+    showLocalRuntime: Boolean = false,
 ) {
     val colors = LocalAgentocColors.current
 
@@ -134,7 +135,7 @@ fun GoogleSignInGuideScreen(
                     }
 
                     Spacer(Modifier.height(8.dp))
-                    OnboardingTextAction(stringResource(R.string.local_runtime_entry), onLocalRuntime, quiet = true)
+                    if (showLocalRuntime) OnboardingTextAction(stringResource(R.string.local_runtime_entry), onLocalRuntime, quiet = true)
                     onContinueWithBrowser?.let { browser ->
                         OnboardingTextAction(stringResource(R.string.sign_in_guide_continue_with_browser), browser,
                             quiet = true)

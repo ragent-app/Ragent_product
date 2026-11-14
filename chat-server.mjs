@@ -692,6 +692,12 @@ function handleHttpRequest(req, res, fromCliSocket = false) {
     res.end('Service shutting down');
     return;
   }
+  if (isProotRuntime && !fromCliSocket && req.method === 'GET'
+      && req.url === '/api/local/discovery' && isDirectProotRequest(req)) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ version: 1, kind: 'ragent-proot-local' }));
+    return;
+  }
   if (req.method === 'POST' && req.url === '/api/cli/auth') {
     void handleCliSocketAuth(req, res);
     return;

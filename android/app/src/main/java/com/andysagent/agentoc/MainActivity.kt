@@ -452,6 +452,21 @@ class MainActivity : ComponentActivity() {
                 val runtimeScope = rememberCoroutineScope()
                 var localSetupOpen by remember { mutableStateOf(false) }
                 val localLinkDirectory by app.runtime.configStore.directory.collectAsStateWithLifecycle(initialValue = com.andysagent.agentoc.core.datastore.ComputerDirectory())
+                var localDiscovered by remember { mutableStateOf(false) }
+                var discoveryGeneration by remember { mutableStateOf(0) }
+                val hasSavedLocal = localLinkDirectory.computers.any { it.localRuntime }
+                val showLocalRuntime = hasSavedLocal || localDiscovered
+                androidx.compose.runtime.DisposableEffect(this@MainActivity) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) discoveryGeneration++
+                    }
+                    lifecycle.addObserver(observer)
+                    onDispose { lifecycle.removeObserver(observer) }
+                }
+                LaunchedEffect(discoveryGeneration, hasSavedLocal) {
+                    localDiscovered = false
+                    if (!hasSavedLocal) localDiscovered = discoverLocalRuntime()
+                }
                 val localLinkStates by app.runtime.localAccountLinkStates.collectAsStateWithLifecycle()
                 var localLinkReview by remember { mutableStateOf<LocalAccountLinkStatus?>(null) }
                 var localUnbindReview by remember { mutableStateOf<LocalAccountLinkStatus?>(null) }
@@ -597,7 +612,13 @@ class MainActivity : ComponentActivity() {
                         dismissButton = { TextButton(enabled = !localLinkBusy, onClick = { localUnbindReview = null }) { Text(getString(android.R.string.cancel)) } },
                     )
                 }
-                if (addComputerChoiceOpen) AlertDialog(
+                LaunchedEffect(addComputerChoiceOpen, showLocalRuntime) {
+                    if (addComputerChoiceOpen && !showLocalRuntime) {
+                        addComputerChoiceOpen = false
+                        addRemoteRequested = true
+                    }
+                }
+                if (addComputerChoiceOpen && showLocalRuntime) AlertDialog(
                     onDismissRequest = { addComputerChoiceOpen = false },
                     title = { Text(getString(R.string.local_runtime_add_title)) },
                     confirmButton = { TextButton(onClick = { addComputerChoiceOpen = false; localSetupOpen = true }) { Text(getString(R.string.local_runtime_title)) } },
@@ -1766,6 +1787,7 @@ class MainActivity : ComponentActivity() {
                         pendingPairingScanFromWelcome = true
                     },
                     onLocalRuntime = { localSetupOpen = true },
+                    showLocalRuntime = showLocalRuntime,
                     onOpenSubscription = {
                         subscriptionInfoOpen = true
                     },

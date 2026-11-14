@@ -88,3 +88,23 @@ internal class LocalTargetConnection(
     override suspend fun stop() { identityVerified.set(false); job?.cancelAndJoin(); job = null; transport.close() }
     override fun applyVerifiedBootstrap(plan: BootstrapConnectionPlan) = Unit
 }
+
+/** Unauthenticated discovery is only a visibility hint; pairing still verifies identity. */
+private val localDiscoveryMutex = kotlinx.coroutines.sync.Mutex()
+
+internal suspend fun discoverLocalRuntime(): Boolean {
+    localDiscoveryMutex.lock()
+    try { return withContext(Dispatchers.IO) {
+    val client = localHttpClient().newBuilder()
+        .callTimeout(1200, java.util.concurrent.TimeUnit.MILLISECONDS).build()
+    try {
+        val request = okhttp3.Request.Builder().url("http://127.0.0.1:17690/api/local/discovery").build()
+        client.newCall(request).execute().use { response ->
+            if (response.code != 200) return@use false
+            val obj = Json.parseToJsonElement(response.peekBody(1024).string()).jsonObject
+            obj["version"]?.jsonPrimitive?.let { !it.isString && it.content == "1" } == true &&
+                obj["kind"]?.jsonPrimitive?.let { it.isString && it.content == "ragent-proot-local" } == true
+        }
+    } catch (_: Exception) { false }
+    } } finally { localDiscoveryMutex.unlock() }
+}

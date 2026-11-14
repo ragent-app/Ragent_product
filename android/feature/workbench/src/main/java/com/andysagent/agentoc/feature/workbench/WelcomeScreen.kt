@@ -54,6 +54,7 @@ fun WelcomeScreen(
     onDemoSignIn: (() -> Unit)? = null,
     onSetUpComputer: () -> Unit = onScanPairing,
     onLocalRuntime: () -> Unit = {},
+    showLocalRuntime: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalAgentocColors.current
@@ -81,6 +82,7 @@ fun WelcomeScreen(
                 onDemoSignIn = onDemoSignIn,
                 onSetUpComputer = onSetUpComputer,
                 onLocalRuntime = onLocalRuntime,
+                showLocalRuntime = showLocalRuntime,
             )
         }
     }
@@ -97,12 +99,13 @@ private fun WelcomeConnectionContent(
     onDemoSignIn: (() -> Unit)?,
     onSetUpComputer: () -> Unit,
     onLocalRuntime: () -> Unit,
+    showLocalRuntime: Boolean,
 ) {
     val colors = LocalAgentocColors.current
     OnboardingPageContent(
         Modifier.testTag(if (signedIn) "connect-computer-page" else "welcome-entry-page"),
         footer = {
-            OnboardingTextAction(stringResource(R.string.local_runtime_entry), onLocalRuntime, quiet = true)
+            if (showLocalRuntime) OnboardingTextAction(stringResource(R.string.local_runtime_entry), onLocalRuntime, quiet = true)
             if (!signedIn) {
                 OnboardingTextAction(stringResource(R.string.journey_temporary_entry), onLearnConnectionMethods,
                     Modifier.testTag("temporary-access-entry"), quiet = true)
