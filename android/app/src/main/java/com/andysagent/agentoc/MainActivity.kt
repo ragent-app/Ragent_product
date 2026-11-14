@@ -1606,8 +1606,18 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 ) {
+                val organizationTargetId = if (tabletDualPane) detailTargetId else currentWorkbenchTargetId
+                val profileDirectory by app.runtime.configStore.accountProfileState.collectAsStateWithLifecycle(initialValue = null)
+                val organizationProfileAccount = profileDirectory?.let { profile ->
+                    profile.profileAccountId?.takeIf { it == profile.sessionAccountId && organizationTargetId in profile.targets }
+                }
+                val organizationTargetTransport = organizationTargetId?.takeIf { id ->
+                    organizationProfileAccount != null && computerDirectory.computers.any { it.instanceId == id }
+                }?.let(app.runtime::existingTargetTransport)
                 WorkbenchScreen(
-                    organizationTransport = if (tabletDualPane) tabletChatBinding.transport else app.runtime.transport,
+                    organizationTransport = organizationTargetTransport ?: if (tabletDualPane) tabletChatBinding.transport else app.runtime.transport,
+                    verifiedOrganizationTargetId = organizationTargetId.takeIf { organizationTargetTransport != null },
+                    verifiedOrganizationAccountId = organizationProfileAccount.takeIf { organizationTargetTransport != null },
                     modifier = Modifier.drawWithContent {
                         if (pendingGoogleSignIn != null) recordToLayer(signInBackdrop) else drawContent()
                     },

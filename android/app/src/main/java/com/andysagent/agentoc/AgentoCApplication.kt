@@ -814,6 +814,9 @@ class AndroidRuntimeGraph internal constructor(
     val identityStore = AndroidDeviceIdentityStore(application)
     val accountDeviceAlias: String = identityStore.defaultDeviceAlias()
     private val targetRuntimes = java.util.concurrent.ConcurrentHashMap<String, TargetRuntime>()
+    // Return only the target-owned transport, never the mutable foreground facade.
+    internal fun existingTargetTransport(instanceId: String): com.andysagent.agentoc.core.network.AgentoCTransport? =
+        targetRuntimes[instanceId]?.takeIf { it.instanceId == instanceId }?.transport
     @Volatile private var tabletChatTargetId: String? = null
     private val connectionUses = TargetConnectionLeases<TargetRuntime> { instanceId ->
         val target = configStore.directory.first().computers.firstOrNull { it.instanceId == instanceId }

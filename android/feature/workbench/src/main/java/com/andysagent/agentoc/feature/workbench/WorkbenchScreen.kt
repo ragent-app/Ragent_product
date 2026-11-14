@@ -325,6 +325,8 @@ enum class GoogleSignInSuccessAction {
 fun WorkbenchScreen(
     state: WorkbenchUiState,
     organizationTransport: com.andysagent.agentoc.core.network.AgentoCTransport? = null,
+    verifiedOrganizationTargetId: String? = null,
+    verifiedOrganizationAccountId: String? = null,
     accountsViewModel: AccountsViewModel? = null,
     webParityViewModel: WebParityViewModel? = null,
     chatWebParityViewModel: WebParityViewModel? = null,
@@ -809,18 +811,17 @@ fun WorkbenchScreen(
         if (state.chatOpen && state.sessionId != null && organizationTransport != null) {
             if (organizationOpen) {
                 val offlineAccount = accountsViewModel?.state?.collectAsState()?.value
-                val offlineTarget = state.chatTargetId ?: state.activeRemoteTargetId
+                val offlineTarget = verifiedOrganizationTargetId
                 val offlineScope = offlineAccount?.takeIf {
                     it.hasVerifiedAccountSession &&
-                        it.deviceBindingStatus == com.andysagent.agentoc.feature.workbench.accounts.GoogleDeviceBindingStatus.Bound &&
-                        !offlineTarget.isNullOrBlank() && it.targetInstanceId == offlineTarget &&
+                        !offlineTarget.isNullOrBlank() && !verifiedOrganizationAccountId.isNullOrBlank() && it.accountId == verifiedOrganizationAccountId &&
                         !it.accountId.isNullOrBlank() && !it.credentialId.isNullOrBlank() && !it.deviceId.isNullOrBlank()
                 }?.let { org.json.JSONArray(listOf(it.accountId, it.credentialId, it.deviceId, offlineTarget, state.sessionId)).toString() }
                 com.andysagent.agentoc.feature.organization.ui.ConnectedOrganizationScreen(
                     offlineScope = offlineScope,
                     transport = organizationTransport,
                     sessionId = state.sessionId,
-                    targetId = state.chatTargetId ?: state.activeRemoteTargetId,
+                    targetId = verifiedOrganizationTargetId ?: (state.chatTargetId ?: state.activeRemoteTargetId),
                     responsibilityDraft = state.composerText,
                     selectedResponsibilityId = responsibilitySelection,
                     onResponsibilitySelected = { responsibilitySelection = it },
