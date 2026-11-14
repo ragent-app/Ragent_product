@@ -73,3 +73,7 @@
 真实单次 Run 正在运行且 supervisor 已接管时，全量 Run 检查仅该 QA Run 活跃；随后仅 ControlPlane 重启，PID 290668→291788，Supervisor PID 290284 不变。同一 occurrence、同一 Run 最终 completed/published、attempt 1，提醒自动禁用。该 Run 的空 receiver wait 自然发生并完成，delegation decision 为 complete、canonical 数为 0；这验证该次在途关联恢复及空 wait，不证明真实 spawn 或跨 Run 子代理绑定。前文关于在途恢复未验证是当时状态，以本段结果更新。
 
 本次 assistant 先发表检查计划，最终答复明确表示 Windows operation check unavailable，未读取两个文件、无法给出代码依据或安全结论。因此交付和恢复有证据，但原本要求的源码审查未完成；日志仅能确认相关事件发生在控制面重启完成之前，实际 stop 发起时间未保留，不能据此排除重启期间发生。该错误的具体来源仍待诊断。历史 owner 恢复失败首因、broker 无 threadId 通知真实覆盖、真实 spawn 与跨 Run 绑定仍未闭环。
+
+0.0.90 为收集 Windows hook 的固定原因码而正式安装，基于提交 `1936a360f7042524bb8aeab7a38edebf076d8f00`，MSI SHA-256 `662A9B4BCE9F6CF73F17210CC8D9F61CF4FB299D6E683B759BF5B10735DEB982`；准入与组件兼容通过，安装返回 3010，目标文件 blob 一致、服务运行且 drain 解除。稳定服务下的真实只读任务仍被拦截，最终固定码为 `HOOK_RESPONSE_INVALID`，未读到目标源码；任务回复已发布但业务审查未完成。源码后续修正共享 hook 对无 ID rate-limit 通知的处理，保留超时、大小及其他错误的 fail-closed 边界，尚待部署与现场验证。
+
+按该 Run 的正式 provider registry、认证存储和只读账户路由解析的 broker 端点，对当前管理员身份的正常管道连接返回 Access denied。未修改 ACL、冒用服务身份或强行终止进程；旧 broker 进程存在不足以证明该 Run 使用它或构成此次根因。正式 ControlPlane 和 RunnerSupervisor 使用各自服务身份；当前未发现不改配置的公开纯退役入口，正在按严格空闲和账户绑定契约补充维护能力。

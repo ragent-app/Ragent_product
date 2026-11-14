@@ -42,6 +42,44 @@ export async function handleCodexMcpRoutes({
   authSession,
   writeJson,
 }) {
+  const retireMatch = /^\/api\/providers\/([^/]+)\/codex\/broker\/retire$/.exec(pathname);
+  if (retireMatch) {
+    const finish = (status, code) => {
+      console.info(`[codex-broker-maintenance] ${code}`);
+      writeJson(res, status, { code });
+      return true;
+    };
+    if (authSession?.role !== 'owner') return finish(403, 'CODEX_MAINTENANCE_OWNER_REQUIRED');
+    if (WORKBENCH_EXECUTION_POLICY) return finish(403, 'WORKBENCH_EXECUTION_POLICY_DENIED');
+    if (req.method !== 'POST') return finish(405, 'CODEX_MAINTENANCE_METHOD_INVALID');
+    let providerId;
+    try { providerId = decodeURIComponent(retireMatch[1]); } catch { return finish(400, 'CODEX_MAINTENANCE_INPUT_INVALID'); }
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(providerId)) return finish(400, 'CODEX_MAINTENANCE_INPUT_INVALID');
+    try {
+      const body = await readBody(req, CODEX_MCP_BODY_MAX_BYTES);
+      if (body && body.trim() && body.trim() !== '{}') return finish(400, 'CODEX_MAINTENANCE_INPUT_INVALID');
+      const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
+      const profile = await registry.getProviderProfile(providerId);
+      if (!profile || profile.agentType !== 'codex' || profile.enabled === false) return finish(404, 'CODEX_MAINTENANCE_PROFILE_UNAVAILABLE');
+      const auth = await registry.getAuthProfile(profile.authProfileId);
+      const secret = auth?.storageRef ? await createSecretStore({ configDir: CONFIG_DIR }).resolveSecret(auth.storageRef) : null;
+      const accountId = secret?.authType === 'oauth' ? nativeCodexAccountId(secret.tokens) : '';
+      if (!accountId) return finish(409, 'CODEX_MAINTENANCE_ACCOUNT_UNVERIFIED');
+      const providerHomeRoot = nativeProviderHomeRoot(dirname(CODEX_MANAGED_HOME_DIR), 'codex', profile.id);
+      const homeRoot = await resolveCodexAccountHomeRoot({ configDir: CONFIG_DIR, providerHomeRoot, providerProfileId: profile.id, accountId });
+      const latestProfile = await registry.getProviderProfile(providerId);
+      const latestAuth = latestProfile?.authProfileId ? await registry.getAuthProfile(latestProfile.authProfileId) : null;
+      const latest = latestAuth?.storageRef ? await createSecretStore({ configDir: CONFIG_DIR }).resolveSecret(latestAuth.storageRef) : null;
+      if (latestProfile?.agentType !== 'codex' || latestProfile.enabled === false || latest?.authType !== 'oauth'
+          || nativeCodexAccountId(latest.tokens) !== accountId) return finish(409, 'CODEX_MAINTENANCE_ACCOUNT_CHANGED');
+      const result = await retireIdleCodexBrokerForPluginChange({ homeRoot, accountId });
+      return finish(200, result === 'retired' ? 'CODEX_BROKER_IDLE_HANDOFF_COMPLETE' : 'CODEX_BROKER_HOME_ABSENT');
+    } catch (error) {
+      const code = ['CODEX_RETIRE_BUSY', 'CODEX_RETIRE_TIMEOUT', 'CODEX_RETIRE_PROTOCOL'].includes(error?.code)
+        ? error.code : 'CODEX_MAINTENANCE_UNAVAILABLE';
+      return finish(409, code);
+    }
+  }
   const pluginMatch = /^\/api\/providers\/([^/]+)\/codex\/(plugin-preference|capability-sync|capability-sync-policy)$/.exec(pathname);
   if (pluginMatch) {
     if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
