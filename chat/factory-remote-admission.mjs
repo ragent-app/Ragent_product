@@ -88,7 +88,7 @@ export async function admitRemoteFactoryAttempt({binding,operation}={}) {
     const parentRemoteOperation={bindingId:b.id,bindingVersion:b.version,operationId:f.operation.operation_id,requestId:f.operation.request_id,
       sourceFactoryBindingId:f.operation.source_factory_binding_id,contractRevision:f.operation.contract_revision,executionEpoch:f.operation.execution_epoch,
       contractDigest:f.contractDigest,nodeGeneration:b.node_generation};
-    db.prepare('INSERT INTO factory_goals VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(goalId,b.organization_id,b.project_id,null,encode({objective:contract.objective,acceptanceBaseline:[],parentRemoteOperation}),1,1,'active',ts,ts);
+    db.prepare('INSERT INTO factory_goals (id,organization_id,project_id,parent_goal_id,body_json,revision,row_version,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(goalId,b.organization_id,b.project_id,null,encode({objective:contract.objective,acceptanceBaseline:[],parentRemoteOperation}),1,1,'active',ts,ts);
     db.prepare('INSERT INTO factory_work_items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(workId,goalId,b.organization_id,b.project_id,'execution','active','ready','none',0,b.node_id,1,1,0,0,null,encode({parentRemoteOperation}),null,0,ts,ts);
     db.prepare('INSERT INTO factory_work_contracts VALUES(?,?,?,?,?)').run(workId,1,encode(contract),digest(contract),ts);
     db.prepare('INSERT INTO factory_remote_children VALUES(?,?,?,?,?,?)').run(b.id,f.operation.operation_id,goalId,workId,f.operation.payload_digest,ts);
