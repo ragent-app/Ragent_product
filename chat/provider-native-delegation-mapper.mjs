@@ -299,7 +299,8 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
     const bound = text(parentThreadId) && text(item.senderThreadId) === text(parentThreadId);
     const events = [];
     const errors = [];
-    if (operation === 'spawn' && lower(raw?.method) === 'item/completed' && lower(item.status) === 'completed' && receivers.length) {
+    const successfulSpawn = operation === 'spawn' && lower(raw?.method) === 'item/completed' && lower(item.status) === 'completed';
+    if (successfulSpawn && receivers.length) {
       if (!bound) errors.push('delegation_parent_thread_unresolved');
       else for (const child of receivers) {
         if (codexChildren.has(child)) continue;
@@ -308,7 +309,7 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
           childSessionId: child, kind: 'spawned', state: 'spawned' }));
       }
     }
-    if (bound && ['wait', 'close'].includes(operation)) {
+    if (bound && (successfulSpawn || ['wait', 'close'].includes(operation))) {
       const states = object(item.agentsStates);
       for (const child of receivers) {
         if (!codexChildren.has(child)) continue;
