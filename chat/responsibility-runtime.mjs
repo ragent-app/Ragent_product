@@ -1,4 +1,4 @@
-import { read, transaction, newId, now, activity } from './responsibility-store.mjs';
+import { read, transaction, newId, now, activity, recordObservation } from './responsibility-store.mjs';
 import { randomUUID } from 'node:crypto';
 
 // Only schedules observations. Factory remains the sole Work Item dispatcher.
@@ -12,12 +12,13 @@ export function createResponsibilityRuntime({intervalMs=60000,onError=error=>con
     try { await transaction(db=>{const ts=now(); const due=db.prepare(`SELECT s.*,r.revision,r.policy_revision FROM responsibility_subscriptions s JOIN responsibilities r ON r.id=s.responsibility_id WHERE s.enabled=1 AND s.next_due_at<=? AND r.lifecycle='active' ORDER BY s.next_due_at,s.id LIMIT 100`).all(ts);
       for(const s of due) { const next=new Date(Date.now()+s.interval_ms).toISOString(); db.prepare('UPDATE responsibility_subscriptions SET next_due_at=? WHERE id=?').run(next,s.id);
         const existing=db.prepare("SELECT id FROM responsibility_wakes WHERE responsibility_id=? AND responsibility_revision=? AND policy_revision=? AND state IN ('pending','waiting','deciding') LIMIT 1").get(s.responsibility_id,s.revision,s.policy_revision); if(existing) {const prior=db.prepare('SELECT count FROM responsibility_subscription_coalescing WHERE subscription_id=?').get(s.id); db.prepare('INSERT INTO responsibility_subscription_coalescing VALUES(?,1,?,?) ON CONFLICT(subscription_id) DO UPDATE SET count=count+1,last_due_at=excluded.last_due_at').run(s.id,s.next_due_at,s.next_due_at); if(!prior) activity(db,s.responsibility_id,'wake_coalesced',{wakeId:existing.id,subscriptionId:s.id,firstScheduledAt:s.next_due_at}); continue;}
-        const id=newId('wake'); db.prepare('INSERT INTO responsibility_wakes VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,s.responsibility_id,s.revision,s.policy_revision,ts,'pending',0,null,ts,ts); activity(db,s.responsibility_id,'wake_received',{wakeId:id,source:'interval',scheduledAt:s.next_due_at});
+        const id=newId('wake'); db.prepare('INSERT INTO responsibility_wakes VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,s.responsibility_id,s.revision,s.policy_revision,ts,'pending',0,null,ts,ts); recordObservation(db,id,'interval',{subscriptionId:s.id,scheduledAt:s.next_due_at}); activity(db,s.responsibility_id,'wake_received',{wakeId:id,source:'interval',scheduledAt:s.next_due_at});
       }
     });
       const due=await read(db=>db.prepare("SELECT id FROM responsibility_wakes WHERE state IN ('pending','deciding') AND due_at<=? ORDER BY due_at,id LIMIT 10").all(now()));
       const {processResponsibilityWake,holdResponsibilityWake}=await import('./responsibility-decision.mjs');
       for(const wake of due) {if(stopped) break; const lease=await claim(wake.id); if(!lease) continue; try {await processResponsibilityWake(wake.id,lease);} catch(error) {onError(error); await holdResponsibilityWake(wake.id,'decision_or_admission_error',lease);} finally {await release(wake.id,lease);}}
+      if(!stopped) { const {collectResponsibilityPlans,dispatchApprovedResponsibilityPlans}=await import('./responsibility-plans.mjs'); await collectResponsibilityPlans(); await dispatchApprovedResponsibilityPlans(); }
     } catch(error) {onError(error);} finally {running=false;}
   }
   function scheduleTick() { if(pending) return pending; pending=tick().finally(()=>{pending=null;}); return pending; }

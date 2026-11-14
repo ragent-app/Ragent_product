@@ -7,6 +7,7 @@ import { withDatabase } from './collaboration-store.mjs';
 import { getOrganization } from './organization-store.mjs';
 import { assertOrganizationCapability } from './organization-runtime-capabilities.mjs';
 import { verifyResponsibilityAuthority } from './responsibility-authority.mjs';
+import { verifyResponsibilityPlanAuthority } from './responsibility-plans.mjs';
 
 export const ORG_BUDGET_EXCEEDED = 'ORG_BUDGET_EXCEEDED';
 export const ORG_STALLED = 'ORG_STALLED';
@@ -136,13 +137,21 @@ function responsibilityWindow(db, organizationId, workItemId, delta) {
   if (!workItemId || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_work_links'").get()) return null;
   const item=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(workItemId,organizationId);
   if (!item) throw governorError(ORG_BUDGET_INVALID,'Factory work item unavailable');
-  const link=db.prepare('SELECT * FROM responsibility_work_links WHERE goal_id=?').get(item.goal_id);
-  if (!link) return null;
-  const decision=db.prepare('SELECT proposal_json FROM responsibility_decisions WHERE id=?').get(link.decision_id);
-  if (!decision) throw governorError(ORG_BUDGET_INVALID,'Responsibility decision unavailable');
-  const proposal=JSON.parse(decision.proposal_json);
-  const authority=verifyResponsibilityAuthority(db,{...proposal,organizationId,projectId:item.project_id,responsibilityId:link.responsibility_id,
-    wakeId:link.wake_id,decisionId:link.decision_id,responsibilityRevision:link.responsibility_revision,policyRevision:link.policy_revision});
+  let link=db.prepare('SELECT * FROM responsibility_work_links WHERE goal_id=?').get(item.goal_id), authority;
+  if(link) {
+    const decision=db.prepare('SELECT proposal_json FROM responsibility_decisions WHERE id=?').get(link.decision_id);
+    if (!decision) throw governorError(ORG_BUDGET_INVALID,'Responsibility decision unavailable');
+    const proposal=JSON.parse(decision.proposal_json);
+    authority=verifyResponsibilityAuthority(db,{...proposal,organizationId,projectId:item.project_id,responsibilityId:link.responsibility_id,
+      wakeId:link.wake_id,decisionId:link.decision_id,responsibilityRevision:link.responsibility_revision,policyRevision:link.policy_revision});
+  } else {
+    const exists=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_plan_executions'").get();
+    const execution=exists&&db.prepare('SELECT * FROM responsibility_plan_executions WHERE goal_id=?').get(item.goal_id);
+    if(!execution) return null;
+    const plan=db.prepare('SELECT proposal_digest FROM responsibility_plans WHERE id=?').get(execution.plan_id);
+    authority=verifyResponsibilityPlanAuthority(db,{planId:execution.plan_id,planDigest:plan?.proposal_digest,approvalId:execution.approval_id,organizationId,projectId:item.project_id});
+    link={responsibility_id:authority.responsibilityId};
+  }
   const budget=authority.policy.dailyBudget;
   if (!budget || typeof budget.timeZone!=='string' || !budget.timeZone || !['maxRuns','maxTokens','maxCost'].some(k=>budget[k]!==undefined)
       || ['maxRuns','maxTokens'].some(k=>budget[k]!==undefined && (!Number.isSafeInteger(budget[k]) || budget[k]<0))

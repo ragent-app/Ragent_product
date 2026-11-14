@@ -805,6 +805,11 @@
           if (this.projection?.organizationId !== organizationId || screen.hidden) return;
           content.replaceChildren(); button(content, 'All work items', showList);
           add(content, 'h3', 'Responsibilities');
+          add(content, 'p', 'A draft records an objective; execution requires a separately reviewed policy and an available adapter.');
+          try {
+            const catalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}`);
+            for (const provider of catalog.providers || []) add(content, 'p', `${provider.id}@${provider.version}: ${provider.available ? 'adapter present; node checks still required' : 'unavailable'} · ${provider.reason || ''} · scope ${JSON.stringify(provider.requiredScope || {})} · network ${JSON.stringify(provider.networkPolicies || [])}`);
+          } catch { add(content, 'p', 'Adapter availability is unavailable; no execution capability is assumed.'); }
           if (!result.responsibilities?.length) add(content, 'p', 'No responsibilities.');
           for (const responsibility of result.responsibilities || []) {
             button(content, `${responsibility.objective} · ${responsibility.lifecycle}`, () => showResponsibility(responsibility.id));
@@ -813,10 +818,15 @@
             const projectId = root.prompt('Project ID for this organization'); if (!projectId) return;
             const objective = root.prompt('Responsibility objective'); if (!objective) return;
             const criterion = root.prompt('Success criterion'); if (!criterion) return;
+            const interval = root.prompt('Trigger interval in minutes (leave blank for manual only)', '');
+            if (interval === null) return;
+            const minutes = interval.trim() === '' ? null : Number(interval);
+            if (minutes !== null && (!Number.isSafeInteger(minutes) || minutes < 1 || minutes > 525600)) { add(content, 'p', 'Interval must be a whole number from 1 to 525600 minutes.'); return; }
             const validUntil = root.prompt('Policy expiry (ISO date and time, including timezone)');
             if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
             const body = { organizationId, projectId, objective, successCriteria: [criterion], policy: { validUntil }, idempotencyKey: root.crypto.randomUUID() };
-            if (!root.confirm(`Create draft responsibility?\nProject: ${projectId}\nObjective: ${objective}\nCriterion: ${criterion}\nPolicy expiry: ${validUntil}`)) return;
+            if (minutes !== null) body.intervalMs = minutes * 60000;
+            if (!root.confirm(`Create draft responsibility?\nProject: ${projectId}\nObjective: ${objective}\nCriterion: ${criterion}\nTrigger: ${minutes === null ? 'manual' : `every ${minutes} minutes`}\nPolicy expiry: ${validUntil}\nThis does not grant tool access or approve a plan.`)) return;
             const submit = async () => { try { await responsibilityRequest('', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); await showResponsibilities(); }
               catch (error) { add(content, 'p', `Request not confirmed: ${error.message}`); button(content, 'Retry same request', submit); } };
             submit();
@@ -836,6 +846,128 @@
           add(content, 'h3', item.objective);
           add(content, 'p', `Responsibility ${item.lifecycle} · version ${item.rowVersion} · policy ${item.policyRevision}`);
           add(content, 'p', 'A paused responsibility stops new admission; existing work may continue.');
+          add(content, 'p', `Policy (not a plan approval): ${JSON.stringify(detail.policy || {})}`);
+          try {
+            const catalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`);
+            const planner = (catalog.providers || []).find(p => p.id === 'generic-planner' && p.version === 1 && p.available === true);
+            const plannerTemplate = planner?.templates?.find(t => t.id === 'agentoc-responsibility-planner' && t.version === 1);
+            const reportDescriptor = (catalog.planCatalogDescriptors || []).find(d => d.capability === 'project-report' && d.available === true);
+            if (planner?.digest && plannerTemplate?.digest && reportDescriptor?.templateDigest) button(content, 'Review planner authorization', async () => {
+              const includeReport = root.confirm('Include the project-report capability in this planner catalog?');
+              let reportNode = '', reportGeneration = 0;
+              if (includeReport) { reportNode = root.prompt('Report node ID'); if (!reportNode) return; reportGeneration = Number(root.prompt('Report node binding generation')); if (!Number.isSafeInteger(reportGeneration) || reportGeneration < 1) return; }
+              const maxAttempts = Number(root.prompt('Maximum attempts per step (1–10)')); if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) return;
+              const maxCost = Number(root.prompt('Maximum cost per step')); if (!Number.isFinite(maxCost) || maxCost <= 0) return;
+              const timeZone = root.prompt('Daily budget IANA timezone'); if (!timeZone) return;
+              const dailyInput = root.prompt('Maximum daily cost'); if (dailyInput === null || !dailyInput.trim()) return;
+              const dailyCost = Number(dailyInput); if (!Number.isFinite(dailyCost) || dailyCost < 0) return;
+              const validUntil = root.prompt('Authorization expiry (ISO date and time with timezone)', detail.policy?.validUntil || ''); if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
+              const networkPolicy = root.prompt('Network policy: deny, or inherit_existing_permissions (no default)'); if (!['deny','inherit_existing_permissions'].includes(networkPolicy)) return;
+              const existing = {validUntil, resource:{projectId:item.projectId,readScope:'entire_project',networkPolicy}, nodeBindings:{report:{nodeId:reportNode,bindingGeneration:reportGeneration}}, maxAttempts,maxCost,dailyBudget:{timeZone,maxCost:dailyCost}};
+              const nodeId = root.prompt('Planner node ID'); if (!nodeId) return;
+              const generation = Number(root.prompt('Planner node binding generation')); if (!Number.isSafeInteger(generation) || generation < 1) return;
+              const entry = {capability:'project-report', templateId:reportDescriptor.templateId, templateVersion:reportDescriptor.templateVersion,
+                templateDigest:reportDescriptor.templateDigest, resource:existing.resource, nodeBindings:{report:existing.nodeBindings.report}, maxAttempts:existing.maxAttempts, maxCost:existing.maxCost};
+              const policy = {validUntil:existing.validUntil, providerId:planner.id, providerVersion:planner.version, providerDigest:planner.digest,
+                templateId:plannerTemplate.id, templateVersion:plannerTemplate.version, templateDigest:plannerTemplate.digest,
+                resource:existing.resource, nodeBindings:{planning:{nodeId,bindingGeneration:generation}}, maxAttempts:existing.maxAttempts, maxCost:existing.maxCost,
+                dailyBudget:existing.dailyBudget, planCatalog:includeReport ? [entry] : [], planExecutionMaxAttempts:existing.maxAttempts, planExecutionMaxCost:existing.maxCost, planApproval:'always'};
+              const codeDescriptor = (catalog.planCatalogDescriptors || []).find(d => d.capability === 'project-code' && d.available === true);
+              if (codeDescriptor && root.confirm('Also review a separately bounded project-code capability?')) {
+                try {
+                  const { baseline } = await responsibilityRequest(`${path}/code-baseline`, {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+                  const paths = root.prompt(`Clean project baseline ${baseline.head} on ${baseline.branch}. Allowed project-relative paths, comma separated`); if (!paths) return;
+                  const allowedPaths = paths.split(',').map(v => v.trim()).filter(Boolean); if (!allowedPaths.length) return;
+                  const candidateScope = root.prompt('Candidate path within allowed paths'); if (!candidateScope) return;
+                  const checkActionId = root.prompt('Existing registered check action ID'); if (!checkActionId) return;
+                  const nodeBindings = {};
+                  for (const key of ['implementation','review','integration']) { const nodeId = root.prompt(`${key} node ID`); if (!nodeId) return; const generation = Number(root.prompt(`${key} node binding generation`)); if (!Number.isSafeInteger(generation) || generation < 1) return; nodeBindings[key] = {nodeId,bindingGeneration:generation}; }
+                  const code = {capability:'project-code',templateId:codeDescriptor.templateId,templateVersion:codeDescriptor.templateVersion,templateDigest:codeDescriptor.templateDigest,
+                    codeBaselineId:baseline.id,repositoryFactId:baseline.repositoryFactId,repository:baseline.repository,targetBranch:baseline.branch,allowedPaths,candidateScope,checkActionId,nodeBindings,maxAttempts:existing.maxAttempts,maxCost:existing.maxCost};
+                  if (!root.confirm(`Authorize code scope separately?\n${JSON.stringify(code,null,2)}\nBaseline HEAD: ${baseline.head}. Code changes and results require human review.`)) return;
+                  policy.planCatalog.push(code); if (includeReport) { policy.planExecutionMaxAttempts += existing.maxAttempts; policy.planExecutionMaxCost += existing.maxCost; }
+                } catch (error) { add(content, 'p', `Code baseline unavailable: ${error.message}`); return; }
+              }
+              if (!policy.planCatalog.length) { add(content, 'p', 'Select at least one available capability.'); return; }
+              if (existing.resource.networkPolicy === 'inherit_existing_permissions') {
+                if (!root.confirm('Separately confirm that the selected planner node retains its existing network and tool permissions? Filesystem read-only does not prevent external effects.')) return;
+                policy.networkPermissionConfirmed = true;
+              }
+              if (includeReport && reportDescriptor.autoEligible === true && root.confirm('Optional: allow automatic admission of eligible report-only plans within this exact policy? Cancel keeps approval required for every plan. Code changes and external publishing still require human approval.')) {
+                entry.autoApproval = true; entry.requiresHumanApproval = false;
+                policy.planApproval = 'within_policy'; policy.planAutoAdmissionConfirmed = true;
+              }
+              if (!root.confirm(`Authorize planner and catalog exactly as shown?\n${JSON.stringify(policy, null, 2)}\n${policy.planApproval === 'always' ? 'Each plan requires separate approval.' : 'Only eligible report-only plans may be automatically admitted; code and external publication require human approval.'} Report results still require human review.`)) return;
+              submitCommand('', {policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID()}, 'PATCH');
+            });
+            const ci = (catalog.providers || []).find(p => p.id === 'github-ci' && p.version === 1 && p.available === true);
+            const ciTemplate = ci?.templates?.find(t => t.id === 'agentoc-reviewed-change' && t.version === 3);
+            if (ciTemplate?.digest) button(content, 'Review GitHub CI authorization', () => {
+              const repository = root.prompt('Repository owner/name'); if (!repository) return;
+              const targetBranch = root.prompt('Target branch'); if (!targetBranch) return;
+              const paths = root.prompt('Allowed project-relative paths, comma separated'); if (!paths) return;
+              const allowedPaths = paths.split(',').map(v => v.trim()).filter(Boolean); if (!allowedPaths.length) return;
+              const candidateScope = root.prompt('Candidate path within allowed paths'); if (!candidateScope) return;
+              const checkActionId = root.prompt('Existing registered check action ID (not a shell command)'); if (!checkActionId) return;
+              const nodeBindings = {};
+              for (const key of ['implementation', 'review', 'integration']) {
+                const nodeId = root.prompt(`${key} node ID`); if (!nodeId) return;
+                const generation = Number(root.prompt(`${key} node binding generation`)); if (!Number.isSafeInteger(generation) || generation < 1) return;
+                nodeBindings[key] = { nodeId, bindingGeneration:generation };
+              }
+              const maxAttempts = Number(root.prompt('Maximum attempts (1–10)')); if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) return;
+              const maxCost = Number(root.prompt('Maximum cost')); if (!Number.isFinite(maxCost) || maxCost <= 0) return;
+              const timeZone = root.prompt('Daily budget IANA timezone'); if (!timeZone) return;
+              const dailyInput = root.prompt('Maximum daily cost'); if (dailyInput === null || !dailyInput.trim()) return;
+              const dailyCost = Number(dailyInput); if (!Number.isFinite(dailyCost) || dailyCost < 0) return;
+              const validUntil = root.prompt('Authorization expiry (ISO date and time with timezone)', detail.policy?.validUntil || '');
+              if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
+              const policy = {validUntil, repository, templateId:ciTemplate.id, templateVersion:ciTemplate.version, templateDigest:ciTemplate.digest,
+                targetBranch, allowedPaths, candidateScope, checkActionId, nodeBindings, maxAttempts, maxCost, dailyBudget:{timeZone,maxCost:dailyCost}};
+              if (!root.confirm(`Authorize GitHub CI policy?\n${JSON.stringify(policy, null, 2)}\nOnly the registered check action is used. Existing work may continue until separately stopped.`)) return;
+              submitCommand('', {policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID()}, 'PATCH');
+            });
+            const provider = (catalog.providers || []).find(p => p.id === 'project-report' && p.version === 1 && p.available === true);
+            const template = provider?.templates?.find(t => t.id === 'agentoc-project-report' && t.version === 1);
+            if (provider?.digest && template?.digest) button(content, 'Review project report authorization', () => {
+              const nodeId = root.prompt('Authorized report node ID'); if (!nodeId) return;
+              const generation = Number(root.prompt('Current node binding generation')); if (!Number.isSafeInteger(generation) || generation < 1) return;
+              const maxAttempts = Number(root.prompt('Maximum attempts (1–10)')); if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) return;
+              const maxCost = Number(root.prompt('Maximum cost')); if (!Number.isFinite(maxCost) || maxCost <= 0) return;
+              const timeZone = root.prompt('Daily budget IANA timezone'); if (!timeZone) return;
+              const dailyCostInput = root.prompt('Maximum daily cost'); if (dailyCostInput === null || !dailyCostInput.trim()) return;
+              const dailyCost = Number(dailyCostInput); if (!Number.isFinite(dailyCost) || dailyCost < 0) return;
+              const validUntil = root.prompt('Authorization expiry (ISO date and time with timezone)', detail.policy?.validUntil || '');
+              if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
+              const networkPolicy = root.prompt('Network policy: deny, or inherit_existing_permissions (no default)');
+              if (!['deny', 'inherit_existing_permissions'].includes(networkPolicy)) return;
+              if (networkPolicy === 'inherit_existing_permissions' && !root.confirm('Separately authorize this node to retain its existing network and tool permissions? Filesystem read-only does not prevent external actions; no domain restriction or network isolation is promised.')) return;
+              const policy = { validUntil, providerId:provider.id, providerVersion:provider.version, providerDigest:provider.digest,
+                templateId:template.id, templateVersion:template.version, templateDigest:template.digest,
+                resource:{ projectId:item.projectId, readScope:'entire_project', networkPolicy }, nodeBindings:{ report:{ nodeId, bindingGeneration:generation } },
+                maxAttempts, maxCost, dailyBudget:{ timeZone, maxCost:dailyCost } };
+              if (networkPolicy === 'inherit_existing_permissions') policy.networkPermissionConfirmed = true;
+              if (!root.confirm(`Authorize this policy?\n${JSON.stringify(policy, null, 2)}\nThe entire project is readable; project file writes are blocked. Other tools remain subject to their existing permissions; network isolation is not established. Manual/interval triggers may automatically start this fixed report; output is a ResultPacket. Results require human review and are not automatically verified facts.`)) return;
+              submitCommand('', { policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID() }, 'PATCH');
+            });
+          } catch { /* unavailable catalog never grants authority */ }
+          add(content, 'h4', 'Plans awaiting review');
+          try {
+            const plans = await responsibilityRequest(`${path}/plans`);
+            for (const plan of plans.plans || []) {
+              add(content, 'p', `${plan.state} · ${JSON.stringify(plan.summary || {})} · digest ${plan.proposalDigest}`);
+              for (const step of plan.proposal?.steps || []) add(content, 'p', `Step ${step.id}: ${step.objective || step.templateId} · depends on ${JSON.stringify(step.dependsOn || [])} · scope and budget ${JSON.stringify(step.scope || step.resource || {})} ${JSON.stringify(step.budget || {})} · approval ${step.requiresHumanApproval ?? 'see policy'}`);
+              if (plan.proposal) add(content, 'pre', JSON.stringify(plan.proposal, null, 2));
+              if (plan.catalog) add(content, 'pre', `Authorized catalog and bounds:\n${JSON.stringify(plan.catalog, null, 2)}`);
+              if (!plan.proposal || !Array.isArray(plan.catalog)) add(content, 'p', 'Full proposal or authorized catalog unavailable; approval is disabled.');
+              if (plan.state === 'pending_review' && plan.proposal && Array.isArray(plan.catalog) && plan.proposalDigest) button(content, 'Approve this reviewed plan', async () => {
+                if (!root.confirm(`Approve only plan ${plan.id} at digest ${plan.proposalDigest} and responsibility version ${item.rowVersion}?`)) return;
+                const body = { expectedVersion:item.rowVersion, proposalDigest:plan.proposalDigest, idempotencyKey:root.crypto.randomUUID(), confirmed:true };
+                try { await responsibilityRequest(`${path}/plans/${encodeURIComponent(plan.id)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); await showResponsibility(id); }
+                catch (error) { add(content, 'p', `Plan approval not confirmed: ${error.message}. Refresh before retrying.`); }
+              });
+            }
+          } catch { add(content, 'p', 'Plan review is unavailable.'); }
           add(content, 'h4', 'Success criteria');
           for (const criterion of item.successCriteria || []) add(content, 'p', criterion);
           add(content, 'h4', 'Activity');

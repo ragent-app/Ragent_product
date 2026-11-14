@@ -70,10 +70,21 @@ export async function assertFactoryExecutionFence(context, { requireWorkspace = 
   });
   if(remoteBefore) await assertRemoteTargetWorkspace(remoteBefore);
   if (responsibility) {
-    const { verifyCurrentResponsibilityRepository } = await import('./responsibility-repository.mjs');
-    await verifyCurrentResponsibilityRepository(responsibility.repositoryFactId);
-    const { isGithubFailureCurrent } = await import('./github-ci-observer.mjs');
-    if (!await isGithubFailureCurrent(responsibility.event)) refuse('GitHub failure is no longer current');
+    if(responsibility.providerId==='github-ci') {
+      const { verifyCurrentResponsibilityRepository } = await import('./responsibility-repository.mjs');
+      await verifyCurrentResponsibilityRepository(responsibility.repositoryFactId);
+      const { isGithubFailureCurrent } = await import('./github-ci-observer.mjs');
+      if (!await isGithubFailureCurrent(responsibility.event)) refuse('GitHub failure is no longer current');
+    } else if(['project-report','generic-planner','project-code'].includes(responsibility.providerId)) {
+      const {verifyCurrentResponsibilityProject}=await import('./responsibility-project.mjs');
+      await verifyCurrentResponsibilityProject(responsibility.projectFactId);
+      if(responsibility.providerId==='project-code') {
+        const {verifyCurrentResponsibilityRepository}=await import('./responsibility-repository.mjs');
+        await verifyCurrentResponsibilityRepository(responsibility.repositoryFactId);
+        const {verifyCurrentResponsibilityCodeBaseline}=await import('./responsibility-code-baseline.mjs');
+        await verifyCurrentResponsibilityCodeBaseline(responsibility.codeBaselineId);
+      }
+    } else refuse('Unsupported responsibility provider');
   }
   return withDatabase((db) => {
     const item = db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(context?.workItemId, context?.organizationId);
@@ -87,8 +98,7 @@ export async function assertFactoryExecutionFence(context, { requireWorkspace = 
     if (remote && remote.sessionId!==context.managedSessionId) refuse('Remote managed session changed');
     if (remote && requireWorkspace) verifyRemoteCapturedBaseline(db,remote,context.dispatchKey);
     const currentResponsibility = item && verifyFactoryResponsibilityFence(db,item);
-    if ((currentResponsibility?.repositoryFactId || '') !== (responsibility?.repositoryFactId || '')
-        || (currentResponsibility?.eventId || '') !== (responsibility?.eventId || '')) refuse('Responsibility event or repository binding changed');
+    if (JSON.stringify(currentResponsibility)!==JSON.stringify(responsibility)) refuse('Responsibility evidence or resource binding changed');
     if (item && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_reconciliation_failures'").get()
         && db.prepare("SELECT 1 FROM factory_reconciliation_failures WHERE organization_id=? AND work_item_id=? AND execution_epoch=? AND state='dead_letter'").get(context.organizationId,item.id,item.execution_epoch)) refuse('Factory reconciliation requires explicit recovery');
     if (!item || !binding || !org || !node || !lease || lease.expires_at <= new Date().toISOString()
@@ -278,7 +288,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       executionIsolation: node.grant?.executionIsolation || 'shared', allowedAgentIds: [session.templateId],
       allowedRoles: [role], organizationId, organizationNodeId: node.id, organizationBindingGeneration: node.bindingGeneration };
     const executionObjective = item.contract.triggerEvidence
-      ? `${item.contract.objective}\n\nVerified CI event: ${JSON.stringify(item.contract.triggerEvidence)}` : item.contract.objective;
+      ? `${item.contract.objective}\n\nVerified trigger evidence: ${JSON.stringify(item.contract.triggerEvidence)}` : item.contract.objective;
     const collaboration = await orchestrator.dispatchFactory({ rootSessionId: org.rootSessionId, projectId: org.projectId,
       idempotencyKey: binding.dispatchKey, policy, plan: { version: 1, title: item.contract.objective,
         tasks: [{ id: item.id, objective: executionObjective, agentId: session.templateId, role,
@@ -459,6 +469,17 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       });
     }
     if (binding.status === 'running' && attempt?.state === 'succeeded' && attempt.runId === binding.runId) {
+      if(latest.contract?.resource?.readScope==='entire_project' && latest.contract.accessMode==='read') {
+        if(actualRun?.state!=='completed' || actualRun.sessionId!==attempt.sessionId || !attempt.resultPacketId) return {state:'report_evidence_pending'};
+        const {getResultPacket}=await import('./result-packets.mjs');
+        const {verifyFactoryReportEvidence}=await import('./factory-report-evidence.mjs');
+        const packet=await getResultPacket(attempt.resultPacketId);
+        if(!packet || typeof packet.digest!=='string' || !packet.digest.startsWith('sha256:')) return {state:'report_evidence_pending'};
+        const payload={digest:packet.digest.slice(7),packetId:packet.packetId};
+        return updateFactoryBinding({organizationId,workItemId:latest.id,expectedVersion:latest.rowVersion,
+          contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,
+          action:'submit_candidate',payload},actor,{verifyCandidate:({db,item,binding:current})=>verifyFactoryReportEvidence(db,item,current,packet)});
+      }
       const session = await getSession(attempt.sessionId);
       const workspace = session?.sourceContext?.managedWriter;
       if (!workspace || !collaboration.policy?.factoryExecution) return { state: 'candidate_unavailable' };

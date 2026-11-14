@@ -1,5 +1,7 @@
 # 阶段 C GitHub CI 自治闭环
 
+本阶段是通用责任平台的首个具体适配示例，CI 专有事件、仓库和交付约束不定义所有责任的语义。其他场景需要各自的事实来源、授权、执行边界和证据，不能因为本示例存在就视作已接通。
+
 [上一阶段 B](phase-b-responsibility-events.zh.md) · [返回总览](README.md) · [下一阶段 D](phase-d-context-organization.zh.md)
 
 目标：将已有 CI 观察脚本迁移到持续责任与 Factory 执行链，使一次责任授权能够产生后续受限工作。本阶段完成后，与 A、B 一起构成 Ragent 2.0 MVP。

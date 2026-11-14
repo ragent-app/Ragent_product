@@ -20,6 +20,19 @@ export async function decideFactoryManualAcceptance(input,actor) {
   const criterion=item.contract?.acceptanceCriteria?.find(entry=>entry.id===criterionId);
   if (!criterion || criterion.method!=='manual') invalid('Criterion is not explicitly designated for manual acceptance');
   if (item.contractRevision!==input.contractRevision || item.gateGeneration!==input.gateGeneration || item.candidateDigest!==input.candidateDigest) invalid('Candidate or criterion generation changed','FACTORY_CONFLICT');
+  if(item.contract?.resource?.readScope==='entire_project' && item.contract.accessMode==='read') {
+    const binding=item.bindings.find(entry=>entry.contractRevision===item.contractRevision && entry.executionEpoch===item.executionEpoch && entry.bindingGeneration===item.bindingGeneration && entry.status==='candidate');
+    const packetId=binding?.details?.packetId, packet=packetId&&await getResultPacket(packetId);
+    const {verifyFactoryReportEvidence}=await import('./factory-report-evidence.mjs');
+    if(!packet || packet.digest!==`sha256:${item.candidateDigest}`) invalid('Report packet is unavailable');
+    const evidence={kind:'owner_report_review',packetId,packetDigest:packet.digest,rationale};
+    const command={commandId,idempotencyKey,organizationId,targetId:workItemId,type:'DecideAcceptance',expectedVersion:input.expectedVersion,payload:{criterionId,decision:input.decision,contractRevision:item.contractRevision,candidateDigest:item.candidateDigest,gateGeneration:item.gateGeneration,evidence:[evidence]}};
+    return executeFactoryCommand(command,actor,{verifyEvidence({db,item:current,actor:verifiedActor}) {
+      if(verifiedActor.kind!=='user'||verifiedActor.role!=='owner'||current.id!==item.id||current.candidateDigest!==item.candidateDigest||current.executionEpoch!==item.executionEpoch||current.bindingGeneration!==item.bindingGeneration) return false;
+      const raw=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=? AND work_item_id=?').get(binding.id,current.id);
+      return raw?.status==='candidate' && !!verifyFactoryReportEvidence(db,current,binding,packet);
+    }});
+  }
   if(item.kind==='review' && item.contract.accessMode==='read') {
     const reviewBinding=item.bindings.find(entry=>entry.contractRevision===item.contractRevision && entry.executionEpoch===item.executionEpoch && entry.bindingGeneration===item.bindingGeneration && entry.status==='review_result');
     if(!reviewBinding?.details?.opinionId || reviewBinding.details.digest!==item.candidateDigest) invalid('Verified review result is unavailable');

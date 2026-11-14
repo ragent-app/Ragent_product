@@ -32,7 +32,11 @@ export async function assembleResponsibilityContext(id, actor) {
     responsibility: { id: responsibility.id, projectId: responsibility.projectId, organizationId: responsibility.organizationId,
       objective: responsibility.objective, successCriteria: responsibility.successCriteria, lifecycle: responsibility.lifecycle,
       rowVersion: responsibility.rowVersion, policyRevision: responsibility.policyRevision },
-    policy: first.policy ? { digest: first.policy.digest, validUntil: first.policy.validUntil } : null,
+    // Policy is descriptive context, not a grant to any consumer. Keep the
+    // adapter and resource alongside its version without assuming a CI source.
+    policy: first.policy ? { digest: first.policy.digest, validUntil: first.policy.validUntil,
+      providerId: first.policy.providerId || null, providerVersion: first.policy.providerVersion || null,
+      resource: first.policy.resource || null, dailyBudget: first.policy.dailyBudget || null } : null,
     activity: activity.activity,
     activityNextCursor: activity.nextCursor,
     memory: memory ? { version: memory.currentVersion, digest: memory.digest, updatedAt: memory.updatedAt,

@@ -10,6 +10,9 @@ import { proposeResponsibilityIntent } from './responsibility-intent.mjs';
 import { resolveResponsibilityActor } from './responsibility-actor.mjs';
 import { getResponsibilitySessionContext, setResponsibilitySessionContext } from './responsibility-session-context.mjs';
 import { previewResponsibilityMemory, reviseResponsibilityMemory } from './responsibility-memory.mjs';
+import { getResponsibilityCapabilities } from './responsibility-capabilities.mjs';
+import { captureResponsibilityCodeBaseline } from './responsibility-code-baseline.mjs';
+import { listResponsibilityPlans, approveResponsibilityPlan } from './responsibility-plans.mjs';
 
 function mutationSourceAllowed(req) {
   if(!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers?.['content-type']||''))) return false;
@@ -18,14 +21,17 @@ function mutationSourceAllowed(req) {
   try { const url=new URL(origin); return !url.username && !url.password && url.origin===origin && url.protocol===(req.socket?.encrypted?'https:':'http:') && url.host.toLowerCase()===String(req.headers?.host||'').toLowerCase(); } catch { return false; }
 }
 export async function handleResponsibilityRoutes({req,res,pathname,authSession,writeJson,requireSessionAccess}) {
-  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|wake|activity|context|memory|github-event))?)?$/.exec(String(pathname||''));
+  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|wake|activity|context|memory|github-event|code-baseline))?)?$/.exec(String(pathname||''));
   const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract)$/.exec(String(pathname||''));
   const review=/^\/api\/runs\/([^/]+)\/email-targets\/([^/]+)\/manual-review$/.exec(String(pathname||''));
-  const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision) return false;
+  const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||''));
+  const plans=/^\/api\/responsibilities\/([^/]+)\/plans(?:\/([^/]+)\/(approve))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!plans) return false;
   if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
   const actor=await resolveResponsibilityActor(req,authSession);
   if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
   try {
+    if(plans) {const id=decodeURIComponent(plans[1]);if(!plans[2]&&req.method==='GET') {writeJson(res,200,await listResponsibilityPlans(id,actor));return true;}if(plans[2]&&req.method==='POST'&&mutationSourceAllowed(req)) {const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}writeJson(res,200,await approveResponsibilityPlan(id,decodeURIComponent(plans[2]),body,actor));return true;}writeJson(res,405,{error:'Method or request source is not allowed'});return true;}
+    if(match?.[1]==='capabilities'&&!match[2]) {if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}const url=new URL(req.url||pathname,'http://localhost');writeJson(res,200,await getResponsibilityCapabilities({organizationId:url.searchParams.get('organizationId')||'',projectId:url.searchParams.get('projectId')||''},actor));return true;}
     if(memoryRevision) { if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;} if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;} if(memoryRevision[3]!=='preview'&&process.env.AGENTOC_RESPONSIBILITY_MEMORY_WRITES_ENABLED!=='1') {writeJson(res,503,{code:'MEMORY_REVISION_DISABLED',error:'Memory revision is disabled'});return true;} const raw=await readBody(req,16384); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} const id=decodeURIComponent(memoryRevision[1]),factId=decodeURIComponent(memoryRevision[2]); const result=memoryRevision[3]==='preview'?await previewResponsibilityMemory(id,factId,body,actor):await reviseResponsibilityMemory(id,factId,memoryRevision[3],body,actor); writeJson(res,200,result);return true; }
     if(sessionContext) {const sessionId=decodeURIComponent(sessionContext[1]); if(typeof requireSessionAccess!=='function') {writeJson(res,503,{error:'Session authorization is unavailable'});return true;} if(!await requireSessionAccess(res,authSession,sessionId)) return true; if(req.method==='GET') {writeJson(res,200,await getResponsibilitySessionContext(sessionId,actor));return true;} if(req.method!=='PUT') {writeJson(res,405,{error:'Method not allowed'});return true;} if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;} const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} writeJson(res,200,await setResponsibilitySessionContext(sessionId,body,actor));return true; }
     if(review) { if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;} if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
@@ -37,6 +43,7 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
     }
     if(match?.[1]==='intent'&&!match[2]) { if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;} const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} writeJson(res,200,await proposeResponsibilityIntent({text:body?.text,responsibilityId:body?.responsibilityId},actor));return true; }
     const id=match[1]?decodeURIComponent(match[1]):'', action=match[2]||'', url=new URL(req.url||pathname,'http://localhost'); let result;
+    if(action==='code-baseline') {if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const current=await getResponsibility(id,actor);writeJson(res,200,{schemaVersion:1,baseline:await captureResponsibilityCodeBaseline(current.responsibility.organizationId,current.responsibility.projectId)});return true;}
     if(req.method==='GET'&&!id) result=await listResponsibilities({organizationId:url.searchParams.get('organizationId')||'',projectId:url.searchParams.get('projectId')||'',limit:Number(url.searchParams.get('limit')||100)},actor);
     else if(req.method==='GET'&&id&&!action) result=await getResponsibility(id,actor);
     else if(req.method==='GET'&&id&&action==='activity') result=await listResponsibilityActivity(id,{after:Number(url.searchParams.get('after')||0),limit:Number(url.searchParams.get('limit')||100)},actor);

@@ -1,5 +1,7 @@
 # Ragent 2.0 自治升级修订方案与代码审计
 
+实施范围说明：Responsibility 是面向多种场景的通用持续目标和授权模型；GitHub CI 是首个验证路径，不是唯一用途。后续适配器须各自接入可信事实、受限工具授权和可核查结果；单独确认目标不构成任意工具授权。以下历史审计保留原基线，实际实现与验收状态以分阶段状态记录为准。
+
 分阶段阅读与实施请从[阶段总览](ragent-2.0-autonomy/README.md)开始：[A 执行收敛](ragent-2.0-autonomy/phase-a-execution-closure.zh.md)、[B 责任与事件](ragent-2.0-autonomy/phase-b-responsibility-events.zh.md)、[C CI 自治闭环](ragent-2.0-autonomy/phase-c-github-ci-autonomy.zh.md)、[D 上下文与组织](ragent-2.0-autonomy/phase-d-context-organization.zh.md)、[E 设备与连接器](ragent-2.0-autonomy/phase-e-devices-connectors.zh.md)、[F 语音与体验](ragent-2.0-autonomy/phase-f-voice-experience.zh.md)。另见[共用架构](ragent-2.0-autonomy/architecture-and-boundaries.zh.md)和[验证发布规则](ragent-2.0-autonomy/verification-and-rollout.zh.md)。本文件保留完整审计上下文，阶段执行细节在分阶段文档维护。
 
 Ragent 2.0 应在已有 Factory Work Graph 上补齐持续责任、事件准入和受限决策，先让现有执行链闭环，再扩展长期自治。当前最大的风险是已有模块之间尚未完整接通；继续按原方案新增 Goal-DAG、Scheduler 和执行状态存储，会增加竞争状态和恢复歧义。

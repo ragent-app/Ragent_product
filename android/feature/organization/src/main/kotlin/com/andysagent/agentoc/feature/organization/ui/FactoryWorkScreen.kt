@@ -42,6 +42,11 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     var responsibilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var responsibility by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityActivity by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var responsibilityPolicy by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var responsibilityPlans by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var capabilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var planCatalogDescriptors by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var reviewedPlan by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var proposal by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var pendingResponsibility by remember(organizationId) { mutableStateOf<Triple<String, String, JsonObject>?>(null) }
     var form by remember(organizationId) { mutableStateOf("") }
@@ -49,6 +54,36 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     var objective by remember(organizationId) { mutableStateOf("") }
     var criterion by remember(organizationId) { mutableStateOf("") }
     var expiry by remember(organizationId) { mutableStateOf("") }
+    var intervalMinutes by remember(organizationId) { mutableStateOf("") }
+    var reportNode by remember(organizationId) { mutableStateOf("") }
+    var reportGeneration by remember(organizationId) { mutableStateOf("") }
+    var reportAttempts by remember(organizationId) { mutableStateOf("1") }
+    var reportCost by remember(organizationId) { mutableStateOf("") }
+    var reportDailyCost by remember(organizationId) { mutableStateOf("") }
+    var reportTimeZone by remember(organizationId) { mutableStateOf("") }
+    var reportExpiry by remember(organizationId) { mutableStateOf("") }
+    var reportReview by remember(organizationId) { mutableStateOf(false) }
+    var reportNetworkPolicy by remember(organizationId) { mutableStateOf("") }
+    var reportNetworkConfirmed by remember(organizationId) { mutableStateOf(false) }
+    var plannerReview by remember(organizationId) { mutableStateOf(false) }
+    var plannerNetworkConfirmed by remember(organizationId) { mutableStateOf(false) }
+    var autoReportPlans by remember(organizationId) { mutableStateOf(false) }
+    var plannerNode by remember(organizationId) { mutableStateOf("") }
+    var plannerGeneration by remember(organizationId) { mutableStateOf("") }
+    var ciPolicyText by remember(organizationId) { mutableStateOf("") }
+    var ciPolicyReviewed by remember(organizationId) { mutableStateOf(false) }
+    var ciRepository by remember(organizationId) { mutableStateOf("") }
+    var ciBranch by remember(organizationId) { mutableStateOf("") }
+    var ciPaths by remember(organizationId) { mutableStateOf("") }
+    var ciCandidate by remember(organizationId) { mutableStateOf("") }
+    var ciCheck by remember(organizationId) { mutableStateOf("") }
+    var ciImplementation by remember(organizationId) { mutableStateOf("") }
+    var ciReviewNode by remember(organizationId) { mutableStateOf("") }
+    var ciIntegration by remember(organizationId) { mutableStateOf("") }
+    var ciGeneration by remember(organizationId) { mutableStateOf("") }
+    var codeBaseline by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var includeCode by remember(organizationId) { mutableStateOf(false) }
+    var includeReport by remember(organizationId) { mutableStateOf(false) }
     var reviewForm by remember(organizationId) { mutableStateOf(false) }
     var sessionContext by remember(organizationId, sessionId) { mutableStateOf<JsonObject?>(null) }
     var confirmSessionContext by remember(organizationId, sessionId) { mutableStateOf(false) }
@@ -72,6 +107,9 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     }
     suspend fun loadResponsibilities() {
         status = "Loading responsibilities…"; item = null; responsibility = null; proposal = null
+        val catalog = runCatching { responsibilityRequest("/capabilities?organizationId=${Uri.encode(organizationId)}") }.getOrNull()
+        capabilities = catalog?.get("providers") as? JsonArray
+        planCatalogDescriptors = catalog?.get("planCatalogDescriptors") as? JsonArray
         runCatching { responsibilityRequest("?organizationId=${Uri.encode(organizationId)}") }.onSuccess {
             responsibilities = it["responsibilities"] as? JsonArray ?: JsonArray(emptyList()); status = "Responsibilities"
         }.onFailure { responsibilities = JsonArray(emptyList()); status = "Responsibilities unavailable: ${it.message}" }
@@ -96,11 +134,15 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
     }
     suspend fun loadResponsibility(id: String) {
-        status = "Loading responsibility…"
+        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false
         runCatching {
             val path = "/${Uri.encode(id)}"
-            val detail = responsibilityRequest(path)["responsibility"]!!.jsonObject
+            val response = responsibilityRequest(path)
+            val detail = response["responsibility"]!!.jsonObject
             require(detail["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId)
+            responsibilityPolicy = response["policy"] as? JsonObject
+            responsibilityPlans = runCatching { responsibilityRequest("$path/plans")["plans"] as? JsonArray }.getOrNull()
+            reviewedPlan = null
             detail to responsibilityRequest("$path/activity")["activity"]!!.jsonArray
         }.onSuccess { (detail, activity) -> responsibility = detail; responsibilityActivity = activity; onResponsibilitySelected(id); status = "Responsibility" }
             .onFailure { status = "Responsibility unavailable: ${it.message}" }
@@ -130,6 +172,9 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
         if (responsibilities != null) {
             val current = responsibility
             if (current == null) {
+                Text("A draft records an objective; execution needs a separately reviewed policy and an available adapter.")
+                if (capabilities == null) Text("Adapter availability is unavailable; no execution capability is assumed.")
+                capabilities?.forEach { Text("Adapter: $it") }
                 responsibilities?.forEach { entry ->
                     val row = entry.jsonObject
                     val id = row["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -141,6 +186,162 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 Text(current["objective"]?.jsonPrimitive?.contentOrNull.orEmpty())
                 Text("Responsibility ${current["lifecycle"]}; version ${current["rowVersion"]}; policy ${current["policyRevision"]}")
                 Text("A paused responsibility stops new admission; existing work may continue.")
+                Text("Policy (not plan approval): ${responsibilityPolicy ?: "unavailable"}")
+                val planner = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "generic-planner" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
+                val plannerTemplate = (planner?.get("templates") as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "agentoc-responsibility-planner" }
+                val reportDescriptor = planCatalogDescriptors?.mapNotNull { it as? JsonObject }?.firstOrNull { it["capability"]?.jsonPrimitive?.contentOrNull == "project-report" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
+                val codeDescriptor = planCatalogDescriptors?.mapNotNull { it as? JsonObject }?.firstOrNull { it["capability"]?.jsonPrimitive?.contentOrNull == "project-code" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
+                if (planner?.get("digest") != null && plannerTemplate?.get("digest") != null && reportDescriptor?.get("templateDigest") != null) {
+                    Text("Configure project read, network and budget below; select report and/or code. Plan review is required by default.")
+                    OutlinedTextField(plannerNode, { plannerNode = it; plannerReview = false; plannerNetworkConfirmed = false }, label = { Text("Planner node ID") })
+                    OutlinedTextField(plannerGeneration, { plannerGeneration = it; plannerReview = false; plannerNetworkConfirmed = false }, label = { Text("Planner node generation") })
+                    TextButton(onClick = { includeReport = !includeReport; plannerReview = false; autoReportPlans = false }) { Text(if (includeReport) "Remove report capability" else "Add report capability") }
+                    val resource = if (reportNetworkPolicy.isNotBlank()) buildJsonObject { put("projectId", current["projectId"]!!); put("readScope", "entire_project"); put("networkPolicy", reportNetworkPolicy) } else null
+                    val attemptsValue = reportAttempts.toIntOrNull(); val costValue = reportCost.toDoubleOrNull(); val dailyValue = reportDailyCost.toDoubleOrNull(); val reportGenerationValue = reportGeneration.toLongOrNull()
+                    val baseReady = attemptsValue != null && attemptsValue in 1..10 && costValue != null && costValue.isFinite() && costValue > 0 && dailyValue != null && dailyValue.isFinite() && dailyValue >= 0 && reportTimeZone.isNotBlank() && reportExpiry.isNotBlank() && (!includeReport || (reportNode.isNotBlank() && reportGenerationValue != null && reportGenerationValue > 0))
+                    val existing = buildJsonObject { put("validUntil", reportExpiry); put("resource", resource ?: JsonNull); put("nodeBindings", buildJsonObject { put("report", buildJsonObject { put("nodeId", reportNode); put("bindingGeneration", reportGenerationValue ?: 0) }) }); put("maxAttempts", attemptsValue ?: 0); put("maxCost", costValue ?: 0.0); put("dailyBudget", buildJsonObject { put("timeZone", reportTimeZone); put("maxCost", dailyValue ?: 0.0) }) }
+                    val inherits = resource?.get("networkPolicy")?.jsonPrimitive?.contentOrNull == "inherit_existing_permissions"
+                    if (codeDescriptor != null) {
+                        Text("Optional code capability requires a clean local baseline, bounded paths, registered check and independent human review. It is separate from project read access.")
+                        TextButton(onClick = { scope.launch {
+                            runCatching {
+                                val response = transport.execute(ApiRequest(method = "POST", path = "/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/code-baseline", body = "{}", contentType = "application/json"))
+                                val data = Json.parseToJsonElement(response.body).jsonObject
+                                if (!response.isSuccessful) error(data["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
+                                data["baseline"]!!.jsonObject
+                            }.onSuccess { codeBaseline = it; includeCode = false; plannerReview = false }.onFailure { status = "Code baseline unavailable: ${it.message}" }
+                        } }) { Text("Capture clean code baseline") }
+                        codeBaseline?.let { Text("Baseline: $it. Fill code paths, check and three node bindings in GitHub CI fields below; repository and branch come from this baseline.") }
+                        if (codeBaseline != null) TextButton(onClick = { includeCode = !includeCode; plannerReview = false }) { Text(if (includeCode) "Remove separately authorized code capability" else "Add code capability for review") }
+                    }
+                    if (inherits && !plannerNetworkConfirmed) TextButton(onClick = { plannerNetworkConfirmed = true }) { Text("Separately confirm planner node's existing network and tool permissions") }
+                    Text("Plan approval: ${if (autoReportPlans) "eligible report-only plans may be admitted automatically" else "every plan requires approval"}. Code and external publication always require human approval; report results still require review.")
+                    TextButton(onClick = { autoReportPlans = false; plannerReview = false }) { Text("Require approval for every plan") }
+                    if (includeReport && !autoReportPlans && reportDescriptor["autoEligible"]?.jsonPrimitive?.booleanOrNull == true) TextButton(onClick = { autoReportPlans = true; plannerReview = false }) { Text("Separately confirm automatic eligible report-only plans within this policy") }
+                    TextButton(enabled = plannerNode.isNotBlank() && (plannerGeneration.toLongOrNull() ?: 0) > 0 && resource != null && baseReady && (includeReport || includeCode) && (!inherits || plannerNetworkConfirmed), onClick = { plannerReview = true }) { Text("Review planner authorization") }
+                    if (plannerReview) {
+                        Text("Review planner node $plannerNode generation $plannerGeneration; scope $resource; report catalog $reportDescriptor; existing report policy $existing. Code included: $includeCode; baseline $codeBaseline; allowed paths $ciPaths; candidate $ciCandidate; registered check $ciCheck; nodes $ciImplementation/$ciReviewNode/$ciIntegration; generations $ciGeneration. Automatic eligible report-only plans: $autoReportPlans; code requires human approval.")
+                        val codeGenerations = ciGeneration.split(',').map { it.trim().toLongOrNull() }
+                        val codeReady = !includeCode || (codeDescriptor != null && codeBaseline != null && listOf(ciPaths,ciCandidate,ciCheck,ciImplementation,ciReviewNode,ciIntegration).all { it.isNotBlank() } && codeGenerations.size == 3 && codeGenerations.all { it != null && it > 0 })
+                        TextButton(enabled = codeReady, onClick = {
+                            val oldBindings = existing["nodeBindings"]!!.jsonObject
+                            val entry = buildJsonObject { put("capability", "project-report"); put("templateId", reportDescriptor["templateId"]!!); put("templateVersion", reportDescriptor["templateVersion"]!!); put("templateDigest", reportDescriptor["templateDigest"]!!); put("resource", resource!!); put("nodeBindings", buildJsonObject { put("report", oldBindings["report"]!!) }); put("maxAttempts", existing["maxAttempts"]!!); put("maxCost", existing["maxCost"]!!); if (autoReportPlans) { put("autoApproval", true); put("requiresHumanApproval", false) } }
+                            val policy = buildJsonObject {
+                                put("validUntil", existing["validUntil"]!!); put("providerId", planner["id"]!!); put("providerVersion", planner["version"]!!); put("providerDigest", planner["digest"]!!)
+                                put("templateId", plannerTemplate["id"]!!); put("templateVersion", plannerTemplate["version"]!!); put("templateDigest", plannerTemplate["digest"]!!); put("resource", resource!!)
+                                put("nodeBindings", buildJsonObject { put("planning", buildJsonObject { put("nodeId", plannerNode); put("bindingGeneration", plannerGeneration.toLong()) }) })
+                                put("maxAttempts", existing["maxAttempts"]!!); put("maxCost", existing["maxCost"]!!); put("dailyBudget", existing["dailyBudget"]!!)
+                                put("planCatalog", buildJsonArray { if (includeReport) add(entry); if (includeCode) add(buildJsonObject {
+                                    put("capability", "project-code"); put("templateId", codeDescriptor!!["templateId"]!!); put("templateVersion", codeDescriptor["templateVersion"]!!); put("templateDigest", codeDescriptor["templateDigest"]!!)
+                                    put("codeBaselineId", codeBaseline!!["id"]!!); put("repositoryFactId", codeBaseline!!["repositoryFactId"]!!); put("repository", codeBaseline!!["repository"]!!); put("targetBranch", codeBaseline!!["branch"]!!)
+                                    put("allowedPaths", buildJsonArray { ciPaths.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { add(it) } }); put("candidateScope", ciCandidate); put("checkActionId", ciCheck)
+                                    put("nodeBindings", buildJsonObject { listOf("implementation" to ciImplementation,"review" to ciReviewNode,"integration" to ciIntegration).forEachIndexed { index, pair -> put(pair.first, buildJsonObject { put("nodeId", pair.second); put("bindingGeneration", codeGenerations[index]!!) }) } })
+                                    put("maxAttempts", existing["maxAttempts"]!!); put("maxCost", existing["maxCost"]!!)
+                                }) }); put("planExecutionMaxAttempts", existing["maxAttempts"]!!.jsonPrimitive.int * if (includeCode && includeReport) 2 else 1); put("planExecutionMaxCost", existing["maxCost"]!!.jsonPrimitive.double * if (includeCode && includeReport) 2 else 1); put("planApproval", if (autoReportPlans && includeReport) "within_policy" else "always"); if (autoReportPlans && includeReport) put("planAutoAdmissionConfirmed", true)
+                                if (inherits) put("networkPermissionConfirmed", plannerNetworkConfirmed)
+                            }
+                            val body = buildJsonObject { put("policy", policy); put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
+                            scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}", body, "PATCH"); plannerReview = false }
+                        }) { Text("Confirm planner authorization") }
+                    }
+                }
+                val ciProvider = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "github-ci" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
+                if (ciProvider != null) {
+                    Text("GitHub CI policy: include repository, targetBranch, allowedPaths, candidateScope, registered checkActionId, implementation/review/integration node IDs and binding generations, maxAttempts, maxCost, dailyBudget and validUntil. The check is a registered action, not a shell command. Catalog: $ciProvider")
+                    OutlinedTextField(ciRepository, { ciRepository = it; ciPolicyReviewed = false }, label = { Text("Repository owner/name") })
+                    OutlinedTextField(ciBranch, { ciBranch = it; ciPolicyReviewed = false }, label = { Text("Target branch") })
+                    OutlinedTextField(ciPaths, { ciPaths = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Allowed project paths, comma separated") })
+                    OutlinedTextField(ciCandidate, { ciCandidate = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Candidate path within allowed paths") })
+                    OutlinedTextField(ciCheck, { ciCheck = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Existing registered check ID") })
+                    OutlinedTextField(ciImplementation, { ciImplementation = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Implementation node ID") })
+                    OutlinedTextField(ciReviewNode, { ciReviewNode = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Review node ID") })
+                    OutlinedTextField(ciIntegration, { ciIntegration = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Integration node ID") })
+                    OutlinedTextField(ciGeneration, { ciGeneration = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Node generations: implementation, review, integration") })
+                    Text("Use the report authorization budget fields below for attempts, cost, daily limit, timezone and expiry, then prepare the CI policy for review.")
+                    val ciTemplate = (ciProvider["templates"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "agentoc-reviewed-change" && it["version"]?.jsonPrimitive?.intOrNull == 3 }
+                    TextButton(onClick = {
+                        val generations = ciGeneration.split(',').map { it.trim().toLongOrNull() }
+                        val attempts = reportAttempts.toIntOrNull(); val cost = reportCost.toDoubleOrNull(); val daily = reportDailyCost.toDoubleOrNull()
+                        if (ciTemplate?.get("digest") != null && generations.size == 3 && generations.all { it != null && it > 0 } && attempts != null && attempts in 1..10 && cost != null && cost.isFinite() && cost > 0 && daily != null && daily.isFinite() && daily >= 0 && listOf(ciRepository,ciBranch,ciPaths,ciCandidate,ciCheck,ciImplementation,ciReviewNode,ciIntegration,reportTimeZone,reportExpiry).all { it.isNotBlank() }) {
+                            val policy = buildJsonObject {
+                                put("validUntil", reportExpiry); put("repository", ciRepository); put("templateId", "agentoc-reviewed-change"); put("templateVersion", 3); put("templateDigest", ciTemplate["digest"]!!)
+                                put("targetBranch", ciBranch); put("allowedPaths", buildJsonArray { ciPaths.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { add(it) } }); put("candidateScope", ciCandidate); put("checkActionId", ciCheck)
+                                put("nodeBindings", buildJsonObject { listOf("implementation" to ciImplementation, "review" to ciReviewNode, "integration" to ciIntegration).forEachIndexed { index, pair -> put(pair.first, buildJsonObject { put("nodeId", pair.second); put("bindingGeneration", generations[index]!!) }) } })
+                                put("maxAttempts", attempts); put("maxCost", cost); put("dailyBudget", buildJsonObject { put("timeZone", reportTimeZone); put("maxCost", daily) })
+                            }
+                            ciPolicyText = policy.toString(); ciPolicyReviewed = false
+                        } else status = "Complete CI fields and budget with valid node generations."
+                    }) { Text("Prepare GitHub CI policy") }
+                    OutlinedTextField(ciPolicyText, { ciPolicyText = it; ciPolicyReviewed = false }, label = { Text("Advanced GitHub CI policy JSON") })
+                    val parsedCiPolicy = runCatching { Json.parseToJsonElement(ciPolicyText) as? JsonObject }.getOrNull()
+                    if (!ciPolicyReviewed) TextButton(enabled = parsedCiPolicy != null, onClick = { ciPolicyReviewed = true }) { Text("Review GitHub CI authorization") }
+                    else {
+                        Text("Authorize exactly this policy: $parsedCiPolicy. Existing work may continue until separately stopped.")
+                        TextButton(enabled = parsedCiPolicy != null, onClick = {
+                            val body = buildJsonObject { put("policy", parsedCiPolicy!!); put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
+                            scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}", body, "PATCH"); ciPolicyReviewed = false }
+                        }) { Text("Confirm GitHub CI authorization") }
+                    }
+                }
+                val reportProvider = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "project-report" && it["version"]?.jsonPrimitive?.intOrNull == 1 && it["available"]?.jsonPrimitive?.booleanOrNull == true }
+                val reportTemplate = (reportProvider?.get("templates") as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "agentoc-project-report" && it["version"]?.jsonPrimitive?.intOrNull == 1 }
+                if (reportProvider?.get("digest") != null && reportTemplate?.get("digest") != null) {
+                    Text("Project report authorization: entire project readable; project file writes are blocked. Other tools remain subject to existing permissions; network isolation is not established. Manual or interval triggers may start the fixed report. Results require human review and are not verified facts.")
+                    OutlinedTextField(reportNode, { reportNode = it; reportReview = false; reportNetworkConfirmed = false; plannerReview = false }, label = { Text("Report node ID") })
+                    OutlinedTextField(reportGeneration, { reportGeneration = it; reportReview = false; reportNetworkConfirmed = false; plannerReview = false }, label = { Text("Node binding generation") })
+                    OutlinedTextField(reportAttempts, { reportAttempts = it; reportReview = false; plannerReview = false }, label = { Text("Maximum attempts (1–10)") })
+                    OutlinedTextField(reportCost, { reportCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum cost") })
+                    OutlinedTextField(reportDailyCost, { reportDailyCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum daily cost") })
+                    OutlinedTextField(reportTimeZone, { reportTimeZone = it; reportReview = false; plannerReview = false }, label = { Text("Daily budget IANA timezone") })
+                    OutlinedTextField(reportExpiry, { reportExpiry = it; reportReview = false; plannerReview = false }, label = { Text("Authorization expiry (ISO time)") })
+                    Text("Network policy: ${reportNetworkPolicy.ifBlank { "not selected" }}")
+                    TextButton(onClick = { reportNetworkPolicy = "deny"; reportNetworkConfirmed = false; reportReview = false; plannerReview = false; plannerNetworkConfirmed = false }) { Text("Deny network (requires verified isolation)") }
+                    TextButton(onClick = { reportNetworkPolicy = "inherit_existing_permissions"; reportNetworkConfirmed = false; reportReview = false; plannerReview = false; plannerNetworkConfirmed = false }) { Text("Review existing network and tool permissions") }
+                    if (reportNetworkPolicy == "inherit_existing_permissions" && !reportNetworkConfirmed) {
+                        Text("Filesystem read-only does not prevent external actions. This node retains existing network and tool permissions, with no domain restriction or proven network isolation.")
+                        TextButton(onClick = { reportNetworkConfirmed = true; reportReview = false }) { Text("Separately confirm inherited network and tools") }
+                    }
+                    val generation = reportGeneration.toLongOrNull()
+                    val attempts = reportAttempts.toIntOrNull()
+                    val cost = reportCost.toDoubleOrNull()
+                    val dailyCost = reportDailyCost.toDoubleOrNull()
+                    val validReport = reportNode.isNotBlank() && generation != null && generation > 0 && attempts != null && attempts in 1..10 && cost != null && cost.isFinite() && cost > 0 && dailyCost != null && dailyCost.isFinite() && dailyCost >= 0 && reportTimeZone.isNotBlank() && reportExpiry.isNotBlank() && (reportNetworkPolicy == "deny" || (reportNetworkPolicy == "inherit_existing_permissions" && reportNetworkConfirmed))
+                    if (!reportReview) TextButton(enabled = validReport, onClick = { reportReview = true }) { Text("Review report authorization") }
+                    else {
+                        Text("Authorize entire project ${current["projectId"]} read-only; node $reportNode generation $reportGeneration; network $reportNetworkPolicy; attempts $reportAttempts; cost $reportCost; daily cost $reportDailyCost in $reportTimeZone; expiry $reportExpiry; provider ${reportProvider["digest"]}; template ${reportTemplate["digest"]}.")
+                        TextButton(enabled = validReport, onClick = {
+                            val policy = buildJsonObject {
+                                put("validUntil", reportExpiry); put("providerId", "project-report"); put("providerVersion", 1); put("providerDigest", reportProvider["digest"]!!)
+                                put("templateId", "agentoc-project-report"); put("templateVersion", 1); put("templateDigest", reportTemplate["digest"]!!)
+                                put("resource", buildJsonObject { put("projectId", current["projectId"]!!); put("readScope", "entire_project"); put("networkPolicy", reportNetworkPolicy) })
+                                if (reportNetworkPolicy == "inherit_existing_permissions") put("networkPermissionConfirmed", reportNetworkConfirmed)
+                                put("nodeBindings", buildJsonObject { put("report", buildJsonObject { put("nodeId", reportNode); put("bindingGeneration", generation!!) }) })
+                                put("maxAttempts", attempts!!); put("maxCost", cost!!); put("dailyBudget", buildJsonObject { put("timeZone", reportTimeZone); put("maxCost", dailyCost!!) })
+                            }
+                            val body = buildJsonObject { put("policy", policy); put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
+                            scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}", body, "PATCH"); reportReview = false }
+                        }) { Text("Confirm report authorization") }
+                    }
+                }
+                Text("Plans awaiting review")
+                if (responsibilityPlans == null) Text("Plan review is unavailable.")
+                responsibilityPlans?.forEach { entry ->
+                    val plan = entry.jsonObject
+                    Text("${plan["state"]} · ${plan["summary"]} · digest ${plan["proposalDigest"]}")
+                    ((plan["proposal"] as? JsonObject)?.get("steps") as? JsonArray)?.forEach { step -> Text("Step: $step") }
+                    Text("Authorized catalog and bounds: ${plan["catalog"] ?: "unavailable"}")
+                    if (plan["proposal"] !is JsonObject) Text("Full proposal unavailable; approval is disabled.")
+                    else Text("Full proposal: ${plan["proposal"]}")
+                    if (plan["state"]?.jsonPrimitive?.contentOrNull == "pending_review" && plan["proposal"] is JsonObject && plan["catalog"] is JsonArray && plan["proposalDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true) TextButton(onClick = { reviewedPlan = plan }) { Text("Review plan") }
+                }
+                reviewedPlan?.let { plan ->
+                    Text("Approve only this plan: ${plan["proposal"]} · digest ${plan["proposalDigest"]} · responsibility version ${current["rowVersion"]}")
+                    TextButton(onClick = {
+                        val planId = plan["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        val body = buildJsonObject { put("expectedVersion", current["rowVersion"]!!); put("proposalDigest", plan["proposalDigest"]!!); put("idempotencyKey", UUID.randomUUID().toString()); put("confirmed", true) }
+                        scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/plans/${Uri.encode(planId)}/approve", body); reviewedPlan = null }
+                    }) { Text("Confirm this plan") }
+                }
                 (current["successCriteria"] as? JsonArray)?.forEach { Text(it.jsonPrimitive.content) }
                 Text("Activity")
                 responsibilityActivity?.forEach { Text("${it.jsonObject["createdAt"]} · ${it.jsonObject["type"]}") }
@@ -200,15 +401,17 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 OutlinedTextField(value = objective, onValueChange = { objective = it; reviewForm = false }, label = { Text("Objective") })
                 if (form == "create") {
                     OutlinedTextField(value = criterion, onValueChange = { criterion = it; reviewForm = false }, label = { Text("Success criterion") })
+                    OutlinedTextField(value = intervalMinutes, onValueChange = { intervalMinutes = it; reviewForm = false }, label = { Text("Interval minutes (blank for manual)") })
                     OutlinedTextField(value = expiry, onValueChange = { expiry = it; reviewForm = false }, label = { Text("Policy expiry (ISO time with timezone)") })
                 }
                 if (!reviewForm) TextButton(onClick = { reviewForm = true }) { Text("Review") }
                 else {
-                    Text("Review ${if (form == "create") "draft for project $projectId; criterion $criterion; expiry $expiry" else "objective change for version ${current?.get("rowVersion")}"}: $objective")
-                    TextButton(onClick = {
+                    Text("Review ${if (form == "create") "draft for project $projectId; criterion $criterion; trigger ${intervalMinutes.ifBlank { "manual" }}; expiry $expiry" else "objective change for version ${current?.get("rowVersion")}"}: $objective. This does not grant tool access or approve a plan.")
+                    TextButton(enabled = form != "create" || intervalMinutes.isBlank() || (intervalMinutes.toLongOrNull()?.let { it in 1L..525600L } == true), onClick = {
                         val body = if (form == "create") buildJsonObject {
                             put("organizationId", organizationId); put("projectId", projectId); put("objective", objective)
                             put("successCriteria", buildJsonArray { add(criterion) }); put("policy", buildJsonObject { put("validUntil", expiry) }); put("idempotencyKey", UUID.randomUUID().toString())
+                            intervalMinutes.toLongOrNull()?.let { put("intervalMs", it * 60000) }
                         } else buildJsonObject { put("objective", objective); put("expectedVersion", current!!["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
                         val path = if (form == "create") "/api/responsibilities" else "/api/responsibilities/${Uri.encode(current!!["id"]!!.jsonPrimitive.content)}"
                         scope.launch { submitResponsibility(path, body, if (form == "create") "POST" else "PATCH") }

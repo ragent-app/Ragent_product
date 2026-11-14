@@ -1,5 +1,7 @@
 # 阶段 B 持续责任与持久事件
 
+责任层面向通用持续目标；GitHub CI 是阶段 C 的首个适配示例。创建或确认目标本身不授予工具、资料访问或外部动作权限，具体场景须由已接入的适配器与明确政策共同约束。
+
 [上一阶段 A](phase-a-execution-closure.zh.md) · [返回总览](README.md) · [下一阶段 C](phase-c-github-ci-autonomy.zh.md)
 
 目标：建立与 Session 解耦的长期责任及可恢复事件入口。前置条件是 A 已明确执行、恢复和验收契约；责任只能引用现有 Goal、Work Item 和执行绑定。
