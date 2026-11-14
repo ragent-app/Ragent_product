@@ -2,7 +2,7 @@ import { withDatabase, getCollaborationByIdempotencyKey } from './collaboration-
 import { createHash } from 'node:crypto';
 import { getOrganization, getNode } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
-import { getRun, getRunManifest, requestRunCancel } from './runs.mjs';
+import { getRun, getRunAcceptanceEvidence, getRunManifest, requestRunCancel } from './runs.mjs';
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
 import { getFactoryWorkItem, updateFactoryBinding } from './factory-control.mjs';
 import { reserveFactoryBudget, settleFactoryBudget } from './organization-governor.mjs';
@@ -405,7 +405,22 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch, bindingGeneration: binding.bindingGeneration,
         action: 'block', payload: { reason: { code: 'authorization_revoked' } } }, actor);
     }
-    const actualRun = attempt?.runId ? await getRun(attempt.runId) : null;
+    let actualRun = attempt?.runId ? await getRun(attempt.runId) : null;
+    if (actualRun && ['completed', 'failed', 'cancelled'].includes(actualRun.state)) {
+      // A terminal status alone may precede durable finalization. Re-read the
+      // paired publication; legacy or inconsistent records remain observable
+      // but cannot settle a Factory budget or confirm a terminal effect.
+      let evidence;
+      try { evidence = await getRunAcceptanceEvidence(attempt.runId); }
+      catch { return { state: 'terminal_evidence_pending', reason: 'run_publication_unavailable', runId: attempt.runId }; }
+      if (!evidence || !evidence.runPublication || evidence.id !== attempt.runId || evidence.sessionId !== attempt.sessionId) {
+        return { state: 'terminal_evidence_pending', reason: 'run_publication_identity_unavailable', runId: attempt.runId };
+      }
+      actualRun = evidence;
+      if (['completed', 'failed', 'cancelled'].includes(actualRun.state) && !actualRun.finalizedAt) {
+        return { state: 'terminal_evidence_pending', reason: 'run_finalization_pending', runId: attempt.runId };
+      }
+    }
     if (actualRun && ['completed', 'failed', 'cancelled'].includes(actualRun.state)
         && collaboration.policy?.factoryExecution?.budgetKey) {
       let usage = null;
@@ -503,6 +518,10 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
       });
     }
     if (binding.status === 'running' && attempt?.state === 'succeeded' && attempt.runId === binding.runId) {
+      if (actualRun?.state !== 'completed' || !actualRun.runPublication || !actualRun.finalizedAt
+          || actualRun.sessionId !== attempt.sessionId) {
+        return { state: 'terminal_evidence_pending', reason: 'completed_run_evidence_unavailable', runId: attempt.runId };
+      }
       if(latest.contract?.resource?.readScope==='entire_project' && latest.contract.accessMode==='read') {
         if(actualRun?.state!=='completed' || actualRun.sessionId!==attempt.sessionId || !attempt.resultPacketId) return {state:'report_evidence_pending'};
         const {getResultPacket}=await import('./result-packets.mjs');
