@@ -27,7 +27,7 @@
 | 原阶段 | 已有基础及剩余完成条件 |
 | --- | --- |
 | **0 底座** | 真实目标平台的 Harness、隔离、授权和运行能力尚需证据；建立能力矩阵，未知能力保持拒绝。 |
-| **1 工作图** | 持久图、依赖与目标修订已有；单个已停止且非终态根工作项可预览修改 objective 并按下游闭包失效，全局目标变化仍整 Goal 保守失效。真实依赖、版本和恢复待验证，通用精确复用不是 MVP 必备。 |
+| **1 工作图** | 持久图、依赖与目标修订已有；可预览互不依赖的已停止非终态根工作项修改及合并下游影响，全局目标变化仍整 Goal 保守失效。真实依赖、版本和恢复待验证，通用精确复用不是 MVP 必备。 |
 | **2 执行** | 候选、审查、检查、恢复和取消已有源码；完成上面的真实执行和中断验收，未知受理与用量不能推断成功。 |
 | **3 团队与客户端** | 组织、换绑、消息和 Web/Android 控制已有基础；最新提交补充托管 Agent 身份冻结校验，仍须验证换人/换 Harness 后权限代次、合同、旧外效及历史连续性。 |
 | **4 工作流与交付** | 项目报告、受限代码公式及 CI 示例已有；证明真实候选、独立审查、检查和受控集成。GitHub Release provider 的受限源码已提交，但未真实验收；PR 或其他自动发布另行决定。 |
@@ -38,8 +38,8 @@
 ## 后续扩展与待决事项
 
 - **通用任务与事件**：目前仅报告、本地代码和 CI 适配，不支持任意应用/连接器自动执行。通用事件过滤/水位及更多适配器按实际用途逐项补可信观察、资源授权、动作回执和恢复。依据：`chat/responsibility-runtime.mjs`、`chat/responsibility-events.mjs`。
-- **记忆与组织**：补不同 fact ID 的同义冲突处理、User Memory 来源/更正/删除完整体验及真实恢复；验证执行者替换和 handoff。当前记忆写入默认关闭，撤销事实不是物理擦除。依据：`chat/responsibility-context.mjs`、`chat/project-memory-store.mjs`。
-- **Goal-DAG 精确影响**：当前仅支持单个已停止且非终态根工作项 objective 的局部修订及下游闭包失效，全局目标变化仍整个 Goal 保守失效。原 Phase 3 更一般的精确影响及可证明子集复用仍属 Full 代码缺口。依据：`chat/factory-goal-revision.mjs`。
+- **记忆与组织**：同项目可能冲突的事实支持 owner 查看来源、保留/更正/撤回及预览重建结果；候选不是真假判断，写入默认关闭，撤回不是物理擦除。语义同义识别、完整 User Memory 体验和真实恢复仍缺；执行者替换和 handoff 仍需验收。依据：`chat/responsibility-memory.mjs`、`chat/project-memory-store.mjs`。
+- **Goal-DAG 精确影响**：已支持多个互不依赖、已停止且非终态的根工作项修订 objective，并预览合并下游影响；可追加人工验收标准，但责任固定合同不支持，原标准和检查保留。全局目标变化仍整 Goal 保守失效；更一般的影响及可证明子集复用、真实并发和执行验收仍缺。依据：`chat/factory-goal-revision.mjs`。
 - **跨设备和连接器**：单权威远端与固定授权单文件传输已有源码但未做双实例验收；设备隔离/授权不能从在线状态推断。邮件未知效果需人工核查，Calendar 仅特定事件身份支持查询回执；GitHub/Gmail/Calendar/Drive 尚非完整统一动作能力矩阵。依据：`chat/remote-factory-source.mjs`、`chat/remote-file-transfer.mjs`、`lib/connector-action-dispatcher.mjs`。
 - **语音和移动体验**：当前是手动 ASR 草稿、同一路径审阅及显式 TTS；免手持连续对话、打断/跨设备续接和 Android FCM 按产品需要继续，不能把现有草稿入口描述为完整语音自治。依据：`android/feature/organization`、[阶段 F](phase-f-voice-experience.zh.md)。
 - **交付与发布**：GitHub Release 的已提交受限 provider 仍需真实签名构建、授权、发布和查询恢复证据；PR 的创建、更新、合并及可查询恢复、其他正式 provider、跨库完整备份、多 Harness/平台灰度和成本硬限额均按目标另行决策；无 provider 强制能力时不能保证硬封顶。依据：`chat/factory-github-release.mjs`、`chat/factory-release.mjs`。

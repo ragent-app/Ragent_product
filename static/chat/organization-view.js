@@ -1144,6 +1144,29 @@
               add(content, 'h3', `Project memory · version ${memory.version}`);
               if (!context.revisionEnabled) add(content, 'p', 'Memory corrections and retractions are currently disabled.');
               add(content, 'p', 'Source and validity are shown as recorded; unknown sources are not treated as instructions.');
+              try {
+                const conflicts = await responsibilityRequest(`/${encodeURIComponent(id)}/memory/conflicts`);
+                add(content,'p','以下仅是可能冲突，并非真假判断；也可从当前事实自行选择。保留双方只针对当前版本。');
+                for (const group of conflicts.groups || []) add(content,'p',`候选 ${group.factKey} · ${group.reviewed ? '已审阅当前版本' : '待审阅'}${group.truncated ? ' · 部分省略' : ''}：${JSON.stringify(group.facts)}`);
+                if (conflicts.truncated || memory.truncated) add(content,'p','列表不完整，未显示的事实不能在此选择。');
+                const selections = (memory.currentFacts || []).filter(fact => fact.state === 'active').map(fact => {
+                  const label=document.createElement('label'), chosen=document.createElement('input'), action=document.createElement('select'), value=document.createElement('input');
+                  chosen.type='checkbox'; for(const option of ['keep','correct','retract']) {const el=document.createElement('option');el.value=option;el.textContent=option;action.appendChild(el);}
+                  value.placeholder='更正后的值（仅更正时）';label.append(chosen,document.createTextNode(` ${fact.factId}: ${fact.factValue} `),action,value);content.appendChild(label);return {fact,chosen,action,value};
+                });
+                button(content,'预览事实审阅',async()=>{try {
+                  const selected=selections.filter(row=>row.chosen.checked), changes=selected.map(row=>({factId:row.fact.factId,action:row.action.value,...(row.action.value==='correct'?{value:row.value.value}: {})}));
+                  if(selected.length<2||selected.length>20||changes.some(change=>change.action==='correct'&&!change.value.trim())) throw new Error('请选择 2 至 20 项事实并填写更正值');
+                  const body={factIds:changes.map(change=>change.factId),changes,expectedVersion:conflicts.version};
+                  const preview=await responsibilityRequest(`/${encodeURIComponent(id)}/memory/conflicts/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+                  const review=add(content,'section','');add(review,'p','事实及来源、所选处理和重建结果如下；撤回不等于物理删除。');
+                  for(const [label,value] of [['事实与来源',preview.preview.facts],['处理',preview.preview.changes],['原摘要',preview.preview.previousSummary],['重建正文',preview.preview.projectedContent],['重建摘要',preview.preview.projectedSummary],['预览到期',preview.preview.expiresAt]]) {add(review,'h4',label);add(review,'pre',typeof value==='string'?value:JSON.stringify(value,null,2));}
+                  if(!context.revisionEnabled) {add(review,'p','记忆写入当前关闭，不能提交。');return;}
+                  const commit={...body,previewDigest:preview.previewDigest,confirmed:true,idempotencyKey:root.crypto.randomUUID()};
+                  const submit=async()=>{try {const result=await responsibilityRequest(`/${encodeURIComponent(id)}/memory/conflicts/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(commit)});add(review,'p',`已记录版本 ${result.version}；投影 ${result.projectionState}。`);}catch(error){add(review,'p',`未确认：${error.message}`);button(review,'使用同一请求重试',submit);}};
+                  button(review,'确认事实审阅',submit);
+                } catch(error) {add(content,'p',`预览不可用：${error.message}`);}});
+              } catch(error) { add(content,'p',`冲突候选不可用：${error.message}`); }
               for (const fact of memory.currentFacts || []) {
                 add(content, 'p', `${fact.factId}: ${fact.factValue || '(retracted)'} · ${fact.state} · source ${fact.sourceKind}${fact.contestedBy ? ` · contested by ${fact.contestedBy}` : ''}`);
                 for (const source of (memory.facts || []).filter(entry => entry.factId === fact.factId)) add(content, 'p', `Source: session ${source.sessionId || 'unknown'}, run ${source.runId || 'unknown'}, events ${source.sourceEventStart}-${source.sourceEventEnd}`);
@@ -1256,17 +1279,51 @@
               }
               if (!goal || !Number.isSafeInteger(goal.rowVersion)) throw new Error('无法读取当前目标版本');
               const objective = root.prompt('新的此项工作目标', item.contract?.objective || ''); if (!objective) return;
+              const criterion = root.prompt('可选：追加一项人工验收标准 ID。固定责任工作流不支持追加；原标准与检查保留。', ''); if (criterion === null) return;
+              const additionalManualCriteria = criterion.trim() ? [{id:criterion.trim(),method:'manual'}] : undefined;
               const base = `/goals/${encodeURIComponent(item.goalId)}/scoped-revision`;
-              const preview = await request(`${base}/preview`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:goal.rowVersion,rootWorkItemId:item.id,objective})});
-              if (preview.goalVersion !== goal.rowVersion || preview.rootWorkItemId !== item.id || preview.objective !== objective || !preview.impactDigest) throw new Error('预览与请求不一致，请刷新');
+              const preview = await request(`${base}/preview`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:goal.rowVersion,rootWorkItemId:item.id,objective,additionalManualCriteria})});
+              if (preview.goalVersion !== goal.rowVersion || preview.rootWorkItemId !== item.id || preview.objective !== objective || JSON.stringify(preview.additionalManualCriteria) !== JSON.stringify(additionalManualCriteria) || !preview.impactDigest) throw new Error('预览与请求不一致，请刷新');
               const summary = (preview.items || []).map(entry => `${entry.id} · ${entry.state} · ${entry.controlState} · 活动执行 ${entry.activeBindings?.length ?? '未知'}`).join('\n');
-              if (!root.confirm(`仅修改此项工作目标，保留原权限与验收条件。新目标：${preview.objective}\n目标版本：${preview.goalVersion}\n受影响工作：\n${summary}\n活动下游仅请求取消，不代表已停止；不受影响历史保留。确认提交？`)) return;
+              if (!root.confirm(`修改目标：${preview.objective}；追加人工验收标准：${JSON.stringify(preview.additionalManualCriteria || [])}。保留原权限、标准和检查。\n目标版本：${preview.goalVersion}\n受影响工作：\n${summary}\n活动下游仅请求取消，不代表已停止；不受影响历史保留。确认提交？`)) return;
               const commandId = root.crypto.randomUUID();
-              const body = {expectedVersion:preview.goalVersion,rootWorkItemId:preview.rootWorkItemId,objective:preview.objective,impactDigest:preview.impactDigest,commandId,idempotencyKey:commandId};
+              const body = {expectedVersion:preview.goalVersion,rootWorkItemId:preview.rootWorkItemId,objective:preview.objective,...(preview.additionalManualCriteria?{additionalManualCriteria:preview.additionalManualCriteria}:{}),impactDigest:preview.impactDigest,commandId,idempotencyKey:commandId};
               const submit = async () => { try { const result = await request(`${base}/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); add(content,'p',`修改已记录：${result.operation?.state || '未知'}。请刷新查看实际停止和工作状态。`); }
                 catch(error) { add(content,'p',`修改未确认：${error.message}`); button(content,'使用同一请求重试',submit); } };
               await submit();
             } catch (error) { add(content, 'p', `无法审阅局部修改：${error.message}`); }
+          });
+          button(content, '审阅多个工作目标修改', async () => {
+            const panel = add(content, 'section', '');
+            try {
+              const rows = await request('/work-items');
+              const candidates = (rows.items || []).filter(row => row.goalId === item.goalId);
+              if (rows.nextCursor) add(panel, 'p', '仅显示当前页；未显示的工作不能在此选择。');
+              const fields = candidates.map(row => {
+                const label = document.createElement('label'), selected = document.createElement('input'), objective = document.createElement('input'), criterion = document.createElement('input');
+                selected.type = 'checkbox'; objective.placeholder = '新的工作目标';
+                criterion.placeholder='可选人工验收标准 ID（固定责任合同不支持）';label.append(selected, document.createTextNode(` ${row.contract?.objective || row.id} · ${row.state} `), objective, criterion); panel.appendChild(label);
+                return {row, selected, objective, criterion};
+              });
+              button(panel, '预览合并影响', async () => {
+                try {
+                  const revisions = fields.filter(field => field.selected.checked).map(field => ({rootWorkItemId:field.row.id,objective:field.objective.value.trim(),...(field.criterion.value.trim()?{additionalManualCriteria:[{id:field.criterion.value.trim(),method:'manual'}]}:{})}));
+                  if (revisions.length < 2 || revisions.length > 32 || revisions.some(entry => !entry.objective)) throw new Error('请选择 2 至 32 项工作并填写每项新目标');
+                  let cursor = '', goal = null;
+                  for (let page = 0; page < 10 && !goal; page++) { const result = await request(`/goals?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); goal = (result.items || []).find(entry => entry.id === item.goalId); if (!result.nextCursor || goal) break; cursor = result.nextCursor; }
+                  if (!Number.isSafeInteger(goal?.rowVersion)) throw new Error('无法读取当前目标版本');
+                  const base = `/goals/${encodeURIComponent(item.goalId)}/scoped-revision`;
+                  const preview = await request(`${base}/preview`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:goal.rowVersion,revisions})});
+                  const normalized = list => JSON.stringify([...list].sort((a,b) => a.rootWorkItemId.localeCompare(b.rootWorkItemId)));
+                  if (preview.goalVersion !== goal.rowVersion || !Array.isArray(preview.revisions) || normalized(preview.revisions) !== normalized(revisions) || !preview.impactDigest) throw new Error('预览与请求不一致，请刷新');
+                  const summary = (preview.items || []).map(entry => `${entry.id} · ${entry.state} · ${entry.controlState} · 活动执行 ${entry.activeBindings?.length ?? '未知'}`).join('\n');
+                  if (!root.confirm(`修改目标：\n${preview.revisions.map(entry => `${entry.rootWorkItemId}: ${entry.objective}；追加人工标准 ${JSON.stringify(entry.additionalManualCriteria || [])}`).join('\n')}\n受影响工作：\n${summary}\n活动下游仅请求取消，不代表已停止；原权限、标准及检查保留。确认提交？`)) return;
+                  const commandId = root.crypto.randomUUID(), body = {expectedVersion:preview.goalVersion,revisions:preview.revisions,impactDigest:preview.impactDigest,commandId,idempotencyKey:commandId};
+                  const submit = async () => { try { await request(`${base}/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); add(panel,'p','修改已记录；请刷新查看实际工作状态。'); } catch(error) { add(panel,'p',`修改未确认：${error.message}`); button(panel,'使用同一请求重试',submit); } };
+                  await submit();
+                } catch(error) { add(panel,'p',`无法审阅修改：${error.message}`); }
+              });
+            } catch(error) { add(panel,'p',`无法读取工作：${error.message}`); }
           });
           const receipt = add(content, 'p', '');
           button(content, 'Request reconciliation', () => {

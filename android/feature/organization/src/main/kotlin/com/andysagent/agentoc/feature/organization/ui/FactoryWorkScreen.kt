@@ -40,13 +40,22 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
     var itemBudget by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var itemReconciliation by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var scopedObjective by remember(organizationId) { mutableStateOf("") }
+    var scopedCriterion by remember(organizationId) { mutableStateOf("") }
     var scopedPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var scopedPending by remember(organizationId) { mutableStateOf<Pair<String, JsonObject>?>(null) }
+    var multiObjectives by remember(organizationId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var multiCriteria by remember(organizationId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var multiPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var multiPending by remember(organizationId) { mutableStateOf<Pair<String, JsonObject>?>(null) }
     var status by remember(organizationId) { mutableStateOf("Loading work items…") }
     var pending by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var responsibility by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityActivity by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var memoryConflictData by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var memoryData by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var memoryChanges by remember(organizationId) { mutableStateOf<Map<String, Pair<String,String>>>(emptyMap()) }
+    var memoryPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityPolicy by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityPlans by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var capabilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
@@ -149,7 +158,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
     }
     suspend fun loadResponsibility(id: String) {
-        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null
+        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null; memoryData = null; memoryConflictData = null; memoryChanges = emptyMap(); memoryPreview = null
         runCatching {
             val path = "/${Uri.encode(id)}"
             val response = responsibilityRequest(path)
@@ -180,7 +189,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
         if (resumeId == null) reload() else { loadResponsibilities(); loadResponsibility(resumeId) }
     }
     LaunchedEffect(organizationId, item?.get("id")) {
-        itemBudget = null; itemReconciliation = null; scopedPreview = null; scopedPending = null; scopedObjective = ""
+        itemBudget = null; itemReconciliation = null; scopedPreview = null; scopedPending = null; scopedObjective = ""; scopedCriterion = ""; multiObjectives = emptyMap(); multiCriteria = emptyMap(); multiPreview = null; multiPending = null
         val id = item?.get("id")?.jsonPrimitive?.contentOrNull
         if (!id.isNullOrBlank()) {
             itemReconciliation = runCatching { request("/work-items/${Uri.encode(id)}/reconcile") }.getOrNull()
@@ -248,6 +257,31 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                     }
                 }
                 Text("Responsibility notifications through Android FCM are not supported. Activity remains available in the app.")
+                TextButton(onClick={scope.launch {runCatching { val path="/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/memory"; responsibilityRequest(path) to responsibilityRequest("$path/conflicts") }.onSuccess { (memory,conflicts) -> memoryData=memory; memoryConflictData=conflicts; memoryChanges=emptyMap();memoryPreview=null }.onFailure {status="记忆不可用：${it.message}"}}}) { Text("查看记忆和可能冲突") }
+                memoryConflictData?.let { conflicts ->
+                    Text("仅为可能冲突，不判断真假；保留双方只针对当前版本。${if (conflicts["truncated"]?.jsonPrimitive?.booleanOrNull == true) "候选不完整。" else ""}")
+                    (conflicts["groups"] as? JsonArray)?.forEach { Text("候选与来源：$it") }
+                    val memory = memoryData?.get("memory") as? JsonObject
+                    (memory?.get("currentFacts") as? JsonArray)?.mapNotNull {it as? JsonObject}?.filter {it["state"]?.jsonPrimitive?.contentOrNull=="active"}?.forEach { fact ->
+                        val id=fact["factId"]?.jsonPrimitive?.contentOrNull.orEmpty(); if(id.isNotBlank()) {
+                            Text("事实：${fact["factValue"]} · $id")
+                            TextButton(onClick={memoryChanges=if(memoryChanges.containsKey(id)) memoryChanges-id else memoryChanges+(id to ("keep" to ""));memoryPreview=null}) {Text(if(memoryChanges.containsKey(id)) "取消选择" else "选择事实")}
+                            memoryChanges[id]?.let { (action,value) ->
+                                listOf("keep","correct","retract").forEach { next -> TextButton(onClick={memoryChanges=memoryChanges+(id to (next to value));memoryPreview=null}) {Text("${if(action==next) "✓ " else ""}$next")} }
+                                if(action=="correct") OutlinedTextField(value,{memoryChanges=memoryChanges+(id to (action to it));memoryPreview=null},label={Text("更正后的值")})
+                            }
+                        }
+                    }
+                    TextButton(enabled=memoryChanges.size in 2..20 && memoryChanges.values.all {it.first!="correct" || it.second.isNotBlank()},onClick={scope.launch {runCatching {
+                        val changes=JsonArray(memoryChanges.map { (id,choice) -> buildJsonObject {put("factId",id);put("action",choice.first);if(choice.first=="correct")put("value",choice.second)} });val body=buildJsonObject {put("factIds",JsonArray(memoryChanges.keys.map {JsonPrimitive(it)}));put("changes",changes);put("expectedVersion",conflicts["version"]!!)}
+                        val response=transport.execute(ApiRequest(method="POST",path="/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/memory/conflicts/preview",body=body.toString(),contentType="application/json"));val result=Json.parseToJsonElement(response.body).jsonObject;if(!response.isSuccessful)error(result["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}");buildJsonObject {put("request",body);put("result",result)}
+                    }.onSuccess {memoryPreview=it}.onFailure {status="预览不可用：${it.message}"}}}) {Text("预览事实审阅")}
+                    memoryPreview?.let { saved -> val result=saved["result"]!!.jsonObject;val preview=result["preview"]!!.jsonObject
+                        Text("事实和来源：${preview["facts"]}\n处理：${preview["changes"]}\n原摘要：${preview["previousSummary"]}\n重建正文：${preview["projectedContent"]}\n重建摘要：${preview["projectedSummary"]}\n到期：${preview["expiresAt"]}。撤回不是物理删除。")
+                        if(memoryData?.get("revisionEnabled")?.jsonPrimitive?.booleanOrNull==true) TextButton(onClick={val original=saved["request"]!!.jsonObject;val body=buildJsonObject {original.forEach {(key,value)->put(key,value)};put("previewDigest",result["previewDigest"]!!);put("confirmed",true);put("idempotencyKey",UUID.randomUUID().toString())};memoryPreview=null;scope.launch {submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/memory/conflicts/commit",body)}}) {Text("确认事实审阅")}
+                        else Text("记忆写入当前关闭，不能提交。")
+                    }
+                }
                 Text("Policy (not plan approval): ${responsibilityPolicy ?: "unavailable"}")
                 if (responsibilityFeatures?.get("committedGitChangesOnly")?.jsonPrimitive?.booleanOrNull == true && responsibilityPolicy?.get("providerId")?.jsonPrimitive?.contentOrNull in listOf("generic-planner", "project-report")) {
                     val enabled = responsibilityPolicy?.get("committedGitChangesOnly")?.jsonPrimitive?.booleanOrNull == true
@@ -516,22 +550,49 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             val reservation = itemBudget?.get("reservation") as? JsonObject
             Text(if (reservation == null) "Budget facts unavailable; this does not prove work did not run." else "Budget ${reservation["state"] ?: "unavailable"}; reserved ${reservation["reserved"]?.takeUnless { it is JsonNull } ?: "unknown"}; actual usage ${if (itemBudget?.get("usageState")?.jsonPrimitive?.contentOrNull == "actual") reservation["actualUsage"]?.takeUnless { it is JsonNull } ?: "unknown" else "unknown"}; window ${reservation["window"]?.takeUnless { it is JsonNull } ?: "unknown"}. Admission estimates do not enforce a provider spending cap.")
             OutlinedTextField(scopedObjective,{scopedObjective=it;scopedPreview=null},label={Text("新的此项工作目标")})
+            OutlinedTextField(scopedCriterion,{scopedCriterion=it;scopedPreview=null},label={Text("可选追加人工验收标准 ID；固定责任合同不支持")})
             TextButton(enabled=scopedObjective.isNotBlank(),onClick={ scope.launch {
                 runCatching {
                     val goalId=selected["goalId"]!!.jsonPrimitive.content; var cursor=""; var goal:JsonObject?=null
                     for (page in 0 until 10) { val result=request("/goals?limit=200" + if(cursor.isNotEmpty()) "&cursor=${Uri.encode(cursor)}" else ""); goal=result["items"]?.jsonArray?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull==goalId }; cursor=result["nextCursor"]?.jsonPrimitive?.contentOrNull.orEmpty(); if(goal!=null || cursor.isEmpty()) break }
                     val version=goal?.get("rowVersion")?.jsonPrimitive?.longOrNull ?: error("无法读取当前目标版本")
-                    val body=buildJsonObject { put("expectedVersion",version); put("rootWorkItemId",selected["id"]!!); put("objective",scopedObjective) }
+                    val criteria=if(scopedCriterion.isBlank()) null else JsonArray(listOf(buildJsonObject {put("id",scopedCriterion.trim());put("method","manual")}))
+                    val body=buildJsonObject { put("expectedVersion",version); put("rootWorkItemId",selected["id"]!!); put("objective",scopedObjective); if(criteria!=null)put("additionalManualCriteria",criteria) }
                     val preview=request("/goals/${Uri.encode(goalId)}/scoped-revision/preview",body)
-                    require(preview["goalVersion"]?.jsonPrimitive?.longOrNull==version && preview["rootWorkItemId"]==selected["id"] && preview["objective"]?.jsonPrimitive?.contentOrNull==scopedObjective && preview["impactDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true) { "预览与请求不一致，请刷新" }
+                    require(preview["goalVersion"]?.jsonPrimitive?.longOrNull==version && preview["rootWorkItemId"]==selected["id"] && preview["objective"]?.jsonPrimitive?.contentOrNull==scopedObjective && preview["additionalManualCriteria"]==criteria && preview["impactDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true) { "预览与请求不一致，请刷新" }
                     preview
                 }.onSuccess { scopedPreview=it }.onFailure { status="无法审阅局部修改：${it.message}" }
             } }) { Text("审阅局部目标修改") }
             scopedPreview?.takeIf { it["rootWorkItemId"] == selected["id"] }?.let { preview ->
-                Text("仅修改此项工作目标，保留原权限与验收条件。新目标：${preview["objective"]}；目标版本：${preview["goalVersion"]}；受影响工作：${preview["items"]}。活动下游仅请求取消，不代表已停止；不受影响历史保留。")
-                TextButton(onClick={ val command=UUID.randomUUID().toString(); val body=buildJsonObject { put("expectedVersion",preview["goalVersion"]!!);put("rootWorkItemId",preview["rootWorkItemId"]!!);put("objective",preview["objective"]!!);put("impactDigest",preview["impactDigest"]!!);put("commandId",command);put("idempotencyKey",command) }; val path="/goals/${Uri.encode(preview["goalId"]!!.jsonPrimitive.content)}/scoped-revision/commit"; scopedPending=path to body; scope.launch { runCatching { request(path,body) }.onSuccess { scopedPending=null;scopedPreview=null;status="修改已记录，请刷新查看实际停止和工作状态。" }.onFailure { status="修改未确认：${it.message}" } } }) { Text("确认局部修改") }
+                Text("新目标：${preview["objective"]}；追加人工标准：${preview["additionalManualCriteria"] ?: "无"}；目标版本：${preview["goalVersion"]}；受影响工作：${preview["items"]}。保留原权限、标准和检查；活动下游仅请求取消，不代表已停止。")
+                TextButton(onClick={ val command=UUID.randomUUID().toString(); val body=buildJsonObject { put("expectedVersion",preview["goalVersion"]!!);put("rootWorkItemId",preview["rootWorkItemId"]!!);put("objective",preview["objective"]!!);preview["additionalManualCriteria"]?.let {put("additionalManualCriteria",it)};put("impactDigest",preview["impactDigest"]!!);put("commandId",command);put("idempotencyKey",command) }; val path="/goals/${Uri.encode(preview["goalId"]!!.jsonPrimitive.content)}/scoped-revision/commit"; scopedPending=path to body; scope.launch { runCatching { request(path,body) }.onSuccess { scopedPending=null;scopedPreview=null;status="修改已记录，请刷新查看实际停止和工作状态。" }.onFailure { status="修改未确认：${it.message}" } } }) { Text("确认局部修改") }
             }
             scopedPending?.takeIf { it.second["rootWorkItemId"] == selected["id"] }?.let { (path,body) -> TextButton(onClick={scope.launch { runCatching { request(path,body) }.onSuccess {scopedPending=null;scopedPreview=null;status="修改已记录。"}.onFailure {status="修改未确认：${it.message}"} }}) { Text("使用同一请求重试") } }
+            Text("多个工作目标：选择同一目标内 2 至 32 项工作并填写各自新目标。仅显示当前列表页。")
+            list?.get("items")?.jsonArray?.mapNotNull { it as? JsonObject }?.filter { it["goalId"] == selected["goalId"] }?.forEach { row ->
+                val id = row["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (id.isNotBlank()) {
+                    TextButton(onClick = { multiObjectives = if (multiObjectives.containsKey(id)) multiObjectives - id else multiObjectives + (id to ""); multiPreview = null }) { Text("${if (multiObjectives.containsKey(id)) "取消选择" else "选择"} $id · ${row["state"]}") }
+                    if (multiObjectives.containsKey(id)) OutlinedTextField(multiObjectives[id].orEmpty(), { multiObjectives = multiObjectives + (id to it); multiPreview = null }, label = { Text("此工作的新目标") })
+                    if (multiObjectives.containsKey(id)) OutlinedTextField(multiCriteria[id].orEmpty(), { multiCriteria = multiCriteria + (id to it); multiPreview = null }, label = { Text("可选人工标准 ID；固定责任合同不支持") })
+                }
+            }
+            TextButton(enabled = multiObjectives.size in 2..32 && multiObjectives.values.all { it.isNotBlank() }, onClick = { scope.launch {
+                runCatching {
+                    val goalId=selected["goalId"]!!.jsonPrimitive.content; var cursor=""; var goal:JsonObject?=null
+                    for (page in 0 until 10) { val result=request("/goals?limit=200" + if(cursor.isNotEmpty()) "&cursor=${Uri.encode(cursor)}" else ""); goal=result["items"]?.jsonArray?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull==goalId }; cursor=result["nextCursor"]?.jsonPrimitive?.contentOrNull.orEmpty(); if(goal!=null || cursor.isEmpty()) break }
+                    val version=goal?.get("rowVersion")?.jsonPrimitive?.longOrNull ?: error("无法读取当前目标版本")
+                    val revisions=JsonArray(multiObjectives.entries.map { (id, objective) -> buildJsonObject { put("rootWorkItemId",id); put("objective",objective.trim());multiCriteria[id]?.trim()?.takeIf {it.isNotEmpty()}?.let {put("additionalManualCriteria",JsonArray(listOf(buildJsonObject {put("id",it);put("method","manual")})))} } })
+                    val preview=request("/goals/${Uri.encode(goalId)}/scoped-revision/preview",buildJsonObject {put("expectedVersion",version);put("revisions",revisions)})
+                    val returned=(preview["revisions"] as? JsonArray)?.map { it.jsonObject["rootWorkItemId"]!!.jsonPrimitive.content to it.jsonObject["objective"]!!.jsonPrimitive.content }?.toMap()
+                    require(preview["goalVersion"]?.jsonPrimitive?.longOrNull==version && returned==multiObjectives.mapValues { it.value.trim() } && (preview["revisions"] as? JsonArray)?.toSet()==revisions.toSet() && preview["impactDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank()==true) { "预览与请求不一致，请刷新" }; preview
+                }.onSuccess { multiPreview=it }.onFailure { status="无法审阅局部修改：${it.message}" }
+            } }) { Text("预览合并影响") }
+            multiPreview?.let { preview ->
+                Text("修改目标：${preview["revisions"]}；受影响工作：${preview["items"]}。活动下游仅请求取消，不代表已停止；原权限与验收条件保留。")
+                TextButton(onClick = { val command=UUID.randomUUID().toString(); val body=buildJsonObject {put("expectedVersion",preview["goalVersion"]!!);put("revisions",preview["revisions"]!!);put("impactDigest",preview["impactDigest"]!!);put("commandId",command);put("idempotencyKey",command)};val path="/goals/${Uri.encode(preview["goalId"]!!.jsonPrimitive.content)}/scoped-revision/commit";multiPending=path to body;scope.launch {runCatching {request(path,body)}.onSuccess {multiPending=null;multiPreview=null;status="修改已记录，请刷新查看实际工作状态。"}.onFailure {status="修改未确认：${it.message}"}} }) { Text("确认多个目标修改") }
+            }
+            multiPending?.let { (path,body) -> TextButton(onClick={scope.launch {runCatching {request(path,body)}.onSuccess {multiPending=null;multiPreview=null;status="修改已记录。"}.onFailure {status="修改未确认：${it.message}"}}}) { Text("使用同一多目标请求重试") } }
             Text("State ${selected["state"]}; control ${selected["controlState"]}; priority ${selected["priority"]}; version ${selected["rowVersion"]}")
             listOf("contract", "dependencies", "bindings", "candidates", "decisions").forEach { Text("$it: ${selected[it] ?: "[]"}") }
             Text("Delivery evidence")

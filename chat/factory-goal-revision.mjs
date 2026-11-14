@@ -57,8 +57,23 @@ export async function reviseFactoryGoalWithImpact(input,actor) {
   });
 }
 
-// A scoped revision changes only one task's objective. Authorization, Goal
-// and acceptance criteria stay fixed; downstream history remains immutable.
+// A scoped revision may add manual gates without weakening existing gates.
+// Responsibility workflows use fixed catalog contracts and cannot use this.
+function manualCriteria(db,root,value) {
+  if(value===undefined) return null;
+  if(!Array.isArray(value)||value.length<1||value.length>32) throw factoryError('FACTORY_INVALID','One to 32 manual criteria are required',400);
+  for(const table of ['responsibility_work_links','responsibility_plan_executions']) {
+    if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table) && db.prepare(`SELECT 1 FROM ${table} WHERE goal_id=? LIMIT 1`).get(root.goal_id))
+      throw factoryError('FACTORY_CONFLICT','Responsibility workflows require their fixed authorized contract');
+  }
+  const existing=itemRow(db,root).contract?.acceptanceCriteria;
+  if(!Array.isArray(existing)) throw factoryError('FACTORY_CONFLICT','Existing criteria are unavailable');
+  const ids=new Set(existing.map(entry=>entry.id));
+  return value.map(entry=>{
+    if(!entry||typeof entry!=='object'||Array.isArray(entry)||Object.keys(entry).sort().join(',')!=='id,method'||entry.method!=='manual') throw factoryError('FACTORY_INVALID','Only explicit manual criteria may be added',400);
+    const id=required(entry.id,'criterion id');if(id!==entry.id||ids.has(id)) throw factoryError('FACTORY_INVALID','Criterion IDs must be normalized and unique',400);ids.add(id);return {id,method:'manual'};
+  });
+}
 function scopedImpact(db,input) {
   const goal=db.prepare('SELECT * FROM factory_goals WHERE id=? AND organization_id=?').get(input.goalId,input.organizationId);
   if(!goal) throw factoryError('FACTORY_NOT_FOUND','Goal not found',404);
@@ -76,17 +91,20 @@ function scopedImpact(db,input) {
     if(id===root.id&&active.length) throw factoryError('FACTORY_CONFLICT','Root execution must be stopped before revision');
     return {id:row.id,goalId:row.goal_id,rowVersion:row.row_version,state:row.state,controlState:row.control_state,contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,candidateDigest:row.candidate_digest,activeBindings:active,invalidated:!!db.prepare('SELECT 1 FROM factory_work_invalidations WHERE work_item_id=?').get(id)};
   });
-  const facts={goalId:goal.id,goalRevision:goal.revision,goalVersion:goal.row_version,rootWorkItemId:root.id,objective:required(input.objective,'objective'),items};
+  const added=manualCriteria(db,root,input.additionalManualCriteria);
+  const facts={goalId:goal.id,goalRevision:goal.revision,goalVersion:goal.row_version,rootWorkItemId:root.id,objective:required(input.objective,'objective'),...(added?{additionalManualCriteria:added}:{}),items};
   return {goal,root,facts,impactDigest:digest(facts)};
 }
 export async function previewFactoryScopedRevision(input,actor) {
+  if(input?.revisions!==undefined) return previewFactoryMultiScopedRevision(input,actor);
   owner(actor); required(input?.organizationId,'organizationId'); required(input?.goalId,'goalId'); required(input?.rootWorkItemId,'rootWorkItemId');
   return factoryRead(db=>{authorize(db,input.organizationId,actor,'factory.read');const plan=scopedImpact(db,input);return {schemaVersion:1,...plan.facts,impactDigest:plan.impactDigest};});
 }
 export async function reviseFactoryScopeWithImpact(input,actor) {
+  if(input?.revisions!==undefined) return reviseFactoryMultiScopeWithImpact(input,actor);
   owner(actor); const org=required(input?.organizationId,'organizationId'),goalId=required(input?.goalId,'goalId'),rootId=required(input?.rootWorkItemId,'rootWorkItemId');
   const commandId=required(input.commandId,'commandId'),key=required(input.idempotencyKey,'idempotencyKey');
-  const payloadDigest=digest({org,goalId,rootId,expectedVersion:input.expectedVersion,objective:input.objective,impactDigest:input.impactDigest});
+  const payloadDigest=digest({org,goalId,rootId,expectedVersion:input.expectedVersion,objective:input.objective,impactDigest:input.impactDigest,...(input.additionalManualCriteria!==undefined?{additionalManualCriteria:input.additionalManualCriteria}:{})});
   return factoryTransaction(db=>{
     authorize(db,org,actor,'factory.AmendContract');
     const prior=db.prepare('SELECT * FROM factory_command_receipts WHERE actor_id=? AND command_type=? AND target_id=? AND idempotency_key=?').get(actor.principalId,'ReviseFactoryScope',rootId,key);
@@ -101,12 +119,77 @@ export async function reviseFactoryScopeWithImpact(input,actor) {
       const next=update(db,row,{control_state:affected.activeBindings.length?'cancel_requested':'paused'});
       event(db,org,row.id,'WorkInvalidatedByScopedRevision',{goalId,rootWorkItemId:rootId,commandId,stopRequested:affected.activeBindings.length>0,rowVersion:next.row_version});
     }
-    const contract={...itemRow(db,plan.root).contract,objective:plan.facts.objective};
+    const previous=itemRow(db,plan.root).contract;
+    const contract={...previous,objective:plan.facts.objective,...(plan.facts.additionalManualCriteria?{acceptanceCriteria:[...previous.acceptanceCriteria,...plan.facts.additionalManualCriteria]}:{})};
     const revision=plan.root.contract_revision+1;
     db.prepare('INSERT INTO factory_work_contracts VALUES(?,?,?,?,?)').run(rootId,revision,encode(contract),digest(contract),ts);
     const root=update(db,plan.root,{contract_revision:revision,state:'proposed',candidate_digest:null,gate_generation:plan.root.gate_generation+1,blocked_json:null});
     event(db,org,rootId,'WorkScopedRevision',{commandId,impactDigest:plan.impactDigest,contractRevision:revision});
     const result={schemaVersion:1,operation:{commandId,state:'completed'},goalId,rootWorkItemId:rootId,contractRevision:revision,item:itemRow(db,root),impact:plan.facts,impactDigest:plan.impactDigest};
     db.prepare('INSERT INTO factory_command_receipts VALUES(?,?,?,?,?,?,?,?,?)').run(commandId,org,actor.principalId,'ReviseFactoryScope',rootId,key,payloadDigest,encode(result),ts);return result;
+  });
+}
+
+// Keep the original single-root contract and receipt identity intact. The
+// multi-root form is one atomic command with a separately scoped receipt.
+function normalizeScopedRevisions(input) {
+  if(input.rootWorkItemId!==undefined || input.objective!==undefined || input.additionalManualCriteria!==undefined || !Array.isArray(input.revisions) || input.revisions.length<2 || input.revisions.length>32)
+    throw factoryError('FACTORY_INVALID','Two to 32 scoped revisions are required without single-root fields',400);
+  const revisions=input.revisions.map(entry=>{
+    if(!entry || typeof entry!=='object' || Array.isArray(entry) || Object.keys(entry).some(key=>!['rootWorkItemId','objective','additionalManualCriteria'].includes(key)))
+      throw factoryError('FACTORY_INVALID','Invalid scoped revision',400);
+    return {rootWorkItemId:required(entry.rootWorkItemId,'rootWorkItemId'),objective:required(entry.objective,'objective'),...(entry.additionalManualCriteria!==undefined?{additionalManualCriteria:entry.additionalManualCriteria}:{})};
+  }).sort((a,b)=>a.rootWorkItemId<b.rootWorkItemId?-1:a.rootWorkItemId>b.rootWorkItemId?1:0);
+  if(new Set(revisions.map(entry=>entry.rootWorkItemId)).size!==revisions.length) throw factoryError('FACTORY_INVALID','Scoped roots must be distinct',400);
+  return revisions;
+}
+function multiScopedImpact(db,input,revisions) {
+  const roots=new Set(revisions.map(entry=>entry.rootWorkItemId)),items=new Map(),plans=[];
+  for(const revision of revisions) {
+    const plan=scopedImpact(db,{...input,...revision});
+    if(plan.facts.items.some(item=>item.id!==revision.rootWorkItemId && roots.has(item.id)))
+      throw factoryError('FACTORY_CONFLICT','Scoped roots must not depend on one another');
+    plans.push(plan);
+    for(const item of plan.facts.items) items.set(item.id,item);
+  }
+  const goal=plans[0].goal;
+  const facts={goalId:goal.id,goalRevision:goal.revision,goalVersion:goal.row_version,revisions,items:[...items.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0)};
+  return {goal,plans,facts,impactDigest:digest(facts)};
+}
+async function previewFactoryMultiScopedRevision(input,actor) {
+  owner(actor);required(input?.organizationId,'organizationId');required(input?.goalId,'goalId');
+  const revisions=normalizeScopedRevisions(input);
+  return factoryRead(db=>{authorize(db,input.organizationId,actor,'factory.read');const plan=multiScopedImpact(db,input,revisions);return {schemaVersion:1,...plan.facts,impactDigest:plan.impactDigest};});
+}
+async function reviseFactoryMultiScopeWithImpact(input,actor) {
+  owner(actor);const org=required(input?.organizationId,'organizationId'),goalId=required(input?.goalId,'goalId');
+  const commandId=required(input.commandId,'commandId'),key=required(input.idempotencyKey,'idempotencyKey'),revisions=normalizeScopedRevisions(input);
+  const payloadDigest=digest({org,goalId,expectedVersion:input.expectedVersion,revisions,impactDigest:input.impactDigest});
+  return factoryTransaction(db=>{
+    authorize(db,org,actor,'factory.AmendContract');
+    const prior=db.prepare('SELECT * FROM factory_command_receipts WHERE actor_id=? AND command_type=? AND target_id=? AND idempotency_key=?').get(actor.principalId,'ReviseFactoryMultiScope',goalId,key);
+    if(prior){if(prior.payload_digest!==payloadDigest) throw factoryError('FACTORY_CONFLICT','Revision key reused with different inputs');return {...decode(prior.result_json,{}),replayed:true};}
+    if(db.prepare('SELECT 1 FROM factory_command_receipts WHERE command_id=?').get(commandId)) throw factoryError('FACTORY_CONFLICT','Command ID already used');
+    const plan=multiScopedImpact(db,input,revisions);
+    if(!input.impactDigest || input.impactDigest!==plan.impactDigest) throw factoryError('FACTORY_CONFLICT','Impact preview changed');
+    const roots=new Set(revisions.map(entry=>entry.rootWorkItemId)),ts=now();
+    for(const affected of plan.facts.items) {
+      if(roots.has(affected.id)||affected.invalidated) continue;
+      const row=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(affected.id,org);
+      db.prepare('INSERT INTO factory_work_invalidations VALUES(?,?,?,?,?)').run(row.id,goalId,plan.goal.revision,commandId,ts);
+      const next=update(db,row,{control_state:affected.activeBindings.length?'cancel_requested':'paused'});
+      event(db,org,row.id,'WorkInvalidatedByScopedRevision',{goalId,rootWorkItemIds:[...roots],commandId,stopRequested:affected.activeBindings.length>0,rowVersion:next.row_version});
+    }
+    const results=[];
+    for(const entry of plan.plans) {
+      const previous=itemRow(db,entry.root).contract;
+      const contract={...previous,objective:entry.facts.objective,...(entry.facts.additionalManualCriteria?{acceptanceCriteria:[...previous.acceptanceCriteria,...entry.facts.additionalManualCriteria]}:{})},revision=entry.root.contract_revision+1;
+      db.prepare('INSERT INTO factory_work_contracts VALUES(?,?,?,?,?)').run(entry.root.id,revision,encode(contract),digest(contract),ts);
+      const root=update(db,entry.root,{contract_revision:revision,state:'proposed',candidate_digest:null,gate_generation:entry.root.gate_generation+1,blocked_json:null});
+      event(db,org,root.id,'WorkScopedRevision',{commandId,impactDigest:plan.impactDigest,contractRevision:revision});
+      results.push({rootWorkItemId:root.id,contractRevision:revision,item:itemRow(db,root)});
+    }
+    const result={schemaVersion:1,operation:{commandId,state:'completed'},goalId,revisions:results,impact:plan.facts,impactDigest:plan.impactDigest};
+    db.prepare('INSERT INTO factory_command_receipts VALUES(?,?,?,?,?,?,?,?,?)').run(commandId,org,actor.principalId,'ReviseFactoryMultiScope',goalId,key,payloadDigest,encode(result),ts);return result;
   });
 }

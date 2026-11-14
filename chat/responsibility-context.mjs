@@ -40,9 +40,9 @@ export async function assembleResponsibilityContext(id, actor) {
     activity: activity.activity,
     activityNextCursor: activity.nextCursor,
     memory: memory ? { version: memory.currentVersion, digest: memory.digest, updatedAt: memory.updatedAt,
-      currentFacts: currentFacts.slice(0, 100).map(({ factId, factVersion, currentVersion, factValue, state, contestedBy }) =>
-        ({ factId, factVersion: factVersion || currentVersion, factValue, state, contestedBy,
-          sourceKind: provenance.some(source => source.factId===factId && source.provider==='user') ? 'user' : 'unknown' })),
+      currentFacts: currentFacts.slice(0, 100).map(({ factId, factKey, factVersion, currentVersion, factValue, state, contestedBy }) =>
+        ({ factId, factKey, factVersion: factVersion || currentVersion, factValue, state, contestedBy,
+          sourceKind: provenance.some(source => source.factId===factId && source.provider==='user' && source.factVersion===(factVersion || currentVersion)) ? 'user' : 'unknown' })),
       facts: provenance.slice(0, 100).map(({ factId, fact, factVersion, state, sessionId, runId, provider, sourceEventStart, sourceEventEnd }) =>
         ({ factId, fact, factVersion, state, sessionId, runId, sourceKind:provider==='user'?'user':'unknown', sourceEventStart, sourceEventEnd })),
       truncated: provenance.length > 100 || currentFacts.length > 100 } : null,

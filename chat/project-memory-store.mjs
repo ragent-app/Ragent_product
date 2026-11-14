@@ -62,6 +62,9 @@ function parse(value, fallback = null) {
 function digest(value) {
   return createHash('sha256').update(typeof value === 'string' ? value : stringify(value)).digest('hex');
 }
+export function projectMemoryConflictMutationDigest(project,changes,expectedVersion) {
+  return digest({project,changes,expectedVersion});
+}
 
 const FACT_ID_RE = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
@@ -327,6 +330,17 @@ function ensureSchema(db) {
       project_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
       payload_digest TEXT NOT NULL, memory_version INTEGER NOT NULL,
       PRIMARY KEY(project_id, actor_id, request_id)
+    );
+    CREATE TABLE IF NOT EXISTS memory_conflict_reviews (
+      project_id TEXT NOT NULL, group_key TEXT NOT NULL, fact_signature TEXT NOT NULL,
+      fact_ids_json TEXT NOT NULL, actor_id TEXT NOT NULL, memory_version INTEGER NOT NULL,
+      updated_at TEXT NOT NULL, PRIMARY KEY(project_id,group_key)
+    );
+    CREATE TABLE IF NOT EXISTS memory_conflict_review_events (
+      project_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
+      group_key TEXT NOT NULL, fact_signature TEXT NOT NULL, changes_json TEXT NOT NULL,
+      memory_version INTEGER NOT NULL, created_at TEXT NOT NULL,
+      PRIMARY KEY(project_id,actor_id,request_id)
     );
 
     CREATE TABLE IF NOT EXISTS memory_fact_versions (
@@ -1221,6 +1235,47 @@ export function createProjectMemoryStore(options = {}) {
     };
   }
 
+  async function listConflictReviews(projectId) {
+    return withDatabase(db=>db.prepare('SELECT * FROM memory_conflict_reviews WHERE project_id=? ORDER BY group_key').all(text(projectId,160)).map(row=>({groupKey:row.group_key,factSignature:row.fact_signature,factIds:parse(row.fact_ids_json,[]),memoryVersion:row.memory_version,actorId:row.actor_id,updatedAt:row.updated_at})));
+  }
+
+  async function resolveFactConflict({projectId,changes,expectedVersion,actorId,requestId}, {now:at=new Date(),authorize=null}={}) {
+    return projectionQueue(async()=>{
+      const project=text(projectId,160),actor=text(actorId,160),request=text(requestId,160),current=iso(at);
+      if(!project||!actor||!request||!Number.isSafeInteger(expectedVersion)||expectedVersion<1||!Array.isArray(changes)||changes.length<2||changes.length>20) throw Object.assign(new Error('Invalid conflict resolution'),{statusCode:400});
+      const normalized=changes.map(c=>({factId:text(c?.factId,120),action:c?.action,value:c?.action==='correct'?text(c?.value,1200):''})).sort((a,b)=>a.factId<b.factId?-1:a.factId>b.factId?1:0);
+      if(normalized.some(c=>!c.factId||!['keep','correct','retract'].includes(c.action)||(c.action==='correct'&&!c.value))||new Set(normalized.map(c=>c.factId)).size!==normalized.length) throw Object.assign(new Error('Invalid conflict resolution'),{statusCode:400});
+      const payloadDigest=projectMemoryConflictMutationDigest(project,normalized,expectedVersion);
+      const result=await withDatabase(async db=>{if(authorize) await authorize();begin(db);try {
+        const prior=db.prepare('SELECT * FROM memory_user_mutations WHERE project_id=? AND actor_id=? AND request_id=?').get(project,actor,request);
+        if(prior) {if(prior.payload_digest!==payloadDigest) throw Object.assign(new Error('Request identity already used'),{statusCode:409});db.exec('COMMIT');return {version:prior.memory_version,replayed:true};}
+        const head=db.prepare('SELECT * FROM project_memory WHERE project_id=?').get(project);
+        if(!head||Number(head.current_version)!==expectedVersion) throw Object.assign(new Error('Memory version changed'),{statusCode:409});
+        const previous=normalized.map(c=>db.prepare('SELECT * FROM memory_facts WHERE project_id=? AND fact_id=?').get(project,c.factId));
+        if(previous.some(row=>!row||row.fact_state!=='active')) throw Object.assign(new Error('Conflict facts changed'),{statusCode:409});
+        const changed=normalized.some(c=>c.action!=='keep'),version=expectedVersion+(changed?1:0);
+        for(let i=0;i<normalized.length;i++) {const c=normalized[i],old=previous[i];if(c.action==='keep') continue;const state=c.action==='correct'?'active':'invalidated',value=c.value,versionOfFact=Number(old.current_version)+1;
+          db.prepare('INSERT INTO memory_user_overrides VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,fact_id) DO UPDATE SET action=excluded.action,fact_value=excluded.fact_value,actor_id=excluded.actor_id,updated_at=excluded.updated_at').run(project,c.factId,c.action,value,actor,current);
+          db.prepare('UPDATE memory_facts SET current_version=?,fact_value=?,fact_state=?,supersedes_fact_version=?,contested_by=?,candidate_ids_json=?,updated_at=? WHERE project_id=? AND fact_id=?').run(versionOfFact,value,state,old.current_version,'','[]',current,project,c.factId);
+          db.prepare('UPDATE memory_candidates SET state=?,resolved_version=?,updated_at=? WHERE project_id=? AND fact_id=?').run('invalidated',version,current,project,c.factId);
+          db.prepare('INSERT INTO memory_fact_versions (project_id,fact_id,memory_version,fact_version,fact_key,fact_value,fact_state,supersedes_fact_version,contested_by,candidate_ids_json,section_name,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(project,c.factId,version,versionOfFact,old.fact_key,value,state,old.current_version,'','[]','user',current);
+          db.prepare('INSERT INTO memory_fact_provenance (id,project_id,memory_version,section_name,fact_text,fact_id,fact_key,fact_value,fact_version,fact_state,candidate_id,stage1_id,provider,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id('pmprov'),project,version,'user',value,c.factId,old.fact_key,value,versionOfFact,state,`user:${request}`,`user:${actor}`,'user',current);
+        }
+        const rows=db.prepare('SELECT * FROM memory_facts WHERE project_id=? ORDER BY fact_id').all(project);
+        if(changed) {const facts=rows.map(row=>({factId:row.fact_id,factKey:row.fact_key,factValue:row.fact_value,text:row.fact_value,factVersion:Number(row.current_version),state:row.fact_state,supersedesFactVersion:row.supersedes_fact_version,contestedBy:row.contested_by,candidateIds:parse(row.candidate_ids_json,[]),section:normalized.some(c=>c.factId===row.fact_id&&c.action!=='keep')?'user':''}));const lines=facts.filter(f=>f.state==='active'&&f.factValue).map(f=>`- ${f.factValue}`).join('\n')||'No active structured facts.';const content=`# Project Memory\n\n${lines}`,summary=`v${version}\n${lines}`,snapshot=parse(head.workspace_snapshot_json,{}),outputDigest=digest({content,summary,facts,snapshot});
+          db.prepare('INSERT INTO memory_versions (project_id,version,parent_version,source_watermark,extraction_watermark,consolidation_watermark,content,summary,facts_json,workspace_snapshot_json,candidate_ids_json,content_digest,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(project,version,expectedVersion,head.source_watermark,head.extraction_watermark,head.consolidation_watermark,content,summary,stringify(facts),stringify(snapshot),'[]',outputDigest,current);
+          const updated=db.prepare("UPDATE project_memory SET current_version=?,content=?,summary=?,facts_json=?,content_digest=?,projection_state='dirty',projection_error='',updated_at=? WHERE project_id=? AND current_version=?").run(version,content,summary,stringify(facts),outputDigest,current,project,expectedVersion);if(!updated.changes) throw Object.assign(new Error('Memory version changed'),{statusCode:409});db.prepare('DELETE FROM memory_fresh_deltas WHERE project_id=?').run(project);
+        }
+        const factIds=normalized.map(c=>c.factId),selected=rows.filter(row=>factIds.includes(row.fact_id)).map(row=>({factId:row.fact_id,version:Number(row.current_version),value:row.fact_value,state:row.fact_state}));
+        const groupKey=digest(factIds),factSignature=digest(selected);db.prepare('INSERT INTO memory_conflict_reviews VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id,group_key) DO UPDATE SET fact_signature=excluded.fact_signature,fact_ids_json=excluded.fact_ids_json,actor_id=excluded.actor_id,memory_version=excluded.memory_version,updated_at=excluded.updated_at').run(project,groupKey,factSignature,stringify(factIds),actor,version,current);
+        db.prepare('INSERT INTO memory_conflict_review_events VALUES(?,?,?,?,?,?,?,?)').run(project,actor,request,groupKey,factSignature,stringify(normalized),version,current);
+        db.prepare('INSERT INTO memory_user_mutations VALUES(?,?,?,?,?)').run(project,actor,request,payloadDigest,version);db.exec('COMMIT');return {version,replayed:false};
+      } catch(e) {rollback(db);throw e;}},{mutate:true});
+      if(result.version!==expectedVersion) {const version=await getMemoryVersion(project,result.version);try {await writeProjectionUnlocked(version);}catch {}}
+      return {...result,projectId:project,projectionState:(await getProjectMemory(project))?.projectionState||'unknown'};
+    });
+  }
+
   async function reviseFact({ projectId, factId, action, value = '', expectedVersion, actorId, requestId }, { now = new Date() } = {}) {
     return projectionQueue(async () => {
     const project = text(projectId, 160), fact = text(factId, 120), actor = text(actorId, 160), request = text(requestId, 160);
@@ -1470,6 +1525,8 @@ export function createProjectMemoryStore(options = {}) {
     listCurrentFacts,
     getFactHistory,
     getFactForTask,
+    listConflictReviews,
+    resolveFactConflict,
     reviseFact,
     getMemoryMutationReceipt,
     diffMemoryVersions,

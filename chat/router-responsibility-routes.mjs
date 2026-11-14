@@ -9,7 +9,7 @@ import { observeGithubFailure } from './github-ci-observer.mjs';
 import { proposeResponsibilityIntent } from './responsibility-intent.mjs';
 import { resolveResponsibilityActor } from './responsibility-actor.mjs';
 import { getResponsibilitySessionContext, setResponsibilitySessionContext } from './responsibility-session-context.mjs';
-import { previewResponsibilityMemory, reviseResponsibilityMemory } from './responsibility-memory.mjs';
+import { previewResponsibilityMemory, reviseResponsibilityMemory, listResponsibilityMemoryConflicts, previewResponsibilityMemoryConflict, commitResponsibilityMemoryConflict } from './responsibility-memory.mjs';
 import { getResponsibilityCapabilities } from './responsibility-capabilities.mjs';
 import { captureResponsibilityCodeBaseline } from './responsibility-code-baseline.mjs';
 import { listResponsibilityPlans, approveResponsibilityPlan } from './responsibility-plans.mjs';
@@ -25,15 +25,17 @@ function mutationSourceAllowed(req) {
 export async function handleResponsibilityRoutes({req,res,pathname,authSession,writeJson,requireSessionAccess}) {
   const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|complete|cancel|archive|wake|activity|context|memory|notifications|github-event|code-baseline))?)?$/.exec(String(pathname||''));
   const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract)$/.exec(String(pathname||''));
+  const memoryConflicts=/^\/api\/responsibilities\/([^/]+)\/memory\/conflicts(?:\/(preview|commit))?$/.exec(String(pathname||''));
   const review=/^\/api\/runs\/([^/]+)\/email-targets\/([^/]+)\/manual-review$/.exec(String(pathname||''));
   const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||''));
   const plans=/^\/api\/responsibilities\/([^/]+)\/plans(?:\/([^/]+)\/(approve))?$/.exec(String(pathname||''));
   const triggerBinding=/^\/api\/responsibilities\/([^/]+)\/trigger-bindings(?:\/([^/]+)\/(revoke|recover))?$/.exec(String(pathname||''));
-  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!plans&&!notificationBinding&&!triggerBinding) return false;
+  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!memoryConflicts&&!plans&&!notificationBinding&&!triggerBinding) return false;
   if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
   const actor=await resolveResponsibilityActor(req,authSession);
   if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
   try {
+    if(memoryConflicts) {const id=decodeURIComponent(memoryConflicts[1]),action=memoryConflicts[2];if(!action&&req.method==='GET') {writeJson(res,200,await listResponsibilityMemoryConflicts(id,actor));return true;}if(!action||req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}if(action==='commit'&&process.env.AGENTOC_RESPONSIBILITY_MEMORY_WRITES_ENABLED!=='1') {writeJson(res,503,{code:'MEMORY_REVISION_DISABLED',error:'Memory revision is disabled'});return true;}const raw=await readBody(req,65536);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}writeJson(res,200,await (action==='preview'?previewResponsibilityMemoryConflict(id,body,actor):commitResponsibilityMemoryConflict(id,body,actor)));return true;}
     if(triggerBinding) {const id=decodeURIComponent(triggerBinding[1]);if(req.method==='GET'&&!triggerBinding[2]) {writeJson(res,200,await listResponsibilityTriggers(id,actor));return true;}if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}const result=triggerBinding[2]?await changeResponsibilityTrigger(id,decodeURIComponent(triggerBinding[2]),triggerBinding[3],body,actor):await createResponsibilityTrigger(id,body,actor);writeJson(res,200,result);return true;}
     const bearer=req?._bearerAuthSession;
     const registrationSupported=authSession?.principalKind==='trusted_device'&&bearer?.principalKind==='trusted_device'&&authSession.role==='owner'&&bearer.role==='owner'&&!authSession.workspaceAccess&&!!authSession.deviceId&&authSession.deviceId===bearer.deviceId&&!!authSession.accountId&&authSession.accountId===bearer.accountId&&!!authSession.bindingAuthorityRevision&&authSession.bindingAuthorityRevision===bearer.bindingAuthorityRevision;
