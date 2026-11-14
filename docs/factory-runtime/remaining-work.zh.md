@@ -12,7 +12,7 @@
 | 2 | 在上述范围贯通真实本地 Work Graph → 共享 broker Run → 候选 → 审查/检查或允许的人工验收 → 受控集成，修复真实暴露的问题。 | 关联契约版本、执行代次、Run/Attempt、候选摘要、验收决定与集成结果；未运行的检查如实标记。 |
 | 可并行 | 推进执行/发布恢复、预算与身份可靠性；最小闭环稳定后再扩远端、长期知识和更多平台。 | 每次扩大范围先固定支持声明、兼容路径和回退条件；保留未知事实，不把阻断当成功。 |
 
-现场下一步：依据权威事实对账旧 unknown binding，未证实旧副作用状态前不能释放它；该 binding 也计入实例及项目容量。另一次 Android 审查 Run 已完成但旧 packet 摘要为空，未形成候选或完成正式验收；`a29403d8` 修复后续 producer，尚未通过新 Run 验证。用户已授权后续工作；本轮一次真实报告 Run 因 semantic 上下文被误判为需要 freshRecoveryPrompt 而 failed，未形成正式报告，1 Run / 200000 tokens / 5 美元预留保留，实际用量未知；随后独立授权 Run 已进入 provider thread，但在 225469 tokens、超过 200000 预留后定向取消并 finalized，无报告和候选，费用 unknown；本轮不再新增 Run。此前验收 Run 的 token 亦曾超过预留。
+现场下一步：依据权威事实对账旧 unknown binding，未证实旧副作用状态前不能释放它；该 binding 也计入实例及项目容量。另一次 Android 审查 Run 已完成但旧 packet 摘要为空，未形成候选或完成正式验收；`a29403d8` 修复后续 producer；一次真实窄审已生成非空结果包与候选，但报告误将合同未要求的材料视作阻断，owner 正式 manual failed，工作项保留 review，尚无通过的报告。用户已授权后续工作；本轮一次真实报告 Run 因 semantic 上下文被误判为需要 freshRecoveryPrompt 而 failed，未形成正式报告，1 Run / 200000 tokens / 5 美元预留保留，实际用量未知；随后独立授权 Run 已进入 provider thread，但在 225469 tokens、超过 200000 预留后定向取消并 finalized，无报告和候选，费用 unknown；其后按用户明确授权另执行一次窄审 Run，实际用量 23618 tokens、费用 unknown，人工拒收；此前验收 Run 的 token 亦曾超过预留。
 
 ## A. 源码进度与具体剩余
 
