@@ -788,6 +788,23 @@
           if (!list.items.length) add(content, 'p', 'No work items.');
           for (const item of list.items) button(content, `${item.contract?.objective || item.id} · ${item.state} · ${item.controlState}`, () => showItem(item.id));
           if (list.nextCursor) add(content, 'p', 'More items exist; this view shows the first page.');
+          button(content, 'Factory concurrency', async () => {
+            const panel=add(content,'section','');
+            try {
+              const policy=await request('/policy');
+              add(panel,'p',`Current limit: ${policy.factoryMaxConcurrent ?? 'not configured'}; Organization budget limit: ${policy.budgetMaxConcurrent ?? 'not configured'}. This does not enable automatic admission.`);
+              if (!Number.isSafeInteger(policy.budgetMaxConcurrent)) { add(panel,'p','A valid organization concurrency budget is required first.'); return; }
+              const input=document.createElement('input'); input.type='number'; input.min='1'; input.max=String(policy.budgetMaxConcurrent); input.value=String(policy.factoryMaxConcurrent || 1); panel.appendChild(input);
+              const receipt=add(panel,'p','');
+              button(panel,'Save concurrency',()=>{
+                const value=Number(input.value);
+                if (!Number.isSafeInteger(value) || value<1 || value>policy.budgetMaxConcurrent) {receipt.textContent='Enter a whole number within the organization budget.';return;}
+                const commandId=root.crypto.randomUUID(),body={commandId,expectedVersion:policy.organizationVersion,factoryMaxConcurrent:value};
+                const submit=async()=>{try {const result=await request('/policy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});receipt.textContent=`Saved limit ${result.factoryMaxConcurrent}; refresh to see runtime status.`;}catch(error){receipt.textContent=`Not confirmed: ${error.message}`;button(panel,'Retry same request',submit);}};
+                submit();
+              });
+            } catch(error) { add(panel,'p',`Concurrency settings unavailable: ${error.message}`); }
+          });
           button(content, 'Team lifecycle', showLifecycle);
           button(content, 'Responsibilities', showResponsibilities);
           button(content, 'Positions and relationships', showTeamConfiguration);
@@ -1156,6 +1173,34 @@
           for (const milestone of item.milestones || []) add(content, 'p', `${milestone.milestone} · candidate ${milestone.candidateDigest} · commit ${milestone.evidence?.commit || 'unverified'} · target ${milestone.target || 'unknown'}`);
           if (!item.milestones?.some(m => m.milestone === 'integrated')) add(content, 'p', 'Integrated commit: unverified');
           add(content, 'p', 'Package availability and publication: unverified unless supported by a recorded delivery operation.');
+          add(content, 'h4', 'Read-only consultation');
+          add(content, 'p', 'A consultation requests an expert opinion, subject to read-only runtime and budget checks. It is not an acceptance decision.');
+          const consultationBase=`/work-items/${encodeURIComponent(item.id)}/consultations`;
+          const consultationStatus=add(content,'p','');
+          const expert=document.createElement('select');
+          for(const node of this.projection?.nodes || []) { const option=document.createElement('option');option.value=node.id;option.textContent=node.displayName || node.id;expert.appendChild(option); }
+          content.appendChild(expert);
+          const consultationField=(placeholder,type='text')=>{const field=document.createElement('input');field.placeholder=placeholder;field.type=type;content.appendChild(field);return field;};
+          const question=consultationField('Question for the expert'), deadline=consultationField('Deadline','datetime-local');
+          const maxCost=consultationField('Maximum cost','number'), maxTokens=consultationField('Maximum tokens','number');
+          let consultationId='';
+          const showConsultation=async action=>{if(!consultationId){consultationStatus.textContent='No consultation selected.';return;}try {const result=await request(`${consultationBase}/${encodeURIComponent(consultationId)}${action?`/${action}`:''}`,action?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});consultationStatus.textContent=`Consultation ${result.consultationId}: ${result.state}; ${result.reconciliation || result.reason || result.recovery || 'no new observation'}. ${result.opinion?.opinion ? `Opinion: ${result.opinion.opinion}${result.opinion.truncated ? ' (truncated)' : ''}` : 'Opinion unavailable or unverified.'} Opinion is not acceptance; budget usage may remain pending.`;}catch(error){consultationStatus.textContent=`Consultation unavailable: ${error.message}`;}};
+          button(content,'Start consultation',()=>{
+            const end=new Date(deadline.value),cost=Number(maxCost.value),tokens=Number(maxTokens.value);
+            if(!expert.value || !question.value.trim() || !Number.isFinite(end.getTime()) || !Number.isFinite(cost) || cost<=0 || !Number.isSafeInteger(tokens) || tokens<=0) {consultationStatus.textContent='Select an expert and enter a question, deadline and positive cost and token limits.';return;}
+            const commandId=root.crypto.randomUUID(),body={expertNodeId:expert.value,expectedVersion:item.rowVersion,question:question.value.trim(),deadline:end.toISOString(),budget:{maxCost:cost,maxTokens:tokens},commandId,idempotencyKey:commandId};
+            const submit=async()=>{try{const result=await request(consultationBase,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});consultationId=result.consultationId;consultationStatus.textContent=`Consultation ${consultationId}: ${result.state}${result.reason ? ` · ${result.reason}` : ''}. A recorded request is not an answer.`;}catch(error){consultationStatus.textContent=`Consultation not confirmed: ${error.message}`;button(content,'Retry same consultation',submit);}};
+            submit();
+          });
+          try {
+            const prior=await request(consultationBase);
+            if(!prior.items?.length) add(content,'p','No consultations recorded.');
+            for(const entry of prior.items || []) button(content,`${entry.createdAt} · ${entry.state}`,()=>{consultationId=entry.consultationId;showConsultation('');});
+            if(prior.truncated) add(content,'p','Only the most recent consultations are shown.');
+          } catch(error) { add(content,'p',`Consultation history unavailable: ${error.message}`); }
+          button(content,'Refresh consultation',()=>showConsultation(''));
+          button(content,'Reconcile consultation',()=>showConsultation('reconcile'));
+          button(content,'Resume unstarted consultation',()=>showConsultation('resume'));
           add(content, 'h4', 'Worker blocker proposals');
           try {
             const proposals = await request(`/work-items/${encodeURIComponent(item.id)}/blocker-proposals`);

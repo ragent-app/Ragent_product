@@ -27,7 +27,8 @@ import {
   listRunIds,
   requestRunCancel,
 } from './runs.mjs';
-import { loadHistory } from './history.mjs';
+import { loadHistory, findLatestAssistantMessage } from './history.mjs';
+import { assertRunPublication } from './run-publication-contract.mjs';
 import { createGitWorktree, validateWorkspacePlan } from './collaboration-workspace.mjs';
 import { createExecutionPacket, getResultPacket } from './result-packets.mjs';
 import { resultPacketPrompt } from './delegation-result.mjs';
@@ -620,7 +621,7 @@ export function createCollaborationOrchestrator(options = {}) {
         ...(agentContracts[task.id]?.runtime ? { runtime: agentContracts[task.id].runtime } : {}),
       })),
     });
-    const { reworkContext: _ignoredReworkContext, factoryExecution: _ignoredFactoryExecution, ...externalPolicy } = policy;
+    const { reworkContext: _ignoredReworkContext, factoryExecution: _ignoredFactoryExecution, factoryConsultation: _ignoredFactoryConsultation, ...externalPolicy } = policy;
     const frozenPolicy = {
       ...externalPolicy,
       agentContracts,
@@ -633,7 +634,7 @@ export function createCollaborationOrchestrator(options = {}) {
     };
   }
 
-  async function createRecord(input = {}, internalContext = null, factoryExecution = null) {
+  async function createRecord(input = {}, internalContext = null, factoryExecution = null, factoryConsultation = null) {
     const prepared = await prepareRecord(input);
     const existing = await store.listCollaborationRecords({ activeOnly: false });
     const usedTaskIds = new Set(existing.flatMap((record) => record.tasks.map((task) => task.id)));
@@ -645,7 +646,7 @@ export function createCollaborationOrchestrator(options = {}) {
       rootSessionId: prepared.root.id,
       title: trim(input.title) || plan.title,
       policy: { ...prepared.policy, agentContracts, ...(internalContext ? { reworkContext: internalContext } : {}),
-        ...(factoryExecution ? { factoryExecution } : {}) },
+        ...(factoryExecution ? { factoryExecution } : {}), ...(factoryConsultation ? { factoryConsultation } : {}) },
       plan,
       idempotencyKey: trim(input.idempotencyKey),
     });
@@ -695,6 +696,10 @@ export function createCollaborationOrchestrator(options = {}) {
         if (owner?.policy?.factoryExecution) {
           const { assertFactoryExecutionFence } = await import('./factory-execution-adapter.mjs');
           await assertFactoryExecutionFence(owner.policy.factoryExecution, { requireWorkspace: true });
+        }
+        if (owner?.policy?.factoryConsultation) {
+          const { assertFactoryConsultationFence } = await import('./factory-consultation.mjs');
+          await assertFactoryConsultationFence(owner.policy.factoryConsultation, owner.id);
         }
         const outcome = await deps.sendMessage(command.sessionId, command.prompt, [], {
           ...command.options,
@@ -773,7 +778,7 @@ export function createCollaborationOrchestrator(options = {}) {
         || node.currentSessionId !== managedSessionId
         || (Number.isInteger(collaboration.policy?.organizationBindingGeneration)
           && node.bindingGeneration !== collaboration.policy.organizationBindingGeneration)
-        || Number(managedTarget.organizationRevision) !== Number(organization.currentRevision)
+        || Number(managedTarget.organizationRevision) !== Number(collaboration.policy?.factoryConsultation ? node.createdRevision : organization.currentRevision)
         || trim(managedTarget.organizationNodeId) !== expectedNodeId) {
         const error = new Error(`Managed Session target is not bound to this Organization task: ${task.id}`);
         error.code = 'COLLABORATION_MANAGED_SESSION_BINDING_INVALID';
@@ -1157,6 +1162,7 @@ export function createCollaborationOrchestrator(options = {}) {
       }
       const result = await deps.getRunResult(runId) || run.result || null;
       const manifest = await deps.getRunManifest(runId);
+      if (taskCollaboration.policy?.factoryConsultation && !run.finalizedAt) return false;
       const outcome = classifyAttemptOutcome(run, result);
       const reportLoader = typeof deps.loadRecentTurnHistory === 'function'
         ? deps.loadRecentTurnHistory
@@ -1211,12 +1217,23 @@ export function createCollaborationOrchestrator(options = {}) {
       // ResultPacket (S5). The attempt stores only the rsp_ reference — the
       // packet content is never copied into the collaboration store.
       let resultPacketId = '';
-      try {
+      // Failed/cancelled consultation Runs have no opinion to packetize.
+      // Preserve the actual outcome instead of replacing it with packet failure.
+      if (!(taskCollaboration.policy?.factoryConsultation && run.state !== 'completed')) try {
         // S13: a rework attempt (opened via dispatchRework) derives its
         // ResultPacket v2 org/phase fields and chains the previous packet via
         // parentPacketIds. Non-rework attempts pass nothing, keeping the packet
         // shape and digest semantics identical to S5.
         const rework = taskCollaboration.policy?.reworkContext || null;
+        const consultation = taskCollaboration.policy?.factoryConsultation;
+        let opinion = '';
+        if (consultation && task?.taskKind==='consultation' && run.state==='completed') {
+          const canonicalRun=await deps.getRun(runId);
+          if(!canonicalRun || canonicalRun.id!==runId || canonicalRun.sessionId!==currentAttempt.sessionId || canonicalRun.state!=='completed' || !canonicalRun.finalizedAt || !assertRunPublication(canonicalRun,manifest)) throw new Error('Consultation Run publication is unavailable');
+          const message=await findLatestAssistantMessage(canonicalRun.sessionId,{strict:true,includeBodies:true,match:event=>event.runId===runId && (!event.requestId || event.requestId===canonicalRun.requestId)});
+          if(message && message.messageState!=='streaming' && !message.bodyTruncated && !(message.bodyAvailable && message.bodyLoaded===false)) opinion=trim(message.content);
+        }
+        if (consultation && !opinion) throw Object.assign(new Error('Consultation Run has no persisted opinion summary'),{code:'CONSULTATION_PACKET_INVALID'});
         const packet = await deps.createExecutionPacket({
           runId,
           projectId: packetProjectId,
@@ -1228,6 +1245,7 @@ export function createCollaborationOrchestrator(options = {}) {
           revision: rework?.revision,
           phaseId: rework?.phaseId || '',
           parentPacketIds: rework?.parentPacketId ? [rework.parentPacketId] : [],
+          ...(consultation ? {taskKind:'consultation',consultation:{recommendation:{opinion:opinion.slice(0,4000),truncated:opinion.length>4000}}} : {}),
           deps: {
             getRun: deps.getRun,
             getRunManifest: deps.getRunManifest,
@@ -1431,6 +1449,19 @@ export function createCollaborationOrchestrator(options = {}) {
     return store.getCollaboration(collaboration.id);
   }
 
+  async function dispatchFactoryConsultation(input, context) {
+    const { assertFactoryConsultationFence } = await import('./factory-consultation.mjs');
+    await assertFactoryConsultationFence(context);
+    const task=Array.isArray(input?.plan?.tasks) && input.plan.tasks.length===1 ? input.plan.tasks[0] : null;
+    if (!task || task.taskKind!=='consultation' || task.readOnlyRequired!==true || task.accessMode!=='read' || !Array.isArray(task.writablePaths) || task.writablePaths.length
+        || task.agentId!==context.agentId || task.managedSessionId!==context.sessionId || task.projectId!==context.projectId || task.role!==context.role
+        || task.objective!==`${context.objective}\n\nConsultation question: ${context.question}` || JSON.stringify(task.runtime)!==JSON.stringify(context.runtime)) throw Object.assign(new Error('A single bound read-only consultation task is required'),{code:'CONSULTATION_INVALID',statusCode:400});
+    const collaboration=await createRecord(input,null,null,context);
+    if(JSON.stringify(collaboration.policy?.factoryConsultation)!==JSON.stringify(context)) throw Object.assign(new Error('Consultation dispatch identity conflicts'),{code:'CONSULTATION_CONFLICT',statusCode:409});
+    await dispatchReady(collaboration.id);
+    return store.getCollaboration(collaboration.id);
+  }
+
   async function cancel(collaborationId, reason = 'cancelled by manager') {
     const collaboration = await store.getCollaboration(collaborationId);
     if (!collaboration) return false;
@@ -1486,6 +1517,7 @@ export function createCollaborationOrchestrator(options = {}) {
     createRecord,
     dispatch,
     dispatchFactory,
+    dispatchFactoryConsultation,
     dispatchReady,
     dispatchRework,
     get: (id) => store.getCollaboration(id, { includeEvents: true }),
