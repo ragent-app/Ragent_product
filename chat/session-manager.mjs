@@ -12998,7 +12998,7 @@ const PREPARATION_OPTION_KEYS = Object.freeze([
   'authenticatedPrincipalKind', 'authenticatedOwnerDevice', 'temporaryControlAuthority', 'internalOperation', 'collaborationCapability',
   'compactionTargetSessionId', 'compactionSourceSeq', 'compactionToolIndex', 'compactionReason',
   'freshThread', 'skipSessionContinuation', 'transientProviderContext', 'codexResume',
-  'skipDispatch', 'skipPendingDispatchLookup', 'queueIfBusy', 'deferIfBusy', 'recordUserMessage',
+  'skipDispatch', 'skipRunnerLaunch', 'skipPendingDispatchLookup', 'queueIfBusy', 'deferIfBusy', 'recordUserMessage',
   'replyPublicationRootRunId', 'replyPublicationResponseIds',
 ]);
 
@@ -14156,7 +14156,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   };
 
   let launchResult = null;
-  if (options.skipDispatch === true) {
+  if (options.skipRunnerLaunch === true) {
     // Internal callers and deterministic tests may persist an accepted Run
     // without launching a provider. HTTP ingress never forwards this option.
   } else if (options.deferRunnerLaunch === true) {
@@ -14504,7 +14504,7 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
     } : {}),
   });
 
-  const launchResult = options.skipDispatch
+  const launchResult = options.skipRunnerLaunch
     ? null
     : await launchDetachedRunWithAgySlot(sessionId, run, admission.manifest);
 
@@ -14837,7 +14837,7 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
     ...(imageRefs.length > 0 ? { images: imageRefs } : {}),
   });
 
-  const launchResult = options.skipDispatch
+  const launchResult = options.skipRunnerLaunch
     ? null
     : await launchDetachedRunWithAgySlot(sessionId, run, admission.manifest);
 

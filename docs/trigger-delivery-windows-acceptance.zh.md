@@ -59,3 +59,5 @@
 同一环境的专用周期提醒两轮均 completed/published，达到上限后自动禁用；两轮对应最终 assistant 持久消息 seq 36 和 41 均为“修复后周期提醒验收成功。”。未直接观察用户界面；排队及控制面重启期间跟踪恢复仍需独立证据。
 
 控制面重启后的 pending 恢复已用专用单次提醒验证：到期前全量 Run 索引和目录 111/111 一致且均终态，正常重启仅 ControlPlane（PID 262640→247988），RunnerSupervisor PID 149628 保持运行。同一提醒在重启后自然到期，单次尝试后 Run completed、delivery published 并自动禁用；同一 Run 的持久 assistant 消息 seq 55 为“重启后提醒验收成功。”。这只验证 pending 调度恢复；排队和已受理 Run 的在途 tracking 重启恢复尚未命中。历史 `OSV_RECOVERY_REFUSED` 的根因尚未确定，后续健康恢复不证明根因修复；无 threadId 的 broker 通知路由也未在真实事件中单独验证。
+
+进一步验收捕获到真实 queued 提醒，并在背景专用 Run 仍运行、仅该 QA Run 活跃时正常重启 ControlPlane；Supervisor 保持原 PID。原 occurrence 重启后关联的 Run 长时间 accepted 且未启动，随后正式对账将其判为 failed/unknown，未重发。静态定位发现 queue flush 的 skipDispatch 同时阻止了 runner 启动；已将调度规划与内部不启动 runner 的选项分离。现有 session-dispatch 与单项 derived 检查通过，follow-up fixture 因 unknown Harness、resend 因 EXECUTION_SCOPE_STALE 未通过，不能称所有检查通过；修复须部署后重新验证。

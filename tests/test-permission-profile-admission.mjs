@@ -158,7 +158,7 @@ try {
     await assert.rejects(
       () => submitHttpMessage(session.id, 'Check approval admission.', [], {
         requestId: `manual-${tool}`,
-        skipDispatch: true,
+        skipDispatch: true, skipRunnerLaunch: true,
       }),
       (error) => error?.code === 'PRIVILEGED_GATE_UNSUPPORTED_RUNTIME'
         && error?.statusCode === 409,
@@ -171,7 +171,7 @@ try {
   await assert.rejects(
     () => submitHttpMessage(unsupportedGuarded.id, 'Check guarded admission.', [], {
       requestId: 'guarded-opencode',
-      skipDispatch: true,
+      skipDispatch: true, skipRunnerLaunch: true,
     }),
     (error) => error?.code === 'PERMISSION_PROFILE_UNSUPPORTED_RUNTIME'
       && error?.statusCode === 409,
@@ -184,7 +184,7 @@ try {
     await assert.rejects(
       () => submitHttpMessage(autonomous.id, 'Check autonomous admission.', [], {
         requestId: `autonomous-${tool}`,
-        skipDispatch: true,
+        skipDispatch: true, skipRunnerLaunch: true,
       }),
       (error) => error?.code === 'PERMISSION_PROFILE_UNSUPPORTED_RUNTIME'
         && error?.statusCode === 409,
@@ -200,7 +200,7 @@ try {
       launchedSessions.push(kimi.id);
       const submitted = await submitHttpMessage(kimi.id, 'Verify ACP permission mode and startup ordering.', [], {
         requestId: `kimi-${riskMode}`,
-        skipDispatch: true,
+        skipDispatch: true, skipRunnerLaunch: true,
       });
       assert.ok(submitted.run?.id, 'Kimi should create a concrete Run through the isolated Supervisor');
       const terminal = await waitForRunTerminal(submitted.run.id);

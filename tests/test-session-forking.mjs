@@ -293,7 +293,7 @@ try {
   const promptOutcome = await submitHttpMessage(promptChild.id, 'Branch into a new sub-feature.', [], {
     requestId: 'req_prompt_cache',
     queueIfBusy: false,
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   const manifest = await getRunManifest(promptOutcome.run.id);
   assert.match(manifest?.prompt || '', /SENTINEL FORK CONTEXT/, 'first child turn should reuse the prepared fork context');

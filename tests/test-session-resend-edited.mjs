@@ -53,7 +53,7 @@ try {
     mimeType: 'text/plain',
     }],
     requestId: 'req_original',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   const originalRunId = original.run.id;
   const originalManifest = await getRunManifest(originalRunId);
@@ -81,7 +81,7 @@ try {
   );
   const running = await submitHttpMessage(session.id, 'Another question', [], {
     requestId: 'req_running',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   await assert.rejects(
     () => resendEditedMessage(session.id, 'req_running', { prompt: 'Edited' }),
@@ -91,7 +91,7 @@ try {
 
   const outcome = await resendEditedMessage(session.id, 'req_original', {
     prompt: 'Edited question',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   assert.ok(outcome.run, 'edit-resend should create a new run');
   assert.notEqual(outcome.run.requestId, 'req_original', 'new run should get its own requestId');
@@ -137,7 +137,7 @@ try {
   await makeTerminal(outcome.run.id);
   const second = await resendEditedMessage(session.id, outcome.run.requestId, {
     prompt: 'Edited question v2',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   const secondRun = await getRun(second.run.id);
   const secondManifest = await getRunManifest(second.run.id);
@@ -157,7 +157,7 @@ try {
   await makeTerminal(secondRun.id);
   const regen = await regenerateSessionReply(session.id, secondRun.requestId, {
     requestId: 'req_regenerated',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   const regenRun = await getRun(regen.run.id);
   const regenManifest = await getRunManifest(regen.run.id);
@@ -182,7 +182,7 @@ try {
     model: 'claude-sonnet-5',
     effort: 'high',
     thinking: true,
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   const crossRun = await getRun(cross.run.id);
   const crossManifest = await getRunManifest(cross.run.id);

@@ -47,7 +47,7 @@ try {
   const editOptions = {
     prompt: 'Edited prompt.',
     requestId: 'request-edited',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   };
   const [firstEditAttempt, replayedEditAttempt] = await Promise.all([
     resendEditedMessage(session.id, 'request-parent', editOptions),
@@ -67,7 +67,7 @@ try {
   await updateRun(edited.run.id, (current) => ({ ...current, state: 'completed' }));
   const regenerated = await regenerateSessionReply(session.id, 'request-edited', {
     requestId: 'request-regenerated',
-    skipDispatch: true,
+    skipDispatch: true, skipRunnerLaunch: true,
   });
   const regeneratedManifest = await getRunManifest(regenerated.run.id);
   assert.equal(regeneratedManifest.id, regenerated.run.id);

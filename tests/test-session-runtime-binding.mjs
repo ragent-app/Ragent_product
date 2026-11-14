@@ -118,7 +118,7 @@ try {
     () => submitHttpMessage(classicClaudeSession.id, 'This runtime cannot answer approvals.', [], {
       requestId: 'classic-claude-gate',
       model: 'classic-claude-model',
-      skipDispatch: true,
+      skipDispatch: true, skipRunnerLaunch: true,
     }),
     (error) => error?.code === 'PRIVILEGED_GATE_UNSUPPORTED_RUNTIME'
       && error?.statusCode === 409
@@ -133,7 +133,7 @@ try {
     () => submitHttpMessage(fakeGatedSession.id, 'This runtime cannot answer approvals.', [], {
       requestId: 'codex-cli-gate',
       model: 'fake-model',
-      skipDispatch: true,
+      skipDispatch: true, skipRunnerLaunch: true,
     }),
     (error) => error?.code === 'PRIVILEGED_GATE_UNSUPPORTED_RUNTIME'
       && error?.statusCode === 409
