@@ -4,7 +4,7 @@
 // they do not prove the service stopped or freeze external side effects.
 import { DatabaseSync, backup } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { constants, createReadStream } from 'node:fs';
 import { lstat, mkdir, open, realpath, rm, statfs, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,11 +24,13 @@ async function regularFile(path) {
   return { path: await realpath(path), size: stat.size };
 }
 function openRead(path) { return new DatabaseSync(path, { readOnly: true, timeout: 1000 }); }
-function hasTable(db, table) { return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)); }
+function hasTable(db, table) { return Boolean(db && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)); }
 function count(db, table, condition = '1', values = [], optional = false) {
+  if (!db) return null;
   return hasTable(db, table) ? Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${condition}`).get(...values).n) : (optional ? 0 : null);
 }
 function rows(db, table, sql, condition = '1') {
+  if (!db) return { total: null, items: [], truncated: false, status: 'source_unavailable' };
   if (!hasTable(db, table)) return { total: null, items: [], truncated: false, status: 'absent_legacy_or_not_initialized' };
   const total = count(db, table, condition), items = db.prepare(`${sql} LIMIT ${LIMIT}`).all();
   return { total, items, truncated: total > items.length, status: 'available' };
@@ -66,10 +68,10 @@ function inspect(databases) {
       : "state NOT IN ('completed','failed_terminal','cancelled','unsupported')", [], true),
     workspaceLeases: count(r, 'workspace_leases', "state IN ('preparing','active','quarantined')"),
   };
-  const schema = Object.fromEntries(NAMES.map((name) => [name, {
+  const schema = Object.fromEntries(NAMES.map((name) => [name, databases[name] ? {
     userVersion: Number(databases[name].prepare('PRAGMA user_version').get().user_version),
     tables: databases[name].prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row) => row.name),
-  }]));
+  } : { status:'source_unavailable', userVersion:null, tables:null }]));
   const watermarks = {
     collaborationEvents: hasTable(c, 'collaboration_events') ? Number(c.prepare('SELECT COALESCE(MAX(id),0) AS n FROM collaboration_events').get().n) : null,
     factoryEvents: hasTable(c, 'factory_events') ? Number(c.prepare('SELECT COALESCE(MAX(sequence),0) AS n FROM factory_events').get().n) : null,
@@ -92,7 +94,7 @@ function inspect(databases) {
   };
   return { schema, watermarks, active, references, referenceChecks:{attemptPacketLinks:packetLinks(references.runs,references.packets),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
     optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands']
-      .map((name) => [name, hasTable(c, name) ? 'available' : 'absent_legacy_or_not_initialized'])) };
+      .map((name) => [name, !c ? 'source_unavailable' : hasTable(c, name) ? 'available' : 'absent_legacy_or_not_initialized'])) };
 }
 async function digestFile(path) {
   const hash = createHash('sha256');
@@ -155,6 +157,44 @@ async function observeRunFiles(index, runsRoot) {
   }
   return { status: index.total === null ? 'source_unavailable' : index.truncated || candidates.length > items.length ? 'observed_truncated' : 'observed', asOf: new Date().toISOString(), crossStoreAtomic: false, limitation: 'Files can change after observation; database locks do not fence Run files.', items };
 }
+// Only inspect immutable, previously registered package paths. The explicit
+// root further restricts the observation; it does not reauthorize release.
+async function observeRegisteredArtifacts(db, artifactRoot) {
+  if (!artifactRoot) return { status: 'not_checked', reason: 'artifact_root_not_provided' };
+  if (!isAbsolute(artifactRoot)) fail('Artifact root must be an absolute path');
+  const rootStat=await lstat(artifactRoot);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('Artifact root must be an existing non-symlink directory');
+  const root=await realpath(artifactRoot);
+  if (!hasTable(db,'factory_release_packages')) return {status:'source_unavailable',items:[]};
+  const packages=db.prepare('SELECT id,artifact_path,artifact_digest,artifact_bytes FROM factory_release_packages ORDER BY id LIMIT 51').all();
+  const items=[]; let remaining=32*1024*1024;
+  for (const pkg of packages.slice(0,50)) {
+    const item={packageId:pkg.id,expectedDigest:pkg.artifact_digest,expectedBytes:pkg.artifact_bytes,status:'unknown'};
+    items.push(item);
+    try {
+      if (!isAbsolute(pkg.artifact_path) || !contained(root,resolve(pkg.artifact_path))) {item.status='outside_observation_root';continue;}
+      const path=pkg.artifact_path, initial=await lstat(path);
+      if (!initial.isFile() || initial.isSymbolicLink() || !contained(root,await realpath(path))) {item.status='invalid';continue;}
+      if (initial.size>remaining) {item.status='byte_limit';continue;}
+      const handle=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
+      try {
+        const before=await handle.stat();
+        if (!before.isFile() || before.dev!==initial.dev || before.ino!==initial.ino || before.size!==initial.size) {item.status='changed';continue;}
+        const hash=createHash('sha256'),buffer=Buffer.alloc(64*1024);let offset=0;
+        while (offset<before.size) {
+          const part=await handle.read(buffer,0,Math.min(buffer.length,before.size-offset),offset);
+          if (!part.bytesRead) break;
+          hash.update(buffer.subarray(0,part.bytesRead));offset+=part.bytesRead;remaining-=part.bytesRead;
+        }
+        const after=await handle.stat(), final=await lstat(path);
+        if (offset!==before.size || !final.isFile() || final.isSymbolicLink() || before.dev!==after.dev || before.ino!==after.ino || before.size!==after.size || before.mtimeMs!==after.mtimeMs || before.ctimeMs!==after.ctimeMs || after.dev!==final.dev || after.ino!==final.ino || after.size!==final.size || after.mtimeMs!==final.mtimeMs || after.ctimeMs!==final.ctimeMs) {item.status='changed';continue;}
+        item.observedDigest=hash.digest('hex');item.observedBytes=offset;
+        item.status=item.observedDigest===pkg.artifact_digest && offset===pkg.artifact_bytes ? 'digest_matched' : 'digest_mismatch';
+      } finally {await handle.close();}
+    } catch(error) {item.status=error?.code==='ENOENT'?'missing':'unreadable';}
+  }
+  return {status:packages.length>items.length?'observed_truncated':'observed',asOf:new Date().toISOString(),crossStoreAtomic:false,scope:'registered_packages_within_explicit_root_only',limitation:'Registration authorized the original path; this observation does not reauthorize release or fence later file changes.',items};
+}
 async function sourceFiles(sources) {
   const list = {};
   for (const name of NAMES) list[name] = await regularFile(sources?.[name]);
@@ -168,19 +208,29 @@ function assertKnownQuiescence(report) {
   }
   if (report.references.packets.total === null) fail('Workflow ResultPacket store is unavailable');
 }
-export async function inventoryFactoryBackup({ sources, runsRoot } = {}) {
-  const files = await sourceFiles(sources), databases = {};
+export async function inventoryFactoryBackup({ sources, runsRoot, artifactRoot } = {}) {
+  const files = {}, databases = {};
   try {
-    for (const name of NAMES) databases[name] = openRead(files[name].path);
+    for (const name of NAMES) {
+      const input=sources?.[name];
+      if (typeof input!=='string' || !isAbsolute(input)) fail('Each source database must be an absolute path');
+      try { files[name]=await regularFile(input); }
+      catch(error) { if(error?.code!=='ENOENT') throw error; files[name]=null; }
+    }
+    const existing=NAMES.map(name=>files[name]?.path).filter(Boolean);
+    if(new Set(existing).size!==existing.length) fail('Source databases must be distinct');
+    for (const name of NAMES) databases[name] = files[name] ? openRead(files[name].path) : null;
     const report = inspect(databases);
     report.referenceChecks.runFiles = await observeRunFiles(report.references.runs, runsRoot);
+    report.referenceChecks.artifacts = await observeRegisteredArtifacts(databases.collaborations, artifactRoot);
     return { mode: 'inventory', copiesCreated: false, guarantee: 'observational_only',
       limitations: ['SQLite may create or update source WAL shared-memory sidecars even for read-only connections.'],
-      sourceSizes: Object.fromEntries(NAMES.map((name) => [name, files[name].size])), ...report };
-  } finally { for (const db of Object.values(databases)) db.close(); }
+      sourceSizes: Object.fromEntries(NAMES.map((name) => [name, files[name]?.size ?? null])),
+      sourceStatus: Object.fromEntries(NAMES.map(name=>[name,files[name]?'available':'source_unavailable'])), ...report };
+  } finally { for (const db of Object.values(databases)) db?.close(); }
 }
 
-export async function createFactoryBackup({ sources, destination, allowedRoot, runsRoot } = {}) {
+export async function createFactoryBackup({ sources, destination, allowedRoot, runsRoot, artifactRoot } = {}) {
   const files = await sourceFiles(sources);
   if (!isAbsolute(destination || '') || !isAbsolute(allowedRoot || '')) fail('Absolute destination and allowed root are required');
   const root = await realpath(allowedRoot), parent = await realpath(dirname(destination)), target = resolve(destination);
@@ -205,6 +255,7 @@ export async function createFactoryBackup({ sources, destination, allowedRoot, r
     const report = inspect(locks);
     assertKnownQuiescence(report);
     report.referenceChecks.runFiles = await observeRunFiles(report.references.runs, runsRoot);
+    report.referenceChecks.artifacts = await observeRegisteredArtifacts(locks.collaborations, artifactRoot);
     for (const name of NAMES) {
       readers[name] = openRead(files[name].path);
       const output = join(target, `${name}.sqlite`);
@@ -251,12 +302,12 @@ async function main(argv) {
   for (let i = 1; i < argv.length; i += 2) {
     if (!argv[i]?.startsWith('--') || !argv[i + 1]) fail('Arguments must be --name value pairs');
     const key = argv[i].slice(2);
-    if (!['collaborations', 'workflow', 'coordination', 'destination', 'allowed-root', 'runs-root'].includes(key) || options[key]) fail('Unknown or duplicate option');
+    if (!['collaborations', 'workflow', 'coordination', 'destination', 'allowed-root', 'runs-root', 'artifact-root'].includes(key) || options[key]) fail('Unknown or duplicate option');
     options[key] = argv[i + 1];
   }
   const sources = Object.fromEntries(NAMES.map((name) => [name, options[name]]));
-  const result = mode === 'inventory' ? await inventoryFactoryBackup({ sources, runsRoot: options['runs-root'] })
-    : await createFactoryBackup({ sources, destination: options.destination, allowedRoot: options['allowed-root'], runsRoot: options['runs-root'] });
+  const result = mode === 'inventory' ? await inventoryFactoryBackup({ sources, runsRoot: options['runs-root'], artifactRoot: options['artifact-root'] })
+    : await createFactoryBackup({ sources, destination: options.destination, allowedRoot: options['allowed-root'], runsRoot: options['runs-root'], artifactRoot: options['artifact-root'] });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
