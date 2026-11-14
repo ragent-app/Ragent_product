@@ -28,9 +28,22 @@ function count(db, table, condition = '1', values = [], optional = false) {
   return hasTable(db, table) ? Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${condition}`).get(...values).n) : (optional ? 0 : null);
 }
 function rows(db, table, sql, condition = '1') {
-  if (!hasTable(db, table)) return { total: null, items: [], truncated: false };
+  if (!hasTable(db, table)) return { total: null, items: [], truncated: false, status: 'absent_legacy_or_not_initialized' };
   const total = count(db, table, condition), items = db.prepare(`${sql} LIMIT ${LIMIT}`).all();
-  return { total, items, truncated: total > items.length };
+  return { total, items, truncated: total > items.length, status: 'available' };
+}
+// Hash evidence bytes for indexing, never emit the evidence body itself.
+function evidenceRows(db,table,sql) {
+  const result=rows(db,table,sql);
+  result.items=result.items.map(({_evidence,...item})=>({...item,evidenceDigest:_evidence===null?null:createHash('sha256').update(_evidence).digest('hex')}));
+  return result;
+}
+function packetLinks(attempts,packets) {
+  if(attempts.total===null||packets.total===null||attempts.truncated||packets.truncated)
+    return {status:'unknown_incomplete_index',checked:null,missing:null,mismatched:null};
+  const byId=new Map(packets.items.map(packet=>[packet.packet_id,packet]));let checked=0,missing=0,mismatched=0;
+  for(const attempt of attempts.items) {if(!attempt.result_packet_id)continue;checked++;const packet=byId.get(attempt.result_packet_id);if(!packet)missing++;else if(packet.run_id!==attempt.run_id)mismatched++;}
+  return {status:'checked_database_references',checked,missing,mismatched};
 }
 function inspect(databases) {
   const c = databases.collaborations, w = databases.workflow, r = databases.coordination;
@@ -40,11 +53,16 @@ function inspect(databases) {
     dispatchCommands: count(c, 'collaboration_dispatch_commands', "state IN ('pending','claimed')"),
     schedulerLeases: count(c, 'factory_scheduler_leases', 'expires_at > ?', [new Date().toISOString()], true),
     integrationOperations: count(c, 'factory_integration_operations', "state IN ('intent','applying','applied_unverified','workspace_applied_verified','committing','commit_verified')", [], true),
+    combinationCommits: count(c, 'factory_combination_commits', "state <> 'integrated'", [], true),
+    retirementOperations: count(c, 'factory_retirement_operations', "state <> 'retired'", [], true),
     organizationOperations: count(c, 'organization_operations', "state NOT IN ('completed','failed_terminal')", [], true),
     lifecycleOperations: count(c, 'organization_lifecycle_operations', "state='pending'", [], true),
     nodeRebindOperations: count(c, 'organization_node_rebind_operations', "state='pending'", [], true),
     orchestrationCommands: count(c, 'orchestration_commands', "state IN ('pending','deferred','claimed','acknowledged')", [], true),
-    releaseOperations: count(c, 'factory_release_operations', "state NOT IN ('completed','failed_terminal','cancelled','unsupported')", [], true),
+    // A published remote fact alone is not proof the local producer returned.
+    releaseOperations: count(c, 'factory_release_operations', hasTable(c,'factory_release_producer_completions') && hasTable(c,'factory_release_recovery_commands')
+      ? "state NOT IN ('completed','failed_terminal','cancelled','unsupported') AND NOT (state='published' AND EXISTS (SELECT 1 FROM factory_release_producer_completions p WHERE p.operation_id=factory_release_operations.id AND p.organization_id=factory_release_operations.organization_id AND p.input_digest=factory_release_operations.input_digest AND p.producer='initial') AND NOT EXISTS (SELECT 1 FROM factory_release_recovery_commands r WHERE r.operation_id=factory_release_operations.id))"
+      : "state NOT IN ('completed','failed_terminal','cancelled','unsupported')", [], true),
     workspaceLeases: count(r, 'workspace_leases', "state IN ('preparing','active','quarantined')"),
   };
   const schema = Object.fromEntries(NAMES.map((name) => [name, {
@@ -57,12 +75,22 @@ function inspect(databases) {
     workspaceEvents: hasTable(r, 'workspace_lease_events') ? Number(r.prepare('SELECT COALESCE(MAX(id),0) AS n FROM workspace_lease_events').get().n) : null,
   };
   const references = {
-    runs: rows(c, 'collaboration_attempts', "SELECT id,task_id,run_id,result_packet_id,state FROM collaboration_attempts WHERE run_id IS NOT NULL ORDER BY id", 'run_id IS NOT NULL'),
+    runs: rows(c, 'collaboration_attempts', "SELECT id,task_id,session_id,run_id,result_packet_id,state FROM collaboration_attempts ORDER BY id"),
     candidates: rows(c, 'factory_candidates', 'SELECT id,work_item_id,contract_revision,execution_epoch,binding_generation,digest FROM factory_candidates ORDER BY id'),
     packets: rows(w, 'result_packets', 'SELECT packet_id,run_id,digest FROM result_packets ORDER BY packet_id'),
+    candidatePayloads: rows(c, 'factory_candidate_payloads', 'SELECT candidate_id,work_item_id,contract_revision,execution_epoch,binding_generation,run_id,baseline_digest,digest FROM factory_candidate_payloads ORDER BY candidate_id'),
+    decisions: evidenceRows(c, 'factory_acceptance_decisions', 'SELECT id,work_item_id,contract_revision,candidate_digest,gate_generation,criterion_id,decision,evidence_json AS _evidence FROM factory_acceptance_decisions ORDER BY id'),
+    checks: evidenceRows(c, 'factory_check_operations', 'SELECT id,organization_id,work_item_id,validation_work_item_id,candidate_digest,criterion_id,action_id,action_digest,validation_run_id,workspace_id,state,evidence_json AS _evidence FROM factory_check_operations ORDER BY id'),
+    combinationChecks: evidenceRows(c, 'factory_combination_checks', 'SELECT id,organization_id,queue_id,combination_digest,input_digest,base_head,action_id,action_digest,validation_work_item_id,run_id,workspace_id,state,evidence_json AS _evidence FROM factory_combination_checks ORDER BY id'),
+    milestones: evidenceRows(c, 'factory_delivery_milestones', 'SELECT id,organization_id,work_item_id,contract_revision,execution_epoch,binding_generation,candidate_digest,milestone,operation_id,source_digest,result_digest,evidence_json AS _evidence FROM factory_delivery_milestones ORDER BY id'),
+    combinationReceipts: rows(c, 'factory_combination_receipts', 'SELECT operation_id,organization_id,queue_id,input_digest,combination_digest,base_head,commit_id,tree_id,result_digest FROM factory_combination_receipts ORDER BY operation_id'),
+    releasePackages: rows(c, 'factory_release_packages', 'SELECT id,organization_id,work_item_id,candidate_digest,integration_operation_id,source_commit,artifact_digest,artifact_bytes FROM factory_release_packages ORDER BY id'),
+    releases: rows(c, 'factory_release_operations', 'SELECT id,organization_id,authorization_id,input_digest,state FROM factory_release_operations ORDER BY id'),
+    retirements: rows(c, 'factory_retirement_operations', 'SELECT id,organization_id,kind,target_id,preview_digest,state FROM factory_retirement_operations ORDER BY id'),
+    validationWorkspaces: rows(c, 'factory_validation_workspaces', 'SELECT id,validation_work_item_id,run_id,session_id,candidate_digest,state,provenance FROM factory_validation_workspaces ORDER BY id'),
   };
-  return { schema, watermarks, active, references,
-    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations']
+  return { schema, watermarks, active, references, referenceChecks:{attemptPacketLinks:packetLinks(references.runs,references.packets),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
+    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands']
       .map((name) => [name, hasTable(c, name) ? 'available' : 'absent_legacy_or_not_initialized'])) };
 }
 async function digestFile(path) {
