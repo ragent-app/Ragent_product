@@ -72,4 +72,17 @@
     <string name="factory_team_advanced_type">此类工作请在高级工作中操作。</string>
     <string name="factory_team_pass">通过</string>
     <string name="factory_team_fail">不通过</string>
+    <string name="factory_state_proposed">待批准</string>
+    <string name="factory_state_ready">待执行</string>
+    <string name="factory_state_claimed">已领取</string>
+    <string name="factory_state_running">执行中</string>
+    <string name="factory_state_blocked">已阻塞</string>
+    <string name="factory_state_review">待验收</string>
+    <string name="factory_state_completed">已完成</string>
+    <string name="factory_state_failed">失败</string>
+    <string name="factory_state_cancelled">已取消</string>
+    <string name="factory_state_unknown">状态未知</string>
+    <string name="factory_control_pause_requested">已请求暂停</string>
+    <string name="factory_control_paused">已暂停</string>
+    <string name="factory_control_cancel_requested">已请求取消</string>
 </resources>

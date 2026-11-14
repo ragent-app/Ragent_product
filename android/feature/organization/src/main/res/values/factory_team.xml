@@ -72,4 +72,17 @@
     <string name="factory_team_advanced_type">This work type is available in advanced work.</string>
     <string name="factory_team_pass">pass</string>
     <string name="factory_team_fail">fail</string>
+    <string name="factory_state_proposed">Proposed</string>
+    <string name="factory_state_ready">Ready</string>
+    <string name="factory_state_claimed">Assigned</string>
+    <string name="factory_state_running">Running</string>
+    <string name="factory_state_blocked">Blocked</string>
+    <string name="factory_state_review">Awaiting review</string>
+    <string name="factory_state_completed">Completed</string>
+    <string name="factory_state_failed">Failed</string>
+    <string name="factory_state_cancelled">Cancelled</string>
+    <string name="factory_state_unknown">Unknown state</string>
+    <string name="factory_control_pause_requested">Pause requested</string>
+    <string name="factory_control_paused">Paused</string>
+    <string name="factory_control_cancel_requested">Cancel requested</string>
 </resources>

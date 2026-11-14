@@ -196,7 +196,9 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
         }
     }
     Column(Modifier.fillMaxSize().background(LocalAgentocColors.current.canvas)) {
-        TextButton(onClick = onBack) { Text("Back") }
+        if (!(loaded && workOpen && connection == RuntimeConnectionState.Connected && cachedAt == null && organizationId != null)) {
+            TextButton(onClick = onBack) { Text("Back") }
+        }
         if (cacheClearFailed) Text("Offline data could not be removed. Offline snapshots are disabled for this app session.")
         if (cachedAt != null && connection != RuntimeConnectionState.AuthenticationRequired) Text("Offline snapshot from ${Instant.ofEpochMilli(cachedAt!!)}. Read-only; reconnect to refresh.")
         if (connection != RuntimeConnectionState.Connected && (cachedAt == null || connection == RuntimeConnectionState.AuthenticationRequired)) {

@@ -3654,9 +3654,10 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
                     if (id in presentIds) null else sessionSnapshots[id]
                 }
                 sessionSnapshots.keys.retainAll(presentIds + acceptedIds)
-                val listedSessions = (sessions + retainedAccepted).distinctBy { it.id }.filter {
-                    it.latestSeq > 0L || it.status != SessionStatus.Idle || it.id in acceptedIds
-                }
+                // The server list contains authorized user-addressable root
+                // sessions, including real roots with no chat messages yet.
+                // An unsent new-chat draft remains in memory and has no ID.
+                val listedSessions = (sessions + retainedAccepted).distinctBy { it.id }
                 updateState {
                     copy(
                         sessions = listedSessions,

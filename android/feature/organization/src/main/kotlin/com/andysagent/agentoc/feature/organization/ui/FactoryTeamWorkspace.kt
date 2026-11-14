@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import com.andysagent.agentoc.feature.organization.R
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.andysagent.agentoc.core.designsystem.*
 import com.andysagent.agentoc.core.network.AgentoCTransport
@@ -34,6 +35,30 @@ private fun JsonObject.str(key: String): String = (this[key] as? JsonPrimitive)?
 private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
 private fun JsonObject.arr(key: String): List<JsonObject> = (this[key] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
 private fun JsonObject.num(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
+
+@Composable
+private fun workStateLabel(state: String): String = when (state) {
+    "proposed" -> stringResource(R.string.factory_state_proposed)
+    "ready" -> stringResource(R.string.factory_state_ready)
+    "claimed" -> stringResource(R.string.factory_state_claimed)
+    "running" -> stringResource(R.string.factory_state_running)
+    "blocked" -> stringResource(R.string.factory_state_blocked)
+    "review" -> stringResource(R.string.factory_state_review)
+    "completed" -> stringResource(R.string.factory_state_completed)
+    "failed" -> stringResource(R.string.factory_state_failed)
+    "cancelled" -> stringResource(R.string.factory_state_cancelled)
+    else -> state.ifBlank { stringResource(R.string.factory_state_unknown) }
+}
+
+@Composable
+private fun controlStateLabel(state: String): String = when (state) {
+    "", "none" -> ""
+    "pause_requested" -> stringResource(R.string.factory_control_pause_requested)
+    "paused" -> stringResource(R.string.factory_control_paused)
+    "cancel_requested" -> stringResource(R.string.factory_control_cancel_requested)
+    else -> state
+}
+
 
 /** Owner workflow; advanced controls remain available in the existing workspace. */
 @Composable
@@ -195,8 +220,9 @@ fun FactoryTeamWorkspace(
                     items(items, key = { it.str("id") }) { work ->
                         AgentoCard(Modifier.fillMaxWidth(), onClick = { scope.launch { open(work.str("id")) } }) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(work.obj("contract")?.str("objective").orEmpty().ifBlank { "Work item" }, fontWeight = FontWeight.SemiBold, color = colors.primaryContent, maxLines = 3)
-                                Text("${work.str("state")} · ${work.str("controlState")}", color = colors.secondaryContent, style = MaterialTheme.typography.bodySmall)
+                                Text(work.obj("contract")?.str("objective").orEmpty().ifBlank { "Work item" }, fontWeight = FontWeight.SemiBold, color = colors.primaryContent, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                val control = controlStateLabel(work.str("controlState"))
+                                Text(listOf(workStateLabel(work.str("state")), control).filter { it.isNotBlank() }.joinToString(" · "), color = colors.secondaryContent, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -263,7 +289,8 @@ fun FactoryTeamWorkspace(
                         contract.arr("acceptanceCriteria").all { it.str("method") == "manual" }
                     Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(contract?.str("objective").orEmpty(), style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.factory_team_state, work.str("state"), work.str("controlState")), color = colors.secondaryContent)
+                        val control = controlStateLabel(work.str("controlState"))
+                        Text(listOf(workStateLabel(work.str("state")), control).filter { it.isNotBlank() }.joinToString(" · "), color = colors.secondaryContent)
                         contract?.arr("acceptanceCriteria")?.forEach { c -> Text(stringResource(R.string.factory_team_review_criterion, c.str("description").ifBlank { c.str("id") })) }
                         TextButton(onClick = { scope.launch { open(id) } }) { Text(stringResource(R.string.factory_team_26)) }
                         if (!reportType) Text(stringResource(R.string.factory_team_advanced_type), color = colors.secondaryContent)
