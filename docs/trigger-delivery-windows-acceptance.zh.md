@@ -51,3 +51,11 @@
 对 0.0.85 失败 Run 的既存 inventory 做限定投影，目标服务器的 `runtimeStatus` 为 `connected`，目标工具存在且其输入 schema 的类型为 object。该事实缩小了问题范围：等待 ready 并不表示目标服务器未连接。早先现场投影因枚举列表不完整将该值标为 other，后经完整枚举更正；不得据此推断运行时字段为对象。
 
 后续修正解析并评估 inventory 的 `connected` 状态，并限定关联合法 MCP 通知；这针对已观察到的 connected 状态未被使用的问题。现有 broker 检查通过；adapter 检查在第 39 行权限参数断言失败，未做基线复跑，不能称全项通过或断言归因。实际提醒链路须在部署后验收；broker 路由是否造成此前通知缺失仍未证实。
+
+正式 minor 0.0.86 基于提交 `92bd96166e60494c64beee6b04496eb7ea49af9c`，MSI SHA-256 `747130669D8C41DF31CACCFFBA34FF69D90E4E0B350CE6DD3BBF2C270071D029`；组件兼容和正式准入通过。维护 drain 下 106 个索引及目录一致且均终态。安装返回 3010，版本已注册，三处 MCP 修复文件安装 blob 与提交一致，两核心服务运行且 drain 已解除。本事务日志记录重启后删除 MSI 回滚文件，未重启系统；真实业务结果须另验收。
+
+0.0.86 部署后，正式 owner health 为 listening/ready，CLI 只读成功。专用一次性提醒 Run completed/published；其最终 assistant 持久消息 seq 31 精确为“修复后提醒验收成功。”。该 Run 的 inventory 记录目标 `connected`、必需工具存在、readiness verified，未见目标 startup 通知；这支持 connected 状态修复的真实路径，不证明通知路由修复被触发。
+
+同一环境的专用周期提醒两轮均 completed/published，达到上限后自动禁用；两轮对应最终 assistant 持久消息 seq 36 和 41 均为“修复后周期提醒验收成功。”。未直接观察用户界面；排队及控制面重启期间跟踪恢复仍需独立证据。
+
+控制面重启后的 pending 恢复已用专用单次提醒验证：到期前全量 Run 索引和目录 111/111 一致且均终态，正常重启仅 ControlPlane（PID 262640→247988），RunnerSupervisor PID 149628 保持运行。同一提醒在重启后自然到期，单次尝试后 Run completed、delivery published 并自动禁用；同一 Run 的持久 assistant 消息 seq 55 为“重启后提醒验收成功。”。这只验证 pending 调度恢复；排队和已受理 Run 的在途 tracking 重启恢复尚未命中。历史 `OSV_RECOVERY_REFUSED` 的根因尚未确定，后续健康恢复不证明根因修复；无 threadId 的 broker 通知路由也未在真实事件中单独验证。
