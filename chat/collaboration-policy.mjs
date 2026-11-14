@@ -9,6 +9,15 @@
 // kept as a projection for legacy readers (read old -> write new). Reviewer
 // role, prompt or empty writablePaths never constitute a read-only guarantee —
 // read access is only granted by the runtime certification layer (S4).
+const AGENT_CAPABILITIES = new Set(['read','write','manage','review','aggregate','input','run']);
+export function normalizeExplicitAgentCapabilities(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > AGENT_CAPABILITIES.size || value.some(item => typeof item !== 'string' || !AGENT_CAPABILITIES.has(item))) {
+    throw Object.assign(new Error('Agent capabilities must be a non-empty list of supported lowercase capabilities'), { code: 'AGENT_CAPABILITIES_INVALID', statusCode: 400 });
+  }
+  if (new Set(value).size !== value.length) throw Object.assign(new Error('Duplicate Agent capability'), { code: 'AGENT_CAPABILITIES_INVALID', statusCode: 400 });
+  return [...value].sort();
+}
+
 const ROLES = new Set(['manager', 'specialist', 'reviewer']);
 const WORKSPACE_POLICIES = new Set(['shared-exclusive', 'git-worktree', 'read-only-review']);
 const ACCESS_MODES = new Set(['read', 'write']);
@@ -80,8 +89,13 @@ export function normalizeCollaborationPolicy(value) {
   const executionIsolation = EXECUTION_ISOLATIONS.has(trimString(value.executionIsolation).toLowerCase())
     ? trimString(value.executionIsolation).toLowerCase()
     : projected.executionIsolation;
+  let allowedCapabilities;
+  if (Object.hasOwn(value, 'allowedCapabilities')) {
+    try { allowedCapabilities = normalizeExplicitAgentCapabilities(value.allowedCapabilities); } catch { /* Legacy malformed input remains unconfigured. */ }
+  }
   return {
     role,
+    ...(allowedCapabilities ? { allowedCapabilities } : {}),
     canDelegate: value.canDelegate === true && role === 'manager',
     canWrite: value.canWrite !== false && role !== 'reviewer',
     canReview: value.canReview !== false,

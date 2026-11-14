@@ -3,7 +3,7 @@ import { dirname } from 'path';
 import { APPS_FILE } from '../lib/config.mjs';
 import { createSerialTaskQueue, ensureDir, readJson, writeJsonAtomic } from './fs-utils.mjs';
 import { resolveDefaultStarterToolId } from './starter-session-content.mjs';
-import { normalizeCollaborationPolicy } from './collaboration-policy.mjs';
+import { normalizeCollaborationPolicy, normalizeExplicitAgentCapabilities } from './collaboration-policy.mjs';
 
 const runAppsMutation = createSerialTaskQueue();
 const BUILTIN_CREATED_AT = '1970-01-01T00:00:00.000Z';
@@ -166,7 +166,13 @@ export async function createApp(input = {}, { assertAuthorization = () => {} } =
     templateContext,
     perMessageSystemPrompt,
     collaborationPolicy,
+    capabilities,
   } = input;
+  const explicitCapabilities = capabilities === undefined ? null : normalizeExplicitAgentCapabilities(capabilities);
+  const policyCapabilities = collaborationPolicy && Object.hasOwn(collaborationPolicy, 'allowedCapabilities')
+    ? normalizeExplicitAgentCapabilities(collaborationPolicy.allowedCapabilities) : null;
+  if (explicitCapabilities && policyCapabilities && JSON.stringify(explicitCapabilities) !== JSON.stringify(policyCapabilities)) throw new Error('Agent capability declarations conflict');
+  if (policyCapabilities && !normalizeAppCollaborationPolicy(collaborationPolicy)) throw new Error('Agent collaboration policy is invalid');
   return runAppsMutation(async () => {
     const id = `app_${randomBytes(16).toString('hex')}`;
     const resolvedTool = typeof tool === 'string' && tool.trim()
@@ -181,6 +187,7 @@ export async function createApp(input = {}, { assertAuthorization = () => {} } =
       tool: resolvedTool,
       createdAt: new Date().toISOString(),
     };
+    if (explicitCapabilities || policyCapabilities) app.capabilities = explicitCapabilities || policyCapabilities;
     const normalizedPerMessagePrompt = normalizePerMessageSystemPrompt(perMessageSystemPrompt);
     if (normalizedPerMessagePrompt) {
       app.perMessageSystemPrompt = normalizedPerMessagePrompt;
@@ -205,6 +212,12 @@ export async function updateApp(id, updates) {
     const apps = await loadApps();
     const idx = apps.findIndex((app) => app.id === id && !app.deleted);
     if (idx === -1) return null;
+    const explicitCapabilities = updates.capabilities === undefined ? null : normalizeExplicitAgentCapabilities(updates.capabilities);
+    const policyCapabilities = updates.collaborationPolicy && Object.hasOwn(updates.collaborationPolicy, 'allowedCapabilities')
+      ? normalizeExplicitAgentCapabilities(updates.collaborationPolicy.allowedCapabilities) : null;
+    if (explicitCapabilities && policyCapabilities && JSON.stringify(explicitCapabilities) !== JSON.stringify(policyCapabilities)) throw new Error('Agent capability declarations conflict');
+    if (policyCapabilities && !normalizeAppCollaborationPolicy(updates.collaborationPolicy)) throw new Error('Agent collaboration policy is invalid');
+    const selectedCapabilities = explicitCapabilities || policyCapabilities;
     const allowed = ['name', 'systemPrompt', 'welcomeMessage', 'skills', 'tool', 'perMessageSystemPrompt', 'collaborationPolicy'];
     for (const key of allowed) {
       if (updates[key] === undefined) continue;
@@ -224,6 +237,10 @@ export async function updateApp(id, updates) {
         continue;
       }
       apps[idx][key] = updates[key];
+    }
+    if (selectedCapabilities) {
+      apps[idx].capabilities = selectedCapabilities;
+      if (apps[idx].collaborationPolicy) apps[idx].collaborationPolicy.allowedCapabilities = selectedCapabilities;
     }
     if (Object.prototype.hasOwnProperty.call(updates, 'templateContext')) {
       const templateContext = normalizeTemplateContext(updates.templateContext);
@@ -274,6 +291,15 @@ function normalizeAgentSyncProfile(profile) {
     createdAt: typeof profile.createdAt === 'string' ? profile.createdAt : '',
     updatedAt: typeof profile.updatedAt === 'string' ? profile.updatedAt : '',
   };
+  if (profile.capabilities !== undefined) {
+    try { normalized.capabilities = normalizeExplicitAgentCapabilities(profile.capabilities); } catch { return null; }
+  }
+  if (profile.collaborationPolicy && Object.hasOwn(profile.collaborationPolicy, 'allowedCapabilities')) {
+    try {
+      const caps = normalizeExplicitAgentCapabilities(profile.collaborationPolicy.allowedCapabilities);
+      if (normalized.capabilities && JSON.stringify(caps) !== JSON.stringify(normalized.capabilities)) return null;
+    } catch { return null; }
+  }
   const perMessageSystemPrompt = normalizePerMessageSystemPrompt(profile.perMessageSystemPrompt);
   if (perMessageSystemPrompt) normalized.perMessageSystemPrompt = perMessageSystemPrompt;
   const templateContext = normalizeTemplateContext(profile.templateContext);
