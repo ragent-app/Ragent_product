@@ -5,9 +5,10 @@
 import { DatabaseSync, backup } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, realpath, rm, statfs, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, realpath, rm, statfs, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertRunPublication } from '../chat/run-publication-contract.mjs';
 
 const NAMES = ['collaborations', 'workflow', 'coordination'];
 const LIMIT = 5000;
@@ -98,6 +99,62 @@ async function digestFile(path) {
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
 }
+// An observational index, not a copy or an atomic filesystem checkpoint.
+// Only canonical Run facts are inspected; capability files and output bodies
+// are never emitted. A changing file is not treated as a stable observation.
+async function observeRunFiles(index, runsRoot) {
+  if (!runsRoot) return { status: 'not_checked', reason: 'runs_root_not_provided' };
+  if (!isAbsolute(runsRoot)) fail('Run root must be an absolute path');
+  const rootStat = await lstat(runsRoot);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('Run root must be an existing non-symlink directory');
+  const root = await realpath(runsRoot);
+  const items = [], candidates = index.items.filter(attempt => attempt.run_id);
+  // Keep the optional scan bounded independently of the database row limit.
+  for (const attempt of candidates.slice(0, 100)) {
+    const id = attempt.run_id;
+    if (!id) continue;
+    const entry = { attemptId: attempt.id, runId: id, status: 'unknown', files: {} };
+    items.push(entry);
+    if (!/^run_[a-f0-9]{24}$/.test(id)) { entry.status = 'unsupported_run_id'; continue; }
+    try {
+      const dir = join(root, id), directory = await lstat(dir);
+      if (!directory.isDirectory() || directory.isSymbolicLink() || !contained(root, await realpath(dir))) { entry.status = 'invalid_run_directory'; continue; }
+      const values = {};
+      for (const name of ['status', 'manifest', 'result']) {
+        const path = join(dir, `${name}.json`);
+        try {
+          const before = await lstat(path);
+          if (!before.isFile() || before.isSymbolicLink()) { entry.files[name] = { status: 'invalid' }; continue; }
+          if (before.size > 2 * 1024 * 1024) { entry.files[name] = { status: 'size_limit', bytes: before.size }; continue; }
+          // Read no more than the declared cap even if the file grows after lstat.
+          const handle = await open(path, 'r');
+          let bytes;
+          try {
+            const buffer = Buffer.alloc(2 * 1024 * 1024 + 1);
+            let length = 0;
+            while (length < buffer.length) {
+              const part = await handle.read(buffer, length, buffer.length - length, length);
+              if (!part.bytesRead) break;
+              length += part.bytesRead;
+            }
+            if (length > 2 * 1024 * 1024) { entry.files[name] = { status: 'size_limit' }; continue; }
+            bytes = buffer.subarray(0, length);
+          } finally { await handle.close(); }
+          const after = await lstat(path);
+          if (!after.isFile() || after.isSymbolicLink() || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) { entry.files[name] = { status: 'changed' }; continue; }
+          try { values[name] = JSON.parse(bytes.toString('utf8')); } catch { entry.files[name] = { status: 'invalid_json' }; continue; }
+          entry.files[name] = { status: 'observed', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+        } catch (error) { entry.files[name] = { status: error?.code === 'ENOENT' ? 'missing' : 'unreadable' }; }
+      }
+      if (Object.values(entry.files).some(file => file.status !== 'observed')) { entry.status = 'incomplete'; continue; }
+      const run = values.status, manifest = values.manifest;
+      try {
+        entry.status = run?.id === id && run?.sessionId === attempt.session_id && assertRunPublication(run, manifest) ? 'publication_matched' : 'identity_unverified';
+      } catch { entry.status = 'identity_inconsistent'; }
+    } catch (error) { entry.status = error?.code === 'ENOENT' ? 'missing_run_directory' : 'unreadable'; }
+  }
+  return { status: index.total === null ? 'source_unavailable' : index.truncated || candidates.length > items.length ? 'observed_truncated' : 'observed', asOf: new Date().toISOString(), crossStoreAtomic: false, limitation: 'Files can change after observation; database locks do not fence Run files.', items };
+}
 async function sourceFiles(sources) {
   const list = {};
   for (const name of NAMES) list[name] = await regularFile(sources?.[name]);
@@ -111,17 +168,19 @@ function assertKnownQuiescence(report) {
   }
   if (report.references.packets.total === null) fail('Workflow ResultPacket store is unavailable');
 }
-export async function inventoryFactoryBackup({ sources } = {}) {
+export async function inventoryFactoryBackup({ sources, runsRoot } = {}) {
   const files = await sourceFiles(sources), databases = {};
   try {
     for (const name of NAMES) databases[name] = openRead(files[name].path);
+    const report = inspect(databases);
+    report.referenceChecks.runFiles = await observeRunFiles(report.references.runs, runsRoot);
     return { mode: 'inventory', copiesCreated: false, guarantee: 'observational_only',
       limitations: ['SQLite may create or update source WAL shared-memory sidecars even for read-only connections.'],
-      sourceSizes: Object.fromEntries(NAMES.map((name) => [name, files[name].size])), ...inspect(databases) };
+      sourceSizes: Object.fromEntries(NAMES.map((name) => [name, files[name].size])), ...report };
   } finally { for (const db of Object.values(databases)) db.close(); }
 }
 
-export async function createFactoryBackup({ sources, destination, allowedRoot } = {}) {
+export async function createFactoryBackup({ sources, destination, allowedRoot, runsRoot } = {}) {
   const files = await sourceFiles(sources);
   if (!isAbsolute(destination || '') || !isAbsolute(allowedRoot || '')) fail('Absolute destination and allowed root are required');
   const root = await realpath(allowedRoot), parent = await realpath(dirname(destination)), target = resolve(destination);
@@ -145,6 +204,7 @@ export async function createFactoryBackup({ sources, destination, allowedRoot } 
     }
     const report = inspect(locks);
     assertKnownQuiescence(report);
+    report.referenceChecks.runFiles = await observeRunFiles(report.references.runs, runsRoot);
     for (const name of NAMES) {
       readers[name] = openRead(files[name].path);
       const output = join(target, `${name}.sqlite`);
@@ -191,12 +251,12 @@ async function main(argv) {
   for (let i = 1; i < argv.length; i += 2) {
     if (!argv[i]?.startsWith('--') || !argv[i + 1]) fail('Arguments must be --name value pairs');
     const key = argv[i].slice(2);
-    if (!['collaborations', 'workflow', 'coordination', 'destination', 'allowed-root'].includes(key) || options[key]) fail('Unknown or duplicate option');
+    if (!['collaborations', 'workflow', 'coordination', 'destination', 'allowed-root', 'runs-root'].includes(key) || options[key]) fail('Unknown or duplicate option');
     options[key] = argv[i + 1];
   }
   const sources = Object.fromEntries(NAMES.map((name) => [name, options[name]]));
-  const result = mode === 'inventory' ? await inventoryFactoryBackup({ sources })
-    : await createFactoryBackup({ sources, destination: options.destination, allowedRoot: options['allowed-root'] });
+  const result = mode === 'inventory' ? await inventoryFactoryBackup({ sources, runsRoot: options['runs-root'] })
+    : await createFactoryBackup({ sources, destination: options.destination, allowedRoot: options['allowed-root'], runsRoot: options['runs-root'] });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
