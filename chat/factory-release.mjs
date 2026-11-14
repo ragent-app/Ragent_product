@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS factory_release_producer_completions (operation_id TE
 CREATE TRIGGER IF NOT EXISTS factory_release_producer_completion_no_update BEFORE UPDATE ON factory_release_producer_completions BEGIN SELECT RAISE(ABORT,'immutable producer completion'); END;
 CREATE TRIGGER IF NOT EXISTS factory_release_producer_completion_no_delete BEFORE DELETE ON factory_release_producer_completions BEGIN SELECT RAISE(ABORT,'immutable producer completion'); END;
 CREATE TABLE IF NOT EXISTS factory_release_recovery_commands (organization_id TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, operation_id TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(organization_id,actor_id,idempotency_key));
+CREATE TABLE IF NOT EXISTS factory_release_recovery_completions (organization_id TEXT NOT NULL,actor_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,operation_id TEXT NOT NULL,input_digest TEXT NOT NULL,evidence_json TEXT NOT NULL,completed_at TEXT NOT NULL,PRIMARY KEY(organization_id,actor_id,idempotency_key));
+CREATE TRIGGER IF NOT EXISTS factory_release_recovery_completion_no_update BEFORE UPDATE ON factory_release_recovery_completions BEGIN SELECT RAISE(ABORT,'immutable recovery completion'); END;
+CREATE TRIGGER IF NOT EXISTS factory_release_recovery_completion_no_delete BEFORE DELETE ON factory_release_recovery_completions BEGIN SELECT RAISE(ABORT,'immutable recovery completion'); END;
 CREATE TABLE IF NOT EXISTS factory_release_github_authorization_bindings (authorization_id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, binding_json TEXT NOT NULL, binding_digest TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS factory_release_github_auth_no_update BEFORE UPDATE ON factory_release_github_authorization_bindings BEGIN SELECT RAISE(ABORT,'immutable release provider authorization'); END;
 CREATE TRIGGER IF NOT EXISTS factory_release_github_auth_no_delete BEFORE DELETE ON factory_release_github_authorization_bindings BEGIN SELECT RAISE(ABORT,'immutable release provider authorization'); END;
@@ -66,7 +69,18 @@ export async function resumeFactoryGithubRelease({organizationId,operationId,ide
  if(!claimed)return {operation:{id:op,state:'unknown',replayed:true}};
  const assertAuthority=async()=>{await factoryRead(db=>{const orgRow=authorize(db,org,actor,'factory.CreateWorkItem');if(Date.parse(row.expires_at)<=Date.now()||digest(githubReleaseConfig(decode(orgRow.policy_json,{}),row.target,path))!==digest(config))throw factoryError('FACTORY_CONFLICT','Release authorization changed',409);integrated(db,org,row.work_item_id,row.candidate_digest,row.integration_operation_id);});const current=await artifactIdentity(path);if(current.digest!==row.artifact_digest||current.bytes!==row.artifact_bytes)throw factoryError('FACTORY_CONFLICT','Artifact changed',409);};
  try {await assertAuthority();let observation=await observeGithubRelease({...config,artifactDigest:row.artifact_digest,sourceCommit:row.source_commit,operationId:op});if(observation.state!=='draft_verified')throw factoryError('FACTORY_CONFLICT','Draft assets are not verified',409);await assertAuthority();observation=await observeGithubRelease({...config,artifactDigest:row.artifact_digest,sourceCommit:row.source_commit,operationId:op});if(observation.state!=='draft_verified')throw factoryError('FACTORY_CONFLICT','Draft changed before publishing',409);await finalizeGithubRelease(config);}catch{await factoryTransaction(db=>{db.prepare("UPDATE factory_release_operations SET state='unknown',updated_at=? WHERE id=? AND state='recovering'").run(now(),op);db.prepare("UPDATE factory_release_recovery_commands SET state='unknown',updated_at=? WHERE organization_id=? AND actor_id=? AND idempotency_key=? AND state='sending'").run(now(),org,actor.principalId,key);});return {operation:{id:op,state:'unknown',result:{reason:'recovery_requires_reconciliation'}}};}
- await factoryTransaction(db=>{db.prepare("UPDATE factory_release_operations SET state='unknown',updated_at=? WHERE id=? AND state='recovering'").run(now(),op);db.prepare("UPDATE factory_release_recovery_commands SET state='observed',updated_at=? WHERE organization_id=? AND actor_id=? AND idempotency_key=? AND state='sending'").run(now(),org,actor.principalId,key);});return reconcileFactoryGithubRelease({organizationId:org,operationId:op},actor);
+ await factoryTransaction(db=>{
+  schema(db);
+  const operation=db.prepare('SELECT * FROM factory_release_operations WHERE id=? AND organization_id=?').get(op,org);
+  const command=db.prepare('SELECT * FROM factory_release_recovery_commands WHERE organization_id=? AND actor_id=? AND idempotency_key=?').get(org,actor.principalId,key);
+  if(!operation || operation.input_digest!==row.input_digest || !['recovering','published'].includes(operation.state)
+    || !command || command.operation_id!==op || command.state!=='sending') throw factoryError('FACTORY_CONFLICT','Recovery producer identity changed',409);
+  const timestamp=now(), evidence={kind:'direct_gh_command_returned',command:'release_edit_publish',directProcessExit:'success',priorProducerQuiescence:'not_proven',externalQuiescence:'not_proven'};
+  db.prepare('INSERT INTO factory_release_recovery_completions VALUES(?,?,?,?,?,?,?)').run(org,actor.principalId,key,op,row.input_digest,encode(evidence),timestamp);
+  const changed=db.prepare("UPDATE factory_release_recovery_commands SET state='observed',updated_at=? WHERE organization_id=? AND actor_id=? AND idempotency_key=? AND operation_id=? AND state='sending'").run(timestamp,org,actor.principalId,key,op);
+  if(changed.changes!==1) throw factoryError('FACTORY_CONFLICT','Recovery producer state changed',409);
+  db.prepare("UPDATE factory_release_operations SET state='unknown',updated_at=? WHERE id=? AND organization_id=? AND state='recovering'").run(timestamp,op,org);
+ });return reconcileFactoryGithubRelease({organizationId:org,operationId:op},actor);
 }
 export async function getFactoryReleaseOperation(organizationId,operationId,actor) {
   owner(actor);
@@ -76,6 +90,7 @@ export async function getFactoryReleaseOperation(organizationId,operationId,acto
     if(!row) throw factoryError('FACTORY_NOT_FOUND','Release operation not found',404);
     const completion=db.prepare('SELECT producer,evidence_json,completed_at FROM factory_release_producer_completions WHERE organization_id=? AND operation_id=? AND input_digest=?').get(organizationId,row.id,row.input_digest);
     const recoveryPresent=!!db.prepare('SELECT 1 FROM factory_release_recovery_commands WHERE organization_id=? AND operation_id=? LIMIT 1').get(organizationId,row.id);
+    const recoveryCompletions=db.prepare('SELECT actor_id,idempotency_key,evidence_json,completed_at FROM factory_release_recovery_completions WHERE organization_id=? AND operation_id=? AND input_digest=? ORDER BY completed_at DESC,actor_id,idempotency_key LIMIT 51').all(organizationId,row.id,row.input_digest);
     const producerStatus=recoveryPresent?'recovery_history_requires_reconciliation':completion?'initial_commands_returned':'completion_unavailable';
     const result=decode(row.result_json), github=result?.provider==='github';
     const recoveryGuidance=github ? {
@@ -87,6 +102,7 @@ export async function getFactoryReleaseOperation(organizationId,operationId,acto
     return {operation:{id:row.id,authorizationId:row.authorization_id,state:['sending','recovering'].includes(row.state)?'unknown':row.state,
       persistedState:row.state,result,producerStatus,recoveryGuidance,
       producerCompletion:completion?{producer:completion.producer,evidence:decode(completion.evidence_json),completedAt:completion.completed_at}:null,
+      recoveryProducerCompletions:{items:recoveryCompletions.slice(0,50).map(value=>({identityDigest:createHash('sha256').update(JSON.stringify([organizationId,value.actor_id,value.idempotency_key])).digest('hex'),evidence:decode(value.evidence_json),completedAt:value.completed_at})),truncated:recoveryCompletions.length>50},
       createdAt:row.created_at,updatedAt:row.updated_at}};
   });
 }

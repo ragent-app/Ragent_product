@@ -48,6 +48,37 @@ function packetLinks(attempts,packets) {
   for(const attempt of attempts.items) {if(!attempt.result_packet_id)continue;checked++;const packet=byId.get(attempt.result_packet_id);if(!packet)missing++;else if(packet.run_id!==attempt.run_id)mismatched++;}
   return {status:'checked_database_references',checked,missing,mismatched};
 }
+function recoveryRows(db, table, sql, evidence = false) {
+  const result=rows(db,table,sql);
+  result.items=result.items.map(({actor_id,idempotency_key,_evidence,...item})=>({ ...item,
+    recoveryIdentityDigest:createHash('sha256').update(JSON.stringify([item.organization_id,actor_id,idempotency_key])).digest('hex'),
+    ...(evidence?{evidenceDigest:_evidence===null?null:createHash('sha256').update(_evidence).digest('hex')}:{}) }));
+  return result;
+}
+function releaseLinks(operations, completions, recoveries, recoveryCompletions) {
+  if ([operations, completions, recoveries, recoveryCompletions].some(index => index.total === null || index.truncated))
+    return { status: 'unknown_incomplete_index', items: [] };
+  const completionByOperation = new Map(completions.items.map(row => [row.operation_id, row]));
+  const recoveryCompletionByIdentity = new Map(recoveryCompletions.items.map(row => [row.recoveryIdentityDigest,row]));
+  const recoveryByOperation = new Map();
+  for (const row of recoveries.items) {
+    const key=JSON.stringify([row.organization_id,row.operation_id]);
+    const states=recoveryByOperation.get(key) || [];
+    states.push(row); recoveryByOperation.set(key,states);
+  }
+  return { status: 'checked_database_references', items: operations.items.map(operation => {
+    const completion = completionByOperation.get(operation.id);
+    const completionStatus = !completion ? 'missing' : completion.organization_id !== operation.organization_id || completion.input_digest !== operation.input_digest ? 'identity_mismatch' : 'matched';
+    return { operationId: operation.id, state: operation.state, resultDigest: operation.evidenceDigest,
+      producerCompletion: completionStatus, producer: completionStatus === 'matched' ? completion.producer : null,
+      recoveries: (recoveryByOperation.get(JSON.stringify([operation.organization_id,operation.id])) || []).map(command=>{
+        const fact=recoveryCompletionByIdentity.get(command.recoveryIdentityDigest);
+        return { identityDigest:command.recoveryIdentityDigest,state:command.state,
+          directCompletion:!fact?'missing':fact.organization_id===operation.organization_id && fact.operation_id===operation.id && fact.input_digest===operation.input_digest?'matched':'identity_mismatch',
+          completionEvidenceDigest:fact?.evidenceDigest || null };
+      }) };
+  }), limitation: 'Database references only: command return does not prove external effect or producer-tree quiescence.' };
+}
 function inspect(databases) {
   const c = databases.collaborations, w = databases.workflow, r = databases.coordination;
   const active = {
@@ -88,12 +119,15 @@ function inspect(databases) {
     milestones: evidenceRows(c, 'factory_delivery_milestones', 'SELECT id,organization_id,work_item_id,contract_revision,execution_epoch,binding_generation,candidate_digest,milestone,operation_id,source_digest,result_digest,evidence_json AS _evidence FROM factory_delivery_milestones ORDER BY id'),
     combinationReceipts: rows(c, 'factory_combination_receipts', 'SELECT operation_id,organization_id,queue_id,input_digest,combination_digest,base_head,commit_id,tree_id,result_digest FROM factory_combination_receipts ORDER BY operation_id'),
     releasePackages: rows(c, 'factory_release_packages', 'SELECT id,organization_id,work_item_id,candidate_digest,integration_operation_id,source_commit,artifact_digest,artifact_bytes FROM factory_release_packages ORDER BY id'),
-    releases: rows(c, 'factory_release_operations', 'SELECT id,organization_id,authorization_id,input_digest,state FROM factory_release_operations ORDER BY id'),
+    releases: evidenceRows(c, 'factory_release_operations', 'SELECT id,organization_id,authorization_id,input_digest,state,result_json AS _evidence FROM factory_release_operations ORDER BY id'),
+    releaseProducerCompletions: rows(c, 'factory_release_producer_completions', 'SELECT operation_id,organization_id,input_digest,producer,completed_at FROM factory_release_producer_completions ORDER BY operation_id'),
+    releaseRecoveryCommands: recoveryRows(c, 'factory_release_recovery_commands', 'SELECT organization_id,actor_id,idempotency_key,operation_id,state,created_at,updated_at FROM factory_release_recovery_commands ORDER BY organization_id,operation_id,created_at,actor_id,idempotency_key'),
+    releaseRecoveryCompletions: recoveryRows(c, 'factory_release_recovery_completions', 'SELECT organization_id,actor_id,idempotency_key,operation_id,input_digest,evidence_json AS _evidence,completed_at FROM factory_release_recovery_completions ORDER BY organization_id,operation_id,completed_at,actor_id,idempotency_key',true),
     retirements: rows(c, 'factory_retirement_operations', 'SELECT id,organization_id,kind,target_id,preview_digest,state FROM factory_retirement_operations ORDER BY id'),
     validationWorkspaces: rows(c, 'factory_validation_workspaces', 'SELECT id,validation_work_item_id,run_id,session_id,candidate_digest,state,provenance FROM factory_validation_workspaces ORDER BY id'),
   };
-  return { schema, watermarks, active, references, referenceChecks:{attemptPacketLinks:packetLinks(references.runs,references.packets),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
-    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands']
+  return { schema, watermarks, active, references, referenceChecks:{attemptPacketLinks:packetLinks(references.runs,references.packets),releaseLinks:releaseLinks(references.releases,references.releaseProducerCompletions,references.releaseRecoveryCommands,references.releaseRecoveryCompletions),scope:'database_rows_only',runFiles:'not_checked',artifacts:'not_checked',externalEffects:'not_checked'},
+    optionalOperationTables: Object.fromEntries(['organization_lifecycle_operations', 'organization_node_rebind_operations', 'factory_combination_commits', 'factory_retirement_operations', 'factory_release_producer_completions', 'factory_release_recovery_commands', 'factory_release_recovery_completions']
       .map((name) => [name, !c ? 'source_unavailable' : hasTable(c, name) ? 'available' : 'absent_legacy_or_not_initialized'])) };
 }
 async function digestFile(path) {
