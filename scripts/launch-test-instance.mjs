@@ -39,6 +39,7 @@ import { createServer } from 'net';
 import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { hashOwnerPassword } from '../lib/windows-owner-auth-bootstrap.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -263,9 +264,9 @@ Options:
   --evidence-dir <dir> save bounded stdout/stderr tails and final status in a new private subdirectory
   -h, --help         this help
 
-Default command: node chat-server.mjs (a random throwaway token is seeded into
-the instance's own temp auth.json so the server can boot; it is removed with
-cleanup and is never a real credential).
+Default command: node chat-server.mjs. A random owner password valid only for
+this isolated instance is stored in its owner-credentials.json. It is removed
+with the instance; --keep-on-error also retains the credential when used.
 Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher error.
 `);
     process.exit(0);
@@ -306,10 +307,9 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
     ? command
     : [process.execPath, DEFAULT_TARGET];
 
-  // chat-server refuses to boot without auth.json; seed a random throwaway
-  // token inside the instance's own temp config dir (removed with cleanup,
-  // never a real credential).
-  const seededAuthToken = randomBytes(32).toString('hex');
+  // Use the same password contract as owner bootstrap. The credential belongs
+  // only to this instance and is removed with its owned directory.
+  const seededOwnerPassword = randomBytes(32).toString('base64url');
   const instance = {
     id: instanceId,
     instanceDir,
@@ -326,7 +326,7 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
     createdAt: new Date().toISOString(),
     markerEnv: 'AGENTOC_TEST_INSTANCE_ID',
     markerFile: 'instance.json',
-    seededAuthToken: true,
+    seededOwnerPassword: true,
     ownerNonce: randomBytes(24).toString('hex'),
     processCleanupScope: 'direct-child',
   };
@@ -350,9 +350,12 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
   const markerPath = join(instanceDir, 'instance.json');
   await writeFile(
     join(configDir, 'auth.json'),
-    `${JSON.stringify({ token: seededAuthToken }, null, 2)}\n`,
+    `${JSON.stringify({ username: 'owner', passwordHash: await hashOwnerPassword(seededOwnerPassword) }, null, 2)}\n`,
     { encoding: 'utf8', mode: 0o600, flag: 'wx' },
   );
+  await writeFile(join(instanceDir, 'owner-credentials.json'),
+    `${JSON.stringify({ username: 'owner', password: seededOwnerPassword }, null, 2)}\n`,
+    { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   await writeFile(markerPath, `${JSON.stringify({ ...instance, pid: null }, null, 2)}\n`, 'utf8');
 
   let settled = false;
@@ -364,7 +367,7 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
   let stderrTail = '';
   let stdioIncomplete = false;
   const tailLimit = 64 * 1024;
-  const redact = (value) => String(value).split(seededAuthToken).join('[REDACTED_TEST_TOKEN]')
+  const redact = (value) => String(value).split(seededOwnerPassword).join('[REDACTED_TEST_PASSWORD]')
     .split(env.AGENTOC_AUTH_SESSION_SECRET).join('[REDACTED_TEST_SECRET]');
 
   const cleanup = async () => {
