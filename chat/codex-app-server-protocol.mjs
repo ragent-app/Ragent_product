@@ -123,6 +123,7 @@ export function buildCodexAppServerThreadOptions({
   threadMcpConfig,
   threadShellEnvironment,
   providerReadOnly = false,
+  factorySingleAgent = false,
   namedPermissionProfile,
   namedPermissionConfig,
 } = {}) {
@@ -143,7 +144,9 @@ export function buildCodexAppServerThreadOptions({
     ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
     ...(agentocApprovalGate === true || providerReadOnly ? { approvalsReviewer: 'user' } : {}),
     ...(namedProfile ? { permissions: namedProfile } : { sandbox: permissionPolicy.sandbox || 'danger-full-access' }),
-    config: { ...buildCodexAppServerConfig(interactionMode), ...(providerReadOnly ? { features: { apps: false } } : {}), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
+    config: { ...buildCodexAppServerConfig(interactionMode), ...(providerReadOnly || factorySingleAgent ? { features: {
+      ...(providerReadOnly ? { apps: false } : {}), ...(factorySingleAgent ? { multi_agent: false, multi_agent_v2: false } : {}),
+    } } : {}), ...(factorySingleAgent ? { agents: { enabled: false } } : {}), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
       ...(namedPermissionConfig ? { [`permissions.${namedProfile}`]: namedPermissionConfig } : {}),
       ...(threadMcpConfig?.mcp_servers && Object.keys(threadMcpConfig.mcp_servers).length
         ? { mcp_servers: threadMcpConfig.mcp_servers } : {}),

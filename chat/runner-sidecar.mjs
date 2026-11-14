@@ -1987,6 +1987,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     agentocApprovalGate: state.agentocApprovalGate,
     threadMcpConfig: state.threadMcpConfig,
     providerReadOnly: state.providerReadOnly === true,
+    factorySingleAgent: state.factorySingleAgent === true,
     threadShellEnvironment: state.threadShellEnvironment,
     executionEnvironment: state.executionEnvironment,
   }));
@@ -4382,6 +4383,7 @@ async function main() {
     })
     : null;
   if (appServerState && providerReadOnly) appServerState.providerReadOnly = true;
+  if (appServerState && factoryBudget) appServerState.factorySingleAgent = true;
   if (appServerState?.agentocApprovalGate && (appServerState.permissionMode === 'untrusted' || appServerState.permissionMode.startsWith('untrusted-'))) {
     // Direct process launches still need this override. The shared broker
     // uses the equivalent thread-scoped trust configuration instead.
