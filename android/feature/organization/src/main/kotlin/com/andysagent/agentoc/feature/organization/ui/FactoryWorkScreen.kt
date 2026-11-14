@@ -130,7 +130,8 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
             val response = transport.execute(ApiRequest(method = method, path = path, body = body.toString(), contentType = "application/json"))
             val parsed = Json.parseToJsonElement(response.body).jsonObject
             if (!response.isSuccessful) error(parsed["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
-        }.onSuccess { pendingResponsibility = null; proposal = null; form = ""; reviewForm = false; status = "Request recorded; existing work may continue. Refresh for current facts." }
+            parsed
+        }.onSuccess { result -> pendingResponsibility = null; proposal = null; form = ""; reviewForm = false; status = "Request recorded; actual stop is not established. Stop requests: ${result["stop"] ?: "none"}. Refresh for current facts." }
             .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
     }
     suspend fun loadResponsibility(id: String) {
@@ -186,6 +187,8 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 Text(current["objective"]?.jsonPrimitive?.contentOrNull.orEmpty())
                 Text("Responsibility ${current["lifecycle"]}; version ${current["rowVersion"]}; policy ${current["policyRevision"]}")
                 Text("A paused responsibility stops new admission; existing work may continue.")
+                Text("A stop request is not proof of stopping. Unknown or older active executions need reconciliation; a run that finished first remains pending review. Archived history is retained.")
+                Text("Responsibility notifications through Android FCM are not supported. Activity remains available in the app.")
                 Text("Policy (not plan approval): ${responsibilityPolicy ?: "unavailable"}")
                 val planner = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "generic-planner" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
                 val plannerTemplate = (planner?.get("templates") as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "agentoc-responsibility-planner" }
@@ -344,7 +347,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 }
                 (current["successCriteria"] as? JsonArray)?.forEach { Text(it.jsonPrimitive.content) }
                 Text("Activity")
-                responsibilityActivity?.forEach { Text("${it.jsonObject["createdAt"]} · ${it.jsonObject["type"]}") }
+                responsibilityActivity?.forEach { Text("${it.jsonObject["createdAt"]} · ${it.jsonObject["type"]} · ${it.jsonObject["details"] ?: ""}") }
                 val spokenActivity = responsibilityActivity.orEmpty().mapNotNull { entry ->
                     val row = entry as? JsonObject ?: return@mapNotNull null
                     val type = row["type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
@@ -375,7 +378,7 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                     }
                 }
                 TextButton(onClick = { form = "edit"; reviewForm = false; objective = current["objective"]?.jsonPrimitive?.contentOrNull.orEmpty() }) { Text("Edit objective") }
-                listOf("pause", "resume", "wake").forEach { action ->
+                listOf("pause", "resume", "wake", "complete", "cancel", "archive").forEach { action ->
                     TextButton(onClick = { proposal = buildJsonObject {
                         put("action", action); put("responsibilityId", id); put("objective", current["objective"]!!)
                         put("expectedVersion", current["rowVersion"]!!)
@@ -388,11 +391,16 @@ fun FactoryWorkScreen(transport: AgentoCTransport, organizationId: String, respo
                 proposal?.let { candidate ->
                     val action = candidate["action"]?.jsonPrimitive?.contentOrNull.orEmpty()
                     Text("Proposal: $action · ${candidate["objective"] ?: "manual review"} · version ${candidate["expectedVersion"] ?: "unknown"}")
-                    if (action in setOf("pause", "resume", "wake") && candidate["responsibilityId"]?.jsonPrimitive?.contentOrNull == id) {
+                    if (action == "complete") Text("Confirm that this responsibility's objective is achieved. This does not stop existing work.")
+                    if (action in setOf("pause", "resume", "wake", "complete", "cancel", "archive") && candidate["responsibilityId"]?.jsonPrimitive?.contentOrNull == id) {
                         TextButton(onClick = {
-                            val body = buildJsonObject { put("expectedVersion", candidate["expectedVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
+                            val body = buildJsonObject { put("expectedVersion", candidate["expectedVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()); put("confirmed", true) }
                             scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(id)}/$action", body) }
                         }) { Text("Confirm $action") }
+                        if (action in setOf("pause", "cancel")) TextButton(onClick = {
+                            val body = buildJsonObject { put("expectedVersion", candidate["expectedVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()); put("confirmed", true); put("stopExisting", true) }
+                            scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(id)}/$action", body) }
+                        }) { Text("Confirm $action and request stop (not proof of stopping)") }
                     }
                 }
             }

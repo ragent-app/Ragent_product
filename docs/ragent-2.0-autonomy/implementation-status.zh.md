@@ -20,6 +20,10 @@
 
 ## 检查与限制
 
+本轮责任生命周期源码支持 owner 按版本确认完成、取消和归档，并可在暂停或取消时单独请求停止既有工作。请求不代表执行已停止；旧代次、未知 Run 和先完成但待审核的结果仍需按实际证据处理，归档保留历史。一个 workflow 完成不代表整个持续责任完成。
+
+责任通知在应用内显示活动，Web Push 还需逐责任显式开启、经认证的已绑定 owner 设备及其完整现有订阅凭据、以及服务端 `AGENTOC_RESPONSIBILITY_PUSH_ENABLED=1`；默认关闭。仅面向已绑定订阅定向发送，记录 provider 接受、拒绝或未知，不代表用户已读；发送与撤销跨存储和网络不原子，未知不自动重发。支持的活动包括待审计划、需要输入、阻塞及真实单次工作流完成和预算阻塞；预算事件仅覆盖实际 Governor 拒绝进入 blocked 的路径，freshClaim 已证实未启动而直接失败的路径不覆盖。单次工作流完成不推断整项责任完成。Android FCM 的责任通知未接入；没有真实推送、重启或设备验收。服务工作线程在已有可见窗口时抑制系统通知，多窗口与冷启动跳转仍需验证。
+
 本轮对修改的 JavaScript 做语法检查和静态差异审阅；未新增测试、测试数据或基础设施。Android 组织模块 Kotlin 离线编译以 Gradle `--configure-on-demand` 通过，避免无关 app 配置；直接配置 app 的首次尝试因既有 debug keystore 缺失停止。真实账户、提供方和设备验收尚未完成。恢复中的外部效果不可由本地回滚撤销；结果未知时应保留证据并人工核查。
 
 责任后台需显式 `AGENTOC_RESPONSIBILITY_RUNTIME_ENABLED=1`；记忆写入需 `AGENTOC_RESPONSIBILITY_MEMORY_WRITES_ENABLED=1`；远程新准入需 `AGENTOC_REMOTE_FACTORY_ENABLED=1`，单文件新传输需 `AGENTOC_REMOTE_FILE_TRANSFER_ENABLED=1`，均默认关闭。Factory 控制、调度、组织白名单、Owner 与 Governor 是独立前提。CI runner 需要责任 ID 和 `AGENTOC_CI_OWNER_USERNAME` / `AGENTOC_CI_OWNER_PASSWORD` 环境配置；旧静态 token 登录已退役，既有配置不会自动迁移。回滚先关闭责任与远程新准入，保留读取、观察、取消与对账；未知外部效果不自动重试。源码和语法检查不代表真实 CI、登录、重启、双实例验收或发布；打包前须核对纳入的文件与精确提交。

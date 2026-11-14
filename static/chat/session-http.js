@@ -81,6 +81,8 @@ if (
     return queueForegroundRefresh({
       forceFresh: true,
       viewportIntent: "session_entry_bottom",
+    }).then(() => {
+      if (event.data?.responsibilityId) return window.AgentocOrganizationView?.openResponsibilityLink?.(event.data.sessionId, event.data.responsibilityId);
     }).catch(() => {});
   });
 }

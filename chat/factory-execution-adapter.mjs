@@ -224,10 +224,10 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
               },
             });
           } catch {
-            await updateFactoryBinding({ ...base, action: 'block', payload: { reason: { code: 'budget_reservation_failed', errorCode: text(error?.code) || 'BUDGET_ERROR' } } }, actor);
+            await updateFactoryBinding({ ...base, action: 'block', payload: { reason: { code: 'budget_reservation_failed', errorCode: text(error?.code) || 'BUDGET_ERROR' } } }, actor,{verifyBudgetDenied:()=>error?.code==='ORG_BUDGET_EXCEEDED'});
           }
         } else {
-          await updateFactoryBinding({ ...base, action: 'block', payload: { reason: { code: 'budget_reservation_failed', errorCode: text(error?.code) || 'BUDGET_ERROR' } } }, actor);
+          await updateFactoryBinding({ ...base, action: 'block', payload: { reason: { code: 'budget_reservation_failed', errorCode: text(error?.code) || 'BUDGET_ERROR' } } }, actor,{verifyBudgetDenied:()=>error?.code==='ORG_BUDGET_EXCEEDED'});
         }
       }
       throw error;
@@ -338,10 +338,21 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
           return raw&&saved ? verifyRemoteTerminalReceipt(db,raw,saved,sourceId) : null;
         });
         if(terminal?.attemptState==='succeeded') {
+          if(shouldCancel) return updateFactoryBinding({organizationId,workItemId:latest.id,expectedVersion:latest.rowVersion,
+            contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,
+            action:'confirm_finished',payload:{terminalEvidenceRef:`remote:${terminal.operationId}:${terminal.runId}`,runId:terminal.runId,attemptId:terminal.attemptId,signedReceipt:terminal.signed}},actor,{
+              verifyTerminal:({db,binding:current,payload})=>{
+                const raw=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(latest.id,organizationId);
+                const saved=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=?').get(current.id);
+                const actual=raw&&saved&&verifyRemoteTerminalReceipt(db,raw,saved,sourceId);
+                return actual?.attemptState==='succeeded' && actual.runState==='completed' && actual.runId===payload.runId && actual.attemptId===payload.attemptId && JSON.stringify(actual.signed)===JSON.stringify(payload.signedReceipt);
+              },
+            });
           return {receipt,cancellation,completion:'completed_pending_review',stopConfirmed:false};
         }
         if(terminal && ['failed','cancelled'].includes(terminal.attemptState)) {
-          const action=shouldCancel||terminal.attemptState==='cancelled'?'confirm_stopped':'fail';
+          if(terminal.attemptState==='cancelled' && terminal.runState!=='cancelled') return {receipt,cancellation,stopConfirmed:false};
+          const action=terminal.attemptState==='cancelled'?'confirm_stopped':'fail';
           const ref=`remote:${terminal.operationId}:${terminal.runId}`;
           const payload={...(action==='fail'?{terminalEvidenceRef:ref}:{stopEvidenceRef:ref}),
             targetRunState:terminal.runState,targetAttemptState:terminal.attemptState,signedReceipt:terminal.signed};
@@ -404,17 +415,30 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     }
     if ((latest.controlState === 'cancel_requested' || latest.controlState === 'pause_requested' || revoked) && attempt?.runId) {
       const run = actualRun;
+      if(run?.state==='completed' && attempt.state==='succeeded') {
+        return updateFactoryBinding({organizationId,workItemId:latest.id,expectedVersion:latest.rowVersion,
+          contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,
+          action:'confirm_finished',payload:{terminalEvidenceRef:`run:${attempt.runId}`,runId:attempt.runId,attemptId:attempt.id,collaborationId:collaboration.id}},actor,{
+            verifyTerminal:({db,binding:current,payload})=>{
+              const actual=db.prepare('SELECT a.state,a.run_id,a.session_id,t.collaboration_id FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=? AND a.task_id=?').get(attempt.id,attempt.taskId);
+              return actual?.state==='succeeded' && actual.run_id===attempt.runId && actual.session_id===run.sessionId && actual.collaboration_id===collaboration.id
+                && (!current.runId||current.runId===attempt.runId) && (!current.attemptId||current.attemptId===attempt.id) && (!current.collaborationId||current.collaborationId===collaboration.id)
+                && payload.terminalEvidenceRef===`run:${attempt.runId}`;
+            },
+          });
+      }
       if (run && ['completed', 'failed', 'cancelled'].includes(run.state)
-          && ['succeeded', 'failed', 'cancelled'].includes(attempt.state) && attempt.failureKind !== 'unknown_outcome') {
+          && (attempt.state==='failed' || (attempt.state==='cancelled' && run.state==='cancelled')) && attempt.failureKind !== 'unknown_outcome') {
+        const action=attempt.state==='failed'?'fail':'confirm_stopped';
         return updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,
           contractRevision: binding.contractRevision, executionEpoch: binding.executionEpoch,
-          bindingGeneration: binding.bindingGeneration, action: 'confirm_stopped',
-          payload: { stopEvidenceRef: `run:${attempt.runId}` } }, actor, {
+          bindingGeneration: binding.bindingGeneration, action,
+          payload: action==='fail'?{terminalEvidenceRef:`run:${attempt.runId}`}:{stopEvidenceRef:`run:${attempt.runId}`} }, actor, {
           verifyTerminal: ({ db, binding: current, payload }) => {
             const actual = db.prepare('SELECT state,run_id,failure_kind FROM collaboration_attempts WHERE id=? AND task_id=?')
               .get(attempt.id, attempt.taskId);
-            return ['succeeded', 'failed', 'cancelled'].includes(actual?.state) && actual.failure_kind !== 'unknown_outcome' && actual.run_id === attempt.runId
-              && (!current.runId || current.runId === attempt.runId) && payload.stopEvidenceRef === `run:${attempt.runId}`;
+            return actual?.state===attempt.state && actual.failure_kind !== 'unknown_outcome' && actual.run_id === attempt.runId
+              && (!current.runId || current.runId === attempt.runId) && (payload.stopEvidenceRef||payload.terminalEvidenceRef) === `run:${attempt.runId}`;
           },
         });
       }
@@ -454,7 +478,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     }
     if (binding.status === 'running' && attempt?.runId === binding.runId && actualRun
         && ['completed', 'failed', 'cancelled'].includes(actualRun.state)
-        && ['failed', 'cancelled'].includes(attempt.state) && attempt.failureKind !== 'unknown_outcome') {
+        && (attempt.state==='failed' || (attempt.state==='cancelled' && actualRun.state==='cancelled')) && attempt.failureKind !== 'unknown_outcome') {
       const action = attempt.state === 'cancelled' ? 'confirm_stopped' : 'fail';
       const evidenceRef = `run:${attempt.runId}`;
       return updateFactoryBinding({ organizationId, workItemId: latest.id, expectedVersion: latest.rowVersion,

@@ -4,6 +4,7 @@ import { VAPID_KEYS_FILE, PUSH_SUBSCRIPTIONS_FILE } from '../lib/config.mjs';
 import { buildToolProcessEnv } from '../lib/user-shell-env.mjs';
 import { createSerialTaskQueue, ensureDir, readJson, writeJsonAtomic } from './fs-utils.mjs';
 import { sendFcm } from './fcm.mjs';
+import { createHash, timingSafeEqual } from 'crypto';
 
 let ready = false;
 let initPromise = null;
@@ -132,6 +133,35 @@ export async function getPublicKey() {
 
 async function loadSubs() {
   return normalizeSubs(await readJson(PUSH_SUBSCRIPTIONS_FILE, []));
+}
+
+// Responsibility delivery deliberately targets only an explicitly bound
+// existing Web Push subscription. Legacy fan-out is never used as fallback.
+export async function hasResponsibilityWebSubscription(subscription) {
+  const fields = value => [value?.endpoint,value?.keys?.p256dh,value?.keys?.auth];
+  const supplied=fields(subscription); if(supplied.some(v=>typeof v!=='string'||!v||v.length>4096)) return false;
+  return (await loadSubs()).some(sub => fields(sub).every((value,index) => {
+    if(typeof value!=='string') return false;
+    const a=Buffer.from(value),b=Buffer.from(supplied[index]);return a.length===b.length && timingSafeEqual(a,b);
+  }));
+}
+export function responsibilitySubscriptionCredentialHash(subscription) {
+  const values=[subscription?.endpoint,subscription?.keys?.p256dh,subscription?.keys?.auth];
+  if(values.some(v=>typeof v!=='string'||!v||v.length>4096)) return '';
+  return createHash('sha256').update(JSON.stringify(values)).digest('hex');
+}
+export async function sendResponsibilityWebPush(endpointHash, credentialHash, payload) {
+  if (!/^[a-f0-9]{64}$/.test(String(endpointHash || '')) || !/^[a-f0-9]{64}$/.test(String(credentialHash || ''))) return { state:'not_configured' };
+  const sub = (await loadSubs()).find(entry => createHash('sha256').update(entry.endpoint).digest('hex') === endpointHash && responsibilitySubscriptionCredentialHash(entry)===credentialHash);
+  if (!sub || isInBackoff(sub)) return { state:'not_configured' };
+  await init();
+  try {
+    const topic = createHash('sha256').update(String(payload?.eventId || '')).digest('hex').slice(0, 32);
+    await webpush.sendNotification(sub, JSON.stringify(payload), { ...resolvePushSendOptions(), topic });
+    return { state:'provider_accepted' };
+  } catch (error) {
+    return { state: error?.statusCode === 404 || error?.statusCode === 410 ? 'provider_rejected' : 'unknown' };
+  }
 }
 
 async function saveSubs(subs) {

@@ -19,6 +19,7 @@ export function createResponsibilityRuntime({intervalMs=60000,onError=error=>con
       const {processResponsibilityWake,holdResponsibilityWake}=await import('./responsibility-decision.mjs');
       for(const wake of due) {if(stopped) break; const lease=await claim(wake.id); if(!lease) continue; try {await processResponsibilityWake(wake.id,lease);} catch(error) {onError(error); await holdResponsibilityWake(wake.id,'decision_or_admission_error',lease);} finally {await release(wake.id,lease);}}
       if(!stopped) { const {collectResponsibilityPlans,dispatchApprovedResponsibilityPlans}=await import('./responsibility-plans.mjs'); await collectResponsibilityPlans(); await dispatchApprovedResponsibilityPlans(); }
+      if(!stopped && process.env.AGENTOC_RESPONSIBILITY_PUSH_ENABLED==='1') {const {processResponsibilityNotifications}=await import('./responsibility-notifications.mjs');await processResponsibilityNotifications();}
     } catch(error) {onError(error);} finally {running=false;}
   }
   function scheduleTick() { if(pending) return pending; pending=tick().finally(()=>{pending=null;}); return pending; }

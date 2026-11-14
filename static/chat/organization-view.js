@@ -755,7 +755,7 @@
       }
     }
 
-    async showFactoryWork() {
+    async showFactoryWork(initialResponsibilityId = '') {
       const organizationId = this.projection?.organizationId;
       if (!organizationId || !this.dom.detailScreen) return;
       const screen = this.dom.detailScreen;
@@ -768,14 +768,17 @@
       const request = async (path, options = {}) => {
         const response = await fetcher(base + path, { credentials: 'same-origin', cache: 'no-store', ...options });
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+        if (!response.ok) throw new Error(`${body.error || `Request failed: ${response.status}`}${body.blockers ? ` · ${JSON.stringify(body.blockers)}` : ''}`);
         return body;
       };
       const header = add(screen, 'div', '');
       button(header, 'Back', () => { screen.hidden = true; screen.replaceChildren(); });
       add(header, 'h2', 'Work items');
       const content = add(screen, 'div', 'Loading…');
+      let responsibilityObserver = null;
+      const stopResponsibilityObserver = () => { if (responsibilityObserver) responsibilityObserver.stopped = true; responsibilityObserver = null; };
       const showList = async () => {
+        stopResponsibilityObserver();
         content.replaceChildren(); add(content, 'p', 'Loading…');
         try {
           const [list, status] = await Promise.all([request('/work-items'), request('/status')]);
@@ -795,10 +798,11 @@
       const responsibilityRequest = async (path, options = {}) => {
         const response = await fetcher(`/api/responsibilities${path}`, { credentials: 'same-origin', cache: 'no-store', ...options });
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+        if (!response.ok) throw new Error(`${body.error || `Request failed: ${response.status}`}${body.blockers ? ` · ${JSON.stringify(body.blockers)}` : ''}`);
         return body;
       };
       const showResponsibilities = async () => {
+        stopResponsibilityObserver();
         content.replaceChildren(); add(content, 'p', 'Loading responsibilities…');
         try {
           const result = await responsibilityRequest(`?organizationId=${encodeURIComponent(organizationId)}`);
@@ -835,6 +839,7 @@
         } catch (error) { content.replaceChildren(); add(content, 'p', `Responsibilities unavailable: ${error.message}`); button(content, 'All work items', showList); }
       };
       const showResponsibility = async id => {
+        stopResponsibilityObserver();
         content.replaceChildren(); add(content, 'p', 'Loading responsibility…');
         try {
           const path = `/${encodeURIComponent(id)}`;
@@ -846,6 +851,38 @@
           add(content, 'h3', item.objective);
           add(content, 'p', `Responsibility ${item.lifecycle} · version ${item.rowVersion} · policy ${item.policyRevision}`);
           add(content, 'p', 'A paused responsibility stops new admission; existing work may continue.');
+          add(content, 'p', 'A stop request is not proof of stopping. Unknown or older active executions must be reconciled; a run that finished first remains pending result review. Archived responsibilities retain their history.');
+          try {
+            const notifications = await responsibilityRequest(`${path}/notifications`);
+            add(content, 'h4', 'Responsibility notifications');
+            add(content, 'p', `Opt-in ${notifications.enabled ? 'on' : 'off'} · delivery ${notifications.deliveryAvailable ? 'configured' : 'not enabled'} · Web Push only; Android FCM responsibility notifications are not supported.`);
+            if (!notifications.registrationSupported) add(content, 'p', notifications.registrationReason || 'Pair and authenticate this owner device before binding a Web Push subscription.');
+            else button(content, 'Bind this device’s Web Push subscription', async () => {
+              try {
+                if (!root.Notification || !navigator.serviceWorker) throw new Error('Web Push is unavailable in this browser');
+                const permission = root.Notification.permission === 'granted' ? 'granted' : await root.Notification.requestPermission();
+                if (permission !== 'granted') throw new Error('Notification permission was not granted');
+                if (typeof root.setupPushNotifications === 'function') await root.setupPushNotifications();
+                const registration = await navigator.serviceWorker.getRegistration();
+                const subscription = await registration?.pushManager?.getSubscription();
+                if (!subscription) throw new Error('Set up an existing Web Push subscription first');
+                await responsibilityRequest('/notification-subscriptions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON()})});
+                await showResponsibility(id);
+              } catch (error) { add(content, 'p', `Subscription not bound: ${error.message}`); }
+            });
+            button(content, notifications.enabled ? 'Disable responsibility notifications' : 'Review enabling responsibility notifications', async () => {
+              const enabled = !notifications.enabled;
+              if (!root.confirm(`${enabled ? 'Enable' : 'Disable'} Web Push for this responsibility? Provider acceptance does not mean the notification was read.`)) return;
+              try { await responsibilityRequest(`${path}/notifications`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,expectedVersion:notifications.version,idempotencyKey:root.crypto.randomUUID(),confirmed:true})}); await showResponsibility(id); }
+              catch (error) { add(content,'p',`Notification setting not confirmed: ${error.message}`); }
+            });
+            for (const binding of notifications.bindings || []) button(content, `Revoke device ${binding.deviceId}`, async () => {
+              if (!root.confirm('Revoke this responsibility notification device binding?')) return;
+              try { await responsibilityRequest(`/notification-subscriptions/${encodeURIComponent(binding.subscriptionId)}/revoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:binding.version,idempotencyKey:root.crypto.randomUUID(),confirmed:true})}); await showResponsibility(id); }
+              catch (error) { add(content,'p',`Revocation not confirmed: ${error.message}`); }
+            });
+            for (const receipt of notifications.receipts || []) add(content,'p',`${receipt.type} · ${receipt.state} · ${receipt.updatedAt} (provider status, not proof of reading)`);
+          } catch { add(content, 'p', 'Responsibility notification settings unavailable.'); }
           add(content, 'p', `Policy (not a plan approval): ${JSON.stringify(detail.policy || {})}`);
           try {
             const catalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`);
@@ -971,13 +1008,38 @@
           add(content, 'h4', 'Success criteria');
           for (const criterion of item.successCriteria || []) add(content, 'p', criterion);
           add(content, 'h4', 'Activity');
-          for (const entry of activity.activity || []) add(content, 'p', `${entry.createdAt} · ${entry.type}`);
+          for (const entry of activity.activity || []) add(content, 'p', `${entry.createdAt} · ${entry.type} · ${JSON.stringify(entry.details || {})}`);
           if (!activity.activity?.length) add(content, 'p', 'No activity recorded.');
+          // Observe only while this owner view is open. The initial drain is a
+          // baseline, so historical activity is never replayed as a notification.
+          const observer = { stopped:false, cursor:activity.nextCursor || 0 };
+          responsibilityObserver = observer;
+          const important = new Set(['plan_proposed','planning_needs_input','planning_invalid_output','plan_admission_blocked','planning_evidence_blocked']);
+          const observe = async initial => {
+            if (observer.stopped || responsibilityObserver !== observer || screen.hidden || this.projection?.organizationId !== organizationId) return;
+            let baselineComplete = !initial;
+            try {
+              let page, pages = 0;
+              do {
+                page = await responsibilityRequest(`${path}/activity?after=${observer.cursor}&limit=200`);
+                if (observer.stopped || responsibilityObserver !== observer || screen.hidden) return;
+                for (const entry of page.activity || []) {
+                  if (!initial && important.has(entry.type)) root.showSystemToast?.(`Responsibility: ${entry.type.replaceAll('_',' ')}. Open activity for details.`);
+                  observer.cursor = Math.max(observer.cursor, Number(entry.sequence) || 0);
+                }
+                pages++;
+              } while ((page.activity || []).length === 200 && pages < 10);
+              if ((page.activity || []).length === 200) { observer.stopped = true; add(content, 'p', 'Live activity unavailable: too much history to establish a safe cursor.'); return; }
+              baselineComplete = true;
+            } catch { /* Retry without advancing past unseen events. */ }
+            if (!observer.stopped) root.setTimeout?.(() => observe(!baselineComplete), 20000);
+          };
+          observe(true);
           const submitCommand = (action, body, method = 'POST') => {
             const path = `/${encodeURIComponent(id)}${action ? `/${action}` : ''}`;
             const submit = async () => { try {
               const result = await responsibilityRequest(path, { method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-              add(content, 'p', action === 'wake' ? 'Wake recorded; execution is not implied.' : `Request recorded. Existing work stopped: ${result.existingWorkStopped === true ? 'yes' : 'not established'}.`);
+              add(content, 'p', action === 'wake' ? 'Wake recorded; execution is not implied.' : `Request recorded. Actual stop is not established. Stop requests: ${JSON.stringify(result.stop || {})}`);
               button(content, 'Refresh', () => showResponsibility(id));
             } catch (error) { add(content, 'p', `Request not confirmed: ${error.message}`); button(content, 'Retry same request', submit); } };
             submit();
@@ -987,9 +1049,13 @@
             if (!root.confirm(`Change objective for ${item.id}, version ${item.rowVersion}?\n${objective}`)) return;
             submitCommand('', { objective, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID() }, 'PATCH');
           });
-          for (const action of ['pause', 'resume', 'wake']) button(content, action, () => {
-            if (!root.confirm(`${action} responsibility ${item.id}, version ${item.rowVersion}? Existing work is not stopped by this command.`)) return;
-            submitCommand(action, { expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID() });
+          for (const action of ['pause', 'resume', 'wake', 'complete', 'cancel', 'archive']) button(content, action, () => {
+            if (!root.confirm(action === 'complete' ? `Confirm the objective of responsibility ${item.id} is achieved? Version ${item.rowVersion}. Existing work is not stopped by this command.` : `${action} responsibility ${item.id}, version ${item.rowVersion}? Existing work is not stopped by this command.`)) return;
+            submitCommand(action, { expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID(), confirmed:true });
+          });
+          for (const action of ['pause', 'cancel']) button(content, `${action} and request stop`, () => {
+            if (!root.confirm(`${action} this responsibility and request cancellation of eligible existing work? A request does not establish that execution has stopped.`)) return;
+            submitCommand(action, {expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID(),confirmed:true,stopExisting:true});
           });
           button(content, 'Review command text', async () => {
             const text = root.prompt('Command text for this responsibility'); if (!text) return;
@@ -1178,7 +1244,7 @@
           add(content,'p','Required review remains a proposal; the impact report identifies contracts that need amendment.');
         } catch(error) { content.replaceChildren(); add(content,'p',`Unable to load team configuration: ${error.message}`); button(content,'All work items',showList); }
       };
-      await showList();
+      if (initialResponsibilityId) await showResponsibility(initialResponsibilityId); else await showList();
     }
 
     // --- Pointer & Gesture Handling (Pan / Pinch / Wheel Zoom) ---
@@ -1312,7 +1378,21 @@
         } else if (this.active && !hasOrg) {
           this.toggleOrganizationMode(false);
         }
+        const url = new URL(root.location.href);
+        const responsibilityId = url.searchParams.get('responsibility');
+        if (responsibilityId && url.searchParams.get('session') === sessionId) {
+          url.searchParams.delete('responsibility'); root.history.replaceState(root.history.state, '', url);
+          this.openResponsibilityLink(sessionId, responsibilityId);
+        }
       });
+    }
+
+    async openResponsibilityLink(sessionId, responsibilityId) {
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(String(responsibilityId || '')) || this.sessionId !== sessionId) return;
+      const projection = await this.fetchProjection(true);
+      if (!projection?.organizationId || this.sessionId !== sessionId) return;
+      this.toggleOrganizationMode(true);
+      await this.showFactoryWork(responsibilityId);
     }
 
     setRadarButtonVisibility(visible) {
