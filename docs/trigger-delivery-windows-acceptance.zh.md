@@ -46,7 +46,7 @@
 
 为采集真实 MCP 启动失败的有限诊断，已将提交 `1be543829d32a21ed6091d1708e8429d2c8eb356` 构建为 minor 0.0.85，MSI SHA-256 `8098193FD4C4E46AAFC89E1AC087CD102065B077E84623FDB29170478A43E4E7`。组件兼容及正式准入通过；升级前 drain 下 105 个索引和 Run 目录一致且均为终态。安装返回 3010，0.0.85 已注册，安装的 sidecar blob 与提交一致，两核心服务运行、drain 已解除。本次日志记录重启后删除 MSI 回滚文件，未重启系统。该版本仅增加失败诊断，不声明 MCP 超时根因已修。
 
-0.0.85 上的一次专用真实提醒再次以 `MCP_READINESS_TIMEOUT` 失败，execution failed、delivery unknown。新增 spool 诊断显示 inventory 已响应、首个目标存在，但 readiness 仍为 waiting / `MCP_READY_UNCONFIRMED`，等待约 15002 毫秒且未观察到目标 ready 状态；这不证明目标进程未启动或其退出原因。当前 MCP 问题仍未解决。
+0.0.85 上的一次专用真实提醒再次以 `MCP_READINESS_TIMEOUT` 失败，execution failed、delivery unknown。新增 spool 诊断显示 inventory 已响应、首个目标存在，但 readiness 仍为 waiting / `MCP_READY_UNCONFIRMED`，等待约 15002 毫秒且未观察到目标 ready 状态；这不证明目标进程未启动或其退出原因。当时 MCP 问题仍未解决，后续修复及验收见下文。
 
 对 0.0.85 失败 Run 的既存 inventory 做限定投影，目标服务器的 `runtimeStatus` 为 `connected`，目标工具存在且其输入 schema 的类型为 object。该事实缩小了问题范围：等待 ready 并不表示目标服务器未连接。早先现场投影因枚举列表不完整将该值标为 other，后经完整枚举更正；不得据此推断运行时字段为对象。
 
@@ -64,7 +64,7 @@
 
 0.0.87 基于 `7a7cfcabbb22bc1b4d5228df3b18db5d9ee01e66` 正式 minor 安装，MSI SHA-256 `5704093FDCD123F1CE01FF0067FDF18C1DA386B2175C843A8FF1905A9753BA70`。安装返回 3010，注册版本及 session-manager 安装 blob 已核对，两服务运行且 drain 已解除。真实队列验收捕获 queued，原 occurrence 后续启动同 request 的 Run 并 completed/published、attempt 1；对应持久 assistant seq 92 正文为“队列修复恢复验收成功。”。该轮核重启条件时 Run 已终态，未重启，只验证队列自然推进，不证明在途重启恢复。
 
-随后单条真实只读审查提醒的 Run 已启动但很快 failed，触发结果为 failed/published，错误 `delegation_replay_invalid`；其持久回复存在不等于任务成功，此轮未重启。有限取证发现新版 Codex 的 wait 调用以工具调用 ID 被误当作子代理 ID；后续源码将带新协议 receiverThreadIds 的 wait 作为控制观测，保留已知活跃子代理安全屏障。随后同 Run 按已确认的父 thread 和 receiver 映射成功 spawn 及明确 child 终态；跨 Run 关联和真实 spawn 尚未验收。该修复尚需正式安装与真实验收。两项既有权限检查已按实际测试场景修正，作者分别运行通过，未更改产品权限策略。
+随后单条真实只读审查提醒的 Run 已启动但很快 failed，触发结果为 failed/published，错误 `delegation_replay_invalid`；其持久回复存在不等于任务成功，此轮未重启。有限取证发现新版 Codex 的 wait 调用以工具调用 ID 被误当作子代理 ID；后续源码将带新协议 receiverThreadIds 的 wait 作为控制观测，保留已知活跃子代理安全屏障。随后同 Run 按已确认的父 thread 和 receiver 映射成功 spawn 及明确 child 终态；跨 Run 关联和真实 spawn 尚未验收。该阶段的修复当时尚需正式安装与真实验收，后续情况见下文。两项既有权限检查已按实际测试场景修正，作者分别运行通过，未更改产品权限策略。
 
 历史 owner `OSV_RECOVERY_REFUSED` 的首因、历史 major 回滚 Return 5 的原因、无 threadId 的 broker 通知真实覆盖及用户界面观察仍未闭环；pending 调度重启已验证，已受理 Run 的在途重启恢复仍未验证。所有结论以实际记录为限。
 
@@ -76,4 +76,16 @@
 
 0.0.90 为收集 Windows hook 的固定原因码而正式安装，基于提交 `1936a360f7042524bb8aeab7a38edebf076d8f00`，MSI SHA-256 `662A9B4BCE9F6CF73F17210CC8D9F61CF4FB299D6E683B759BF5B10735DEB982`；准入与组件兼容通过，安装返回 3010，目标文件 blob 一致、服务运行且 drain 解除。稳定服务下的真实只读任务仍被拦截，最终固定码为 `HOOK_RESPONSE_INVALID`，未读到目标源码；任务回复已发布但业务审查未完成。源码后续修正共享 hook 对无 ID rate-limit 通知的处理，保留超时、大小及其他错误的 fail-closed 边界，尚待部署与现场验证。
 
-按该 Run 的正式 provider registry、认证存储和只读账户路由解析的 broker 端点，对当前管理员身份的正常管道连接返回 Access denied。未修改 ACL、冒用服务身份或强行终止进程；旧 broker 进程存在不足以证明该 Run 使用它或构成此次根因。正式 ControlPlane 和 RunnerSupervisor 使用各自服务身份；当前未发现不改配置的公开纯退役入口，正在按严格空闲和账户绑定契约补充维护能力。
+按该 Run 的正式 provider registry、认证存储和只读账户路由解析的 broker 端点，对当前管理员身份的正常管道连接返回 Access denied。未修改 ACL、冒用服务身份或强行终止进程；旧 broker 进程存在不足以证明该 Run 使用它或构成此次根因。正式 ControlPlane 和 RunnerSupervisor 使用各自服务身份；当时尚未发现不改配置的公开纯退役入口，随后按严格空闲和账户绑定契约补充了维护能力。
+
+0.0.92 基于提交 `87bb329e6005ac08415b6a978484f8994d306859`，MSI SHA-256 `D3C7B92C7B22A8C968E4CD26B009E8678D680B8A5C3D864DDA1686A373C88243`。正式准入通过，drain 内全 Run 终态核对后，owner 对目标 profile 的严格 idle handoff 返回成功，再完成 minor 安装；MSI 返回 0，三处诊断文件安装 blob 一致，两个服务运行、drain 解除。该交接不证明旧 broker 曾存在或其 PID，也不能推断历史错误根因。
+
+首次沿用旧会话的 QA 最终复述了历史 `HOOK_CLAIM_UNMATCHED`，该 Run 未观察到新的 commandExecution 或诊断旗标，不能当作本轮实际 hook 拒绝。新建专用会话后，真实只读 Run 有两次 commandExecution completed、exit 0，最终答复报告读取两个文件，并给出具体行号与有限的静态审查结论；未观察到 hook 错误码。旧 `HOOK_CLAIM_UNMATCHED` 首因仍未确定，不能以新会话成功证明旧问题根治。后续源码修复了成功 spawn 帧本身含 child 终态但无后续 wait/close 时的处理；真实 spawn 尚未现场验证，跨 Run child 绑定也尚未实现。
+
+0.0.93 基于提交 `55cdb7d0a58bdde9faa16109ad3f7cf1ce96ffb8`，MSI SHA-256 `90EFFBE2A94B6FFE4B77E73CCA09957F429A0C58CE318E57746035DE6996A11B`。组件兼容与正式只读准入通过，drain 下 122 项 Run 索引与目录一致且均终态，目标 profile 的严格 idle handoff 成功，正式 minor 安装返回 0；mapper 安装 blob 与提交一致，服务身份保持且 drain 已解除。修复处理成功 spawn 帧自身携带的 child 状态，四项既有 delegation 检查通过，真实 spawn 分支尚未验收。
+
+安装前 owner 健康曾出现 `OSV_INSPECTION_TIMEOUT`；全 Run 终态核查及正式 drain 后仅重启 ControlPlane，随后正常 owner CLI 和 health 恢复 ready。超时具体卡点及根因未知，不能宣称根治。
+
+0.0.93 安装后正式 owner health 返回 listening、ready=true、code=null。新建专用 session `7fa04f5315f268d221cf3178d8dd64f4` 的 Run `run_545ee65069cbffeb1e00c530` 自然 completed/exit 0，原始 spool 中两次 commandExecution 均 completed/exit 0，未见 HOOK 错误码；持久事件中同 Run 的 assistant message_start 为 seq 9、最终 message 为 seq 10，给出源码行号与有限审查结论。该次验证了实际读取，不证明真实 spawn 分支或历史 hook 首因。
+
+收尾时 Run 索引与目录各 123 项，全部终态、无缺失或未知，维护 drain 不存在；G 盘剩余 24,732,442,624 bytes。
