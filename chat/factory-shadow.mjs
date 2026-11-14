@@ -17,10 +17,16 @@ function operationalObservation(db,organizationId) {
   const available=name=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
   const grouped=(tables,sql)=>{
     if(!tables.every(available)) return {state:'unknown',reason:'source_table_unavailable'};
-    const rows=db.prepare(sql).all(organizationId), selected=rows.slice(0,32);
-    return {state:'observed',counts:selected.map(row=>({state:row.state,count:row.count})),truncated:rows.length>32};
+    try {
+      const rows=db.prepare(sql).all(organizationId), selected=rows.slice(0,32);
+      return {state:'observed',counts:selected.map(row=>({state:row.state,count:row.count})),truncated:rows.length>32};
+    } catch { return {state:'unknown',reason:'source_query_unavailable'}; }
   };
-  const scalar=(tables,sql)=>tables.every(available) ? {state:'observed',count:db.prepare(sql).get(organizationId).count} : {state:'unknown',reason:'source_table_unavailable'};
+  const scalar=(tables,sql)=>{
+    if(!tables.every(available)) return {state:'unknown',reason:'source_table_unavailable'};
+    try { return {state:'observed',count:db.prepare(sql).get(organizationId).count}; }
+    catch { return {state:'unknown',reason:'source_query_unavailable'}; }
+  };
   return {scope:'organization_local_database',asOf:now(),crossStoreAtomic:false,
     reconciliation:grouped(['factory_reconciliation_failures'],"SELECT state,COUNT(*) AS count FROM factory_reconciliation_failures WHERE organization_id=? GROUP BY state ORDER BY state LIMIT 33"),
     remoteOperations:grouped(['remote_factory_source_operations','remote_factory_source_bindings'],"SELECT o.status AS state,COUNT(*) AS count FROM remote_factory_source_operations o JOIN remote_factory_source_bindings b ON b.id=o.binding_id WHERE b.organization_id=? GROUP BY o.status ORDER BY o.status LIMIT 33"),

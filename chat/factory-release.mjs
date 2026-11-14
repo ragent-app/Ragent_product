@@ -68,4 +68,25 @@ export async function resumeFactoryGithubRelease({organizationId,operationId,ide
  try {await assertAuthority();let observation=await observeGithubRelease({...config,artifactDigest:row.artifact_digest,sourceCommit:row.source_commit,operationId:op});if(observation.state!=='draft_verified')throw factoryError('FACTORY_CONFLICT','Draft assets are not verified',409);await assertAuthority();observation=await observeGithubRelease({...config,artifactDigest:row.artifact_digest,sourceCommit:row.source_commit,operationId:op});if(observation.state!=='draft_verified')throw factoryError('FACTORY_CONFLICT','Draft changed before publishing',409);await finalizeGithubRelease(config);}catch{await factoryTransaction(db=>{db.prepare("UPDATE factory_release_operations SET state='unknown',updated_at=? WHERE id=? AND state='recovering'").run(now(),op);db.prepare("UPDATE factory_release_recovery_commands SET state='unknown',updated_at=? WHERE organization_id=? AND actor_id=? AND idempotency_key=? AND state='sending'").run(now(),org,actor.principalId,key);});return {operation:{id:op,state:'unknown',result:{reason:'recovery_requires_reconciliation'}}};}
  await factoryTransaction(db=>{db.prepare("UPDATE factory_release_operations SET state='unknown',updated_at=? WHERE id=? AND state='recovering'").run(now(),op);db.prepare("UPDATE factory_release_recovery_commands SET state='observed',updated_at=? WHERE organization_id=? AND actor_id=? AND idempotency_key=? AND state='sending'").run(now(),org,actor.principalId,key);});return reconcileFactoryGithubRelease({organizationId:org,operationId:op},actor);
 }
-export async function getFactoryReleaseOperation(organizationId,operationId,actor) { owner(actor);return factoryRead(db=>{schema(db);authorize(db,organizationId,actor,'factory.read');const row=db.prepare('SELECT * FROM factory_release_operations WHERE id=? AND organization_id=?').get(operationId,organizationId);if(!row) throw factoryError('FACTORY_NOT_FOUND','Release operation not found',404);const completion=db.prepare('SELECT producer,evidence_json,completed_at FROM factory_release_producer_completions WHERE organization_id=? AND operation_id=? AND input_digest=?').get(organizationId,row.id,row.input_digest);const recoveryPresent=!!db.prepare('SELECT 1 FROM factory_release_recovery_commands WHERE organization_id=? AND operation_id=? LIMIT 1').get(organizationId,row.id);const producerStatus=recoveryPresent?'recovery_history_requires_reconciliation':completion?'initial_commands_returned':'completion_unavailable';return {operation:{id:row.id,authorizationId:row.authorization_id,state:['sending','recovering'].includes(row.state)?'unknown':row.state,persistedState:row.state,result:decode(row.result_json),producerStatus,producerCompletion:completion?{producer:completion.producer,evidence:decode(completion.evidence_json),completedAt:completion.completed_at}:null,createdAt:row.created_at,updatedAt:row.updated_at}};}); }
+export async function getFactoryReleaseOperation(organizationId,operationId,actor) {
+  owner(actor);
+  return factoryRead(db=>{
+    schema(db); authorize(db,organizationId,actor,'factory.read');
+    const row=db.prepare('SELECT * FROM factory_release_operations WHERE id=? AND organization_id=?').get(operationId,organizationId);
+    if(!row) throw factoryError('FACTORY_NOT_FOUND','Release operation not found',404);
+    const completion=db.prepare('SELECT producer,evidence_json,completed_at FROM factory_release_producer_completions WHERE organization_id=? AND operation_id=? AND input_digest=?').get(organizationId,row.id,row.input_digest);
+    const recoveryPresent=!!db.prepare('SELECT 1 FROM factory_release_recovery_commands WHERE organization_id=? AND operation_id=? LIMIT 1').get(organizationId,row.id);
+    const producerStatus=recoveryPresent?'recovery_history_requires_reconciliation':completion?'initial_commands_returned':'completion_unavailable';
+    const result=decode(row.result_json), github=result?.provider==='github';
+    const recoveryGuidance=github ? {
+      reconcile:'provider_observation_and_eligible_fact_recording',
+      conditionalResume:row.state==='unknown'?'requires_current_verified_complete_draft_and_authorization':'not_available_for_persisted_state',
+      blockedReason:['sending','recovering'].includes(row.state)?'inflight_producer_outcome_not_safely_replayable':null,
+      observationNote:row.state==='published'?'historical_receipt_only_reconcile_for_current_provider_observation':'current_provider_observation_required',
+    } : {reconcile:'not_available_for_provider',conditionalResume:'not_available_for_provider',blockedReason:null};
+    return {operation:{id:row.id,authorizationId:row.authorization_id,state:['sending','recovering'].includes(row.state)?'unknown':row.state,
+      persistedState:row.state,result,producerStatus,recoveryGuidance,
+      producerCompletion:completion?{producer:completion.producer,evidence:decode(completion.evidence_json),completedAt:completion.completed_at}:null,
+      createdAt:row.created_at,updatedAt:row.updated_at}};
+  });
+}
