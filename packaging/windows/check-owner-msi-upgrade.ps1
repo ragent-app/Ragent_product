@@ -48,12 +48,14 @@ public static class AgentoCOwnerUpgradeTokenReader {
 }
 '@
 }
-function Assert-UpgradePath([string]$Path,[bool]$Directory){
+function Assert-UpgradePath([string]$Path,[bool]$Directory,[string]$InstallRoot){
  $full=[IO.Path]::GetFullPath($Path);$chain=[Collections.Generic.List[string]]::new()
  for($cursor=$full;$cursor;$cursor=[IO.Path]::GetDirectoryName($cursor)){$chain.Add($cursor)};$chain.Reverse()
  foreach($cursor in $chain){
   $attributes=[IO.File]::GetAttributes($cursor)
   if(($attributes -band [IO.FileAttributes]::ReparsePoint) -or ($cursor -cne $full -and -not ($attributes -band [IO.FileAttributes]::Directory))){throw 'OUG_SOURCE_PATH_UNSAFE'}
+  $dataRoot=[IO.Path]::GetFullPath((Get-OwnerDataRoot)).TrimEnd('\')
+  if($InstallRoot -and -not ($full -ieq $dataRoot -or $full.StartsWith($dataRoot+'\',[StringComparison]::OrdinalIgnoreCase)) -and [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\').StartsWith([IO.Path]::GetFullPath($cursor).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){continue}
   $acl=Get-OwnerPathAcl -Path $cursor
   $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if($cursor -ceq $full -and $owner -notin (Get-OwnerAdministrativeSids)){throw 'OUG_SOURCE_OWNER_REFUSED'}
@@ -96,9 +98,9 @@ function Invoke-OwnerUpgradeAdmission {
   $command=' --role '+$role+' --config-dir "'+$config+'" --instance-root "'+$instanceRoot+'"'
   if($service.PathName -cnotmatch '^(?:"(?<exe>[A-Za-z]:\\[^\"]+\.exe)"|(?<exe>[A-Za-z]:\\\S+\.exe))(?<args>.*)$' -or $Matches.args -cne $command){throw 'OUG_SERVICE_COMMAND_REFUSED'}
   $exe=[IO.Path]::GetFullPath($Matches.exe);if($services.Count -and $services[0].exe -cne $exe){throw 'OUG_SERVICE_HOST_MISMATCH'}
-  Assert-UpgradePath $exe $false
+  Assert-UpgradePath $exe $false ([IO.Path]::GetDirectoryName($exe))
   $sourceRoot=[IO.Path]::GetDirectoryName($exe)
-  foreach($relative in @('payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','payload\owner-bootstrap-release.json','payload\AgentoC.OwnerBootstrap.exe')){Assert-UpgradePath (Join-Path $sourceRoot $relative) $false}
+  foreach($relative in @('payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','payload\owner-bootstrap-release.json','payload\AgentoC.OwnerBootstrap.exe')){Assert-UpgradePath (Join-Path $sourceRoot $relative) $false $sourceRoot}
   $token=[AgentoCOwnerUpgradeTokenReader]::Read([int]$service.ProcessId)
   $expectedSid=[Security.Principal.NTAccount]::new('NT SERVICE',$name).Translate([Security.Principal.SecurityIdentifier]).Value
   if($token.userSid -cne $expectedSid -or $token.integrityRid -ne 8192 -or $token.sessionId -ne 0 -or $token.elevated -or $token.enabledAdministrators -or @($token.privileges).Count -ne 1 -or $token.privileges[0] -cne 'SeChangeNotifyPrivilege'){throw 'OUG_SERVICE_TOKEN_REFUSED'}
@@ -149,7 +151,7 @@ function Invoke-OwnerUpgradeAdmission {
  $script:upgradeStage='broker';$broker=[AgentoCOwnerUpgradeTokenReader]::ReadBroker('AgentoC-PrivilegedBroker')
  $brokerBinary=Join-Path $product 'Broker\AgentoC.PrivilegedBroker.exe'
  if(-not $broker -or $broker.account -ine 'LocalSystem' -or $broker.state -ne 4 -or $broker.startType -ne 2 -or $broker.serviceType -ne 16 -or $broker.binary.Trim('"') -ine $brokerBinary){throw 'OUG_BROKER_STATE_REFUSED'}
- Assert-UpgradePath $brokerBinary $false
+ Assert-UpgradePath $brokerBinary $false $product
  return @{ok=$true;readOnly=$true;upgradeAdmitted=$true;credentialContentsRead=$false;identityReused=$true;dataMigration='in-place-preserve';services=@($services|ForEach-Object {@{name=$_.name;role=$_.role;tokenVerified=$true}});dataLayoutVerified=$true;brokerServicePresent=$true;authorityIssued=$false}
 }
 if(-not $upgradeLibraryOnly){

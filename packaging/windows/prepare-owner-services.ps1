@@ -54,7 +54,7 @@ function Open-OwnerServicePreparationInputs([Collections.Generic.List[IDisposabl
   foreach($relative in @('AgentoC.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')){
     $path=Join-Path $product $relative
     for($parent=[IO.Path]::GetDirectoryName($path);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){
-      $Pins.Add([AgentoCOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent $allowed -Ancestor -Pins $Pins
+      $Pins.Add([AgentoCOwnerFilePin]::Directory($parent));if(-not (Test-ExternalProductAncestor $path $parent)){Assert-OwnerObjectAcl $parent $allowed -Ancestor -Pins $Pins}
     }
     $file=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
     $Pins.Add($file);[AgentoCOwnerFilePin]::Verify($file.SafeFileHandle,$path,$false);Assert-OwnerObjectAcl $path $allowed

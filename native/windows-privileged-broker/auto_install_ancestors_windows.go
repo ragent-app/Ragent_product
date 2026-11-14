@@ -75,6 +75,16 @@ func verifyRuntimeAncestor(path string) error {
 	return nil
 }
 
+// Installation ancestors retain directory/reparse checks without requiring a
+// privileged owner or DACL. Private identity paths use verifyRuntimeAncestor.
+func verifyInstallAncestor(path string) error {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil { return errRuntimeIntegrity }
+	attrs, err := windows.GetFileAttributes(name)
+	if err != nil || attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0 || attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 { return errRuntimeIntegrity }
+	return nil
+}
+
 type installedRuntimePins struct {
 	ancestors *runtimePins
 	contents  *runtimePins
@@ -92,12 +102,12 @@ func (p *installedRuntimePins) Close() {
 // Do not invoke this with caller-supplied paths. Service startup supplies its
 // own executable and the manifest digest embedded by the trusted build.
 func pinInstalledRuntime(executable, expectedDigest string) (*installedRuntimePins, string, error) {
-	return pinInstalledRuntimeWithAncestorCheck(executable, expectedDigest, verifyRuntimeAncestor)
+	return pinInstalledRuntimeWithAncestorCheck(executable, expectedDigest, verifyInstallAncestor)
 }
 
 // The injectable ancestor check is used only by isolated tests whose fixture
 // necessarily lives below a developer-writable workspace. Production always
-// supplies verifyRuntimeAncestor above.
+// supplies verifyInstallAncestor above.
 func pinInstalledRuntimeWithAncestorCheck(executable, expectedDigest string, checkAncestor func(string) error) (*installedRuntimePins, string, error) {
 	if checkAncestor == nil {
 		return nil, "", errRuntimeIntegrity

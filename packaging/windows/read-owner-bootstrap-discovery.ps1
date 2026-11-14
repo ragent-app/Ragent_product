@@ -84,7 +84,7 @@ function Assert-OwnerReleaseManifest($Release){
     ($Release.version -eq 1 -and ($Release.publisherSha256 -isnot [string] -or $Release.publisherSha256 -cnotmatch '\A[a-f0-9]{64}\z'))){throw 'OBD_RELEASE_MISMATCH'}
 }
 # Call only after the fixed manifest/helper and their ancestors have been pinned
-# and verified administrative-owned/non-user-writable. v2 makes no publisher claim.
+# and protected installation objects verified. v2 makes no publisher claim.
 function Get-OwnerReleaseTrust($Release,[byte[]]$Helper,[string]$Path){
   Assert-OwnerReleaseManifest $Release;$digest=Get-OwnerDigest $Helper
   if($Release.helperSha256 -cne $digest){throw 'OBD_RELEASE_MISMATCH'}
@@ -135,12 +135,23 @@ function Assert-OwnerObjectAcl([string]$Path,[string[]]$Allowed,[switch]$Ancesto
     foreach($qaHandle in [AgentoCOwnerFilePin]::NonemptyDirectory($qaProgramData,(Join-Path $qaProgramData 'Microsoft'))){$Pins.Add($qaHandle)}
   }
 }
+function Test-ExternalProductAncestor([string]$InputPath,[string]$AncestorPath){
+  $product=[IO.Path]::GetFullPath((Get-OwnerProductRoot)).TrimEnd('\')
+  $inputFull=[IO.Path]::GetFullPath($InputPath)
+  $data=[IO.Path]::GetFullPath((Get-OwnerDataRoot)).TrimEnd('\')
+  if($inputFull -ieq $data -or $inputFull.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase)){return $false}
+  $ancestor=[IO.Path]::GetFullPath($AncestorPath).TrimEnd('\')
+  $inputs=@('payload\owner-bootstrap-release.json','payload\AgentoC.OwnerBootstrap.exe','AgentoC.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','owner-msi.prepared.json','owner-msi.policy.json','owner-msi.removed.json','owner-msi.prevalidation-lock','owner-msi.prepare-lock','owner-msi.prepared.activated.json','owner-msi.policy.activated.json','owner-msi.activated.json','owner-msi.activation-health.json','owner-activation.committed-lock','owner-msi.upgrade-transaction.json','payload\scripts\initialize-windows-owner-identity.mjs','payload\lib\instance-identity.mjs','payload\lib\instance-proof-protocol.mjs','payload\lib\windows-owner-identity-paths.mjs') | ForEach-Object {[IO.Path]::GetFullPath((Join-Path $product $_))}
+  $leaf=[IO.Path]::GetFileName($inputFull)
+  $archive=([IO.Path]::GetDirectoryName($inputFull) -ieq $product) -and $leaf -cmatch '^owner-(?:msi\.(?:prepared\.activated|policy\.activated|activated|activation-health)\.json|activation\.committed-lock)\.previous-[a-f0-9]{32}$'
+  return (($inputs -icontains $inputFull) -or $archive) -and $product.StartsWith($ancestor+'\',[StringComparison]::OrdinalIgnoreCase)
+}
 function Read-OwnerPinnedFile([string]$Path,[string[]]$Allowed,[Collections.Generic.List[IDisposable]]$Pins,[int]$Maximum=8192,[string[]]$AncestorAllowed=$null){
   if($null -eq $AncestorAllowed){$AncestorAllowed=$Allowed}
   $qaPath=[IO.Path]::GetFullPath($Path)
   for($qaParent=[IO.Path]::GetDirectoryName($qaPath);$qaParent;$qaParent=[IO.Path]::GetDirectoryName($qaParent)){
     $qaPin=[AgentoCOwnerFilePin]::Directory($qaParent);$Pins.Add($qaPin)
-    Assert-OwnerObjectAcl $qaParent $AncestorAllowed -Ancestor -Pins $Pins
+    if(-not (Test-ExternalProductAncestor $qaPath $qaParent)){Assert-OwnerObjectAcl $qaParent $AncestorAllowed -Ancestor -Pins $Pins}
   }
   $qaFile=[IO.FileStream]::new($qaPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
   $Pins.Add($qaFile);[AgentoCOwnerFilePin]::Verify($qaFile.SafeFileHandle,$qaPath,$false)

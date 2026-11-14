@@ -871,10 +871,16 @@ namespace AgentoC.ServiceHost
             } finally {for(int i=pins.Count-1;i>=0;i--)pins[i].Dispose();}
         }
 
-        private static byte[] ReadAdministrativeInput(string path,List<IDisposable> pins,int maximum) {
+        private byte[] ReadAdministrativeInput(string path,List<IDisposable> pins,int maximum) {
             var admins=new HashSet<string>(new[]{"S-1-5-18","S-1-5-32-544","S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"});
             for(string p=Path.GetDirectoryName(path);p!=null;p=Path.GetDirectoryName(p)) {
-                pins.Add(ServiceDirectoryPin.Directory(p));var directory=Directory.GetAccessControl(p);
+                pins.Add(ServiceDirectoryPin.Directory(p));
+                string input=Path.GetFullPath(path);
+                string ancestor=Path.GetFullPath(p).TrimEnd('\\');
+                var installInputs=new[]{"owner-msi.prepared.json","owner-identity.initialize-lock",@"payload\node.exe",@"payload\scripts\initialize-windows-owner-identity.mjs",@"payload\lib\instance-identity.mjs",@"payload\lib\instance-proof-protocol.mjs",@"payload\lib\windows-owner-identity-paths.mjs"};
+                bool fixedInstallInput=Array.Exists(installInputs,relative=>String.Equals(input,Path.Combine(productRoot,relative),StringComparison.OrdinalIgnoreCase));
+                if(!input.StartsWith(Path.Combine(ProgramDataPath(),"AgentoC")+"\\",StringComparison.OrdinalIgnoreCase) && fixedInstallInput && productRoot.StartsWith(ancestor+"\\",StringComparison.OrdinalIgnoreCase))continue;
+                var directory=Directory.GetAccessControl(p);
                 if(!admins.Contains(directory.GetOwner(typeof(SecurityIdentifier)).Value))throw new InvalidOperationException("SHT_INITIALIZATION_INPUT_OWNER");
                 bool needsWitness=false;
                 foreach(FileSystemAccessRule rule in directory.GetAccessRules(true,true,typeof(SecurityIdentifier))) {

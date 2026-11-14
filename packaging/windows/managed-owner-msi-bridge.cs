@@ -140,7 +140,7 @@ static class ManagedOwnerMsiBridge {
  static string Hash(Stream stream){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
  static void PinBrokerInputs(List<IDisposable> pins,string binary,string manifest){
   string broker=Path.GetDirectoryName(binary);Need(String.Equals(broker,Path.Combine(Product,"Broker"),StringComparison.OrdinalIgnoreCase),"OMI_BROKER_PATH_REFUSED");
-  for(string path=Product;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));Acl(path,true,true);if(String.Equals(Path.GetFullPath(path).TrimEnd('\\'),Path.GetPathRoot(path).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))break;}
+  for(string path=Product;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));AclProductAncestor(path,Product);if(String.Equals(Path.GetFullPath(path).TrimEnd('\\'),Path.GetPathRoot(path).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))break;}
   pins.Add(ServiceDirectoryPin.Directory(broker));Acl(broker,true,true);
   foreach(string path in new[]{binary,manifest}){
    Need(File.Exists(path)&&(File.GetAttributes(path)&FileAttributes.ReparsePoint)==0,"OMI_BROKER_FILE_MISSING");
@@ -232,7 +232,7 @@ static class ManagedOwnerMsiBridge {
   for(string path=target;path!=null;path=Path.GetDirectoryName(path)){
    if(!Directory.Exists(path))continue;
    var attributes=File.GetAttributes(path);Need((attributes&FileAttributes.ReparsePoint)==0&&(attributes&FileAttributes.Directory)!=0,"OMI_INSTALL_ROOT_REPARSE_REFUSED");
-   Acl(path,true,!String.Equals(path,target,StringComparison.OrdinalIgnoreCase));
+   if(String.Equals(path,target,StringComparison.OrdinalIgnoreCase))Acl(path,true,false);else AclProductAncestor(path,target);
   }
  }
  static bool Present(string path){
@@ -256,7 +256,7 @@ static class ManagedOwnerMsiBridge {
   Need(Present(Product)&&Present(Data),"OMI_EXISTING_INSTALL_REFUSED");ValidateProductRoot();
   Need(!Present(Path.Combine(Product,"owner-msi.prepare-lock")),"OMI_PREPARATION_INCOMPLETE");
   var pins=new List<IDisposable>();try{
-   for(string path=Product;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));Acl(path,true,true);}
+   for(string path=Product;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));AclProductAncestor(path,Product);}
    string markerHash,preparedHash,policyHash,activeHash;
    var marker=ReadRemovalJson("owner-msi.removed.json",pins,out markerHash);
    var prepared=ReadRemovalJson("owner-msi.prepared.activated.json",pins,out preparedHash);
@@ -338,7 +338,7 @@ static class ManagedOwnerMsiBridge {
   var allowed=new HashSet<string>(new[]{"owner-msi.prepared.activated.json","owner-msi.policy.activated.json",
    "owner-msi.activated.json","owner-msi.activation-health.json","owner-activation.committed-lock"},StringComparer.OrdinalIgnoreCase);
   int conflicts=0;var pins=new List<IDisposable>();try{
-   for(string path=target;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));Acl(path,true,true);}
+   for(string path=target;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));AclProductAncestor(path,target);}
    foreach(string path in Directory.EnumerateFileSystemEntries(target)){
     string name=Path.GetFileName(path);
     if(installedPayload&&new[]{"payload","Broker"}.Contains(name,StringComparer.OrdinalIgnoreCase)){
@@ -366,7 +366,7 @@ static class ManagedOwnerMsiBridge {
   ValidateRecoveryDestination(ownerSid,source,target,true);
   var pins=new List<IDisposable>();try{
    foreach(string root in new[]{Path.GetFullPath(source).TrimEnd('\\'),Product}){
-    for(string path=root;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));Acl(path,true,true);}
+    for(string path=root;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));AclProductAncestor(path,root);}
    }
    OwnerMsiRelocationJournal.Begin(source,Product,0);
   }finally{for(int i=pins.Count-1;i>=0;i--)pins[i].Dispose();}
@@ -375,7 +375,7 @@ static class ManagedOwnerMsiBridge {
   Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_RELOCATION_SYSTEM_REQUIRED");
   if(!Present(Path.Combine(Product,"owner-msi.relocation.json")))return;
   ValidateProductRoot();var pins=new List<IDisposable>();try{
-   for(string path=Product;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));Acl(path,true,true);}
+   for(string path=Product;path!=null;path=Path.GetDirectoryName(path)){pins.Add(ServiceDirectoryPin.Directory(path));AclProductAncestor(path,Product);}
    if(commit)OwnerMsiRelocationJournal.Commit(Product);else OwnerMsiRelocationJournal.Rollback(Product);
   }finally{for(int i=pins.Count-1;i>=0;i--)pins[i].Dispose();}
  }
@@ -395,6 +395,10 @@ static class ManagedOwnerMsiBridge {
   using(var rows=search.Get()){foreach(ManagementObject row in rows)using(row){result.Add(new Dictionary<string,object>{{"name",row["Name"]},{"account",row["StartName"]},{"state",row["State"]},{"mode",row["StartMode"]},{"pid",row["ProcessId"]}});}}
   return result;
  }
+ static void AclProductAncestor(string path,string root){
+  if(Path.GetFullPath(root).TrimEnd('\\').StartsWith(Path.GetFullPath(path).TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase))return;
+  Acl(path,true,true);
+ }
  static void Acl(string path,bool directory,bool ancestor){
   FileSystemSecurity a=directory?(FileSystemSecurity)Directory.GetAccessControl(path):File.GetAccessControl(path);
   Need(Admins.Contains(a.GetOwner(typeof(SecurityIdentifier)).Value),"OMI_INPUT_OWNER_REFUSED");
@@ -406,7 +410,7 @@ static class ManagedOwnerMsiBridge {
   ValidateProductRoot();
   var pins=new List<IDisposable>();
   try{
-   for(string p=Product;p!=null;p=Path.GetDirectoryName(p)){pins.Add(ServiceDirectoryPin.Directory(p));Acl(p,true,true);}
+   for(string p=Product;p!=null;p=Path.GetDirectoryName(p)){pins.Add(ServiceDirectoryPin.Directory(p));AclProductAncestor(p,Product);}
    string path=Path.Combine(Product,"owner-msi.prepared.json");
    using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)){
     Acl(path,false,false);Need(stream.Length>0&&stream.Length<8192,"OMI_RECEIPT_INVALID");
@@ -510,7 +514,7 @@ static class ManagedOwnerMsiBridge {
  static void ActiveAdmission(bool allowRemovalLock=false){
   Need(Directory.Exists(Product),"OMI_INSTALL_ROOT_MISSING");ValidateProductRoot();
   var pins=new List<IDisposable>();try{
-   for(string p=Product;p!=null;p=Path.GetDirectoryName(p)){pins.Add(ServiceDirectoryPin.Directory(p));Acl(p,true,true);}
+   for(string p=Product;p!=null;p=Path.GetDirectoryName(p)){pins.Add(ServiceDirectoryPin.Directory(p));AclProductAncestor(p,Product);}
    string pending=Path.Combine(Product,"owner-msi.prepare-lock");
    if(Present(pending)){
     Need(allowRemovalLock,"OMI_PREPARATION_INCOMPLETE");
