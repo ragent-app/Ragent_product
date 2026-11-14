@@ -12,13 +12,31 @@
 
 `e582cd88` 持久化显式 Agent capabilities，`c524291b` 让 Web 如实显示未启动预留的对账结果。`af3038e0` 提交前交叉审查发现并修正未启动回执 INSERT 的列数与占位符一致性；这是静态审查，不是该恢复路径的运行验证。
 
+后续 `663ba138` 增加对正式三库备份的校验及新目录恢复工具，`62d0690f` 将 owner 初始化非终态纳入备份栅栏并兼容旧 manifest；`3d5caf89` 为显式发布恢复增加该次直接 gh 命令返回的不可变回执及有界关联索引，不证明先前 producer 或外部效果静止。`48c610c5` 和 `6a43a1d8` 分别修复远端 child 与 workflow 的 Goal 插入列数；三处 Goal 写入已静态核对。新增路径尚未完成真实恢复、远端派发、workflow 或发布验收。
+
+跨组织的容量不是天然隔离：实例及项目并发上限会把 unknown binding 计入容量；若配置上限为 1，另一组织也可能被阻断。不得通过跳过或清除 unknown 来绕开上限。远端知识引用仍拒绝：现有目标运行时代理需要调用实例的 Accounts 绑定与对应方向授权，当前未证实目标具备回查源实例的反向正式通路；已有源公钥与静态签名不能证明之后未撤销。
+
+后续 `db3a0130` 增加 owner 明确发起的初始单 reviewer 组织入口，`12f1491b` 增加首个绑定执行的 owner 只读报告授权；两者均不是通用多岗位组织创建。`2908eac6` 增加 Linux 共享 Codex provider 只读协商路径，需显式启用；预算预留与 provider 实际计费是不同事实，不是保证费用的硬上限。Linux 的 `0bab816e` 基础加 `12f1491b`/`6a43a1d8`/`2908eac6` 受限 overlay 已启用该只读开关；首项当时停在 claimed/intent，因 `COLLABORATION_CHILD_LIMIT` 预检失败而未创建 Run，随后 pause_requested，未进入 provider thread/turn。后续修复与真实报告结果另按实际证据记录，不能把该次尝试称为只读执行通过。
+
+`27645247` 修正 Collaboration 单计划 child 数边界，完整计划仍受 maxChildren 限制。`257fc76d` 提供 owner 对尚未确认的暂停请求的撤回：只适用于未绑定且无 Collaboration/远端操作的当前 intent，保留原 binding、epoch、dispatchKey 与预算；不代表任务曾停止，也不自动恢复旧 unknown。本次已通过正式操作成功撤回未确认暂停，保持原 epoch、dispatchKey 与预算；真实并发竞争仍未验证。
+
+后续真实备份源码审查 Run 已创建、启动并 finalized 为 failed：Run manifest 显示 Codex app-server/read，实际 launch mode 为 runner-lifecycle；实际 lifecycle 进程缺少 `AGENTOC_CODEX_PROVIDER_READONLY`，该进程环境经 allowlist 传递给 sidecar，导致执行侧能力判断不匹配。实际 usage 尚无可信证据，不能记为零消费；后续 lifecycle 配置和另一个已授权任务结果须另行记录，不能由首项失败推断通过。
+
+另一个已授权的 Android 源码审查 Run 已 completed：共享 `codex-app-server-json` thread 报告 cwd `/opt/agentoc/app`、readOnly、network=false、MCP 0 和可调用 app 0，并出现语义事件。这是 provider thread 报告，不证明通用 OS 隔离。最新 provider 累计观察为 131756 tokens（input 130569、cache 109568、output 1187），已超每项 50000 和本轮 100000 的预留；请求取消时已 completed，不能记作取消成功。已停止新 Run；最终可结算 usage、费用和人工验收仍待核实，预算预留不是硬费用或实时 token 上限。
+
+最终 Linux 部署基于 `0bab816e` 加 manifest 所列逐文件 overlay，末次加入 `a29403d8` 两个 producer 文件及 `adac55c9` adapter；三文件核对无不匹配，manifest SHA-256 为 `110e430c5f7b216da8e4a24b6de4e9847af1903bad63dd61e41eae87f6d87460`，回退包为 `/home/pinggu/factory-deploy-a6ee4851/overlay-a29403d8-before.tar`。`ragent.service` active，最后一次服务重启耗时 0.371 秒，正式 summary 的 active sessions/runs/approvals 为 0/0/0；未启动新 Run，此部署不证明新 producer 的业务链路通过。
+
+现场对账后原实例与项目并发上限均读回为 1，重启前正式 summary 的 active session、Run、approval 均为 0；只重启了 ragent.service。旧组织的 1 Run / 20000 tokens / 1 美元预留和新组织的 2 Run / 100000 tokens / 5 美元预留均未结算；两次费用 unknown。旧组织的 unknown binding 仍计入跨组织实例及项目容量；没有新增模型 Run。
+
+该审查的原始报告指出 Android 离线撤权与显示问题，后续 `430729f7` 已提交修复源码，尚未编译或设备验证。canonical ResultPacket 因 producer 未关联最终正文而摘要为空，旧 packet 保持不可变，正式报告候选与人工验收未通过。owner 随后正式请求取消并对账完成事实：binding 为 finished，工作项为 blocked/completed_pending_review、control none、candidateDigest null；这不是 cancelled 或 passed。实际费用仍未证实。`adac55c9` 增加 provider 嵌套 total/last 用量解析；thread 累计值不能当作单 Run 结算，修复后尚无新 Run 验证。`a29403d8` 修正后续报告 producer，从匹配已 finalized Run 的严格历史中读取有界最终正文并记录来源；旧 packet 保持不变，新路径尚无新 Run 验证。
+
 用户已授权本机及指定 `pinggu` 开发实例验收。执行侧报告 Linux 部署的 `a6ee4851` 服务和 owner CLI 可用；初查没有组织与 project-workflow 数据库，后续真实组织规划已完成。初次正式 owner API 查询时 Factory status、shadow 和 work-items 均返回 HTTP 200；后两者为空，status 显示控制和自动准入关闭、executionReadiness 未验证。空列表不证明历史迁移或任务闭环。最新工作树上的知识和后续 readiness 改动不在该部署版本中。分平台条件与现场证据分列于 [能力矩阵](capability-matrix.zh.md)。
 
 现场后续 shadow 同步返回 observed=0、changed=0；这是空历史读取的证据。真实图任务尝试发现规划节点的授权账本缺少 run，已有 claim 被阻断并留下 unknown binding；不能把该状态当作 Run 已启动或已停止。后续源码收紧准入并修复新节点授权物化，既有节点还需正式 owner 修订授权和对账。
 
 Linux 以正式 `64977acb` inventory 观察：collaborations 与 coordination 数据库可用，workflow 数据库 `source_unavailable`；executionBindings=1、runningAttempts=0、dispatchCommands=0，Attempt/Packet 关联为 `unknown_incomplete_index`，产物及外部效果未检查。指定实例 Run 根目录后，数据库引用范围内的 Run 观察为 `items=[]`，不等于扫描全部历史 Run。该调用 `copiesCreated=false`、`observational_only`，结果仅保留工具 stdout，未执行备份或 quick_check；零 Attempt/dispatch 不证明历史 unknown producer 已停止。此前将脚本单独置于临时目录的一次启动因缺相对导入而失败，未打开数据库，后改用正常目录执行。
 
-Linux 随后在 `a6ee4851` 基础及既有 `bbd95785`/`ecaad841`/`0f8bbb32`（仅 Goal INSERT）overlay 上追加 `af3038e0` 精确 12 个模块和 router 授权 hunk，共 13 个部署文件摘要匹配、服务 active，原文件备份可回退；不是整个当前工作树部署。正式 GET 返回 org version 3、revision 1、generation 1、能力 `[read]`、activeOrUnknownBindings=1、quiescence 未验证。owner 申请 `[read,run,review]` 被明确拒绝，原因是存在活动或未知 Factory 执行；重读状态不变。工作项仍为 blocked/authorization_revoked，binding 为 unknown 且无 Collaboration/Attempt/Run；预算 API 返回 Not Found，改用获授权的组织范围 SQLite 只读查询，revision 1 已计 runs/tokens/cost 为 0/0/0，预留为 1/20000/1，未释放。没有新 Run、未修改 Agent 或预算；这仅验证拒绝保护，不能视为授权修订成功或任务闭环。
+Linux 随后在 `a6ee4851` 基础及既有 `bbd95785`/`ecaad841`/`0f8bbb32`（仅 Goal INSERT）overlay 上追加 `af3038e0` 精确 12 个模块和 router 授权 hunk，共 13 个部署文件摘要匹配、服务 active，原文件备份可回退；不是整个当前工作树部署。正式 GET 返回 org version 3、revision 1、generation 1、能力 `[read]`、activeOrUnknownBindings=1、quiescence 未验证。owner 申请 `[read,run,review]` 被明确拒绝，原因是存在活动或未知 Factory 执行；重读状态不变。工作项仍为 blocked/authorization_revoked，binding 为 unknown 且无 Collaboration/Attempt/Run；预算 API 返回 Not Found，改用获授权的组织范围 SQLite 只读查询，revision 1 已计 runs/tokens/cost 为 0/0/0，预留为 1/20000/1，未释放。该次观察没有新 Run、未修改 Agent 或预算；这仅验证拒绝保护，不能视为授权修订成功或任务闭环。后续两次真实任务及其结果见上文。
 
 Windows 现有本机服务 `localhost:18673` 的 `/api/build-info` 返回 HTTP 200，报告 service `v0.0.76`、UI `mwfyxt4y`；进程来自 `G:/AgentoCapp/payload/chat-server.mjs`。Chrome 新建任务标签访问时，控制工具报 `Cannot read properties of undefined (reading timeoutMs)`，未取得页面状态，不能据此认定产品页面失败或通过。
 
@@ -58,7 +76,7 @@ Windows G: 隔离环境既有检查：`tests/test-collaboration-store.mjs`、`te
 
 默认不准入新的 Factory 工作。要在经授权的服务器上启用，须由服务端配置 `AGENTOC_FACTORY_SCHEDULER_ENABLED=1`、`AGENTOC_FACTORY_ORGANIZATIONS` 逗号分隔组织白名单和 `AGENTOC_FACTORY_SCHEDULER_OWNER_ID` 授权来源；后台使用受限 scheduler 服务主体，不把请求体中的身份当作 owner。每个组织还须有正整数 `policy.factoryMaxConcurrent`、明确的运行次数/Token/成本预算，并启用现有 Governor。组织节点须具备当前有效的 run 授权，写任务还须具备覆盖其路径的 write 授权。关闭新准入后，配置了组织和授权来源的服务仍可观察并对账已有执行；关闭服务本身不会继续计算。
 
-`accessMode: read` 表示候选输入只读任务，`accessMode: write` 的交付路径必须处于节点写入授权内；候选范围不自动扩充写权限。执行复用共享 broker，实际工作目录和受限输入由任务绑定；不声称共享进程提供操作系统级隔离。Windows Codex 只读路径使用同一共享 broker 的 provider 协商与报告，非独立服务；实际 provider 响应及强制效果尚未验证。候选暂限 1,000 个文件、32 MiB 范围，拒绝符号链接及缓存/构建目录；可通过拆小授权范围处理，不能静默截断。未知用量保留预算预留；只有可归属该 Run 的完整 provider 实际用量才能结算。上述配置和实现均未在真实项目或重启恢复中验证，本次没有在本机启用。
+`accessMode: read` 表示候选输入只读任务，`accessMode: write` 的交付路径必须处于节点写入授权内；候选范围不自动扩充写权限。执行复用共享 broker，实际工作目录和受限输入由任务绑定；不声称共享进程提供操作系统级隔离。Windows Codex 只读路径使用同一共享 broker 的 provider 协商与报告，非独立服务；实际 provider 响应及强制效果尚未验证。候选暂限 1,000 个文件、32 MiB 范围，拒绝符号链接及缓存/构建目录；可通过拆小授权范围处理，不能静默截断。未知用量保留预算预留；只有可归属该 Run 的完整 provider 实际用量才能结算。上述配置不代表所有平台能力均已验证；Linux 已取得上述受限真实运行事实，真实重启恢复及本机执行仍未验证。
 
 `AGENTOC_FACTORY_SHADOW_SYNC_ENABLED=1` 可在既有 observer 循环按组织白名单启用只读来源的分页 shadow 投影；默认关闭。水位与快照同事务写入，不启动 Run、不发消息、不把旧成功当验收。仅映射明确声明组织且同项目或项目缺失的 Collaboration；未关联组织及跨库 Run/Packet 的真实性仍需人工核对。完成一轮的时间不等于业务验收通过。
 
