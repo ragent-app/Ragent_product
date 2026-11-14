@@ -1150,15 +1150,6 @@ class MainActivity : ComponentActivity() {
                     demoSignIn.consumeSuccess()
                 }
                 val accountsState by accounts.state.collectAsStateWithLifecycle()
-                LaunchedEffect(accountsState.isDemoAccount, accountsState.accountId, accountsState.status) {
-                    if (accountsState.isDemoAccount) {
-                        demoConnection.activate(requireNotNull(accountsState.accountId))
-                    } else if (accountsState.status == com.andysagent.agentoc.feature.workbench.accounts.GoogleAccountStatus.SignedOut ||
-                        accountsState.hasVerifiedAccountSession) {
-                        demoConnection.deactivate()
-                    }
-                }
-
                 @Suppress("DEPRECATION")
                 val packageInfo = remember {
                     applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0)
@@ -1201,6 +1192,18 @@ class MainActivity : ComponentActivity() {
                 val localStartup by localStartupFlow.collectAsStateWithLifecycle(initialValue = null)
                 val computerDirectory = localStartup?.first ?: com.andysagent.agentoc.core.datastore.ComputerDirectory()
                 val currentWorkbenchTargetId = temporaryControlTargetId ?: computerDirectory.activeTargetId
+                val usingLocalRuntime = computerDirectory.computers.any { it.instanceId == currentWorkbenchTargetId && it.localRuntime }
+                LaunchedEffect(localStartup != null, usingLocalRuntime, accountsState.isDemoAccount, accountsState.accountId, accountsState.status) {
+                    if (localStartup == null) return@LaunchedEffect
+                    if (usingLocalRuntime) {
+                        demoConnection.deactivate()
+                    } else if (accountsState.isDemoAccount) {
+                        demoConnection.activate(requireNotNull(accountsState.accountId))
+                    } else if (accountsState.status == com.andysagent.agentoc.feature.workbench.accounts.GoogleAccountStatus.SignedOut ||
+                        accountsState.hasVerifiedAccountSession) {
+                        demoConnection.deactivate()
+                    }
+                }
                 var localErrorAcknowledged by remember(currentWorkbenchTargetId) { mutableStateOf(false) }
                 LaunchedEffect(runtimeConnectionState, currentWorkbenchTargetId) {
                     if (runtimeConnectionState == RuntimeConnectionState.Connected) localErrorAcknowledged = false
@@ -1590,7 +1593,7 @@ class MainActivity : ComponentActivity() {
                 }
                 com.andysagent.agentoc.feature.workbench.DemoEnvironmentSurface(
                     restricted = accountsState.isRestrictedDemoAccount,
-                    testAccount = accountsState.isDemoAccount,
+                    testAccount = accountsState.isDemoAccount && !usingLocalRuntime,
                     connection = demoConnectionState,
                     onRetryConnection = demoConnection::retry,
                     computerRecovery = computerRecovery,
