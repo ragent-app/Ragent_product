@@ -50,7 +50,8 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
             override fun <T : ViewModel> create(modelClass: Class<T>): T = OrganizationViewModel(repository) as T
         }
     }
-    val organizationViewModel: OrganizationViewModel = viewModel(key = "organization:${targetId.orEmpty()}:$sessionId:$scopeKey", factory = factory)
+    val transportKey = remember(transport) { java.util.UUID.randomUUID().toString() }
+    val organizationViewModel: OrganizationViewModel = viewModel(key = "organization:${targetId.orEmpty()}:$sessionId:$scopeKey:$transportKey", factory = factory)
     var status by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf("Loading organization…") }
     var loaded by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var refresh by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(0) }
