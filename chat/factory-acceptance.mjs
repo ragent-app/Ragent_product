@@ -24,13 +24,16 @@ export async function decideFactoryManualAcceptance(input,actor) {
     const binding=item.bindings.find(entry=>entry.contractRevision===item.contractRevision && entry.executionEpoch===item.executionEpoch && entry.bindingGeneration===item.bindingGeneration && entry.status==='candidate');
     const packetId=binding?.details?.packetId, packet=packetId&&await getResultPacket(packetId);
     const {verifyFactoryReportEvidence}=await import('./factory-report-evidence.mjs');
+    const reportRun=binding?.runId ? await getRunAcceptanceEvidence(binding.runId).catch(()=>null) : null;
+    const {currentRevisedGrant,revisedGrantMatches}=await import('./factory-execution-adapter.mjs');
+    const reportProfile=await currentRevisedGrant(organizationId,item.assigneeNodeId);
     if(!packet || packet.digest!==`sha256:${item.candidateDigest}`) invalid('Report packet is unavailable');
     const evidence={kind:'owner_report_review',packetId,packetDigest:packet.digest,rationale};
     const command={commandId,idempotencyKey,organizationId,targetId:workItemId,type:'DecideAcceptance',expectedVersion:input.expectedVersion,payload:{criterionId,decision:input.decision,contractRevision:item.contractRevision,candidateDigest:item.candidateDigest,gateGeneration:item.gateGeneration,evidence:[evidence]}};
     return executeFactoryCommand(command,actor,{verifyEvidence({db,item:current,actor:verifiedActor}) {
       if(verifiedActor.kind!=='user'||verifiedActor.role!=='owner'||current.id!==item.id||current.candidateDigest!==item.candidateDigest||current.executionEpoch!==item.executionEpoch||current.bindingGeneration!==item.bindingGeneration) return false;
       const raw=db.prepare('SELECT * FROM factory_execution_bindings WHERE id=? AND work_item_id=?').get(binding.id,current.id);
-      return raw?.status==='candidate' && !!verifyFactoryReportEvidence(db,current,binding,packet);
+      return raw?.status==='candidate' && !!verifyFactoryReportEvidence(db,current,binding,packet,reportRun,(database,reportItem)=>revisedGrantMatches(database,organizationId,reportItem.assigneeNodeId,reportProfile));
     }});
   }
   if(item.kind==='review' && item.contract.accessMode==='read') {

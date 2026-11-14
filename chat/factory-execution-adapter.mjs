@@ -1,3 +1,5 @@
+import {verifyOwnerReportScope} from './factory-owner-report.mjs';
+import {itemRow} from './work-graph-store.mjs';
 import { getAgentCapabilityProfile } from './agent-capability-registry.mjs';
 import { withDatabase, getCollaborationByIdempotencyKey } from './collaboration-store.mjs';
 import { createHash } from 'node:crypto';
@@ -142,6 +144,13 @@ export async function assertFactoryExecutionFence(context, { requireWorkspace = 
     if (remote && requireWorkspace) verifyRemoteCapturedBaseline(db,remote,context.dispatchKey);
     const currentResponsibility = item && verifyFactoryResponsibilityFence(db,item);
     if (JSON.stringify(currentResponsibility)!==JSON.stringify(responsibility)) refuse('Responsibility evidence or resource binding changed');
+    if(item && currentResponsibility && itemRow(db,item).contract?.accessMode==='read' && itemRow(db,item).contract?.resource?.readScope==='entire_project'
+        && !['project-report','generic-planner'].includes(currentResponsibility.providerId)) refuse('Responsibility does not authorize this report');
+    if (item && binding && !currentResponsibility) {
+      const current=itemRow(db,item);
+      if(current.contract?.accessMode==='read' && current.contract?.resource?.readScope==='entire_project'
+          && !verifyOwnerReportScope(db,current,{contractRevision:binding.contract_revision,executionEpoch:binding.execution_epoch,bindingGeneration:binding.binding_generation})) refuse('Owner report authorization changed or is unavailable');
+    }
     if (item && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_reconciliation_failures'").get()
         && db.prepare("SELECT 1 FROM factory_reconciliation_failures WHERE organization_id=? AND work_item_id=? AND execution_epoch=? AND state='dead_letter'").get(context.organizationId,item.id,item.execution_epoch)) refuse('Factory reconciliation requires explicit recovery');
     if (!item || !binding || !org || !node || !revisedGrantMatches(db,context.organizationId,node.id,revisedGrant) || !lease || lease.expires_at <= new Date().toISOString()
@@ -193,6 +202,21 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || !node || item.projectId !== org.projectId || item.contract?.organizationRevision !== org.currentRevision
         || node.organizationId !== organizationId || !node.currentSessionId || node.retiredRevision !== null) return { allowed: false, reason: 'binding_changed' };
     const session = await getSession(node.currentSessionId);
+    if(item.contract?.accessMode==='read' && item.contract?.resource?.readScope==='entire_project') {
+      try {
+        const {verifyFactoryResponsibilityFence}=await import('./factory-responsibility-admission.mjs');
+        const allowed=await withDatabase(db=>{const raw=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(item.id,organizationId);
+          if(!raw || raw.row_version!==item.rowVersion) return false;
+          const savedNode=db.prepare('SELECT binding_generation FROM organization_nodes WHERE id=? AND organization_id=?').get(raw.assignee_node_id,organizationId);
+          if(!savedNode || savedNode.binding_generation!==node.bindingGeneration) return false;
+          const source=verifyFactoryResponsibilityFence(db,raw,{bindingGeneration:savedNode.binding_generation});
+          if(source) return ['project-report','generic-planner'].includes(source.providerId);
+          const current=itemRow(db,raw);
+          const intendedEpoch=current.state==='claimed'?current.executionEpoch:current.executionEpoch+1;
+          return verifyOwnerReportScope(db,{...current,executionEpoch:intendedEpoch},{contractRevision:current.contractRevision,executionEpoch:intendedEpoch,bindingGeneration:savedNode.binding_generation});});
+        if(!allowed) return {allowed:false,reason:'report_authorization_unavailable'};
+      } catch { return {allowed:false,reason:'report_authorization_unavailable'}; }
+    }
     const profileAllowed = await withDatabase((db) => {
       const currentOrg = db.prepare('SELECT * FROM organizations WHERE id=?').get(organizationId);
       const currentNode = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assigneeNodeId, organizationId);
@@ -582,9 +606,10 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
         const packet=await getResultPacket(attempt.resultPacketId);
         if(!packet || typeof packet.digest!=='string' || !packet.digest.startsWith('sha256:')) return {state:'report_evidence_pending'};
         const payload={digest:packet.digest.slice(7),packetId:packet.packetId};
+        const reportProfile=await currentRevisedGrant(organizationId,latest.assigneeNodeId);
         return updateFactoryBinding({organizationId,workItemId:latest.id,expectedVersion:latest.rowVersion,
           contractRevision:binding.contractRevision,executionEpoch:binding.executionEpoch,bindingGeneration:binding.bindingGeneration,
-          action:'submit_candidate',payload},actor,{verifyCandidate:({db,item,binding:current})=>verifyFactoryReportEvidence(db,item,current,packet)});
+          action:'submit_candidate',payload},actor,{verifyCandidate:({db,item,binding:current})=>verifyFactoryReportEvidence(db,item,current,packet,actualRun,(database,reportItem)=>revisedGrantMatches(database,organizationId,reportItem.assigneeNodeId,reportProfile))});
       }
       const session = await getSession(attempt.sessionId);
       const workspace = session?.sourceContext?.managedWriter;

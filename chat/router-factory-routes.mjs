@@ -1,3 +1,4 @@
+import {authorizeOwnerFactoryReport} from './factory-owner-report.mjs';
 import { previewOwnerOrganization, commitOwnerOrganization, getOwnerOrganizationOperation } from './organization-owner-proposal.mjs';
 import { getOrganizationNodeGrantRevision, reviseOrganizationNodeGrant } from './organization-grant-revision.mjs';
 import { recordFactoryApiDenial, listFactoryApiDenials } from './factory-control-observations.mjs';
@@ -56,6 +57,7 @@ function mutationSourceAllowed(req) {
 }
 
 export async function handleFactoryRoutes({ req, res, pathname, authSession, writeJson }) {
+  const ownerReport = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/owner-report-authorization$/.exec(String(pathname || ''));
   const ownerProposal = /^\/api\/factory\/organization-proposals\/(preview|commit|operations)(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const steer = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/steer$/.exec(String(pathname || ''));
   const steerReceipt = /^\/api\/organizations\/([^/]+)\/factory\/steer-commands\/([^/]+)$/.exec(String(pathname || ''));
@@ -95,7 +97,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
   let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
   try { if(directOrg) observedOrg=decodeURIComponent(directOrg[1]); } catch { observedOrg=''; }
@@ -140,6 +142,15 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, 403, { error: 'Owner access required' }); return true;
   }
   try {
+    if(ownerReport) {
+      if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
+      if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
+      const {commandId,idempotencyKey,expectedVersion}=body;
+      writeJson(res,200,await authorizeOwnerFactoryReport({organizationId:decodeURIComponent(ownerReport[1]),workItemId:decodeURIComponent(ownerReport[2]),commandId,idempotencyKey,expectedVersion},actor));return true;
+    }
     if(ownerProposal) {
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       if(ownerProposal[1]==='operations') {
