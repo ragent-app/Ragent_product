@@ -4,7 +4,7 @@
 
 更新：2026-11-14。源码：`G:/AgentoC/Ragent_product`，`main`。原始核查 HEAD `3628b2ef5f5627fe2118bda40691150c8d1da74f`；方案文档提交 `18250b9ccdb50ec05bd30d44cf2ff684a623b00a`。工作树含其他未提交修改，以下为本次工作状态，不把代码存在等同于真实运行通过。
 
-后续增量：`082be101` 增加发布直接进程完成回执与备份证据索引；`e6a39b38` 为远端委派固定不含收件箱的任务摘要；`a6ee4851` 支持 owner 显式逾期提醒。知识授权的合同栅栏和 dispatch 改动被并行提交 `e36fe334` 夹带，其余闭包在 `0c9719da`：owner 可把已有项目事实固定到单个任务，来源变化在发送前拒绝；远端带知识引用的任务目前拒绝，跨库检查与实际发送不原子。上述增量不等于真实业务验收。
+后续增量：`082be101` 增加发布直接进程完成回执与备份证据索引；`e6a39b38` 为远端委派固定不含收件箱的任务摘要；`a6ee4851` 支持 owner 显式逾期提醒。知识授权的合同栅栏和 dispatch 改动被并行提交 `e36fe334` 夹带，其余闭包在 `0c9719da`：owner 可把已有项目事实固定到单个任务，来源变化在发送前拒绝；该提交时远端带知识引用的任务拒绝，后续改动见下文，跨库检查与实际发送不原子。上述增量不等于真实业务验收。
 
 `233094db` 增加受限 Run 的结构化阻塞提案和 owner 显式处置源码；真实提案、权限撤销及重启恢复尚未验证。
 
@@ -14,7 +14,7 @@
 
 后续 `663ba138` 增加对正式三库备份的校验及新目录恢复工具，`62d0690f` 将 owner 初始化非终态纳入备份栅栏并兼容旧 manifest；`3d5caf89` 为显式发布恢复增加该次直接 gh 命令返回的不可变回执及有界关联索引，不证明先前 producer 或外部效果静止。`48c610c5` 和 `6a43a1d8` 分别修复远端 child 与 workflow 的 Goal 插入列数；三处 Goal 写入已静态核对。新增路径尚未完成真实恢复、远端派发、workflow 或发布验收。
 
-跨组织的容量不是天然隔离：实例及项目并发上限会把 unknown binding 计入容量；若配置上限为 1，另一组织也可能被阻断。不得通过跳过或清除 unknown 来绕开上限。远端知识引用仍拒绝：现有目标运行时代理需要调用实例的 Accounts 绑定与对应方向授权，当前未证实目标具备回查源实例的反向正式通路；已有源公钥与静态签名不能证明之后未撤销。
+跨组织的容量不是天然隔离：实例及项目并发上限会把 unknown binding 计入容量；若配置上限为 1，另一组织也可能被阻断。不得通过跳过或清除 unknown 来绕开上限。远端知识引用此前拒绝；`5a1ef95c` 增加双向 Accounts 范围、固定事实和发送前在线回查。目标是否具备反向正式授权与真实跨实例执行尚未验证；源公钥和静态签名本身不能证明之后未撤销。
 
 后续 `db3a0130` 增加 owner 明确发起的初始单 reviewer 组织入口，`12f1491b` 增加首个绑定执行的 owner 只读报告授权；两者均不是通用多岗位组织创建。`2908eac6` 增加 Linux 共享 Codex provider 只读协商路径，需显式启用；预算预留与 provider 实际计费是不同事实，不是保证费用的硬上限。Linux 的 `0bab816e` 基础加 `12f1491b`/`6a43a1d8`/`2908eac6` 受限 overlay 已启用该只读开关；首项当时停在 claimed/intent，因 `COLLABORATION_CHILD_LIMIT` 预检失败而未创建 Run，随后 pause_requested，未进入 provider thread/turn。后续修复与真实报告结果另按实际证据记录，不能把该次尝试称为只读执行通过。
 
@@ -28,7 +28,9 @@
 
 现场对账后原实例与项目并发上限均读回为 1，重启前正式 summary 的 active session、Run、approval 均为 0；只重启了 ragent.service。旧组织的 1 Run / 20000 tokens / 1 美元预留和新组织的 2 Run / 100000 tokens / 5 美元预留均未结算；两次费用 unknown。旧组织的 unknown binding 仍计入跨组织实例及项目容量；没有新增模型 Run。
 
-该审查的原始报告指出 Android 离线撤权与显示问题，后续 `430729f7` 已提交修复源码，尚未编译或设备验证。canonical ResultPacket 因 producer 未关联最终正文而摘要为空，旧 packet 保持不可变，正式报告候选与人工验收未通过。owner 随后正式请求取消并对账完成事实：binding 为 finished，工作项为 blocked/completed_pending_review、control none、candidateDigest null；这不是 cancelled 或 passed。实际费用仍未证实。`adac55c9` 增加 provider 嵌套 total/last 用量解析；thread 累计值不能当作单 Run 结算，修复后尚无新 Run 验证。`a29403d8` 修正后续报告 producer，从匹配已 finalized Run 的严格历史中读取有界最终正文并记录来源；旧 packet 保持不变，新路径尚无新 Run 验证。
+该审查的原始报告指出 Android 离线撤权与显示问题，后续 `430729f7` 已提交修复源码，尚未编译或设备验证。canonical ResultPacket 因 producer 未关联最终正文而摘要为空，旧 packet 保持不可变，正式报告候选与人工验收未通过。owner 随后正式请求取消并对账完成事实：binding 为 finished，工作项为 blocked/completed_pending_review、control none、candidateDigest null；这不是 cancelled 或 passed。实际费用仍未证实。`5a1ef95c` 的预算 guard 仅接收正整数 token 预留的 Codex app-server；cost-only 或其他 Harness 在 claim 前拒绝。预算固定到 Run manifest，匹配的可信 usage 达阈值发出定向取消；重启不归零已用量，未知仍保留，在途用量仍可能超额。远端旧记录缺 token 的读取、候选与取消保留，新 dispatch 拒绝；尚待真实运行验证。`adac55c9` 增加 provider 嵌套 total/last 用量解析；thread 累计值不能当作单 Run 结算，修复后尚无新 Run 验证。`a29403d8` 修正后续报告 producer，从匹配已 finalized Run 的严格历史中读取有界最终正文并记录来源；旧 packet 保持不变，新路径尚无新 Run 验证。
+
+`1927a085` 备份索引源码补充单项/组合 Git operation、远端 source/target journal 与 evidence 的有界本地关联和观察时间；新记录仅在固定 source identity、非活动 binding 与已有签名终态核验通过时可视作本地终态。旧记录缺身份、截断或证据不足保持未知并阻断；观察不查询外部服务，也不证明跨库原子或外部全局静止。Linux 实例部署 `1927a085` 四文件、语法通过，服务 active 且未重启；以其正式 inventory 观察，三库均存在、workflow 已初始化；活动 execution binding 1、scheduler leases 2，其余列示活动项为 0；两条关联 Attempt 的 Run status/manifest/result 均 publication_matched，Attempt/Packet 数据库引用已检查；remote 表未初始化，remote links 为 unknown_incomplete_index。此结果仅为非原子的观察，不生成 backup 或证明外部效果静止；紧凑摘要保存在 `G:/AgentoC/factory-restore-overlay-1927a085/inventory-summary.json`。本轮没有新增模型 Run；Windows 本机可用内存约 490 MiB、G: 可用约 23 GiB，Android 后续离线修复未再编译或真机验证。
 
 用户已授权本机及指定 `pinggu` 开发实例验收。执行侧报告 Linux 部署的 `a6ee4851` 服务和 owner CLI 可用；初查没有组织与 project-workflow 数据库，后续真实组织规划已完成。初次正式 owner API 查询时 Factory status、shadow 和 work-items 均返回 HTTP 200；后两者为空，status 显示控制和自动准入关闭、executionReadiness 未验证。空列表不证明历史迁移或任务闭环。最新工作树上的知识和后续 readiness 改动不在该部署版本中。分平台条件与现场证据分列于 [能力矩阵](capability-matrix.zh.md)。
 
@@ -49,7 +51,7 @@ Linux 真实规划的三次尝试：① `a6ee4851` 的 `run_5bec3b56ffc0b6d77ba0
 | 0 现状与前置 | 返工上下文持久化、托管 Session 绑定校验、Factory 候选先于回写、Android 组织投影包络修正 | 各平台真实只读/权限能力仍需按实际运行边界补齐 | 真实 Harness、服务重启和真实项目 |
 | 1 Work Graph | 加法 schema、契约/候选/决策、CAS、依赖/状态/控制、分页、事件及服务端授权；保留 legacy/shadow/active 标记；ResumeWork 可解除暂停控制，失败项目按 RetryWork 规则处理；已提交按页 Run/Packet 对账源码 | 仅显式组织归属的旧任务有分页 shadow 快照；缺归属历史不自动猜测 | 已执行空 shadow 同步；代表性历史按页对账、新图业务及迁移兼容尚无现场证据 |
 | 2 执行 | 服务端开关与组织白名单、受限服务主体、scheduler/adapter、预算预留/可证实时结算、共享 broker 任务栅栏、候选与派生验证工作区、定向取消及权限撤销处置 | 未知副作用的自动恢复/补偿不完整；缺可信用量时预算持续保留，不能宣称自动结算 | 真实进程、预算、取消、重启及恢复 |
-| 3 团队指挥 | owner 读写/回执、Web/Android 基础任务控制、节点消息与回复、生命周期与节点换绑；有界本地及签名远端任务交接、任务级显式知识引用、受控咨询源码 | 远端不传收件箱，亦不支持知识引用委派；全项目长期任务知识仍不完整；当前 Steering 为绑定 Run 的受控请求，其他 provider 明确 unsupported；交接的剩余预算等缺失事实保留 unknown | 咨询 Run/意见与跨库恢复、远端交接与知识引用、新节点消息、活跃授权撤销、Android 真机、断线重连 |
+| 3 团队指挥 | owner 读写/回执、Web/Android 基础任务控制、节点消息与回复、生命周期与节点换绑；有界本地及签名远端任务交接、任务级显式知识引用、受控咨询源码 | 远端不传收件箱；知识引用在线核验源码已提交但真实双实例未验，全项目长期任务知识仍不完整；当前 Steering 为绑定 Run 的受控请求，其他 provider 明确 unsupported；交接的剩余预算等缺失事实保留 unknown | 咨询 Run/意见与跨库恢复、远端交接与知识引用、新节点消息、活跃授权撤销、Android 真机、断线重连 |
 | 4 工作流与交付 | 版本化公式、v2 受限独立审查意见、人工验收、注册检查、单候选及有序多候选组合的固定输入、派生验证、真实 Git commit 协议及不可变组合收据；包/授权/幂等发布操作；已提交源码支持显式 GitHub Release 与外部结果查询、签名构建证明校验、完整 draft 显式恢复 | PR 创建/更新/合并渠道（若采用 PR）及长期交付证据策略仍不完整；空/部分 draft 不自动补传，崩溃停在 sending/recovering 缺安全恢复入口；无已配置可信证明时发布受阻 | 独立审查、组合验证、真实项目集成、GitHub attestation/release 及恢复尚未贯通；未实际发布 |
 | 5 灰度与验收 | 加法表、准入开关/白名单、shadow 观察与对账、数据库备份源码、workspace 显式退休；按组织状态观测见 `cf722af1`，分平台条件见 [能力矩阵](capability-matrix.zh.md) | 全量历史事实、Run 文件与外部副作用的一致检查点及旧入口退出流程未完成；权限拒绝与 provider 停止结果缺完整收据 | Linux `a6ee4851` 已部署且服务可用；备份、真实灰度、任务重启恢复、跨平台和回退尚无完整证据 |
 先前 Windows 隔离批次未访问生产数据库、调用真实 Harness、重启服务、部署或发布，未创建测试；后续 Linux 开发实例的部署事实以上方记录为准。完成项需后续审阅及适用的现有可信检查支持。模板来自本仓库方案而非已证实的业务运行流程，不能将其称为已验证模板。
