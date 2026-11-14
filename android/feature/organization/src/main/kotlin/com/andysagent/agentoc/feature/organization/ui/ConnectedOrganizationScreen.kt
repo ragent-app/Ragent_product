@@ -42,7 +42,11 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     val connection by transport.connectionState.collectAsState()
     val scopeKey = remember(offlineScope) { offlineScope?.let { scope -> MessageDigest.getInstance("SHA-256").digest(scope.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) } }.orEmpty() }
     var ownerVerified by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
+    var ownerGeneration by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
+    var projectionGeneration by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
+    val cacheInvalidations by cache.invalidations.collectAsState()
     var cachedAt by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
+    var cacheClearFailed by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(offlineScope?.let { cache.isInvalid(it) } == true) }
     val repository = remember(transport, targetId, sessionId, scopeKey) { RealOrganizationRepository(RealOrganizationApi(transport)) }
     val factory = remember(repository) {
         object : ViewModelProvider.Factory {
@@ -59,18 +63,37 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     var workOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(selectedResponsibilityId != null) }
     var messagesOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var nodes by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
+    LaunchedEffect(scopeKey, cacheInvalidations) {
+        val generation = projectionGeneration
+        if (offlineScope != null && generation != null && !cache.isCurrent(offlineScope, generation)) {
+            ownerVerified = false
+            ownerGeneration = null
+            projectionGeneration = null
+            loaded = false
+            organizationId = null
+            nodes = emptyList()
+            cachedAt = null
+            status = "Organization access changed. Refresh to check current authorization."
+            cacheClearFailed = cache.isInvalid(offlineScope)
+        }
+    }
     LaunchedEffect(transport, targetId, sessionId, scopeKey, refresh, connection) {
         loaded = false
         ownerVerified = false
+        ownerGeneration = null
+        projectionGeneration = null
         cachedAt = null
-        if (connection == RuntimeConnectionState.AuthenticationRequired && offlineScope != null) withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+        if (connection == RuntimeConnectionState.AuthenticationRequired && offlineScope != null) {
+            cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+        }
         organizationId = null
         nodes = emptyList()
         status = "Loading organization…"
+        val requestGeneration = offlineScope?.let { cache.generation(it) }
         val online = connection == RuntimeConnectionState.Connected
         val cacheAllowed = offlineScope != null && connection != RuntimeConnectionState.AuthenticationRequired
         val body: String? = if (online) {
-            val owner = if (cacheAllowed) try {
+            val ownerResponse = if (cacheAllowed) try {
                 val response = transport.execute(ApiRequest("GET", "/api/auth/me"))
                 val info = JSONObject(response.body)
                 response.isSuccessful && info.optString("role") == "owner" && info.optString("principalKind") == "owner"
@@ -79,14 +102,17 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
             } catch (_: Exception) {
                 false
             } else false
+            val owner = ownerResponse && (offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration)))
             ownerVerified = owner
-            if (!owner && offlineScope != null) withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+            ownerGeneration = if (owner) requestGeneration else null
+            if (!owner && offlineScope != null) cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
             val response = try {
                 transport.execute(ApiRequest("GET", "/api/sessions/${android.net.Uri.encode(sessionId)}/organization/projection"))
             } catch (error: ApiException) {
                 if (error.statusCode in listOf(401, 403, 404, 405, 410, 501) && offlineScope != null) {
                     ownerVerified = false
-                    withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+                    ownerGeneration = null
+                    cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
                 }
                 null
             } catch (error: CancellationException) {
@@ -96,10 +122,12 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
             }
             if (response != null && response.statusCode in listOf(401, 403, 404, 405, 410, 501) && offlineScope != null) {
                 ownerVerified = false
-                withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+                ownerGeneration = null
+                cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
             }
-            if (response?.isSuccessful == true) {
-                if (owner && offlineScope != null) withContext(Dispatchers.IO) { cache.write(offlineScope, response.body) }
+            val stillCurrent = offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration))
+            if (response?.isSuccessful == true && stillCurrent) {
+                if (owner && offlineScope != null && requestGeneration != null) withContext(Dispatchers.IO) { cache.write(offlineScope, response.body, requestGeneration) }
                 response.body
             } else null
         } else if (cacheAllowed && offlineScope != null) {
@@ -115,8 +143,10 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
             }
             RealOrganizationApi(responseTransport).getSessionOrganization(sessionId).fold(
                 onSuccess = { projection ->
-                    if (projection == null) status = "No organization is available for this session."
-                    else { organizationViewModel.applyProjection(projection); organizationId = projection.organizationId; nodes = projection.nodes; loaded = true }
+                    val stillCurrent = offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration))
+                    if (!stillCurrent) status = "Organization access changed. Refresh to check current authorization."
+                    else if (projection == null) status = "No organization is available for this session."
+                    else { organizationViewModel.applyProjection(projection); organizationId = projection.organizationId; nodes = projection.nodes; projectionGeneration = requestGeneration; loaded = true }
                 },
                 onFailure = { status = "Organization unavailable: ${it.message ?: "request failed"}" },
             )
@@ -126,22 +156,37 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
         object : AgentoCTransport by transport {
             override suspend fun execute(request: ApiRequest): ApiResponse {
                 if (transport.connectionState.value != RuntimeConnectionState.Connected) error("Offline controls are disabled")
+                val requestGeneration = offlineScope?.let { cache.generation(it) }
                 val response = try { transport.execute(request) } catch (error: ApiException) {
                     if (offlineScope != null && error.statusCode in listOf(401, 403, 404, 405, 410, 501)) {
                         ownerVerified = false
-                        withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+                        ownerGeneration = null
+                        projectionGeneration = null
+                        loaded = false
+                        organizationId = null
+                        nodes = emptyList()
+                        cachedAt = null
+                        status = "Organization access changed. Refresh to check current authorization."
+                        cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
                     }
                     throw error
                 }
                 if (offlineScope != null && response.statusCode in listOf(401, 403, 404, 405, 410, 501)) {
                     ownerVerified = false
-                    withContext(Dispatchers.IO) { cache.clear(offlineScope) }
-                } else if (offlineScope != null && ownerVerified && request.method == "GET" && response.isSuccessful && organizationId != null) {
+                    ownerGeneration = null
+                    projectionGeneration = null
+                    loaded = false
+                    organizationId = null
+                    nodes = emptyList()
+                    cachedAt = null
+                    status = "Organization access changed. Refresh to check current authorization."
+                    cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+                } else if (offlineScope != null && ownerVerified && requestGeneration == ownerGeneration && request.method == "GET" && response.isSuccessful && organizationId != null) {
                     val base = "/api/organizations/${android.net.Uri.encode(organizationId)}/factory/"
                     val tail = request.path.removePrefix(base)
                     val permitted = request.path.startsWith(base) &&
                         (tail == "work-items" || tail.matches(Regex("work-items/[^/?]+")) || tail.matches(Regex("nodes/[^/?]+/messages")))
-                    if (permitted) withContext(Dispatchers.IO) { cache.write(offlineScope, response.body, request.path) }
+                    if (permitted && requestGeneration != null) withContext(Dispatchers.IO) { cache.write(offlineScope, response.body, requestGeneration, request.path) }
                 }
                 return response
             }
@@ -149,6 +194,7 @@ fun ConnectedOrganizationScreen(transport: AgentoCTransport, sessionId: String, 
     }
     Column(Modifier.fillMaxSize().background(LocalAgentocColors.current.canvas)) {
         TextButton(onClick = onBack) { Text("Back") }
+        if (cacheClearFailed) Text("Offline data could not be removed. Offline snapshots are disabled for this app session.")
         if (cachedAt != null && connection != RuntimeConnectionState.AuthenticationRequired) Text("Offline snapshot from ${Instant.ofEpochMilli(cachedAt!!)}. Read-only; reconnect to refresh.")
         if (connection != RuntimeConnectionState.Connected && (cachedAt == null || connection == RuntimeConnectionState.AuthenticationRequired)) {
             Text("Offline: authorized snapshot unavailable.")
