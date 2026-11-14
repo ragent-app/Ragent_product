@@ -11,6 +11,7 @@ import { getCollaborationByIdempotencyKey } from './collaboration-store.mjs';
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
 import { getResultPacket, computeResultPacketDigest } from './result-packets.mjs';
 import { getRunAcceptanceEvidence } from './runs.mjs';
+import { factoryGrantDenial } from './factory-grant-authority.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const text=x=>typeof x==='string'?x.trim():'';
@@ -32,12 +33,8 @@ function current(db,context) {
    || (text(node.node_role).toLowerCase()==='reviewer'?'reviewer':'specialist')!==context.role) fail('Consultation work or managed node changed');
  const budget=decode(org.budget_json,{});
  if(!Number.isFinite(budget.maxCost) || budget.maxCost<context.cost || !Number.isSafeInteger(budget.maxTokens) || budget.maxTokens<context.tokens) fail('Consultation organization budget changed');
- for(const capability of context.role==='reviewer'?['read','run','review']:['read','run']) {
-  const g=db.prepare('SELECT * FROM organization_grants WHERE organization_id=? AND node_id=? AND capability=? AND revision<=? ORDER BY revision DESC,id DESC LIMIT 1').get(org.id,node.id,capability,org.current_revision);
-  let scope; try {scope=JSON.parse(g?.scope_json || '{}');} catch {fail('Expert grant scope is unreadable');}
-  if(!g?.allow || !scope || typeof scope!=='object' || Array.isArray(scope) || (scope.projectId && scope.projectId!==item.project_id) || Object.keys(scope).some(k=>k!=='projectId')) fail('Expert grant is unavailable or outside the project');
- }
- if(context.role==='reviewer' && decode(node.grant_json,{}).canReview!==true) fail('Expert review authority is unavailable');
+ const denial=factoryGrantDenial(db,org,node,{projectId:item.project_id,contract:{accessMode:'read',allowedPaths:[]}});
+ if(denial) fail(`Expert authority unavailable: ${denial}`);
  return {org,item,node};
 }
 async function sessionFor(context) {

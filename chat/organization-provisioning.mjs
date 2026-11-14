@@ -39,6 +39,7 @@ import {
   getNode,
   getRevision,
   listOrganizationNodes,
+  materializeFrozenNodeGrants,
 } from './organization-store.mjs';
 import { organizationGrantForNode } from './organization-role-contract.mjs';
 
@@ -253,6 +254,8 @@ export async function provisionFrozenRevision({
         idempotencyKey: `${opKey}:node`,
       });
     }
+
+    await materializeFrozenNodeGrants({ organizationId: org.id, nodeId: node.id, revision, expectedGrant: grant });
 
     let session = null;
     let createdSession = false;

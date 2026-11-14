@@ -4,7 +4,7 @@
 // A frozen revision is never updated in place. Session replacement keeps the
 // stable OrganizationNode and advances its binding generation with CAS.
 import { parseOrganizationProposal, compileOrganizationProposal, parsePlanAmendment } from './organization-planner.mjs';
-import { getOrganization, getRevision, createRevisionAtHead, freezeRevision, getNode, getNodeByStableKey, listOrganizationNodes, bindNodeSession, createNode, retireNode, createRoleInstance, bindRoleInstanceNode, createOrganizationEdge, createDelegationGrant } from './organization-store.mjs';
+import { getOrganization, getRevision, createRevisionAtHead, freezeRevision, getNode, getNodeByStableKey, listOrganizationNodes, bindNodeSession, createNode, retireNode, createRoleInstance, bindRoleInstanceNode, createOrganizationEdge, createDelegationGrant, materializeFrozenNodeGrants } from './organization-store.mjs';
 import { createOperation, getOperation, transitionOperation } from './organization-operations.mjs';
 import { appendOrganizationEvent, enqueueInternalEnvelope } from './organization-messaging.mjs';
 import { assertOrganizationCapability } from './organization-runtime-capabilities.mjs';
@@ -273,6 +273,7 @@ async function reconcileAddedNodes({ organizationId, revision, proposal, compile
       currentSessionId: '',
       idempotencyKey: `${options.idempotencyKey}:add:${item.stableKey}:node`,
     });
+    await materializeFrozenNodeGrants({ organizationId, nodeId: node.id, revision, expectedGrant: grant });
     let session = node.currentSessionId ? { sessionId: node.currentSessionId, runId: '' } : null;
     if (!session) {
       try {

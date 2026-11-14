@@ -1,5 +1,6 @@
 import { withDatabase, getCollaborationByIdempotencyKey } from './collaboration-store.mjs';
 import { createHash } from 'node:crypto';
+import { factoryGrantDenial } from './factory-grant-authority.mjs';
 import { getOrganization, getNode } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
 import { getRun, getRunAcceptanceEvidence, getRunManifest, requestRunCancel } from './runs.mjs';
@@ -131,24 +132,9 @@ export async function assertFactoryExecutionFence(context, { requireWorkspace = 
     let contract, grant;
     try { contract = JSON.parse(contractRow?.contract_json || '{}'); grant = JSON.parse(node.grant_json || '{}'); }
     catch { refuse('Factory contract or grant is unreadable'); }
-    const paths = contract.accessMode === 'read' ? [] : (Array.isArray(contract.allowedPaths) ? contract.allowedPaths : []);
-    const granted = Array.isArray(grant.writablePaths) ? grant.writablePaths : [];
-    if (contract.organizationRevision !== org.current_revision || org.project_id !== item.project_id
-        || (paths.length && (grant.canWrite !== true || paths.some((path) => !granted.some((root) => within(path, root)))))) {
-      refuse('Factory contract is outside the current organization grant');
-    }
-    for (const capability of paths.length ? ['run', 'write'] : ['run']) {
-      const effective = db.prepare(`SELECT * FROM organization_grants WHERE organization_id=? AND node_id=?
-        AND capability=? AND revision<=? ORDER BY revision DESC,id DESC LIMIT 1`)
-        .get(context.organizationId, node.id, capability, org.current_revision);
-      if (!effective?.allow) refuse(`Factory ${capability} grant is missing or revoked`);
-      let scope;
-      try { scope = JSON.parse(effective.scope_json || '{}'); } catch { refuse('Factory grant scope is unreadable'); }
-      if (scope.projectId && scope.projectId !== item.project_id) refuse('Factory grant project changed');
-      if (capability === 'write' && Array.isArray(scope.writablePaths)
-          && paths.some((path) => !scope.writablePaths.some((root) => within(path, root)))) refuse('Factory paths exceed the effective write grant');
-      if (Object.keys(scope).some((key) => !['projectId', 'writablePaths'].includes(key))) refuse('Factory grant scope is not supported');
-    }
+    if (contract.organizationRevision !== org.current_revision || org.project_id !== item.project_id) refuse('Factory contract is outside the current organization grant');
+    const grantDenial = factoryGrantDenial(db, org, node, { projectId: item.project_id, contract });
+    if (grantDenial) refuse(grantDenial);
     const counter = db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?')
       .get(context.organizationId, context.organizationRevision);
     let reservations = {};
@@ -165,22 +151,7 @@ export async function executionAuthorityRevoked(organizationId, item, binding) {
     if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || !node || node.retired_revision !== null
         || node.binding_generation !== binding.bindingGeneration || !node.current_session_id
         || org.current_revision !== item.contract?.organizationRevision || !profileAllows(db, org, node)) return true;
-    const paths = item.contract?.accessMode === 'read' ? [] : (Array.isArray(item.contract?.allowedPaths) ? item.contract.allowedPaths : []);
-    let nodeGrant;
-    try { nodeGrant = JSON.parse(node.grant_json || '{}'); } catch { return true; }
-    const nodePaths = Array.isArray(nodeGrant.writablePaths) ? nodeGrant.writablePaths : [];
-    if (paths.length && (nodeGrant.canWrite !== true || paths.some((path) => !nodePaths.some((root) => within(path, root))))) return true;
-    for (const capability of paths.length ? ['run', 'write'] : ['run']) {
-      const grant = db.prepare(`SELECT * FROM organization_grants WHERE organization_id=? AND node_id=?
-        AND capability=? AND revision<=? ORDER BY revision DESC,id DESC LIMIT 1`).get(organizationId, node.id, capability, org.current_revision);
-      if (!grant?.allow) return true;
-      let scope;
-      try { scope = JSON.parse(grant.scope_json || '{}'); } catch { return true; }
-      if ((scope.projectId && scope.projectId !== item.projectId)
-          || Object.keys(scope).some((key) => !['projectId', 'writablePaths'].includes(key))
-          || (capability === 'write' && Array.isArray(scope.writablePaths)
-            && paths.some((path) => !scope.writablePaths.some((root) => within(path, root))))) return true;
-    }
+    if (factoryGrantDenial(db, org, node, item)) return true;
     return false;
   });
 }

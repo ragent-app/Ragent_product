@@ -985,6 +985,41 @@ export async function listOrganizationEdges(organizationId, { revision = null } 
 // Grants
 // ---------------------------------------------------------------------------
 
+// Materialize only the capabilities already derived from a frozen revision.
+// Existing ledger entries, including revocations, are never overwritten by a
+// provisioning replay.
+export async function materializeFrozenNodeGrants({ organizationId, nodeId, revision, expectedGrant } = {}) {
+  return withDatabase(db => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const org = db.prepare('SELECT * FROM organizations WHERE id=?').get(organizationId);
+      const node = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(nodeId, organizationId);
+      const frozen = db.prepare('SELECT state FROM organization_revisions WHERE organization_id=? AND revision=?').get(organizationId, revision);
+      if (!org || !node || frozen?.state !== 'frozen' || org.current_revision !== revision
+          || node.created_revision !== revision || node.retired_revision !== null || node.lifecycle_state !== 'active') {
+        throw orgError('ORG_OPERATION_CONFLICT', 'Frozen node authority changed');
+      }
+      const grant = parseJson(node.grant_json, null);
+      if (!grant || JSON.stringify(grant) !== JSON.stringify(expectedGrant) || !Array.isArray(grant.allowedCapabilities)) {
+        throw orgError('ORG_OPERATION_CONFLICT', 'Frozen node grant differs from provisioned authority');
+      }
+      const valid = new Set(['read', 'write', 'manage', 'review', 'aggregate', 'input', 'run']);
+      const capabilities = [...new Set(grant.allowedCapabilities)];
+      if (capabilities.some(capability => typeof capability !== 'string' || !valid.has(capability))) throw orgError('BAD_REQUEST', 'Invalid frozen capability');
+      for (const capability of capabilities) {
+        const prior = db.prepare('SELECT id FROM organization_grants WHERE organization_id=? AND node_id=? AND capability=? AND revision<=? LIMIT 1')
+          .get(organizationId, nodeId, capability, revision);
+        if (prior) continue;
+        const scope = { ...(org.project_id ? { projectId: org.project_id } : {}),
+          ...(capability === 'write' ? { writablePaths: Array.isArray(grant.writablePaths) ? grant.writablePaths : [] } : {}) };
+        db.prepare('INSERT INTO organization_grants (id,organization_id,node_id,revision,capability,allow,scope_json,created_at) VALUES (?,?,?,?,?,?,?,?)')
+          .run(id('grant'), organizationId, nodeId, revision, capability, 1, json(scope, {}), nowIso());
+      }
+      db.exec('COMMIT');
+    } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+  }, { mutate: true });
+}
+
 export async function createGrant({
   id: grantId = id('grant'),
   organizationId,
