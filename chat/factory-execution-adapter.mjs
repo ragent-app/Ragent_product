@@ -365,7 +365,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     if (observationOnly) {
       const attempt = collaboration?.attempts.find((entry) => entry.runId);
       const run = attempt?.runId ? await getRun(attempt.runId) : null;
-      if (['cancel_requested', 'pause_requested'].includes(latest.controlState) && run
+      if ((revoked || ['cancel_requested', 'pause_requested'].includes(latest.controlState)) && run
           && !['completed', 'failed', 'cancelled'].includes(run.state) && !run.cancelRequested) await requestRunCancel(attempt.runId);
       return { observationOnly: true, collaborationId: collaboration?.id || '', runId: attempt?.runId || '', runState: run?.state || 'unknown' };
     }

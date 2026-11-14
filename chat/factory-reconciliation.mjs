@@ -55,12 +55,37 @@ export async function getFactoryReconciliation({organizationId,workItemId},actor
   if(actor?.kind!=='user'||actor.role!=='owner') throw factoryError('FACTORY_FORBIDDEN','Owner access required',403);
   const {getFactoryRuntimeStatus}=await import('./factory-runtime.mjs');
   const observing=getFactoryRuntimeStatus(organizationId).observing;
-  return factoryRead(db => { schema(db); authorize(db,organizationId,actor,'factory.read'); const item=selectItem(db,organizationId,workItemId);
+  const snapshot=await factoryRead(db => { schema(db); const org=authorize(db,organizationId,actor,'factory.read'); const item=selectItem(db,organizationId,workItemId);
     const row=db.prepare('SELECT * FROM factory_reconciliation_failures WHERE organization_id=? AND work_item_id=? AND execution_epoch=?').get(organizationId,item.id,item.execution_epoch);
     const lease=db.prepare('SELECT generation,expires_at FROM factory_scheduler_leases WHERE organization_id=?').get(organizationId);
-    return {workItemId:item.id,executionEpoch:item.execution_epoch,rowVersion:item.row_version,
+    const binding=db.prepare('SELECT * FROM factory_execution_bindings WHERE work_item_id=? AND contract_revision=? AND execution_epoch=? AND binding_generation=?').get(item.id,item.contract_revision,item.execution_epoch,item.binding_generation);
+    let command=null, reason='unbound_dispatch_unavailable';
+    if(binding && ['intent','unknown'].includes(binding.status) && !binding.run_id) {
+      const collaboration=db.prepare('SELECT * FROM collaborations WHERE root_session_id=? AND idempotency_key=?').get(org.root_session_id,binding.dispatch_key);
+      let context; try { context=JSON.parse(collaboration?.policy_json || '{}').factoryExecution; } catch { context=null; }
+      if(collaboration && context?.organizationId===organizationId && context.workItemId===item.id
+          && context.contractRevision===item.contract_revision && context.executionEpoch===item.execution_epoch
+          && context.bindingGeneration===item.binding_generation && context.dispatchKey===binding.dispatch_key) {
+        const commands=db.prepare('SELECT d.*,a.run_id AS attempt_run FROM collaboration_dispatch_commands d JOIN collaboration_attempts a ON a.id=d.attempt_id JOIN collaboration_tasks t ON t.id=d.task_id AND t.collaboration_id=d.collaboration_id WHERE d.collaboration_id=? AND d.task_id=? AND a.task_id=d.task_id').all(collaboration.id,item.id);
+        if(commands.length===1 && commands[0].session_id && commands[0].request_id) {command=commands[0];reason=null;}
+        else reason='dispatch_identity_unavailable';
+      } else reason='collaboration_identity_unavailable';
+    }
+    return {result:{workItemId:item.id,executionEpoch:item.execution_epoch,rowVersion:item.row_version,
       state:row?.state||'observing',failures:row?.failures||0,nextAttemptAt:row?.next_attempt_at||null,errorCode:row?.error_code||null,
-      schedulerLease:lease ? {generation:lease.generation,expiresAt:lease.expires_at} : null,observationContinues:observing}; });
+      schedulerLease:lease ? {generation:lease.generation,expiresAt:lease.expires_at} : null,observationContinues:observing},command,reason}; });
+  let observation={state:'unknown',reason:snapshot.reason || 'run_evidence_unavailable',observedAt:now()};
+  if(snapshot.command) {
+    try {
+      const command=snapshot.command, run=await findRunByRequest(command.session_id,command.request_id);
+      if(run && run.sessionId===command.session_id && run.requestId===command.request_id
+          && (!command.run_id || command.run_id===run.id) && (!command.attempt_run || command.attempt_run===run.id)) {
+        observation={state:'found',expectedRunId:run.id,runState:run.state,dispatchState:command.state,observedAt:now()};
+      }
+    } catch { observation.reason='run_evidence_unavailable'; }
+  }
+  return {...snapshot.result,acceptedRunObservation:{...observation,requiresVerification:true,
+    crossStoreAtomic:false,requestIndexMayRepair:true}};
 }
 
 // Positive Run evidence only. An index miss or an unavailable/expired outbox
