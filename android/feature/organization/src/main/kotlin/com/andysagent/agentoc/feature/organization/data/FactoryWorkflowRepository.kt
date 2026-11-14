@@ -57,9 +57,10 @@ class FactoryWorkflowRepository(
     /** Creates a proposed read-only report. Authorization and approval are separate owner actions. */
     suspend fun createReadOnlyWork(
         commandId: String, key: String, goalId: String, nodeId: String,
-        projectId: String, objective: String, criterion: String, tokens: Long, cost: Double,
+        projectId: String, objective: String, criterion: String, tokens: Long? = null, cost: Double? = null,
     ): JsonObject {
-        require(tokens > 0 && tokens <= 9_007_199_254_740_991L && cost.isFinite() && cost > 0)
+        require((tokens == null && cost == null) || (tokens != null && cost != null
+            && tokens > 0 && tokens <= 9_007_199_254_740_991L && cost.isFinite() && cost > 0))
         return command("CreateWorkItem", commandId, key, payload = buildJsonObject {
             put("goalId", goalId); put("kind", "review"); put("assigneeNodeId", nodeId)
             put("contract", buildJsonObject {
@@ -71,10 +72,23 @@ class FactoryWorkflowRepository(
                     put("projectId", projectId); put("readScope", "entire_project")
                     put("networkPolicy", "inherit_existing_permissions")
                 })
-                put("budgetReservation", buildJsonObject { put("tokens", tokens); put("cost", cost) })
+                if (tokens != null && cost != null) put("budgetReservation", buildJsonObject { put("tokens", tokens); put("cost", cost) })
                 put("retry", buildJsonObject { put("maxAttempts", 1) })
             })
         })
+    }
+
+    /** Adds a confirmed reservation to the server-read contract; authorization must follow this revision. */
+    suspend fun amendReportBudget(
+        commandId: String, key: String, itemId: String, expectedVersion: Long,
+        contract: JsonObject, tokens: Long, cost: Double,
+    ): JsonObject {
+        require(tokens > 0 && tokens <= 9_007_199_254_740_991L && cost.isFinite() && cost > 0)
+        val next = buildJsonObject {
+            contract.forEach { (name, value) -> if (name != "budgetReservation") put(name, value) }
+            put("budgetReservation", buildJsonObject { put("tokens", tokens); put("cost", cost) })
+        }
+        return command("AmendContract", commandId, key, itemId, expectedVersion, buildJsonObject { put("contract", next) })
     }
 
     suspend fun authorizeReport(commandId: String, key: String, itemId: String, expectedVersion: Long): JsonObject =

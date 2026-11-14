@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="factory_team_00">团队工作</string>
+    <string name="factory_team_00">团队任务</string>
     <string name="factory_team_01">工作详情</string>
     <string name="factory_team_02">新建目标</string>
     <string name="factory_team_03">审阅任务</string>
@@ -72,17 +72,43 @@
     <string name="factory_team_advanced_type">此类工作请在高级工作中操作。</string>
     <string name="factory_team_pass">通过</string>
     <string name="factory_team_fail">不通过</string>
-    <string name="factory_state_proposed">待批准</string>
+    <string name="factory_state_proposed">待你确认</string>
     <string name="factory_state_ready">待执行</string>
     <string name="factory_state_claimed">已领取</string>
     <string name="factory_state_running">执行中</string>
-    <string name="factory_state_blocked">已阻塞</string>
-    <string name="factory_state_review">待验收</string>
+    <string name="factory_state_blocked">暂时无法继续</string>
+    <string name="factory_state_review">报告待查看</string>
     <string name="factory_state_completed">已完成</string>
     <string name="factory_state_failed">失败</string>
     <string name="factory_state_cancelled">已取消</string>
-    <string name="factory_state_unknown">状态未知</string>
+    <string name="factory_state_unknown">状态待确认</string>
     <string name="factory_control_pause_requested">已请求暂停</string>
     <string name="factory_control_paused">已暂停</string>
     <string name="factory_control_cancel_requested">已请求取消</string>
+    <string name="factory_ux_subtitle">让团队帮你检查项目并生成报告。</string>
+    <string name="factory_ux_question">你想让团队做什么？</string>
+    <string name="factory_ux_save">保存草稿</string>
+    <string name="factory_ux_save_note">保存后不会开始；你可以稍后审阅并决定何时开始。</string>
+    <string name="factory_ux_choose_note">选择谁来帮你处理；开始前会核验权限。</string>
+    <string name="factory_ux_choose_plan">放到哪个计划？</string>
+    <string name="factory_ux_person">谁来处理？</string>
+    <string name="factory_ux_person_note">开始前服务端会核验此人的权限。</string>
+    <string name="factory_ux_no_person">暂无可用的审阅成员，请先添加或连接合适的成员。</string>
+    <string name="factory_ux_review_settings">查看验收方式</string>
+    <string name="factory_ux_criterion">你希望报告包含什么？</string>
+    <string name="factory_ux_default_criterion">报告回答任务要求，并列出依据和未确认事项。</string>
+    <string name="factory_ux_ready_to_start">确认执行范围后，决定是否开始。</string>
+    <string name="factory_ux_need_budget">开始前还需设置本次预留用量。</string>
+    <string name="factory_ux_set_budget">设置用量</string>
+    <string name="factory_ux_budget_note">服务未提供费用币种；实际用量或费用可能不同，预留不是硬费用上限。</string>
+    <string name="factory_ux_save_settings">保存用量设置</string>
+    <string name="factory_ux_start_scope">团队可只读查看当前项目；网络沿用现有权限。</string>
+    <string name="factory_ux_prepare">允许团队查看项目</string>
+    <string name="factory_ux_start">开始检查</string>
+    <string name="factory_ux_start_confirm">确认后，若调度已开启，任务可能开始执行。</string>
+    <string name="factory_ux_confirm_start">确认开始</string>
+    <string name="factory_ux_details">查看详情</string>
+    <string name="factory_ux_project_unavailable">暂时无法确认当前项目，请重新连接并刷新后再保存。</string>
+    <string name="factory_ux_prepared">准备就绪，由你决定是否开始。</string>
+    <string name="factory_ux_waiting">等待中</string>
 </resources>

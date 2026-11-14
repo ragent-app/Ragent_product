@@ -42,12 +42,13 @@ private fun workStateLabel(state: String): String = when (state) {
     "ready" -> stringResource(R.string.factory_state_ready)
     "claimed" -> stringResource(R.string.factory_state_claimed)
     "running" -> stringResource(R.string.factory_state_running)
+    "waiting" -> stringResource(R.string.factory_ux_waiting)
     "blocked" -> stringResource(R.string.factory_state_blocked)
     "review" -> stringResource(R.string.factory_state_review)
     "completed" -> stringResource(R.string.factory_state_completed)
     "failed" -> stringResource(R.string.factory_state_failed)
     "cancelled" -> stringResource(R.string.factory_state_cancelled)
-    else -> state.ifBlank { stringResource(R.string.factory_state_unknown) }
+    else -> stringResource(R.string.factory_state_unknown)
 }
 
 @Composable
@@ -56,9 +57,8 @@ private fun controlStateLabel(state: String): String = when (state) {
     "pause_requested" -> stringResource(R.string.factory_control_pause_requested)
     "paused" -> stringResource(R.string.factory_control_paused)
     "cancel_requested" -> stringResource(R.string.factory_control_cancel_requested)
-    else -> state
+    else -> stringResource(R.string.factory_state_unknown)
 }
-
 
 /** Owner workflow; advanced controls remain available in the existing workspace. */
 @Composable
@@ -74,6 +74,7 @@ fun FactoryTeamWorkspace(
     var page by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("list") }
     var items by remember(organizationId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var goals by remember(organizationId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var goalsLoaded by remember(organizationId) { mutableStateOf(false) }
     var selected by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var selectedId by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var error by remember(organizationId) { mutableStateOf<String?>(null) }
@@ -88,7 +89,7 @@ fun FactoryTeamWorkspace(
     var goalId by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var nodeId by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var objective by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
-    var criterion by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
+    var criterion by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(appContext.getString(R.string.factory_ux_default_criterion)) }
     var tokens by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var cost by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var rationale by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
@@ -96,26 +97,36 @@ fun FactoryTeamWorkspace(
     var criterionIdSelected by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var approvalReview by remember(organizationId) { mutableStateOf(false) }
     var authorizedVersion by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
+    var settingsOpen by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(false) }
+    var technicalOpen by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(false) }
+    var nodeChoiceConfirmed by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(false) }
+    var startSettings by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(false) }
+    var needsRefresh by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(false) }
 
     suspend fun refresh() {
         if (loading) return
         loading = true
         try {
+        try {
             val work = repo.listWorkItems()
             val goalResponse = repo.listGoals()
             items = work.arr("items")
             goals = goalResponse.arr("items")
+            goalsLoaded = true
             workCursor = work.str("nextCursor").takeIf { it.isNotBlank() && it != "null" }
             goalCursor = goalResponse.str("nextCursor").takeIf { it.isNotBlank() && it != "null" }
             error = null
         } catch (cancel: CancellationException) { throw cancel }
-        catch (e: Exception) { error = e.message ?: appContext.getString(R.string.factory_team_refresh_error) }
-        finally { loading = false }
+        catch (e: Exception) { goalsLoaded = false; error = e.message ?: appContext.getString(R.string.factory_team_refresh_error) }
+        if (!rootSessionId.isNullOrBlank()) try { sessionProject = repo.getSessionProject(rootSessionId).orEmpty() }
+        catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { sessionProject = "" }
+        } finally { loading = false }
     }
     suspend fun open(id: String) {
         if (loading) return
         loading = true
-        try { selected = repo.getWorkItem(id).obj("item") ?: throw IllegalStateException(appContext.getString(R.string.factory_team_load_work)); if (selectedId != id) criterionIdSelected = ""; selectedId = id; error = null; page = "detail"; approvalReview = false; reviewDecision = null }
+        try { selected = repo.getWorkItem(id).obj("item") ?: throw IllegalStateException(appContext.getString(R.string.factory_team_load_work)); if (selectedId != id) criterionIdSelected = ""; selectedId = id; error = null; needsRefresh = false; page = "detail"; approvalReview = false; reviewDecision = null }
         catch (cancel: CancellationException) { throw cancel }
         catch (e: Exception) { error = e.message ?: appContext.getString(R.string.factory_team_load_work) }
         finally { loading = false }
@@ -127,7 +138,8 @@ fun FactoryTeamWorkspace(
         loading = true
         val result = try { if (checkOnly) repo.getCommand(key) else when (action.str("type")) {
             "goal" -> repo.createGoal(key,key,args.str("project"),args.str("objective"))
-            "proposal" -> repo.createReadOnlyWork(key,key,args.str("goal"),args.str("node"),args.str("project"),args.str("objective"),args.str("criterion"),args.num("tokens") ?: 0,args.str("cost").toDouble())
+            "proposal" -> repo.createReadOnlyWork(key,key,args.str("goal"),args.str("node"),args.str("project"),args.str("objective"),args.str("criterion"))
+            "budget" -> repo.amendReportBudget(key,key,args.str("item"),args.num("version") ?: -1,args.obj("contract") ?: throw IllegalStateException("Missing saved contract"),args.num("tokens") ?: 0,args.str("cost").toDouble())
             "authorization" -> repo.authorizeReport(key,key,args.str("item"),args.num("version") ?: -1)
             "approval" -> repo.approveContract(key,key,args.str("item"),args.num("version") ?: -1)
             "decision" -> repo.decideManual(key,key,args.str("item"),args.num("version") ?: -1,args.num("revision") ?: -1,args.num("gate") ?: -1,args.str("candidate"),args.str("criterion"),args.str("decision"),args.str("reason"))
@@ -137,7 +149,7 @@ fun FactoryTeamWorkspace(
         catch (e: Exception) {
             if (!checkOnly && e is ApiException && e.statusCode == 409) {
                 pending = null
-                authorizedVersion = ""
+                authorizedVersion = ""; needsRefresh = true
                 error = appContext.getString(R.string.factory_team_version_conflict)
             } else error = appContext.getString(R.string.factory_team_request_uncertain, e.message ?: appContext.getString(R.string.factory_team_connection_error))
             loading = false
@@ -148,15 +160,28 @@ fun FactoryTeamWorkspace(
             error = appContext.getString(R.string.factory_team_unknown_outcome)
             return
         }
-        pending = null; error = null
+        error = null
+        val nextDraft = action.obj("next")
+        if (action.str("type") == "goal" && nextDraft != null) {
+            val savedGoal = result.obj("goal")
+            if (savedGoal == null || savedGoal.str("id").isBlank() || savedGoal.str("projectId") != args.str("project")) {
+                loading = false; error = appContext.getString(R.string.factory_team_unknown_outcome); return
+            }
+            val nextArgs = buildJsonObject { nextDraft.obj("args")?.forEach { (k,v) -> put(k,v) }; put("goal",savedGoal.str("id")) }
+            pending = buildJsonObject { put("type","proposal"); put("key",nextDraft.str("key")); put("args",nextArgs) }.toString()
+            goals = (goals + savedGoal).distinctBy { it.str("id") }; goalId = savedGoal.str("id"); project = savedGoal.str("projectId")
+            loading = false; send(); return
+        }
+        pending = null
         if (action.str("type") == "authorization") authorizedVersion = "${args.str("item")}:${args.num("version")}"
+        if (action.str("type") == "budget") { authorizedVersion = ""; startSettings = false }
         notice = appContext.getString(R.string.factory_team_recorded)
         try {
             val resultItem = result.obj("item")
             val resultGoal = result.obj("goal")
             if (resultGoal != null) { goals = (goals + resultGoal).distinctBy { it.str("id") }; goalId = resultGoal.str("id"); project = resultGoal.str("projectId"); page = "createWork" }
-            else if (resultItem != null) { selected = resultItem; selectedId = resultItem.str("id"); page = "detail"; selected = repo.getWorkItem(resultItem.str("id")).obj("item") ?: resultItem }
-            else selected?.str("id")?.takeIf { it.isNotBlank() }?.let { selected = repo.getWorkItem(it).obj("item") ?: selected }
+            else if (resultItem != null) { selected = resultItem; selectedId = resultItem.str("id"); page = "detail"; needsRefresh = true; selected = repo.getWorkItem(resultItem.str("id")).obj("item") ?: throw IllegalStateException(appContext.getString(R.string.factory_team_load_work)); needsRefresh = false }
+            else selected?.str("id")?.takeIf { it.isNotBlank() }?.let { needsRefresh = true; selected = repo.getWorkItem(it).obj("item") ?: throw IllegalStateException(appContext.getString(R.string.factory_team_load_work)); needsRefresh = false }
         } catch (cancel: CancellationException) { throw cancel }
         catch (e: Exception) { error = appContext.getString(R.string.factory_team_refresh_failed, e.message ?: appContext.getString(R.string.factory_team_connection_error)) }
         finally { loading = false }
@@ -171,7 +196,6 @@ fun FactoryTeamWorkspace(
         when (page) {
             "list" -> onBack()
             "advanced" -> page = "list"
-            "confirmWork" -> page = "createWork"
             "detail" -> { selected = null; selectedId = ""; page = "list" }
             else -> page = "list"
         }
@@ -179,12 +203,33 @@ fun FactoryTeamWorkspace(
     BackHandler(enabled = page != "list") { if (!loading) back() }
     LaunchedEffect(repo, rootSessionId) {
         refresh()
-        if (!rootSessionId.isNullOrBlank()) try { sessionProject = repo.getSessionProject(rootSessionId).orEmpty() }
-        catch (cancel: CancellationException) { throw cancel }
-        catch (_: Exception) { sessionProject = "" }
         if (page == "detail" && selectedId.isNotBlank()) open(selectedId)
     }
+    val eligibleNodes = remember(nodes) { nodes.filter { it.role.equals("reviewer", ignoreCase = true) && !it.sessionId.isNullOrBlank() && it.status.lowercase() !in setOf("retired", "inactive") } }
+    LaunchedEffect(eligibleNodes) { if (nodeId.isBlank() && eligibleNodes.size == 1) nodeId = eligibleNodes.single().id }
+    LaunchedEffect(goals, sessionProject) {
+        val active = goals.filter { it.str("state") == "active" && it.str("projectId") == sessionProject }
+        if (goalId.isBlank() && goalCursor == null && active.size == 1) { goalId = active.single().str("id"); project = sessionProject }
+    }
     val listState = rememberLazyListState()
+    fun saveDraft() {
+        if (objective.isBlank() || !goalsLoaded || sessionProject.isBlank() || pending != null || loading) return
+        if (eligibleNodes.none { it.id == nodeId } || (eligibleNodes.size > 1 && !nodeChoiceConfirmed)) { nodeId = ""; nodeChoiceConfirmed = false; page = "createWork"; return }
+        val review = criterion.trim()
+        if (review.isEmpty()) { settingsOpen = true; page = "createWork"; return }
+        val draftArgs = buildJsonObject { put("node",nodeId); put("project",sessionProject); put("objective",objective.trim()); put("criterion",review) }
+        val eligibleGoals = goals.filter { it.str("state") == "active" && it.str("projectId") == sessionProject }
+        val selectedGoal = eligibleGoals.firstOrNull { it.str("id") == goalId }
+        if ((goalCursor != null || eligibleGoals.size > 1) && selectedGoal == null) { page = "createWork"; return }
+        val chosen = selectedGoal?.str("id") ?: eligibleGoals.singleOrNull()?.str("id").orEmpty()
+        if (chosen.isNotBlank()) {
+            prepare("proposal", buildJsonObject { draftArgs.forEach { (k,v) -> put(k,v) }; put("goal",chosen) })
+        } else {
+            val draft = buildJsonObject { put("key",UUID.randomUUID().toString()); put("args",draftArgs) }
+            pending = buildJsonObject { put("type","goal"); put("key",UUID.randomUUID().toString()); put("args",buildJsonObject { put("project",sessionProject); put("objective",objective.trim()) }); put("next",draft) }.toString()
+            scope.launch { send() }
+        }
+    }
 
     val animation = when (LocalMotionPolicy.current.preference) {
         MotionPreference.None -> snap()
@@ -195,7 +240,7 @@ fun FactoryTeamWorkspace(
         if (screen == "advanced") {
             FactoryWorkScreen(transport, organizationId, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, onBack = { page = "list" })
         } else Column(Modifier.fillMaxSize().background(colors.canvas)) {
-            AgentoTopBar(title = when (screen) { "list" -> stringResource(R.string.factory_team_00); "detail" -> stringResource(R.string.factory_team_01); "createGoal" -> stringResource(R.string.factory_team_02); "confirmWork" -> stringResource(R.string.factory_team_03); else -> stringResource(R.string.factory_team_04) },
+            AgentoTopBar(title = when (screen) { "list" -> stringResource(R.string.factory_team_00); "detail" -> stringResource(R.string.factory_team_01); "createGoal" -> stringResource(R.string.factory_team_02); else -> stringResource(R.string.factory_team_04) },
                 subtitle = stringResource(R.string.factory_team_05), navigationIcon = { TextButton(enabled = !loading, onClick = { back() }) { Text(stringResource(R.string.factory_team_06)) } })
             error?.let { Text(it, color = colors.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) }
             notice?.let { Text(it, color = colors.secondaryContent, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) }
@@ -211,11 +256,18 @@ fun FactoryTeamWorkspace(
             }
             when (screen) {
                 "list" -> LazyColumn(state = listState, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { Text(stringResource(R.string.factory_team_07), color = colors.secondaryContent) }
+                    item { Text(stringResource(R.string.factory_ux_subtitle), color = colors.secondaryContent) }
+                    item { OutlinedTextField(objective, { objective = it }, label = { Text(stringResource(R.string.factory_ux_question)) }, modifier = Modifier.fillMaxWidth(), minLines = 2) }
+                    if (eligibleNodes.size == 1) item { Text(stringResource(R.string.factory_team_assigned, eligibleNodes.single().displayName.ifBlank { eligibleNodes.single().id }), color = colors.secondaryContent) }
+                    item { TextButton(onClick = { settingsOpen = !settingsOpen }) { Text(stringResource(R.string.factory_ux_review_settings)) }
+                        if (settingsOpen) OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_ux_criterion)) }, modifier = Modifier.fillMaxWidth()) }
                     item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AgentoButton(stringResource(R.string.factory_team_04), onClick = { page = "createWork" }, enabled = pending == null)
+                        AgentoButton(stringResource(R.string.factory_ux_save), onClick = { if (nodeId.isBlank() || sessionProject.isBlank()) page = "createWork" else saveDraft() }, enabled = pending == null && !loading && goalsLoaded && objective.isNotBlank())
                         AgentoButton(stringResource(R.string.factory_team_08), onClick = { scope.launch { refresh() } }, enabled = !loading, secondary = true)
                     } }
+                    item { Text(stringResource(R.string.factory_ux_save_note), color = colors.secondaryContent, style = MaterialTheme.typography.bodySmall) }
+                    if (!loading && sessionProject.isBlank()) item { Text(stringResource(R.string.factory_ux_project_unavailable), color = colors.secondaryContent) }
+                    if (!loading && eligibleNodes.isEmpty()) item { Text(stringResource(R.string.factory_ux_no_person), color = colors.secondaryContent) }
                     if (items.isEmpty()) item { Text(stringResource(if (loading) R.string.factory_team_09 else R.string.factory_team_10), color = colors.secondaryContent) }
                     items(items, key = { it.str("id") }) { work ->
                         AgentoCard(Modifier.fillMaxWidth(), onClick = { scope.launch { open(work.str("id")) } }) {
@@ -244,9 +296,9 @@ fun FactoryTeamWorkspace(
                     })
                 }
                 "createWork" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.factory_team_16), color = colors.secondaryContent)
-                    Text(stringResource(R.string.factory_team_14), fontWeight = FontWeight.SemiBold)
-                    goals.forEach { goal -> AgentoRowSurface(selected = goalId == goal.str("id"), onClick = { goalId = goal.str("id"); project = goal.str("projectId") }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.factory_ux_choose_note), color = colors.secondaryContent)
+                    if (goalCursor != null || goals.count { it.str("state") == "active" && it.str("projectId") == sessionProject } > 1) Text(stringResource(R.string.factory_ux_choose_plan), fontWeight = FontWeight.SemiBold)
+                    goals.filter { it.str("state") == "active" && it.str("projectId") == sessionProject }.takeIf { goalCursor != null || it.size > 1 }?.forEach { goal -> AgentoRowSurface(selected = goalId == goal.str("id"), onClick = { goalId = goal.str("id"); project = goal.str("projectId") }, modifier = Modifier.fillMaxWidth()) {
                         Text(goal.obj("body")?.str("objective")?.ifBlank { goal.str("id") } ?: goal.str("objective").ifBlank { goal.str("id") }, Modifier.padding(12.dp), color = colors.primaryContent)
                     } }
                     if (goalCursor != null) TextButton(enabled = !loading, onClick = { scope.launch {
@@ -256,28 +308,17 @@ fun FactoryTeamWorkspace(
                         catch (e: Exception) { error = e.message ?: appContext.getString(R.string.factory_team_load_more_error) }
                         finally { loading = false }
                     } }) { Text(stringResource(R.string.factory_team_17)) }
-                    TextButton(enabled = sessionProject.isNotBlank() && (project.isBlank() || project == sessionProject), onClick = { project = sessionProject; page = "createGoal" }) { Text(stringResource(R.string.factory_team_18)) }
-                    Text(stringResource(R.string.factory_team_19), fontWeight = FontWeight.SemiBold)
-                    Text(stringResource(R.string.factory_team_reviewer), color = colors.secondaryContent)
-                    nodes.filter { it.role.equals("reviewer", ignoreCase = true) && !it.sessionId.isNullOrBlank() && it.status.lowercase() !in setOf("retired", "inactive") }.forEach { node -> AgentoRowSurface(selected = nodeId == node.id, onClick = { nodeId = node.id }, modifier = Modifier.fillMaxWidth()) {
-                        Text("${node.displayName.ifBlank { node.id }} · ${node.role} · ${node.status}", Modifier.padding(12.dp), color = colors.primaryContent)
+                    Text(stringResource(R.string.factory_ux_person), fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.factory_ux_person_note), color = colors.secondaryContent)
+                    if (eligibleNodes.isEmpty()) Text(stringResource(R.string.factory_ux_no_person), color = colors.secondaryContent)
+                    eligibleNodes.forEach { node -> AgentoRowSurface(selected = nodeId == node.id, onClick = { nodeId = node.id; nodeChoiceConfirmed = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(node.displayName.ifBlank { node.id }, Modifier.padding(12.dp), color = colors.primaryContent)
                     } }
                     OutlinedTextField(objective, { objective = it }, label = { Text(stringResource(R.string.factory_team_20)) }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_team_21)) }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(tokens, { tokens = it }, label = { Text(stringResource(R.string.factory_team_22)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    OutlinedTextField(cost, { cost = it }, label = { Text(stringResource(R.string.factory_team_23)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    AgentoButton(stringResource(R.string.factory_team_03), enabled = goalId.isNotBlank() && project.isNotBlank() && nodeId.isNotBlank() && objective.isNotBlank() && criterion.isNotBlank() && (tokens.toLongOrNull()?.let { it in 1..9_007_199_254_740_991L } == true) && (cost.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true) && pending == null, onClick = { page = "confirmWork" })
-                }
-                "confirmWork" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(objective, style = MaterialTheme.typography.titleMedium, color = colors.primaryContent)
-                    Text(stringResource(R.string.factory_team_assigned, nodes.find { it.id == nodeId }?.displayName?.ifBlank { nodeId } ?: nodeId))
-                    Text(stringResource(R.string.factory_team_criterion, criterion))
-                    Text(stringResource(R.string.factory_team_scope, tokens, cost), color = colors.secondaryContent)
-                    Text(stringResource(R.string.factory_team_36), color = colors.secondaryContent)
-                    AgentoButton(stringResource(R.string.factory_team_25), enabled = pending == null && !loading, onClick = {
-                        val g=goalId; val n=nodeId; val p=project; val o=objective; val c=criterion; val t=tokens.toLong(); val amount=cost.toDouble()
-                        prepare("proposal", buildJsonObject { put("goal",g); put("node",n); put("project",p); put("objective",o); put("criterion",c); put("tokens",t); put("cost",amount.toString()) })
-                    })
+                    TextButton(onClick = { settingsOpen = !settingsOpen }) { Text(stringResource(R.string.factory_ux_review_settings)) }
+                    if (settingsOpen) OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_ux_criterion)) }, modifier = Modifier.fillMaxWidth())
+                    AgentoButton(stringResource(R.string.factory_ux_save), enabled = goalsLoaded && sessionProject.isNotBlank() && eligibleNodes.any { it.id == nodeId } && objective.isNotBlank() && pending == null && !loading, onClick = { saveDraft() })
+                    Text(stringResource(R.string.factory_ux_save_note), color = colors.secondaryContent)
                 }
                 "detail" -> selected?.let { work ->
                     val id = work.str("id"); val contract = work.obj("contract"); val candidate = work.str("candidateDigest")
@@ -291,25 +332,18 @@ fun FactoryTeamWorkspace(
                         Text(contract?.str("objective").orEmpty(), style = MaterialTheme.typography.titleMedium)
                         val control = controlStateLabel(work.str("controlState"))
                         Text(listOf(workStateLabel(work.str("state")), control).filter { it.isNotBlank() }.joinToString(" · "), color = colors.secondaryContent)
-                        contract?.arr("acceptanceCriteria")?.forEach { c -> Text(stringResource(R.string.factory_team_review_criterion, c.str("description").ifBlank { c.str("id") })) }
                         TextButton(onClick = { scope.launch { open(id) } }) { Text(stringResource(R.string.factory_team_26)) }
                         if (!reportType) Text(stringResource(R.string.factory_team_advanced_type), color = colors.secondaryContent)
-                        if (reportType && work.str("state") == "proposed" && version != null) {
-                            Text(stringResource(R.string.factory_team_35), color = colors.secondaryContent)
-                            AgentoButton(stringResource(R.string.factory_team_27), enabled = pending == null && !loading, secondary = true, onClick = { prepare("authorization", buildJsonObject { put("item",id); put("version",version) }) })
-                            AgentoButton(stringResource(R.string.factory_team_28), enabled = pending == null && !loading && authorizedVersion == "$id:$version", onClick = { approvalReview = true })
-                            if (approvalReview) {
-                                Text(stringResource(R.string.factory_team_34))
-                                Text(stringResource(R.string.factory_team_member, nodes.find { it.id == work.str("assigneeNodeId") }?.displayName?.ifBlank { work.str("assigneeNodeId") } ?: work.str("assigneeNodeId")))
-                                Text(stringResource(R.string.factory_team_reserve, contract?.obj("budgetReservation")?.str("tokens").orEmpty(), contract?.obj("budgetReservation")?.str("cost").orEmpty()))
-                                AgentoButton(stringResource(R.string.factory_team_29), enabled = pending == null && !loading, onClick = { approvalReview = false; prepare("approval", buildJsonObject { put("item",id); put("version",version) }) })
-                            }
-                        }
                         val report = work.arr("candidates").lastOrNull { it.str("digest") == candidate && it.num("contractRevision") == rev && it.num("executionEpoch") == work.num("executionEpoch") && it.num("bindingGeneration") == work.num("bindingGeneration") }?.obj("report")
                         if (report != null) {
                             Text(stringResource(R.string.factory_team_30), style = MaterialTheme.typography.titleMedium)
                             Text(report.str("visibleText").ifBlank { report.obj("declaration")?.str("summary").orEmpty().ifBlank { appContext.getString(R.string.factory_team_report_empty) } })
-                            Text(stringResource(R.string.factory_team_declaration, report.obj("declaration")?.str("state").orEmpty().ifBlank { report.obj("declaration")?.str("status").orEmpty() }), color = colors.secondaryContent)
+                            val declared = report.obj("declaration")
+                            if (declared?.str("status") == "valid") {
+                                val declaredState = declared.str("state")
+                                val label = if (declaredState in setOf("completed", "failed", "blocked", "waiting")) workStateLabel(declaredState) else stringResource(R.string.factory_state_unknown)
+                                Text(stringResource(R.string.factory_team_declaration, label), color = colors.secondaryContent)
+                            }
                             val declaration = report.obj("declaration")
                             listOf("blockers", "risks").forEach { field ->
                                 (declaration?.get(field) as? JsonArray)?.forEach { fact ->
@@ -320,8 +354,43 @@ fun FactoryTeamWorkspace(
                         } else if (reportType && work.str("state") == "review") Text(stringResource(R.string.factory_team_report_empty), color = colors.secondaryContent)
                         work.arr("decisions").forEach {
                             val current = it.str("candidateDigest") == candidate && it.num("contractRevision") == rev && it.num("gateGeneration") == gate
-                            Text(stringResource(R.string.factory_team_decision, it.str("decision"), it.str("criterionId")) + if (current) " · " + stringResource(R.string.factory_team_current) else " · " + stringResource(R.string.factory_team_historical))
+                            val label = when (it.str("decision")) { "passed" -> stringResource(R.string.factory_team_pass); "failed" -> stringResource(R.string.factory_team_fail); else -> stringResource(R.string.factory_state_unknown) }
+                            val description = contract?.arr("acceptanceCriteria")?.firstOrNull { c -> c.str("id") == it.str("criterionId") }?.str("description").orEmpty()
+                            Text(stringResource(R.string.factory_team_decision, label, description.ifBlank { stringResource(R.string.factory_ux_criterion) }) + if (current) " · " + stringResource(R.string.factory_team_current) else " · " + stringResource(R.string.factory_team_historical))
                         }
+                        if (reportType && work.str("state") == "proposed" && version != null && contract != null) {
+                            val reservation = contract.obj("budgetReservation")
+                            val hasBudget = (reservation?.num("tokens") ?: 0) > 0 && (reservation?.str("cost")?.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true)
+                            Text(stringResource(if (hasBudget) R.string.factory_ux_ready_to_start else R.string.factory_ux_need_budget), color = colors.secondaryContent)
+                            if (!hasBudget) {
+                                AgentoButton(stringResource(R.string.factory_ux_set_budget), enabled = pending == null && !loading && !needsRefresh, onClick = { startSettings = true })
+                                if (startSettings) {
+                                    OutlinedTextField(tokens, { tokens = it }, label = { Text(stringResource(R.string.factory_team_22)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    OutlinedTextField(cost, { cost = it }, label = { Text(stringResource(R.string.factory_team_23)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    Text(stringResource(R.string.factory_ux_budget_note), color = colors.secondaryContent)
+                                    AgentoButton(stringResource(R.string.factory_ux_save_settings), enabled = pending == null && !loading && !needsRefresh && (tokens.toLongOrNull()?.let { it in 1..9_007_199_254_740_991L } == true) && (cost.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true), onClick = {
+                                        val savedTokens = tokens.toLong(); val savedCost = cost.toDouble(); val savedContract = contract
+                                        prepare("budget", buildJsonObject { put("item",id); put("version",version); work.num("contractRevision")?.let { put("revision",it) }; put("contract",savedContract); put("tokens",savedTokens); put("cost",savedCost.toString()) })
+                                    })
+                                }
+                            } else {
+                                Text(stringResource(R.string.factory_ux_start_scope), color = colors.secondaryContent)
+                                Text(stringResource(R.string.factory_team_member, nodes.find { it.id == work.str("assigneeNodeId") }?.displayName?.ifBlank { work.str("assigneeNodeId") } ?: work.str("assigneeNodeId")))
+                                Text(stringResource(R.string.factory_team_reserve, reservation?.str("tokens").orEmpty(), reservation?.str("cost").orEmpty()))
+                                if (authorizedVersion != "$id:$version") AgentoButton(stringResource(R.string.factory_ux_prepare), enabled = pending == null && !loading && !needsRefresh, onClick = { prepare("authorization", buildJsonObject { put("item",id); put("version",version) }) })
+                                else if (!approvalReview) {
+                                    Text(stringResource(R.string.factory_ux_prepared), color = colors.secondaryContent)
+                                    AgentoButton(stringResource(R.string.factory_ux_start), enabled = pending == null && !loading && !needsRefresh, onClick = { approvalReview = true })
+                                } else {
+                                    AlertDialog(onDismissRequest = { approvalReview = false }, title = { Text(stringResource(R.string.factory_ux_start)) },
+                                        text = { Text(stringResource(R.string.factory_ux_start_confirm)) },
+                                        confirmButton = { TextButton(enabled = pending == null && !loading && !needsRefresh, onClick = { approvalReview = false; prepare("approval", buildJsonObject { put("item",id); put("version",version) }) }) { Text(stringResource(R.string.factory_ux_confirm_start)) } },
+                                        dismissButton = { TextButton(onClick = { approvalReview = false }) { Text(stringResource(R.string.factory_team_06)) } })
+                                }
+                            }
+                        }
+                        TextButton(onClick = { technicalOpen = !technicalOpen }) { Text(stringResource(R.string.factory_ux_details)) }
+                        if (technicalOpen) contract?.arr("acceptanceCriteria")?.forEach { c -> Text(stringResource(R.string.factory_team_review_criterion, c.str("description").ifBlank { c.str("id") })) }
                         val manualCriteria = contract?.arr("acceptanceCriteria")?.filter { it.str("method") == "manual" }.orEmpty()
                         val manual = manualCriteria.firstOrNull { it.str("id") == criterionIdSelected }
                         val reportReadable = report != null && report.str("source") == "persisted_assistant_final" && (report["readable"] as? JsonPrimitive)?.booleanOrNull == true
