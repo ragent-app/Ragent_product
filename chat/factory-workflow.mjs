@@ -102,7 +102,7 @@ export async function instantiateFactoryWorkflow(input,actor) {
 // The caller owns the transaction and must authorize all supplied assignments.
 export function instantiateFactoryWorkflowInTransaction(db,proposal,org,commandId,{assignments=null}={}) {
   const ts=now(), goalId=newId('goal'), instanceId=newId('workflow');
-  db.prepare('INSERT INTO factory_goals VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(goalId,proposal.goal.organizationId,proposal.goal.projectId,null,encode({objective:proposal.goal.objective,acceptanceBaseline:[]}),1,1,'active',ts,ts);
+  db.prepare('INSERT INTO factory_goals (id,organization_id,project_id,parent_goal_id,body_json,revision,row_version,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(goalId,proposal.goal.organizationId,proposal.goal.projectId,null,encode({objective:proposal.goal.objective,acceptanceBaseline:[]}),1,1,'active',ts,ts);
   const mapping={};
   for (const spec of proposal.workItems) {
     const id=newId('work'); mapping[spec.key]=id;
