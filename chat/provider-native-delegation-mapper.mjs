@@ -228,6 +228,13 @@ function mapCodex(raw, context) {
   const operation = codexOperation(item, raw);
   const id = readProviderDelegationId(item);
   if (!id || !operation) return { events: [], controls: [], recognized: Boolean(type) };
+  // In the current Codex protocol item.id identifies this tool call, not a
+  // child agent. A wait is an observation/control operation and its completion
+  // does not establish that any child has completed. Keep existing canonical
+  // children unchanged; do not invent a spawn from the call identifier.
+  if (type === 'collabagenttoolcall' && operation === 'wait' && Array.isArray(item.receiverThreadIds)) {
+    return { events: [], controls: [{ type: 'delegation_control', control: 'wait', provider: 'codex', runId: text(context.runId) }], recognized: true };
+  }
   const childSessionId = readChildSession(item);
   const parentDelegationId = readParentDelegation(item);
   if (operation === 'send') {
