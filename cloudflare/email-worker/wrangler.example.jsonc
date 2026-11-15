@@ -1,5 +1,5 @@
 {
-  "name": "agentoc-email-worker",
+  "name": "ragent-email-worker",
   "main": "src/index.ts",
   "compatibility_date": "2025-03-10",
   "send_email": [{ "name": "EMAIL" }],

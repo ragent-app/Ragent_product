@@ -531,11 +531,11 @@ if [ -f /var/lib/ragent/config/auth.json ]; then
     '
 fi
 
-# Stop and quarantine any legacy Agentoc-owned worker and state left by an
+# Stop and quarantine any legacy product-owned worker and state left by an
 # older package before ownership convergence. This is also installed as an
 # ExecStartPre hook, so a normal service restart cannot resurrect the old path.
 if [ -x /usr/lib/ragent/retire-legacy-cc-switch ]; then
-  /usr/lib/ragent/retire-legacy-cc-switch || echo "[postinst] legacy Agentoc cc-switch retirement was incomplete" >&2
+  /usr/lib/ragent/retire-legacy-cc-switch || echo "[postinst] legacy product cc-switch retirement was incomplete" >&2
 fi
 
 # /var/lib/ragent/accounts belongs to the separately deployed Accounts

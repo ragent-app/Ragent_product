@@ -35,13 +35,13 @@ function git(dir, args) {
 
 function initRepo(dir) {
   git(dir, ['init', '-q']);
-  git(dir, ['config', 'user.email', 'test@agentoc.local']);
+  git(dir, ['config', 'user.email', 'test@ragent.local']);
   git(dir, ['config', 'user.name', 'Ragent Test']);
 }
 
 function commitAll(dir, message) {
   git(dir, ['add', '-A']);
-  git(dir, ['-c', 'user.email=test@agentoc.local', '-c', 'user.name=Ragent Test', 'commit', '-q', '-m', message]);
+  git(dir, ['-c', 'user.email=test@ragent.local', '-c', 'user.name=Ragent Test', 'commit', '-q', '-m', message]);
 }
 
 function makeFakeChild({ stdoutText = '', stderrText = '', exitCode = 0, error = null, hang = false }) {

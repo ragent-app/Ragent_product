@@ -3,7 +3,7 @@ package com.andysagent.ragent.core.agentui
 import androidx.compose.material3.ButtonDefaults
 
 import com.andysagent.ragent.core.designsystem.AgentoBackdropTone
-import com.andysagent.ragent.core.designsystem.RagentomposerShadowTokens
+import com.andysagent.ragent.core.designsystem.RagentComposerShadowTokens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -194,7 +194,7 @@ import com.andysagent.ragent.core.designsystem.AgentoRadius
 import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.AgentoSpacing
 import com.andysagent.ragent.core.designsystem.AgentoSwitch
-import com.andysagent.ragent.core.designsystem.agentoComposerShadow
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
 import com.andysagent.ragent.core.designsystem.AgentoStatus
 import com.andysagent.ragent.core.designsystem.AgentoStatusTone
 import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
@@ -1226,7 +1226,7 @@ private fun ComposerRuntimePickerPopover(
                             while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
                         }
                     })
-                .agentoComposerShadow(shape = panelShape)
+                .ragentComposerShadow(shape = panelShape)
                 // The transparent fixed-window area dismisses, not the glass.
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }) {
             AgentoFrostedGlassBox(
@@ -2008,12 +2008,12 @@ fun AgentComposer(
                 // footer/header regions. Do not consume child editor gestures.
                 awaitPointerEventScope { while (true) awaitPointerEvent() }
             } else Modifier)
-            .agentoComposerShadow(
+            .ragentComposerShadow(
                 shape = composerShape,
-                ambientLightAlpha = RagentomposerShadowTokens.AmbientLightAlpha * (1f - fullscreenProgress),
-                keyLightAlpha = RagentomposerShadowTokens.KeyLightAlpha * (1f - fullscreenProgress),
-                ambientDarkAlpha = RagentomposerShadowTokens.AmbientDarkAlpha * (1f - fullscreenProgress),
-                keyDarkAlpha = RagentomposerShadowTokens.KeyDarkAlpha * (1f - fullscreenProgress),
+                ambientLightAlpha = RagentComposerShadowTokens.AmbientLightAlpha * (1f - fullscreenProgress),
+                keyLightAlpha = RagentComposerShadowTokens.KeyLightAlpha * (1f - fullscreenProgress),
+                ambientDarkAlpha = RagentComposerShadowTokens.AmbientDarkAlpha * (1f - fullscreenProgress),
+                keyDarkAlpha = RagentComposerShadowTokens.KeyDarkAlpha * (1f - fullscreenProgress),
             )
             .onGloballyPositioned { coordinates ->
                 val position = coordinates.positionInRoot()
@@ -4016,7 +4016,7 @@ fun FloatingTopChrome(
                 .graphicsLayer { alpha = titleContentAlpha }
                 .heightIn(min = if (subtitleText != null) 46.dp else 40.dp)
                 .widthIn(min = 100.dp, max = 185.dp)
-                .agentoComposerShadow(shape = AgentoShapes.PillShape)
+                .ragentComposerShadow(shape = AgentoShapes.PillShape)
                 .then(
                     if (onTitleClick != null) {
                         Modifier.agentoPressScale(

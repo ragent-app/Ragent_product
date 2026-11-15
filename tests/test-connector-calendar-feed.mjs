@@ -215,16 +215,16 @@ async function testBuildSubscriptionUrl() {
     filterCalendarSubscriptionChannelsForExposure,
   } = await import('../lib/connector-calendar-feed.mjs');
 
-  const url = buildSubscriptionUrl('https://agentoc.example.test', 'abc123');
-  assert.equal(url, 'https://agentoc.example.test/cal/abc123.ics');
+  const url = buildSubscriptionUrl('https://ragent.example.test', 'abc123');
+  assert.equal(url, 'https://ragent.example.test/cal/abc123.ics');
 
   // Trailing slash handling
-  const url2 = buildSubscriptionUrl('https://agentoc.example.test/', 'abc123');
-  assert.equal(url2, 'https://agentoc.example.test/cal/abc123.ics');
+  const url2 = buildSubscriptionUrl('https://ragent.example.test/', 'abc123');
+  assert.equal(url2, 'https://ragent.example.test/cal/abc123.ics');
 
   // The low-level URL builder remains generic even though the product now prefers subdomains.
-  const nestedPathUrl = buildSubscriptionUrl('https://gateway.example.com/agentoc', 'abc123');
-  assert.equal(nestedPathUrl, 'https://gateway.example.com/agentoc/cal/abc123.ics');
+  const nestedPathUrl = buildSubscriptionUrl('https://gateway.example.com/ragent', 'abc123');
+  assert.equal(nestedPathUrl, 'https://gateway.example.com/ragent/cal/abc123.ics');
 
   // Localhost should never become a delivered subscription URL
   const localhostUrl = buildSubscriptionUrl('http://127.0.0.1:7690', 'abc123');
@@ -267,7 +267,7 @@ async function testDispatchCalendarToFeed() {
   const result = await dispatchCalendarToFeed(target, {
     sessionId: 'sess_test',
     runId: 'run_test',
-    baseUrl: 'https://agentoc.example.test',
+    baseUrl: 'https://ragent.example.test',
   });
 
   assert.equal(result.connectorId, 'calendar');

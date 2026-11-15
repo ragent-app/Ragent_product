@@ -126,7 +126,7 @@ function makeGetReq(url, extraHeaders = {}) {
 {
   const res = makeRes();
   await handleEntrySwitchRoutes({
-    req: makeBodyReq({ targetDeviceId: TARGET_DEVICE, targetUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ targetDeviceId: TARGET_DEVICE, targetUrl: 'https://b.ragent.test' }),
     res, pathname: '/api/entry-switch/invite', authSession: null, writeJson,
   });
   check('invite 无 owner 会话 → 403', res.statusCode === 403);
@@ -135,7 +135,7 @@ function makeGetReq(url, extraHeaders = {}) {
 {
   const res = makeRes();
   await handleEntrySwitchRoutes({
-    req: makeBodyReq({ targetUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ targetUrl: 'https://b.ragent.test' }),
     res, pathname: '/api/entry-switch/invite', authSession: { role: 'owner' }, writeJson,
   });
   check('invite 缺 targetDeviceId → 400', res.statusCode === 400);
@@ -150,7 +150,7 @@ function makeGetReq(url, extraHeaders = {}) {
 {
   const res = makeRes();
   await handleEntrySwitchRoutes({
-    req: makeBodyReq({ targetDeviceId: 'rdev_unknown', targetUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ targetDeviceId: 'rdev_unknown', targetUrl: 'https://b.ragent.test' }),
     res, pathname: '/api/entry-switch/invite', authSession: { role: 'owner' }, writeJson,
   });
   check('invite 目标不在清单 → 404', res.statusCode === 404);
@@ -159,7 +159,7 @@ function makeGetReq(url, extraHeaders = {}) {
 const firstInvite = await (async () => {
   const res = makeRes();
   await handleEntrySwitchRoutes({
-    req: makeBodyReq({ targetDeviceId: TARGET_DEVICE, targetUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ targetDeviceId: TARGET_DEVICE, targetUrl: 'https://b.ragent.test' }),
     res, pathname: '/api/entry-switch/invite', authSession: { role: 'owner' }, writeJson,
   });
   check('invite 正常 → 200 + jumpUrl', res.statusCode === 200);
@@ -168,7 +168,7 @@ const firstInvite = await (async () => {
   check('jumpUrl 带 join/from/introspect/device 参数',
     /^[0-9a-f]{48}$/.test(url.searchParams.get('join'))
     && url.searchParams.get('from') === 'desktop-a'
-    && url.searchParams.get('introspect') === 'http://a.agentoc.test'
+    && url.searchParams.get('introspect') === 'http://a.ragent.test'
     && url.searchParams.get('device') === TARGET_DEVICE
     && Date.parse(payload.expiresAt) > Date.now());
   // 摘要落盘：明文 token 不出现在文件
@@ -181,7 +181,7 @@ const firstInvite = await (async () => {
 {
   const res = makeRes();
   await handleEntrySwitchRoutes({
-    req: makeBodyReq({ targetDeviceId: TARGET_DEVICE, targetUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ targetDeviceId: TARGET_DEVICE, targetUrl: 'https://b.ragent.test' }),
     res, pathname: '/api/entry-switch/invite', authSession: { role: 'owner' }, writeJson,
   });
   check('invite 同目标重复 → 409', res.statusCode === 409);
@@ -324,7 +324,7 @@ await registerDevicePublicKey({ deviceId: 'desktop-a', publicKey: await getInsta
   const result = await consumeEntrySwitchJoin({
     joinToken: firstInvite.joinToken,
     from: 'desktop-a',
-    introspectUrl: 'https://a.agentoc.test',
+    introspectUrl: 'https://a.ragent.test',
     deviceId: TARGET_DEVICE,
     ownerId: OWNER_ID,
     publicKeyForFrom: await getDevicePublicKey('desktop-a'),
@@ -347,7 +347,7 @@ await registerDevicePublicKey({ deviceId: 'desktop-a', publicKey: await getInsta
   let failed = false;
   try {
     await consumeEntrySwitchJoin({
-      joinToken: firstInvite.joinToken, from: 'desktop-a', introspectUrl: 'https://a.agentoc.test',
+      joinToken: firstInvite.joinToken, from: 'desktop-a', introspectUrl: 'https://a.ragent.test',
       deviceId: TARGET_DEVICE, ownerId: OWNER_ID, publicKeyForFrom: await getDevicePublicKey('desktop-a'),
       fetchImpl: source.fetchImpl,
     });
@@ -363,7 +363,7 @@ await registerDevicePublicKey({ deviceId: 'desktop-a', publicKey: await getInsta
   let failed = false;
   try {
     await consumeEntrySwitchJoin({
-      joinToken: firstInvite.joinToken, from: 'desktop-a', introspectUrl: 'https://a.agentoc.test',
+      joinToken: firstInvite.joinToken, from: 'desktop-a', introspectUrl: 'https://a.ragent.test',
       deviceId: TARGET_DEVICE, ownerId: OWNER_ID, publicKeyForFrom: await getDevicePublicKey('desktop-a'),
       fetchImpl: source.fetchImpl,
     });
@@ -379,7 +379,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   let failed = false;
   try {
     await consumeEntrySwitchJoin({
-      joinToken: firstInvite.joinToken, from: 'desktop-a', introspectUrl: 'https://a.agentoc.test',
+      joinToken: firstInvite.joinToken, from: 'desktop-a', introspectUrl: 'https://a.ragent.test',
       deviceId: TARGET_DEVICE, ownerId: OWNER_ID, publicKeyForFrom: await getDevicePublicKey('desktop-a'),
       fetchImpl: source.fetchImpl,
     });
@@ -394,7 +394,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   let failed = false;
   try {
     await consumeEntrySwitchJoin({
-      joinToken: firstInvite.joinToken, from: 'desktop-unknown', introspectUrl: 'https://a.agentoc.test',
+      joinToken: firstInvite.joinToken, from: 'desktop-unknown', introspectUrl: 'https://a.ragent.test',
       deviceId: TARGET_DEVICE, ownerId: OWNER_ID, publicKeyForFrom: null,
       fetchImpl: async (url) => (
         String(url).endsWith('/api/device-handshake')
@@ -425,7 +425,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   const res = makeRes();
   const handled = await handleEntrySwitchJoin({
     req: { headers: {} }, res,
-    parsedUrl: { pathname: '/', query: { join: firstInvite.joinToken, from: 'desktop-a', device: TARGET_DEVICE, introspect: 'https://a.agentoc.test' } },
+    parsedUrl: { pathname: '/', query: { join: firstInvite.joinToken, from: 'desktop-a', device: TARGET_DEVICE, introspect: 'https://a.ragent.test' } },
   });
   check('B 未绑定 → 302 登录页', handled === true && res.statusCode === 302 && res.headers.Location === '/login?error=join_invalid');
   // 恢复绑定
@@ -441,7 +441,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
     const res = makeRes();
     const handled = await handleEntrySwitchJoin({
       req: { headers: {} }, res,
-      parsedUrl: { pathname: '/', query: { join: firstInvite.joinToken, from: 'desktop-a', device: TARGET_DEVICE, introspect: 'https://a.agentoc.test' } },
+      parsedUrl: { pathname: '/', query: { join: firstInvite.joinToken, from: 'desktop-a', device: TARGET_DEVICE, introspect: 'https://a.ragent.test' } },
     });
     check('B 端入口成功 → 302 首页 + Set-Cookie', handled === true && res.statusCode === 302
       && res.headers.Location === '/' && String(res.headers['Set-Cookie']).includes('session_token='));
@@ -496,16 +496,16 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   check('entryUrl 非法协议 → 400', rejected);
   let notFound = false;
   try {
-    await updateTrustedDeviceEntryUrl('rdev_missing', 'https://b.agentoc.test');
+    await updateTrustedDeviceEntryUrl('rdev_missing', 'https://b.ragent.test');
   } catch (error) {
     notFound = error.statusCode === 404;
   }
   check('entryUrl 未知设备 → 404', notFound);
-  const set = await updateTrustedDeviceEntryUrl('rdev_entrytest', 'https://b.agentoc.test');
-  check('entryUrl 设置成功', set.entryUrl === 'https://b.agentoc.test');
+  const set = await updateTrustedDeviceEntryUrl('rdev_entrytest', 'https://b.ragent.test');
+  check('entryUrl 设置成功', set.entryUrl === 'https://b.ragent.test');
   const listed = await listTrustedDevices();
   check('设备清单带 entryUrl',
-    listed.devices.find((d) => d.id === 'rdev_entrytest')?.entryUrl === 'https://b.agentoc.test');
+    listed.devices.find((d) => d.id === 'rdev_entrytest')?.entryUrl === 'https://b.ragent.test');
 
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -522,7 +522,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
     const payload = JSON.parse(reachable.body);
     check('health HTTP 应答（含 401）→ reachable',
       reachable.statusCode === 200 && payload.reachable === true && payload.statusCode === 401
-      && calls[0]?.url === 'https://b.agentoc.test/' && calls[0]?.options?.method === 'HEAD');
+      && calls[0]?.url === 'https://b.ragent.test/' && calls[0]?.options?.method === 'HEAD');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -545,7 +545,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
 
 {
   // 健康探测必须保留带路径的隧道入口，不能把请求改写到 origin 根路径。
-  await updateTrustedDeviceEntryUrl('rdev_entrytest', 'https://b.agentoc.test/agentoc');
+  await updateTrustedDeviceEntryUrl('rdev_entrytest', 'https://b.ragent.test/ragent');
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -558,7 +558,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
       req: makeGetReq('/api/entry-switch/health?deviceId=rdev_entrytest'),
       res: response, pathname: '/api/entry-switch/health', authSession: { role: 'owner' }, writeJson,
     });
-    check('health 保留隧道路径', calls[0]?.url === 'https://b.agentoc.test/agentoc');
+    check('health 保留隧道路径', calls[0]?.url === 'https://b.ragent.test/ragent');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -568,7 +568,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   // HTTP 层：trusted_device 主体 → 403 / 未知设备 → 404
   const unauthenticated = makeRes();
   await handleDevicePairingOwnerRoutes({
-    req: makeBodyReq({ entryUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ entryUrl: 'https://b.ragent.test' }),
     res: unauthenticated, pathname: '/api/device-pairing/devices/rdev_entrytest/entry-url',
     authSession: null, writeJson,
   });
@@ -576,14 +576,14 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
     && JSON.parse(unauthenticated.body).error === 'Owner access required');
   const res = makeRes();
   await handleDevicePairingOwnerRoutes({
-    req: makeBodyReq({ entryUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ entryUrl: 'https://b.ragent.test' }),
     res, pathname: '/api/device-pairing/devices/rdev_entrytest/entry-url',
     authSession: { role: 'owner', principalKind: 'trusted_device' }, writeJson,
   });
   check('entry-url trusted_device 主体 → 403', res.statusCode === 403);
   const res2 = makeRes();
   await handleDevicePairingOwnerRoutes({
-    req: makeBodyReq({ entryUrl: 'https://b.agentoc.test' }),
+    req: makeBodyReq({ entryUrl: 'https://b.ragent.test' }),
     res: res2, pathname: '/api/device-pairing/devices/rdev_nope/entry-url',
     authSession: { role: 'owner' }, writeJson,
   });
@@ -597,12 +597,12 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   check('entry-url 非法协议 → 400', res3.statusCode === 400);
   const res4 = makeRes();
   await handleDevicePairingOwnerRoutes({
-    req: makeBodyReq({ entryUrl: 'https://b2.agentoc.test' }),
+    req: makeBodyReq({ entryUrl: 'https://b2.ragent.test' }),
     res: res4, pathname: '/api/device-pairing/devices/rdev_entrytest/entry-url',
     authSession: { role: 'owner' }, writeJson,
   });
   check('entry-url 路由设置 → 200', res4.statusCode === 200
-    && JSON.parse(res4.body).device.entryUrl === 'https://b2.agentoc.test');
+    && JSON.parse(res4.body).device.entryUrl === 'https://b2.ragent.test');
 }
 
 {
@@ -613,7 +613,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
     res, pathname: '/api/entry-switch/invite', authSession: { role: 'owner' }, writeJson,
   });
   check('invite 回落已登记 entryUrl → 200',
-    res.statusCode === 200 && new URL(JSON.parse(res.body).jumpUrl).origin === 'https://b2.agentoc.test');
+    res.statusCode === 200 && new URL(JSON.parse(res.body).jumpUrl).origin === 'https://b2.ragent.test');
 }
 
 {

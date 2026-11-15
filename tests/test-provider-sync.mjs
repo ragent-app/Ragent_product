@@ -31,8 +31,8 @@ const competingKeys = await Promise.all(Array.from({ length: 12 }, () =>
 assert.equal(new Set(competingKeys.map((key) => key.fingerprint)).size, 1,
   'concurrent peer requests must share the same persisted decryption key');
 assert.equal(
-  String(buildProviderSyncEndpointUrl('https://computer.example.test/agentoc', '/api/provider-sync/apply')),
-  'https://computer.example.test/agentoc/api/provider-sync/apply',
+  String(buildProviderSyncEndpointUrl('https://computer.example.test/ragent', '/api/provider-sync/apply')),
+  'https://computer.example.test/ragent/api/provider-sync/apply',
   'provider sync must preserve a reverse-proxy path prefix',
 );
 const [sourceSyncKey, sourceSyncKeyAgain, targetSyncKey] = await Promise.all([

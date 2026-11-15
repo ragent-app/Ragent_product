@@ -126,15 +126,15 @@ keytool -genkeypair -keystore /path/to/contributor-debug.keystore \
 Then, from `android/`, run the Gradle wrapper (on Windows use `gradlew.bat`):
 
 ```sh
-./gradlew :app:assembleDebug -PagentocOpenSourceBuild=true \
-  -PagentocDebugKeystorePath=/path/to/contributor-debug.keystore
+./gradlew :app:assembleDebug -PragentOpenSourceBuild=true \
+  -PragentDebugKeystorePath=/path/to/contributor-debug.keystore
 ```
 
 This mode rejects release tasks. To configure Google-backed features, use your
 own authorized Google project and signing configuration. The contributor mode
 defaults to an intentionally invalid account endpoint and OAuth client. Supply
-`-PagentocAccountsUrl=<your-account-service-url>` and
-`-PagentocGoogleServerClientId=<your-web-oauth-client-id>` when testing against
+`-PragentAccountsUrl=<your-account-service-url>` and
+`-PragentGoogleServerClientId=<your-web-oauth-client-id>` when testing against
 your own services. The complete Google setup and full functional verification
 are still being prepared.
 

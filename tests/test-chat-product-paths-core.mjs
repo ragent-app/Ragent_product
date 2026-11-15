@@ -102,7 +102,7 @@ assert.equal(core.getProductBasePath({ href: 'https://example.com/x/', origin: '
 assert.equal(core.resolveProductUrl('/foo', { href: 'https://example.com/x/', origin: 'https://example.com', baseHref: '/base/m/install' }), 'https://example.com/base/foo');
 
 // -- parity vs legacy (DOM-less → FALLBACK_ORIGIN environment) ---------------
-const fallbackEnv = { href: 'https://agentoc.invalid/', origin: 'https://agentoc.invalid', baseHref: '' };
+const fallbackEnv = { href: 'https://ragent.invalid/', origin: 'https://ragent.invalid', baseHref: '' };
 const battery = [
   '', '/', '/m/install', '/login', '/logout', '/api/health', '/ws', '/share/abc?x=1',
   '/share-asset/1', '/visitor/2', '/agent/3', '/app/4', '/deep/path/to/x', '/a/m/install',

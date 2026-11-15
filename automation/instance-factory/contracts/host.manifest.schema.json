@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentoc.dev/schemas/instance-factory/host.manifest.schema.json",
+  "$id": "urn:ragent:schemas:instance-factory:host-manifest",
   "title": "Ragent Host Manifest",
   "type": "object",
   "required": ["schemaVersion", "host", "network", "systemd"],

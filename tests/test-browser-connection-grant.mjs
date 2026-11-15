@@ -20,7 +20,7 @@ const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const { privateKey: browserPrivateKey, publicKey: browserPublicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const browserJwk = browserPublicKey.export({ format: 'jwk' });
 const base = {
-  issuer: 'https://test-issuer.agentoc.invalid',
+  issuer: 'https://test-issuer.ragent.invalid',
   instanceId: 'ins_a',
   accountId: 'acct_a',
   clientId: 'browser_a',

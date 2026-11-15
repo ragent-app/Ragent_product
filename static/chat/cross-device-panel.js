@@ -819,7 +819,7 @@
     input.spellcheck = false;
     input.maxLength = 2048;
     input.value = entryUrl;
-    input.placeholder = fallback("crossDevice.devices.entryUrlPlaceholder", "https://computer.example/agentoc");
+    input.placeholder = fallback("crossDevice.devices.entryUrlPlaceholder", "https://computer.example/ragent");
     const inputId = `crossDeviceEntryUrl-${String(deviceId).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     input.id = inputId;
     label.htmlFor = inputId;

@@ -1,5 +1,5 @@
 (function attachRagentProductPathHelpers(globalScope) {
-  const FALLBACK_ORIGIN = "https://agentoc.invalid";
+  const FALLBACK_ORIGIN = "https://ragent.invalid";
   const TERMINAL_MARKERS = Object.freeze([
     Object.freeze(["m", "install"]),
     Object.freeze(["login"]),

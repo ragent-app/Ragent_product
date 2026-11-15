@@ -1,13 +1,13 @@
 # Ragent Browser Automation
 
-Use the `agentoc-browser` MCP server for browser work. The Skill is guidance;
+Use the `ragent-browser` MCP server for browser work. The Skill is guidance;
 the MCP server owns the browser context and Ragent owns the run, approval,
 artifact, and recovery boundaries.
 
 ## Operating rules
 
-- Start by using `agentoc_browser_navigate` with an explicit `http` or `https`
-  URL, then inspect the page with `agentoc_browser_snapshot`.
+- Start by using `ragent_browser_navigate` with an explicit `http` or `https`
+  URL, then inspect the page with `ragent_browser_snapshot`.
 - Use stable CSS selectors supplied by the page or task. Do not guess a
   destructive target from visible text when a stable selector is available.
 - `click`, `fill`, `press`, `select_option`, and `download` always require the

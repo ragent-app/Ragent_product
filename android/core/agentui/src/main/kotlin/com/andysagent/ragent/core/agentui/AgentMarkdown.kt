@@ -2569,7 +2569,7 @@ private fun parseListItem(line: String): ListItem {
  */
 const val STRESS_TEST_MARKDOWN = """# 1. 架构升级概览 (H1)
 
-Ragent Android 客户端已全面接入 **AgentoMarkdownTheme v2** 排版引擎。这是一段包含 *Italic 辅助说明*、[核心链接](https://agentoc.io) 以及 `SessionSyncEngine.kt` 行内代码的中英混合排版测试。
+Ragent Android 客户端已全面接入 **Ragent Markdown** 排版引擎。这是一段包含 *Italic 辅助说明*、[核心链接](https://ragent.example.test) 以及 `SessionSyncEngine.kt` 行内代码的中英混合排版测试。
 
 ## 2. 列表与嵌套体系 (H2)
 
@@ -2647,7 +2647,7 @@ const val INLINE_CODE_WRAP_MARKDOWN = """## 跨行 Inline Code 验证
 
 提交 `9f8e7d6c5b4a392817065544332211ffeeddccbbaa99887766554433221100` 已合入 main 分支，触发完整回归。
 
-文档地址是 `https://agentoc.example.com/projects/pinggu-workspace/sessions/1699cfb2549ea7bad55089c68a5e5dee/events?offset=1280&filter=tool_calls` 请查收。
+文档地址是 `https://ragent.example.com/projects/pinggu-workspace/sessions/1699cfb2549ea7bad55089c68a5e5dee/events?offset=1280&filter=tool_calls` 请查收。
 
 改动集中在 `android/core/agentui/src/main/kotlin/com/andysagent/ragent/core/agentui/AgentMarkdown.kt` 与 `static/chat/chat-messages.css` 两处。
 

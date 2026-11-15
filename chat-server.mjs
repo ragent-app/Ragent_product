@@ -102,8 +102,8 @@ const cliListenTarget = cliIpcListenTarget(cliTransport);
 // Environment selects lifecycle only. The installed OS inspector, never these
 // flags, establishes the actual separated service token and Owner authority.
 const ownerService = process.platform === 'win32'
-  && process.env.AGENTOC_WINDOWS_SERVICE_MODE === '1'
-  && process.env.AGENTOC_WINDOWS_SERVICE_ROLE === 'control'
+  && process.env.RAGENT_WINDOWS_SERVICE_MODE === '1'
+  && process.env.RAGENT_WINDOWS_SERVICE_ROLE === 'control'
   ? createOwnerServiceLifecycle({
     issueOwnerSession: () => issueSession({ role: 'owner', authMethod: 'native_cli' }),
     revokeOwnerSession: revokeSession,
@@ -134,9 +134,9 @@ let stopTemporaryPairingPoller = () => {};
 let stopAccountPairingPoller = () => {};
 let stopTemporaryControlPoller = () => {};
 
-const STARTUP_RECOVERY_DELAY_ENV = 'AGENTOC_STARTUP_RECOVERY_DELAY_MS';
-const STALE_APPROVAL_BACKFILL_ENV = 'AGENTOC_STALE_APPROVAL_BACKFILL';
-const P2P_HOST_RECOVERY_ENV = 'AGENTOC_P2P_HOST_RECOVERY';
+const STARTUP_RECOVERY_DELAY_ENV = 'RAGENT_STARTUP_RECOVERY_DELAY_MS';
+const STALE_APPROVAL_BACKFILL_ENV = 'RAGENT_STALE_APPROVAL_BACKFILL';
+const P2P_HOST_RECOVERY_ENV = 'RAGENT_P2P_HOST_RECOVERY';
 
 function captureRemoteGeneration() {
   if (!isProotRuntime) return null;
@@ -329,7 +329,7 @@ let forensicWriteChain = Promise.resolve();
 
 function readEventLoopWindow() {
   const now = Date.now();
-  const windowMs = readPositiveIntEnv('AGENTOC_EVENT_LOOP_WINDOW_MS', 5_000);
+  const windowMs = readPositiveIntEnv('RAGENT_EVENT_LOOP_WINDOW_MS', 5_000);
   if (lastEventLoopWindowAtMs === 0 || now - lastEventLoopWindowAtMs >= windowMs) {
     const utilization = performance.eventLoopUtilization(previousEventLoopUtilization);
     previousEventLoopUtilization = performance.eventLoopUtilization();
@@ -406,19 +406,19 @@ function readCgroupDirectorySnapshot(root) {
 
 function readRunnerFleetSnapshot() {
   if (process.platform !== 'linux') return null;
-  // systemd creates this slice below agentoc.slice on packaged installs;
+  // systemd creates this slice below ragent.slice on packaged installs;
   // retain the direct path for older/dev units. This exposes the actual fleet
   // pressure instead of reporting only the chat-server cgroup.
   for (const root of [
-    '/sys/fs/cgroup/agentoc.slice/agentoc-runners.slice',
-    '/sys/fs/cgroup/agentoc-runners.slice',
+    '/sys/fs/cgroup/ragent.slice/ragent-runners.slice',
+    '/sys/fs/cgroup/ragent-runners.slice',
   ]) {
     const snapshot = readCgroupDirectorySnapshot(root);
     if (snapshot) {
       let activeRunnerUnits = [];
       try {
         activeRunnerUnits = readdirSync(root)
-          .filter((name) => /^agentoc-runner-run_[A-Za-z0-9_-]+\.service$/.test(name))
+          .filter((name) => /^ragent-runner-run_[A-Za-z0-9_-]+\.service$/.test(name))
           .sort();
       } catch {}
       return { ...snapshot, activeRuns: activeRunnerUnits.length, activeRunnerUnits };
@@ -430,7 +430,7 @@ function readRunnerFleetSnapshot() {
 function forensicRecord(snapshot) {
   const delay = snapshot?.process?.eventLoopDelayMs || {};
   const sampler = snapshot?.sampler || {};
-  const thresholdMs = readPositiveIntEnv('AGENTOC_EVENT_LOOP_FORENSICS_DELAY_MS', 1_000);
+  const thresholdMs = readPositiveIntEnv('RAGENT_EVENT_LOOP_FORENSICS_DELAY_MS', 1_000);
   return {
     collectedAtMs: snapshot?.collectedAtMs || Date.now(),
     process: snapshot?.process || null,
@@ -442,7 +442,7 @@ function forensicRecord(snapshot) {
 }
 
 function persistForensicSnapshot(snapshot) {
-  const maxSamples = readPositiveIntEnv('AGENTOC_FORENSICS_MAX_SAMPLES', 360);
+  const maxSamples = readPositiveIntEnv('RAGENT_FORENSICS_MAX_SAMPLES', 360);
   const record = forensicRecord(snapshot);
   forensicWriteChain = forensicWriteChain.catch(() => {}).then(async () => {
     if (!Array.isArray(forensicSamples)) {
@@ -745,8 +745,8 @@ function handleHttpRequest(req, res, fromCliSocket = false) {
         const requestCorrelation = apiRequestLog.getApiRequestCorrelation?.() || {};
         const requestId = typeof requestCorrelation.requestId === 'string' && requestCorrelation.requestId
           ? requestCorrelation.requestId
-          : (typeof req.headers?.['x-agentoc-request-id'] === 'string'
-            ? req.headers['x-agentoc-request-id'].trim()
+          : (typeof req.headers?.['x-ragent-request-id'] === 'string'
+            ? req.headers['x-ragent-request-id'].trim()
             : '');
         res.writeHead(statusCode, {
           'Content-Type': 'application/json',
@@ -879,7 +879,7 @@ async function startDeferredBackgroundServices() {
     console.warn(`[sessions] deferred archive cleanup failed: ${error?.message || error}`);
   }
   triggers.startTriggerScheduler();
-  if (!shuttingDown && process.env.AGENTOC_RESPONSIBILITY_RUNTIME_ENABLED === '1') {
+  if (!shuttingDown && process.env.RAGENT_RESPONSIBILITY_RUNTIME_ENABLED === '1') {
     try {
       const { createResponsibilityRuntime } = await import('./chat/responsibility-runtime.mjs');
       if (!shuttingDown) {
@@ -1130,8 +1130,8 @@ server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
       return lastMemorySnapshot;
     },
     onSample: persistForensicSnapshot,
-    intervalMs: readPositiveIntEnv('AGENTOC_MEMORY_SAMPLER_INTERVAL_MS', 5_000),
-    maxSamples: readPositiveIntEnv('AGENTOC_MEMORY_SAMPLER_MAX_SAMPLES', 360),
+    intervalMs: readPositiveIntEnv('RAGENT_MEMORY_SAMPLER_INTERVAL_MS', 5_000),
+    maxSamples: readPositiveIntEnv('RAGENT_MEMORY_SAMPLER_MAX_SAMPLES', 360),
   });
   memoryRegistry.startSampler();
   listenersReadyAtMs = Date.now();
@@ -1155,9 +1155,9 @@ server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
     if (shuttingDown) stop(); else stopAccountPairingPoller = stop;
   }).catch(() => console.warn('[account-pairing] deferred poller start failed'));
 
-  void systemdNotify.systemdNotify({ ready: true, status: 'AgentoC chat server listening' });
+  void systemdNotify.systemdNotify({ ready: true, status: 'Ragent chat server listening' });
   systemdWatchdog = systemdNotify.startSystemdWatchdog({
-    status: () => `AgentoC chat server healthy; uptime=${Math.round(process.uptime())}s`,
+    status: () => `Ragent chat server healthy; uptime=${Math.round(process.uptime())}s`,
   });
   // P2P Host lifecycle is per trusted account device, not per invitation.
   // Start it after the control-plane listener is reachable so a slow signaling

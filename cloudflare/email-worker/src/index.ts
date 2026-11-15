@@ -137,7 +137,7 @@ function messageIdDomain(fromAddress: string): string {
 }
 
 function buildGeneratedMessageId(fromAddress: string): string {
-  return `<agentoc-${Date.now()}-${crypto.randomUUID().slice(0, 8)}@${messageIdDomain(fromAddress)}>`;
+  return `<ragent-${Date.now()}-${crypto.randomUUID().slice(0, 8)}@${messageIdDomain(fromAddress)}>`;
 }
 
 function buildPlainTextMime({
@@ -208,7 +208,7 @@ function buildMultipartMime({
   messageId: string;
   attachments: Array<{ filename: string; contentType: string; contentBase64: string }>;
 }): string {
-  const boundary = `agentoc-mixed-${crypto.randomUUID()}`;
+  const boundary = `ragent-mixed-${crypto.randomUUID()}`;
   const headers = [
     `From: ${fromAddress}`,
     `To: ${recipient}`,
@@ -407,7 +407,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/healthz') {
       return jsonResponse({
         ok: true,
-        service: 'agentoc-email-worker',
+        service: 'ragent-email-worker',
         from: trimString(env.MAILBOX_FROM),
         senderPolicy: 'exact_or_same_domain_alias',
         bridgeUrlConfigured: Boolean(trimString(env.MAILBOX_BRIDGE_URL)),

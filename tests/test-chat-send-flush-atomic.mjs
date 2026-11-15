@@ -167,7 +167,7 @@ function createContext({
   };
   const focusComposerCalls = [];
   const consoleMock = { ...console, warn() {} };
-  const agentoCLayout = {
+  const ragentLayout = {
     getViewportHeight() {
       const managedHeight = windowTarget.visualViewport?.height;
       if (Number.isFinite(managedHeight) && managedHeight > 0) {
@@ -180,7 +180,7 @@ function createContext({
       return () => {};
     },
   };
-  windowTarget.RagentLayout = agentoCLayout;
+  windowTarget.RagentLayout = ragentLayout;
   const context = {
     console: consoleMock,
     msgInput,

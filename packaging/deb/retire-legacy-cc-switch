@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Retire only the cc-switch runtime that belonged to Agentoc.  An independently
+# Retire only the product-owned cc-switch runtime.  An independently
 # installed desktop `/usr/bin/cc-switch` is intentionally outside these exact
 # paths and is never stopped or modified.
 is_ragent_cc_switch_process() {

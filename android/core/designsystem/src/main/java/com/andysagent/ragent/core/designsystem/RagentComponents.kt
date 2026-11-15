@@ -311,7 +311,7 @@ fun AgentoFloatingIconButton(
             AgentoFrostedGlassBox(
                 modifier = Modifier
                     .size(36.dp)
-                    .then(if (diffuseShadow) Modifier.agentoComposerShadow(shape = CircleShape) else Modifier)
+                    .then(if (diffuseShadow) Modifier.ragentComposerShadow(shape = CircleShape) else Modifier)
                     .onGloballyPositioned { coordinates ->
                         val position = coordinates.positionInRoot()
                         backdropOffset = IntOffset(
@@ -640,7 +640,7 @@ fun AgentoFrostedMenu(
                     modifier = Modifier
                         .widthIn(min = 196.dp, max = 280.dp)
                         .heightIn(max = 380.dp)
-                        .agentoComposerShadow(shape = RoundedCornerShape(20.dp))
+                        .ragentComposerShadow(shape = RoundedCornerShape(20.dp))
                         .onGloballyPositioned { coords ->
                             val pos = coords.positionInRoot()
                             backdropOffset = IntOffset(

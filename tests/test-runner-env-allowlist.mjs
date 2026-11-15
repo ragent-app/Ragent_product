@@ -77,7 +77,7 @@ try {
   process.env.RAGENT_WORK_ROOT_DIR = join(fixtureControl, 'workspace');
   process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = join(fixtureConfig, 'runner-lifecycle.sock');
   process.env.RAGENT_CONTROL_SOCKET = '/run/ragent-control.sock';
-  process.env.RAGENT_PUBLIC_BASE_URL = 'https://agentoc.example.com';
+  process.env.RAGENT_PUBLIC_BASE_URL = 'https://ragent.example.com';
   process.env.RAGENT_NODE_RUNTIME = '/opt/ragent/runtime/node';
   process.env.RAGENT_RUNNER_USER = 'ragent-runner';
   process.env.MY_SERVICE_TOKEN = 's3cret';

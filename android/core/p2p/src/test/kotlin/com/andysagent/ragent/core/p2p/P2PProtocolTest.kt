@@ -91,7 +91,7 @@ class P2PProtocolTest {
 
     @Test
     fun `createP2PRoomId matches known vector`() {
-        // HMAC-SHA256(key="test-secret", msg="agentoc-p2p-room-v1")
+        // HMAC-SHA256(key="test-secret", msg="ragent-p2p-room-v1")
         // Known test vector from cross-check with Node.
         val id = P2PProtocol.createP2PRoomId("test-secret")
         assertEquals(40, id.length)

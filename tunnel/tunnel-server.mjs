@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// tunnel-server.mjs — AgentoC reverse tunnel entry (runs on the public host).
+// tunnel-server.mjs — Ragent reverse tunnel entry (runs on the public host).
 //
 // Listens on 127.0.0.1:PORT and exposes two roles:
 //   POST /tunnel       — the single control connection initiated by the
 //                        remote client (frame protocol, token-authenticated).
 //   everything else    — browser traffic: the request is serialized and
 //                        forwarded byte-for-byte over the tunnel as a stream
-//                        toward the remote AgentoC (127.0.0.1:7690).
+//                        toward the remote Ragent (127.0.0.1:7690).
 //
 // The forward target is fixed by --target; OPEN frames never carry an
 // address, so a compromised tunnel peer cannot pivot to other ports.
 //
 // Usage:
-//   node tunnel-server.mjs --port 17890 --target 127.0.0.1:7690 --token-file /etc/agentoc/tunnel-token
+//   node tunnel-server.mjs --port 17890 --target 127.0.0.1:7690 --token-file /etc/ragent/tunnel-token
 
 import http from 'http';
 import { timingSafeEqual } from 'crypto';
@@ -43,7 +43,7 @@ function serializeRequestHead(req, includeUpgrade) {
     if (HOP_BY_HOP_HEADERS.has(lower)) continue;
     if (lower === 'host') continue; // Host is rewritten below
     // tunnel-client re-marks the forward itself; never relay a far-end copy.
-    if (lower === 'x-agentoc-tunnel') continue;
+    if (lower === 'x-ragent-tunnel') continue;
     lines.push(`${name}: ${Array.isArray(value) ? value.join(', ') : value}\r\n`);
   }
   lines.push(`Host: ${req.headers.host || '127.0.0.1:7690'}\r\n`);

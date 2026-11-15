@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.constrainHeight
 import kotlin.math.roundToInt
 import com.andysagent.ragent.core.designsystem.AgentoSprings
-import com.andysagent.ragent.core.designsystem.RagentomposerShadowTokens
+import com.andysagent.ragent.core.designsystem.RagentComposerShadowTokens
 import com.andysagent.ragent.core.designsystem.MotionPreference
 
 /** Width settles first; readable content accompanies height rather than an empty full shell. */
@@ -76,8 +76,8 @@ internal fun Modifier.pickerShellPresence(viewport: PickerReadingViewport): Modi
         val alpha = pickerEmptyShellAlpha(size.height, viewport.headingHeight.toFloat())
         if (alpha >= 1f) drawContent()
         else if (alpha > 0f) {
-            val halo = (maxOf(RagentomposerShadowTokens.AmbientBlur, RagentomposerShadowTokens.KeyBlur) * 3 +
-                RagentomposerShadowTokens.OffsetY).toPx()
+            val halo = (maxOf(RagentComposerShadowTokens.AmbientBlur, RagentComposerShadowTokens.KeyBlur) * 3 +
+                RagentComposerShadowTokens.OffsetY).toPx()
             paint.alpha = alpha
             drawContext.canvas.saveLayer(Rect(-halo, -halo, size.width + halo, size.height + halo), paint)
             try { drawContent() } finally { drawContext.canvas.restore() }

@@ -1,14 +1,14 @@
-# AgentoC reverse tunnel — public entry (run on the Singapore host).
+# Ragent reverse tunnel — public entry (run on the Singapore host).
 #
 # Install as root:
-#   sudo cp agentoc-tunnel-server.service /etc/systemd/system/
+#   sudo cp ragent-tunnel-server.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now agentoc-tunnel-server
+#   sudo systemctl enable --now ragent-tunnel-server
 #
 # The server binds 127.0.0.1:17890 (loopback only); Caddy reverse-proxies
-# tunnel.example.com to it. Requires /home/agentoc/agentoc-tunnel/
+# tunnel.example.com to it. Requires /home/ragent/ragent-tunnel/
 # with tunnel-server.mjs + tunnel-common.mjs, and the shared token at
-# /home/agentoc/.agentoc-tunnel-token (mode 0600, owner agentoc).
+# /home/ragent/.ragent-tunnel-token (mode 0600, owner ragent).
 
 [Unit]
 Description=Ragent reverse tunnel server (public entry)
@@ -17,14 +17,14 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=agentoc
-WorkingDirectory=/home/agentoc/agentoc-tunnel
-ExecStart=/opt/agentoc/runtime/node tunnel-server.mjs --port 17890 --target 127.0.0.1:7690 --token-file /home/agentoc/.agentoc-tunnel-token
+User=ragent
+WorkingDirectory=/home/ragent/ragent-tunnel
+ExecStart=/opt/ragent/runtime/node tunnel-server.mjs --port 17890 --target 127.0.0.1:7690 --token-file /home/ragent/.ragent-tunnel-token
 Restart=always
 RestartSec=3
 # App logs append to server.log in the working directory (open via
 # StateDirectory-adjacent path); keep hardening minimal so the token file
-# stays readable under /home/agentoc.
+# stays readable under /home/ragent.
 NoNewPrivileges=true
 PrivateTmp=true
 LimitNOFILE=65536

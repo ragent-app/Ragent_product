@@ -76,7 +76,7 @@ import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
 import com.andysagent.ragent.core.designsystem.AgentoBackdropTone
-import com.andysagent.ragent.core.designsystem.agentoComposerShadow
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
 import com.andysagent.ragent.core.designsystem.Ragentolors
 import com.andysagent.ragent.core.designsystem.AgentoDropdownMenu
 import com.andysagent.ragent.core.designsystem.AgentoDropdownMenuItem
@@ -526,7 +526,7 @@ fun OperationGroup(
         else -> AgentoWebGlyph.File
     }
     AgentoFrostedGlassBox(
-        modifier = modifier.fillMaxWidth().agentoComposerShadow(RoundedCornerShape(16.dp)),
+        modifier = modifier.fillMaxWidth().ragentComposerShadow(RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         surface = AgentoGlassSurface.Neutral,
         blurRadius = AgentoFrostedTokens.BlurNavigation,

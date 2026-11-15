@@ -1713,7 +1713,7 @@ fun Modifier.agentoLargeCardShadow(
 )
 
 /** Visual tokens for the floating composer and navigation bar halo. */
-object RagentomposerShadowTokens {
+object RagentComposerShadowTokens {
     // Wide, low-opacity layers produce the diffuse falloff of the reference
     // composer without introducing a Material-style hard edge.
     val AmbientBlur = 22.dp
@@ -1730,15 +1730,15 @@ object RagentomposerShadowTokens {
  * Uses hardware-accelerated Skia Gaussian BlurMaskFilter to provide a completely continuous,
  * smooth gradient falloff from inside to outside without any visible color banding or discrete steps.
  */
-fun Modifier.agentoComposerShadow(
+fun Modifier.ragentComposerShadow(
     shape: Shape = RoundedCornerShape(percent = 50),
-    ambientBlur: Dp = RagentomposerShadowTokens.AmbientBlur,
-    keyBlur: Dp = RagentomposerShadowTokens.KeyBlur,
-    offsetY: Dp = RagentomposerShadowTokens.OffsetY,
-    ambientLightAlpha: Float = RagentomposerShadowTokens.AmbientLightAlpha,
-    keyLightAlpha: Float = RagentomposerShadowTokens.KeyLightAlpha,
-    ambientDarkAlpha: Float = RagentomposerShadowTokens.AmbientDarkAlpha,
-    keyDarkAlpha: Float = RagentomposerShadowTokens.KeyDarkAlpha,
+    ambientBlur: Dp = RagentComposerShadowTokens.AmbientBlur,
+    keyBlur: Dp = RagentComposerShadowTokens.KeyBlur,
+    offsetY: Dp = RagentComposerShadowTokens.OffsetY,
+    ambientLightAlpha: Float = RagentComposerShadowTokens.AmbientLightAlpha,
+    keyLightAlpha: Float = RagentComposerShadowTokens.KeyLightAlpha,
+    ambientDarkAlpha: Float = RagentComposerShadowTokens.AmbientDarkAlpha,
+    keyDarkAlpha: Float = RagentComposerShadowTokens.KeyDarkAlpha,
 ): Modifier = composed {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f

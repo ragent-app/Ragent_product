@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// tunnel-client.mjs — AgentoC reverse tunnel peer (runs on the remote host
+// tunnel-client.mjs — Ragent reverse tunnel peer (runs on the remote host
 // that only has outbound connectivity).
 //
 // Keeps one long-lived HTTPS POST open to the public entry (through Caddy,
 // TLS terminates there), authenticates with the shared token, and for every
 // OPEN frame it receives acts as an HTTP forwarder toward the fixed local
-// target (the AgentoC on 127.0.0.1:7690): it parses the serialized request
+// target (the Ragent on 127.0.0.1:7690): it parses the serialized request
 // head, issues a real outbound HTTP request, and streams the (de-encoded)
 // response body back as DATA frames. WebSocket/upgrade requests are bridged
 // as raw byte streams after the 101 handshake. The client never listens.
 //
 // Usage:
 //   node tunnel-client.mjs --url https://tunnel.example.com/tunnel \
-//     --target 127.0.0.1:7690 --token-file /etc/agentoc/tunnel-token
+//     --target 127.0.0.1:7690 --token-file /etc/ragent/tunnel-token
 
 import http from 'http';
 import http2 from 'http2';
@@ -288,8 +288,8 @@ class TunnelClient {
         // every forward as tunnel-borne; inbound copies are overwritten, never
         // trusted, so the far end cannot fake "direct local access".
         const headers = { ...head.headers };
-        delete headers['x-agentoc-tunnel'];
-        headers['x-agentoc-tunnel'] = '1';
+        delete headers['x-ragent-tunnel'];
+        headers['x-ragent-tunnel'] = '1';
         const options = {
           method: head.method,
           host: client.target.host,

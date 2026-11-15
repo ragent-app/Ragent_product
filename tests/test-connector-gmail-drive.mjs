@@ -25,7 +25,7 @@ writeFileSync(credentialsPath, JSON.stringify({
   web: {
     client_id: 'test-client-id',
     client_secret: 'test-client-secret',
-    redirect_uris: ['https://agentoc.example.test/api/connectors/calendar/google/callback'],
+    redirect_uris: ['https://ragent.example.test/api/connectors/calendar/google/callback'],
   },
 }), 'utf8');
 

@@ -1,4 +1,0 @@
-interface:
-  display_name: "AgentoC Visual UI Review"
-  short_description: "Review AgentoC UI screenshots and iterate safely"
-  default_prompt: "Use $agentoc-visual-ui-review to inspect the requested AgentoC frontend surface, capture representative screenshots, rank the highest-impact visual defects, fix accepted issues, and verify the result."

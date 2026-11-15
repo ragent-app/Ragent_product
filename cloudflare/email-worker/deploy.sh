@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUTBOUND_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/agentoc/agent-mailbox/outbound.json"
-BRIDGE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/agentoc/agent-mailbox/bridge.json"
+OUTBOUND_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/ragent/agent-mailbox/outbound.json"
+BRIDGE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/ragent/agent-mailbox/bridge.json"
 
 cd "$ROOT_DIR"
 

@@ -10,7 +10,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
-  <meta name="agentoc-build" content="{{BUILD_TITLE}}">
+  <meta name="ragent-build" content="{{BUILD_TITLE}}">
   <base href="{{PRODUCT_BASE_HREF}}">
   <link rel="manifest" href="{{MANIFEST_HREF}}" crossorigin="use-credentials">
   <link rel="icon" href="favicon.ico?v={{ASSET_VERSION}}" sizes="any">
@@ -299,13 +299,13 @@
   <script src="chat/product-paths.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
   <script nonce="{{NONCE}}">
     (function initializeMobileInstallGuide() {
-      const buildInfo = window.__AGENTOC_BUILD__ || {};
-      const bootstrap = window.__AGENTOC_BOOTSTRAP__ || {};
+      const buildInfo = window.__RAGENT_BUILD__ || {};
+      const bootstrap = window.__RAGENT_BOOTSTRAP__ || {};
       const installData = bootstrap.mobileInstall || {};
       const handoffToken = typeof installData.handoffToken === 'string' ? installData.handoffToken.trim() : '';
-      const browserSkipKey = 'agentoc.mobileInstall.skipUntil';
+      const browserSkipKey = 'ragent.mobileInstall.skipUntil';
       const browserSkipMs = 7 * 24 * 60 * 60 * 1000;
-      const installabilityReloadKey = 'agentoc.mobileInstall.installabilityReloaded';
+      const installabilityReloadKey = 'ragent.mobileInstall.installabilityReloaded';
       const titleEl = document.getElementById('title');
       const subtitleEl = document.getElementById('subtitle');
       const statusEl = document.getElementById('status');
@@ -327,8 +327,8 @@
       const benefit3CopyEl = document.getElementById('benefit3Copy');
 
       function resolveProductPath(path) {
-        if (typeof window.agentocResolveProductPath === 'function') {
-          return window.agentocResolveProductPath(path);
+        if (typeof window.ragentResolveProductPath === 'function') {
+          return window.ragentResolveProductPath(path);
         }
         return typeof path === 'string' ? path : String(path || '');
       }

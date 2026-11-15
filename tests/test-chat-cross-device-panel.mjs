@@ -85,7 +85,7 @@ try {
     window.open = (...args) => { window.__opened = args; };
     window.__requests = [];
     window.__googleStatus = { enabled: true, bound: false };
-    window.__entryUrl = 'https://office.example.test/agentoc';
+    window.__entryUrl = 'https://office.example.test/ragent';
     window.__entryUrlFailure = 0;
     window.__switchFailure = 0;
     window.__temporaryStatus = 'PENDING';
@@ -106,8 +106,8 @@ try {
           : { entries: [{ deviceAlias: 'Office laptop', email: 'owner@example.test' }] },
         '/api/auth/google/devices': { devices: [
           { deviceId: 'inst_local_001', instanceId: 'inst_local_001', alias: 'Studio laptop', deviceKind: 'computer', instancePublicKey: 'local-key', sub: 'acct_owner_1', boundAt: '2026-08-10T08:00:00.000Z', unboundAt: null, lastSeenAt: '2026-08-10T10:00:00.000Z', source: 'local' },
-          { deviceId: 'inst_remote_001', instanceId: 'inst_remote_001', alias: 'Office laptop', deviceKind: 'computer', instancePublicKey: 'remote-key', endpoint: 'https://office.example.test/agentoc', sub: 'acct_owner_1', boundAt: '2026-08-10T07:00:00.000Z', unboundAt: null, lastSeenAt: '2026-08-10T09:30:00.000Z', source: 'remote' },
-          { deviceId: 'inst_untrusted_001', instanceId: 'inst_untrusted_001', alias: 'Home laptop', deviceKind: 'computer', instancePublicKey: 'untrusted-key', endpoint: 'https://home.example.test/agentoc', sub: 'acct_owner_1', boundAt: '2026-08-10T06:30:00.000Z', unboundAt: null, lastSeenAt: '2026-08-10T09:00:00.000Z', source: 'remote' },
+          { deviceId: 'inst_remote_001', instanceId: 'inst_remote_001', alias: 'Office laptop', deviceKind: 'computer', instancePublicKey: 'remote-key', endpoint: 'https://office.example.test/ragent', sub: 'acct_owner_1', boundAt: '2026-08-10T07:00:00.000Z', unboundAt: null, lastSeenAt: '2026-08-10T09:30:00.000Z', source: 'remote' },
+          { deviceId: 'inst_untrusted_001', instanceId: 'inst_untrusted_001', alias: 'Home laptop', deviceKind: 'computer', instancePublicKey: 'untrusted-key', endpoint: 'https://home.example.test/ragent', sub: 'acct_owner_1', boundAt: '2026-08-10T06:30:00.000Z', unboundAt: null, lastSeenAt: '2026-08-10T09:00:00.000Z', source: 'remote' },
           { deviceId: 'adev_phone_001', instanceId: 'adev_phone_001', alias: 'Pixel', deviceKind: 'phone', sub: 'acct_owner_1', boundAt: '2026-08-10T06:00:00.000Z', unboundAt: null, lastSeenAt: '2026-08-10T09:00:00.000Z', source: 'remote' },
           ...Array.from({ length: 6 }, (_, i) => ({ deviceId: `adev_more_${i}`, alias: 'Pixel', deviceKind: 'phone', boundAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z' })),
           { deviceId: 'adev_unbound', alias: 'Old phone', deviceKind: 'phone', unboundAt: '2026-08-02T00:00:00.000Z' },
@@ -118,7 +118,7 @@ try {
           { id: 'rdev_phone', deviceName: 'Phone', platform: 'Android', revokedAt: '2026-08-01T09:00:00Z' },
         ] },
         '/api/entry-switch/health': { reachable: true, statusCode: 200 },
-        '/api/entry-switch/invite': { jumpUrl: 'https://office.example.test/agentoc/?join=fixture' },
+        '/api/entry-switch/invite': { jumpUrl: 'https://office.example.test/ragent/?join=fixture' },
         '/api/device-pairing/invitations': { invitation: {
           id: 'rpinv_protocol_test_0001', accountHandoff: window.__accountHandoff === true,
           pairingUri: 'ragent://pair?v=3&i=inst_local_001&e=https%3A%2F%2Fcomputer.example.test&t=rpi_0123456789abcdef0123456789abcdef&x=2099-08-09T09%3A02%3A00.000Z', shortCode: 'AB12CD34', expiresAt: '2099-08-09T09:02:00Z',
@@ -243,7 +243,7 @@ try {
   assert.equal(await page.getByText('Switch unavailable until this instance trusts the target.').count(), 1, 'untrusted account computer should explain why switching is unavailable');
   assert.equal(await page.evaluate(() => window.__requests.some((request) => request.path === '/api/auth/google/devices')), true, 'Devices tab should query the Accounts directory when signed in');
   assert.equal(await page.evaluate(() => window.__requests.some((request) => request.path === '/api/device-pairing/devices')), true, 'Devices tab should query the local ledger for switch capability');
-  assert.equal(await page.getByText('https://office.example.test/agentoc').count(), 1, 'the account endpoint should preserve its path');
+  assert.equal(await page.getByText('https://office.example.test/ragent').count(), 1, 'the account endpoint should preserve its path');
 
   await page.evaluate(() => { window.__switchFailure = 409; });
   await page.getByRole('button', { name: 'Switch' }).click();
@@ -260,11 +260,11 @@ try {
   assert.equal(await page.getByText('Enter a valid http(s) entry URL.').count(), 1, 'invalid entry URL should be rejected before the request');
   assert.equal(await page.evaluate(() => window.__requests.some((request) => request.path.endsWith('/entry-url'))), false, 'invalid entry URL must not be sent');
 
-  await entryInput.fill('https://new-office.example.test/agentoc?ignored=query#fragment');
+  await entryInput.fill('https://new-office.example.test/ragent?ignored=query#fragment');
   await page.getByRole('button', { name: 'Save' }).click();
   await page.getByText('Device entry URL saved.').waitFor();
   const saveRequest = await page.evaluate(() => window.__requests.find((request) => request.path.endsWith('/entry-url')));
-  assert.deepEqual(saveRequest.body, { entryUrl: 'https://new-office.example.test/agentoc' }, 'save should normalize query and fragment before sending');
+  assert.deepEqual(saveRequest.body, { entryUrl: 'https://new-office.example.test/ragent' }, 'save should normalize query and fragment before sending');
 
   await page.getByRole('button', { name: 'Edit entry URL' }).click();
   await page.getByRole('button', { name: 'Clear' }).click();
@@ -274,7 +274,7 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Switch' }).count(), 0, 'clearing the local URL should disable entry switching');
 
   await page.getByRole('button', { name: 'Set entry URL' }).click();
-  await page.locator('#crossDeviceEntryUrl-rdev_remote_001').fill('https://office.example.test/agentoc');
+  await page.locator('#crossDeviceEntryUrl-rdev_remote_001').fill('https://office.example.test/ragent');
   await page.evaluate(() => { window.__entryUrlFailure = 403; });
   await page.getByRole('button', { name: 'Save' }).click();
   await page.getByText('Only the owner can update device entry URLs.').waitFor();

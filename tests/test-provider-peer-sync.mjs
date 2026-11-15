@@ -60,14 +60,14 @@ const snapshot = {
 };
 
 const result = await syncProviderSnapshotToPeer({
-  targetEndpoint: 'https://computer.example.test/agentoc',
+  targetEndpoint: 'https://computer.example.test/ragent',
   targetInstanceId: targetIdentity.instanceId,
   snapshot,
   fetchImpl: async (url, options) => {
     calls.push({ url: String(url), options });
     const request = JSON.parse(options.body);
     if (calls.length === 1) {
-      assert.equal(calls[0].url, 'https://computer.example.test/agentoc/api/provider-sync/handshake');
+      assert.equal(calls[0].url, 'https://computer.example.test/ragent/api/provider-sync/handshake');
       const issuedAt = new Date().toISOString();
       const fields = { requestId: request.sourceProof.requestId, targetInstanceId: sourceIdentity.instanceId,
         issuedAt, audience: 'ragent-provider-sync', syncKeyFingerprint: targetKey.fingerprint };
@@ -84,7 +84,7 @@ const result = await syncProviderSnapshotToPeer({
         sourceInstanceId: targetIdentity.instanceId, targetInstanceId: sourceIdentity.instanceId,
         sourcePublicKey: targetIdentity.publicKey }), { status: 200 });
     }
-    assert.equal(calls[2].url, 'https://computer.example.test/agentoc/api/provider-sync/apply');
+    assert.equal(calls[2].url, 'https://computer.example.test/ragent/api/provider-sync/apply');
     assert.equal(Object.hasOwn(request, 'sourceSyncPublicKey'), false);
     const decrypted = decryptProviderSyncEnvelope({
       envelope: request.envelope,

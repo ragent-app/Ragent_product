@@ -36,7 +36,7 @@ Configured in `wrangler.example.jsonc` and then copied locally to `wrangler.json
 
 Do not set `destination_address` or `allowed_destination_addresses` unless you intentionally want to restrict outbound recipients further. An unrestricted binding allows sending to any Email Routing destination address verified on this Cloudflare account; it does not bypass Cloudflare's verified-destination requirement.
 
-If Ragent also needs to reach arbitrary external recipients, configure a local outbound provider in `~/.config/agentoc/agent-mailbox/outbound.json` such as `resend_api` for a custom-domain sender or `apple_mail` for local fallback testing; Cloudflare's platform-level verified-destination rule itself cannot be disabled.
+If Ragent also needs to reach arbitrary external recipients, configure a local outbound provider in `~/.config/ragent/agent-mailbox/outbound.json` such as `resend_api` for a custom-domain sender or `apple_mail` for local fallback testing; Cloudflare's platform-level verified-destination rule itself cannot be disabled.
 
 See [Cloudflare's send binding documentation](https://developers.cloudflare.com/email-service/configuration/send-bindings/) for current restrictions and prerequisites.
 

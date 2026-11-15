@@ -22,7 +22,7 @@ a manifest.json under the output directory.
              root or pass this explicitly — running from skills/.../scripts
              without it resolves tests/ against the wrong directory.
   --output   screenshot output directory (default: a timestamped dir under
-             /var/lib/agentoc/workspace/visual-ui-reviews)`);
+             /var/lib/ragent/workspace/visual-ui-reviews)`);
   process.exit(0);
 }
 
@@ -37,7 +37,7 @@ const repoRoot = resolve(option('--repo', process.cwd()));
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outputRoot = resolve(option(
   '--output',
-  join('/var/lib/agentoc/workspace/visual-ui-reviews', stamp),
+  join('/var/lib/ragent/workspace/visual-ui-reviews', stamp),
 ));
 mkdirSync(outputRoot, { recursive: true });
 
@@ -115,7 +115,7 @@ for (const name of selectedVisuals) {
   const visualCase = visualCases[name];
   const screenshotDir = join(outputRoot, visualCase.outputDir);
   mkdirSync(screenshotDir, { recursive: true });
-  ok = runScript(visualCase.script, { AGENTOC_VISUAL_OUTPUT_DIR: screenshotDir }) && ok;
+  ok = runScript(visualCase.script, { RAGENT_VISUAL_OUTPUT_DIR: screenshotDir }) && ok;
 }
 
 for (const script of selectedChecks) {

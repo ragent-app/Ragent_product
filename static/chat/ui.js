@@ -214,12 +214,12 @@ async function copyPlanProposalText(planText, button) {
 
 function setPendingComposerPlanAction(action) {
   const normalized = String(action || "").trim().toLowerCase();
-  globalThis.__agentoCPendingComposerPlanAction = ["revise", "execute"].includes(normalized) ? normalized : "";
+  globalThis.__ragentPendingComposerPlanAction = ["revise", "execute"].includes(normalized) ? normalized : "";
 }
 
 function consumePendingComposerPlanAction() {
-  const action = globalThis.__agentoCPendingComposerPlanAction || "";
-  globalThis.__agentoCPendingComposerPlanAction = "";
+  const action = globalThis.__ragentPendingComposerPlanAction || "";
+  globalThis.__ragentPendingComposerPlanAction = "";
   return action;
 }
 
@@ -270,12 +270,12 @@ function createPlanCopyButton(planText) {
 
 function setPendingComposerPlanId(planId) {
   const normalized = String(planId || "").trim();
-  globalThis.__agentoCPendingComposerPlanId = normalized;
+  globalThis.__ragentPendingComposerPlanId = normalized;
 }
 
 function consumePendingComposerPlanId() {
-  const planId = globalThis.__agentoCPendingComposerPlanId || "";
-  globalThis.__agentoCPendingComposerPlanId = "";
+  const planId = globalThis.__ragentPendingComposerPlanId || "";
+  globalThis.__ragentPendingComposerPlanId = "";
   return planId;
 }
 

@@ -63,7 +63,7 @@ import androidx.compose.ui.zIndex
 import com.andysagent.ragent.core.agentui.AgentRunStatus
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
-import com.andysagent.ragent.core.designsystem.agentoComposerShadow
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
 import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
 import com.andysagent.ragent.core.designsystem.agentoPressScale
@@ -180,7 +180,7 @@ internal fun RunDetailsIsland(
                     .testTag("run-island-shell")
                     // Follow the same continuously morphing outline as the glass.
                     // Keep the halo outside the content clip, as in the composer.
-                    .agentoComposerShadow(shape = RoundedCornerShape(cornerRadius))
+                    .ragentComposerShadow(shape = RoundedCornerShape(cornerRadius))
                     // Expanded card content cannot accidentally open details.
                     .islandTapShield()
                     .onGloballyPositioned { coords ->

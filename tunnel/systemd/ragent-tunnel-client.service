@@ -1,0 +1,30 @@
+# Ragent reverse tunnel — remote peer (run on the NAT'd host, e.g. ragent).
+#
+# Install as root on the remote host:
+#   sudo cp ragent-tunnel-client.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ragent-tunnel-client
+#
+# The client only makes one outbound HTTPS connection (TLS 443, ALPN h2);
+# it never listens. Requires /home/ragent/ragent-tunnel/ with
+# tunnel-client.mjs + tunnel-common.mjs, and the shared token at
+# /home/ragent/.ragent-tunnel-token (mode 0600, owner ragent).
+
+[Unit]
+Description=Ragent reverse tunnel client (remote peer)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ragent
+WorkingDirectory=/home/ragent/ragent-tunnel
+ExecStart=/usr/bin/node tunnel-client.mjs --url https://tunnel.example.com/tunnel --target 127.0.0.1:7690 --token-file /home/ragent/.ragent-tunnel-token
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

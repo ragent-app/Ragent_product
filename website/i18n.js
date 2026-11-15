@@ -1,7 +1,7 @@
 (() => {
   const languages = {'en':'English','zh-CN':'简体中文','zh-TW':'繁體中文','ja':'日本語','ko':'한국어','fr':'Français','es':'Español'};
   const initial = () => {
-    try { const saved = localStorage.getItem('agentoc-site-language'); if (languages[saved]) return saved; } catch (_) {}
+    try { const saved = localStorage.getItem('ragent-site-language'); if (languages[saved]) return saved; } catch (_) {}
     const tag = (navigator.languages?.[0] || navigator.language || 'en').toLowerCase();
     if (tag.startsWith('zh')) return /tw|hk|mo|hant/.test(tag) ? 'zh-TW' : 'zh-CN';
     return languages[tag.split('-')[0]] ? tag.split('-')[0] : 'en';
@@ -57,7 +57,7 @@
     menu.querySelectorAll('button').forEach(option => option.setAttribute('aria-checked', String(option.dataset.language === current)));
     document.dispatchEvent(new Event('site-language-change'));
   }
-  menu.addEventListener('click', event => { const option = event.target.closest('button[data-language]'); if (!option) return; current = option.dataset.language; try { localStorage.setItem('agentoc-site-language', current); } catch (_) {} closeMenu(); apply(); button.focus(); });
+  menu.addEventListener('click', event => { const option = event.target.closest('button[data-language]'); if (!option) return; current = option.dataset.language; try { localStorage.setItem('ragent-site-language', current); } catch (_) {} closeMenu(); apply(); button.focus(); });
   label.textContent = languages[current];
   fetch('translations.json?v=crossplatform-20261113').then(response => { if (!response.ok) throw Error('translation unavailable'); return response.json(); }).then(data => { dictionary = data; apply(); }).catch(() => { document.documentElement.lang = 'en'; });
 })();

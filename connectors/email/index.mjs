@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Email Connector — bridges Cloudflare Email Routing with AgentoC instances.
+ * Email Connector — bridges Cloudflare Email Routing with Ragent instances.
  *
  * Inbound:  Cloudflare webhook → normalize → dispatch to instance
  * Outbound: Instance reply callback → send via Cloudflare Worker

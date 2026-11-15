@@ -1,5 +1,5 @@
 #!/bin/bash
-# Restart AgentoC services.
+# Restart Ragent services.
 # Usage:
 #   restart.sh          — restart all services
 #   restart.sh chat     — restart owner + all guest chat surfaces
@@ -106,16 +106,16 @@ linux_user_unit_exists() {
 }
 
 linux_resolve_owner_chat_unit() {
-  if linux_system_unit_exists "agentoc"; then
-    echo "system:agentoc"
+  if linux_system_unit_exists "ragent"; then
+    echo "system:ragent"
     return 0
   fi
-  if linux_system_unit_exists "agentoc-promoted"; then
-    echo "system:agentoc-promoted"
+  if linux_system_unit_exists "ragent-promoted"; then
+    echo "system:ragent-promoted"
     return 0
   fi
-  if linux_user_unit_exists "agentoc-chat"; then
-    echo "user:agentoc-chat"
+  if linux_user_unit_exists "ragent-chat"; then
+    echo "user:ragent-chat"
     return 0
   fi
   return 1
@@ -157,13 +157,13 @@ restart_linux_systemctl() {
 # see the same runtime the service was launched with.
 load_linux_service_runtime_environment() {
   local service_pid service_environment entry
-  service_pid="$(systemctl show agentoc.service -p MainPID --value 2>/dev/null || true)"
+  service_pid="$(systemctl show ragent.service -p MainPID --value 2>/dev/null || true)"
   [[ "$service_pid" =~ ^[0-9]+$ ]] || return 0
   service_environment="/proc/${service_pid}/environ"
   [[ -r "$service_environment" ]] || return 0
   while IFS= read -r entry; do
     case "$entry" in
-      AGENTOC_CC_SWITCH_COMMAND=*|AGENTOC_CODEX_PROXY_PORT=*)
+      RAGENT_CC_SWITCH_COMMAND=*|RAGENT_CODEX_PROXY_PORT=*)
         export "$entry"
         ;;
     esac
@@ -185,9 +185,9 @@ restart_linux_provider_runtime() {
   fi
 
   local units=(
-    agentoc-privileged-executor
-    agentoc-runner-lifecycle
-    agentoc-runner-supervisor
+    ragent-privileged-executor
+    ragent-runner-lifecycle
+    ragent-runner-supervisor
   )
   local existing=()
   local unit
@@ -213,9 +213,9 @@ verify_linux_provider_runtime() {
     node "$provider_script" --verify || return 1
   fi
   local units=(
-    agentoc-privileged-executor
-    agentoc-runner-lifecycle
-    agentoc-runner-supervisor
+    ragent-privileged-executor
+    ragent-runner-lifecycle
+    ragent-runner-supervisor
   )
   local unit
   for unit in "${units[@]}"; do
@@ -245,7 +245,7 @@ restart_linux_chat_surfaces() {
     local guest_units=()
     while IFS= read -r unit; do
       [[ -n "$unit" ]] && guest_units+=("$unit")
-    done < <(systemctl list-unit-files 'agentoc-guest@*.service' --no-legend --plain 2>/dev/null | awk '{print $1}' | sed 's/\.service$//')
+    done < <(systemctl list-unit-files 'ragent-guest@*.service' --no-legend --plain 2>/dev/null | awk '{print $1}' | sed 's/\.service$//')
 
     if [[ "${#guest_units[@]}" -gt 0 ]]; then
       echo "  guest chat surfaces: restarting ${#guest_units[@]} services"
@@ -271,29 +271,29 @@ restart_service() {
 }
 
 restart_linux_tunnel() {
-  if linux_system_unit_exists "agentoc-quick-tunnel"; then
-    restart_linux_unit "system" "agentoc-quick-tunnel" "cloudflared quick tunnel"
+  if linux_system_unit_exists "ragent-quick-tunnel"; then
+    restart_linux_unit "system" "ragent-quick-tunnel" "cloudflared quick tunnel"
     return
   fi
-  if linux_system_unit_exists "agentoc-tunnel-client"; then
-    restart_linux_unit "system" "agentoc-tunnel-client" "AgentoC tunnel client"
+  if linux_system_unit_exists "ragent-tunnel-client"; then
+    restart_linux_unit "system" "ragent-tunnel-client" "Ragent tunnel client"
     return
   fi
-  restart_service "cloudflared" "com.cloudflared.tunnel" "agentoc-tunnel"
+  restart_service "cloudflared" "com.cloudflared.tunnel" "ragent-tunnel"
 }
 
 print_quick_tunnel_url() {
-  if [[ "$OS_TYPE" != "linux" ]] || ! linux_system_unit_exists "agentoc-quick-tunnel"; then
+  if [[ "$OS_TYPE" != "linux" ]] || ! linux_system_unit_exists "ragent-quick-tunnel"; then
     return
   fi
   sleep 5
   local tunnel_url
   local access_token
-  tunnel_url="$(grep -E '^AGENTOC_PUBLIC_BASE_URL=' /etc/agentoc/agentoc.env 2>/dev/null | tail -1 | cut -d= -f2-)"
+  tunnel_url="$(grep -E '^RAGENT_PUBLIC_BASE_URL=' /etc/ragent/ragent.env 2>/dev/null | tail -1 | cut -d= -f2-)"
   if [[ -z "$tunnel_url" ]]; then
-    tunnel_url="$(grep -Eho 'https://[^[:space:]]+trycloudflare\.com' /var/log/agentoc/cloudflared.log /var/log/agentoc/cloudflared.error.log 2>/dev/null | tail -1 || true)"
+    tunnel_url="$(grep -Eho 'https://[^[:space:]]+trycloudflare\.com' /var/log/ragent/cloudflared.log /var/log/ragent/cloudflared.error.log 2>/dev/null | tail -1 || true)"
   fi
-  access_token="$(node -e 'try { process.stdout.write(JSON.parse(require("fs").readFileSync(process.env.HOME + "/.config/agentoc/auth.json", "utf8")).token || "") } catch {}' 2>/dev/null)"
+  access_token="$(node -e 'try { process.stdout.write(JSON.parse(require("fs").readFileSync(process.env.HOME + "/.config/ragent/auth.json", "utf8")).token || "") } catch {}' 2>/dev/null)"
   if [[ -n "$tunnel_url" && -n "$access_token" ]]; then
     echo ""
     echo "Current access URL:"
@@ -314,7 +314,7 @@ case "$SERVICE" in
   tunnel)
     echo "Restarting cloudflared..."
     if [[ "$OS_TYPE" == "macos" ]]; then
-      restart_service "cloudflared" "com.cloudflared.tunnel" "agentoc-tunnel"
+      restart_service "cloudflared" "com.cloudflared.tunnel" "ragent-tunnel"
     else
       restart_linux_tunnel
       print_quick_tunnel_url
@@ -322,14 +322,14 @@ case "$SERVICE" in
     ;;
   bridge)
     echo "Restarting prefix bridge..."
-    restart_service "prefix bridge" "com.agentoc.natapp.dual-proxy" "agentoc-prefix-bridge"
+    restart_service "prefix bridge" "com.ragent.natapp.dual-proxy" "ragent-prefix-bridge"
     ;;
   all)
     begin_restart_drain
     echo "Restarting all services..."
     if [[ "$OS_TYPE" == "macos" ]]; then
       restart_all_chat_launchd
-      restart_service "cloudflared" "com.cloudflared.tunnel" "agentoc-tunnel"
+      restart_service "cloudflared" "com.cloudflared.tunnel" "ragent-tunnel"
     else
       restart_linux_chat_surfaces
       restart_linux_tunnel

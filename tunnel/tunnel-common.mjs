@@ -1,4 +1,4 @@
-// tunnel-common.mjs — AgentoC reverse tunnel shared frame protocol.
+// tunnel-common.mjs — Ragent reverse tunnel shared frame protocol.
 //
 // The tunnel carries many logical streams over one long-lived HTTPS POST
 // (request body + response body run duplex over HTTP/1.1 chunked). Every

@@ -295,7 +295,7 @@
       resourceCard('Accounts API', serviceMetrics['ragent-accounts'], (sampleServices['ragent-accounts'] || sampleServices['ragent-accounts']), serviceMetrics['ragent-accounts']),
       resourceCard('TURN 凭据 broker', serviceMetrics['turn-credential-broker'], sampleServices['turn-credential-broker'], serviceMetrics['turn-credential-broker']),
       resourceCard('P2P 信令服务', serviceMetrics['ragent-signaling'], (sampleServices['ragent-signaling'] || sampleServices['ragent-signaling']), serviceMetrics['ragent-signaling']),
-      resourceCard('反向隧道服务', serviceMetrics['ragent-tunnel-server'], (sampleServices['ragent-tunnel-server'] || sampleServices['ragent-tunnel-server']), serviceMetrics['ragent-tunnel-server']),
+      resourceCard('反向隧道服务', serviceMetrics['ragent-tunnel-server'], sampleServices['ragent-tunnel-server'], serviceMetrics['ragent-tunnel-server']),
       resourceCard('Caddy HTTPS 入口', platform.caddy, sampleServices.caddy, platform.caddy),
       resourceCard('PostgreSQL', platform.postgres, sampleServices.postgres, platform.postgres),
       ...(platform.legacyConnectivityGateway?.active || platform.legacyConnectivityGateway?.fragmentPath

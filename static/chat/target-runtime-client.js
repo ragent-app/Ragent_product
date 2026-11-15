@@ -119,13 +119,13 @@
   }
 
   function pathnameOf(url) {
-    try { return new URL(String(url || ""), root.location?.href || "https://agentoc.invalid/").pathname; } catch { return String(url || ""); }
+    try { return new URL(String(url || ""), root.location?.href || "https://ragent.invalid/").pathname; } catch { return String(url || ""); }
   }
 
   function absolutePath(url) {
     const base = /^https?:/i.test(String(root.location?.href || ""))
       ? root.location.href
-      : "https://agentoc.invalid/";
+      : "https://ragent.invalid/";
     const parsed = new URL(String(url || ""), base);
     return `${parsed.pathname}${parsed.search}`;
   }

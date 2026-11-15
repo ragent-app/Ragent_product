@@ -1,5 +1,5 @@
 {
-  "name": "agentoc-cloudflare-email-worker",
+  "name": "ragent-cloudflare-email-worker",
   "private": true,
   "type": "module",
   "scripts": {

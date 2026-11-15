@@ -15,9 +15,9 @@
       "path": "skills/web-design-guidelines"
     },
     {
-      "name": "agentoc-visual-ui-review",
+      "name": "ragent-visual-ui-review",
       "repository": "local",
-      "path": "skills/agentoc-visual-ui-review"
+      "path": "skills/ragent-visual-ui-review"
     }
   ]
 }

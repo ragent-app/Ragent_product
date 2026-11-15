@@ -191,14 +191,14 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println(`agentoc-helper
+	fmt.Println(`ragent-helper
 
 Usage:
-  agentoc-helper pair --server <url> --code <pairing-code> [--root alias=path ...]
-  agentoc-helper bootstrap [--file <path> | --server <url> --token <bootstrap-token>] [--root alias=path ...]
-  agentoc-helper serve
-  agentoc-helper run [--file <path>] [--root alias=path ...]
-  agentoc-helper doctor
+  ragent-helper pair --server <url> --code <pairing-code> [--root alias=path ...]
+  ragent-helper bootstrap [--file <path> | --server <url> --token <bootstrap-token>] [--root alias=path ...]
+  ragent-helper serve
+  ragent-helper run [--file <path>] [--root alias=path ...]
+  ragent-helper doctor
 
 Notes:
   - pair stores config under the platform user config directory.
@@ -512,7 +512,7 @@ func resolveHelperStateDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "AgentoCHelper"), nil
+	return filepath.Join(root, "RagentHelper"), nil
 }
 
 func resolveManagedBinaryPath() (string, error) {
@@ -520,7 +520,7 @@ func resolveManagedBinaryPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	filename := fmt.Sprintf("agentoc-helper-%s-%s", runtime.GOOS, runtime.GOARCH)
+	filename := fmt.Sprintf("ragent-helper-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		filename += ".exe"
 	}

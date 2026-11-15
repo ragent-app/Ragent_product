@@ -48,7 +48,7 @@ const verifiedContext = {
   approvalPolicy: 'on-request',
   approvalsReviewer: 'user',
   sandbox: { type: 'dangerFullAccess' },
-  cwd: 'g:/agentoC/WORKSPACE',
+  cwd: 'g:/ragent/WORKSPACE',
   runtimeWorkspaceRoots: ['G:\\Ragent\\Workspace'],
 };
 assert.deepEqual(validateCodexAppServerApprovalContext({

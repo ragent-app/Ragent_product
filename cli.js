@@ -155,8 +155,8 @@ switch (command) {
         index += 1;
       }
     }
-    if (process.env.AGENTOC_RESTART_EXCLUDE_SESSION) {
-      excludeSessionIds.push(process.env.AGENTOC_RESTART_EXCLUDE_SESSION);
+    if (process.env.RAGENT_RESTART_EXCLUDE_SESSION) {
+      excludeSessionIds.push(process.env.RAGENT_RESTART_EXCLUDE_SESSION);
     }
     const ttlIndex = args.indexOf('--ttl-ms');
     const ttlMs = ttlIndex >= 0 ? Number.parseInt(args[ttlIndex + 1] || '', 10) : undefined;
@@ -277,7 +277,7 @@ switch (command) {
     break;
 
   case 'release': {
-    console.error('`agentoc release` has been removed. Ragent now runs the current source tree after restart. Use `ragent restart chat` for the owner surface.');
+    console.error('`ragent release` has been removed. Ragent now runs the current source tree after restart. Use `ragent restart chat` for the owner surface.');
     process.exit(1);
     break;
   }

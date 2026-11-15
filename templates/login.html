@@ -10,7 +10,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f8f8fa" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#161618" media="(prefers-color-scheme: dark)">
-  <meta name="agentoc-build" content="{{BUILD_TITLE}}">
+  <meta name="ragent-build" content="{{BUILD_TITLE}}">
   <base href="{{PRODUCT_BASE_HREF}}">
   <link rel="manifest" href="manifest.json?v={{ASSET_VERSION}}" crossorigin="use-credentials">
   <link rel="icon" href="favicon.ico?v={{ASSET_VERSION}}" sizes="any">
@@ -238,7 +238,7 @@
     var pwForm = document.getElementById('pw-form');
     var toggleLink = document.getElementById('toggle-link');
     var usePw = '{{MODE}}' === 'pw';
-    var t = window.agentocT || function(key) { return key; };
+    var t = window.ragentT || function(key) { return key; };
 
     var joinError = document.getElementById('join-error');
     try {

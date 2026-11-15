@@ -9,7 +9,7 @@
 // tests/test-chat-product-paths-core.mjs).
 
 (function attachRagentProductPathsCore(root) {
-  const FALLBACK_ORIGIN = "https://agentoc.invalid";
+  const FALLBACK_ORIGIN = "https://ragent.invalid";
 
   const TERMINAL_MARKERS = Object.freeze([
     Object.freeze(["m", "install"]),

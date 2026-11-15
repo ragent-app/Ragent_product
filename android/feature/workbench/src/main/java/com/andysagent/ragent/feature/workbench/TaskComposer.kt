@@ -82,7 +82,7 @@ import com.andysagent.ragent.core.designsystem.AgentoWebIcon
 import com.andysagent.ragent.core.designsystem.RagentSizes
 import com.andysagent.ragent.core.designsystem.RagentTextStyles
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
-import com.andysagent.ragent.core.designsystem.agentoComposerShadow
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
 import com.andysagent.ragent.core.designsystem.agentoPressScale
 import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.ragent.core.model.RuntimeCatalog
@@ -196,7 +196,7 @@ fun TaskComposer(
         modifier = modifier
             .fillMaxWidth()
             .testTag("task-composer")
-            .agentoComposerShadow(shape = composerShape)
+            .ragentComposerShadow(shape = composerShape)
             .onGloballyPositioned { coordinates ->
                 val pos = coordinates.positionInRoot()
                 composerBackdropOffset = IntOffset(-pos.x.roundToInt(), -pos.y.roundToInt())

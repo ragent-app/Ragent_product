@@ -114,7 +114,7 @@ class ProtocolCodecTest {
     fun parsesDeviceP2PCandidateFromPairingResponse() {
         val json = """{
             "instanceId":"rli_p2p",
-            "endpoint":"https://agentoc.example.test",
+            "endpoint":"https://ragent.example.test",
             "device":{"id":"rdev_p2p","deviceName":"Pixel","platform":"android"},
             "credential":{"type":"Bearer","token":"rda_test"},
             "deviceP2P":{"roomId":"room_123","secret":"secret_456","signalingEndpoint":"https://signal.example.test/"}

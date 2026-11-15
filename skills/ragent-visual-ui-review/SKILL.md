@@ -1,5 +1,5 @@
 ---
-name: agentoc-visual-ui-review
+name: ragent-visual-ui-review
 description: Review and improve Ragent frontend surfaces through synthetic Playwright screenshots, project-specific visual rules, focused browser checks, and bounded fix-and-confirm passes. Use for changes to static/chat CSS or JavaScript, mobile layout, composer, messages, sidebar, Run Sheet, Workbench, readers, menus, sheets, icons, glass surfaces, responsive behavior, or any request to polish, critique, audit, harden, or visually verify Ragent UI.
 ---
 
@@ -30,18 +30,18 @@ Use this workflow to turn frontend review into evidence and implementation, not 
 Run the bundled fixture command before judging a material UI change:
 
 ```bash
-node skills/agentoc-visual-ui-review/scripts/capture-fixtures.mjs --target all --output <task-output-directory>
+node skills/ragent-visual-ui-review/scripts/capture-fixtures.mjs --target all --output <task-output-directory>
 ```
 
 Use a narrower target when the change is isolated:
 
 ```bash
-node skills/agentoc-visual-ui-review/scripts/capture-fixtures.mjs --target sidebar
-node skills/agentoc-visual-ui-review/scripts/capture-fixtures.mjs --target activity
-node skills/agentoc-visual-ui-review/scripts/capture-fixtures.mjs --target mobile
+node skills/ragent-visual-ui-review/scripts/capture-fixtures.mjs --target sidebar
+node skills/ragent-visual-ui-review/scripts/capture-fixtures.mjs --target activity
+node skills/ragent-visual-ui-review/scripts/capture-fixtures.mjs --target mobile
 ```
 
-Choose an output directory in the permitted task workspace. On the original Linux deployment, omitting `--output` defaults to `/var/lib/agentoc/workspace/visual-ui-reviews/`; that path is not portable.
+Choose an output directory in the permitted task workspace. On the original Linux deployment, omitting `--output` defaults to `/var/lib/ragent/workspace/visual-ui-reviews/`; that path is not portable.
 
 Use synthetic fixtures by default. Do not capture real session content, credentials,
 private files, provider authentication, or user messages. Use the live application only

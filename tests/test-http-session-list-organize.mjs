@@ -252,12 +252,12 @@ const port = randomPort();
 const server = await startServer({ home, port });
 
 try {
-  const agentoCSession = await request(port, 'POST', '/api/sessions', {
+  const ragentSession = await request(port, 'POST', '/api/sessions', {
     folder: repoRoot,
     tool: 'fake-codex',
     name: 'Ragent workflow cleanup',
   });
-  assert.equal(agentoCSession.status, 201, 'first session should be created');
+  assert.equal(ragentSession.status, 201, 'first session should be created');
 
   const quartzSession = await request(port, 'POST', '/api/sessions', {
     folder: repoRoot,
@@ -283,7 +283,7 @@ try {
   const organize = await request(port, 'POST', `/api/sessions/${organizerSession.json.session.id}/messages`, {
     text: buildSessionListOrganizerTask([
       {
-        id: agentoCSession.json.session.id,
+        id: ragentSession.json.session.id,
         title: 'Ragent workflow cleanup',
         brief: 'Clean up the session grouping and structure.',
         existingGroup: '',
@@ -334,10 +334,10 @@ try {
   assert.equal(listed.status, 200, 'session list should remain available after organizing');
   assert.equal((listed.json.sessions || []).length, 2, 'hidden organizer session should not appear in the normal list');
 
-  const agentoCEntry = listed.json.sessions.find((entry) => entry.id === agentoCSession.json.session.id);
+  const ragentEntry = listed.json.sessions.find((entry) => entry.id === ragentSession.json.session.id);
   const quartzEntry = listed.json.sessions.find((entry) => entry.id === quartzSession.json.session.id);
-  assert.equal(agentoCEntry?.group, 'Ragent', 'organizer should patch the Ragent group');
-  assert.equal(agentoCEntry?.sidebarOrder, 2, 'organizer should patch the Ragent sidebar order');
+  assert.equal(ragentEntry?.group, 'Ragent', 'organizer should patch the Ragent group');
+  assert.equal(ragentEntry?.sidebarOrder, 2, 'organizer should patch the Ragent sidebar order');
   assert.equal(quartzEntry?.group, 'Quartz', 'organizer should patch the Quartz group');
   assert.equal(quartzEntry?.sidebarOrder, 1, 'organizer should patch the Quartz sidebar order');
 

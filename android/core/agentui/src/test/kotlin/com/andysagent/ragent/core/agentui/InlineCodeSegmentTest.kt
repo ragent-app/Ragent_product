@@ -142,7 +142,7 @@ class InlineCodeSegmentTest {
     @Test
     fun `long url fragments into continuous per-line boxes`() {
         assertFragmentationInvariants(
-            "https://agentoc.example.com/projects/pinggu-workspace/sessions/1699cfb2549ea7bad55089c68a5e5dee/events?offset=1280&filter=tool_calls",
+            "https://ragent.example.com/projects/pinggu-workspace/sessions/1699cfb2549ea7bad55089c68a5e5dee/events?offset=1280&filter=tool_calls",
             expectedMinLines = 2,
         )
     }

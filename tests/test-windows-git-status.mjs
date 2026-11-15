@@ -48,7 +48,7 @@ try {
   const run = (cwd, args) => execFileSync(git, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const init = cwd => {
     run(cwd, ['init', '-q']); run(cwd, ['config', 'user.name', 'Ragent Fixture']);
-    run(cwd, ['config', 'user.email', 'fixture@agentoc.local']);
+    run(cwd, ['config', 'user.email', 'fixture@ragent.local']);
   };
   init(subSource);
   writeFileSync(path.join(subSource, 'tracked.txt'), 'fixture');

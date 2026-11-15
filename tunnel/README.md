@@ -75,11 +75,11 @@ bytes are lost.
 ```sh
 # public host
 node tunnel-server.mjs --port 17890 --target 127.0.0.1:7690 \
-  --token-file /etc/agentoc/tunnel-token
+  --token-file /etc/ragent/tunnel-token
 
 # remote host (outbound only)
 node tunnel-client.mjs --url https://tunnel.example.com/tunnel \
-  --target 127.0.0.1:7690 --token-file /etc/agentoc/tunnel-token
+  --target 127.0.0.1:7690 --token-file /etc/ragent/tunnel-token
 ```
 
 Token: `openssl rand -hex 32`, file mode 0600. `--token <raw>` also works;
@@ -117,15 +117,15 @@ Unit files live in `tunnel/systemd/`:
 
 ```sh
 # public host (as root)
-sudo cp tunnel/systemd/agentoc-tunnel-server.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now agentoc-tunnel-server
+sudo cp tunnel/systemd/ragent-tunnel-server.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now ragent-tunnel-server
 
-# remote host (as root, e.g. agentoc)
-sudo cp tunnel/systemd/agentoc-tunnel-client.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now agentoc-tunnel-client
+# remote host (as root, e.g. ragent)
+sudo cp tunnel/systemd/ragent-tunnel-client.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now ragent-tunnel-client
 ```
 
-Adjust `ExecStart` paths (`/opt/agentoc/runtime/node` vs `/usr/bin/node`) to
+Adjust `ExecStart` paths (`/opt/ragent/runtime/node` vs `/usr/bin/node`) to
 match each host. The client never listens; it only holds one outbound
 TLS 443 h2 connection.
 

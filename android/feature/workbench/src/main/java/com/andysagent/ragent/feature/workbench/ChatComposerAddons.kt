@@ -107,7 +107,7 @@ import com.andysagent.ragent.core.designsystem.RagentSpacing
 import com.andysagent.ragent.core.designsystem.RagentTextStyles
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.agentoAmbientShadow
-import com.andysagent.ragent.core.designsystem.agentoComposerShadow
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
 import com.andysagent.ragent.core.designsystem.agentoPressScale
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
@@ -986,7 +986,7 @@ fun ImageAttachmentThumbnailCard(
     Box(
         modifier = modifier
             .size(60.dp)
-            .agentoComposerShadow(shape = cardShape)
+            .ragentComposerShadow(shape = cardShape)
             .onGloballyPositioned { coords ->
                 val pos = coords.positionInRoot()
                 backdropOffset = IntOffset(
@@ -1128,7 +1128,7 @@ fun DocumentAttachmentThumbnailCard(
         modifier = modifier
             .widthIn(min = 140.dp, max = 220.dp)
             .height(54.dp)
-            .agentoComposerShadow(shape = cardShape)
+            .ragentComposerShadow(shape = cardShape)
             .onGloballyPositioned { coords ->
                 val pos = coords.positionInRoot()
                 backdropOffset = IntOffset(
@@ -1307,7 +1307,7 @@ fun CancelEditPill(
 
     Box(
         modifier = modifier
-            .agentoComposerShadow(shape = AgentoShapes.PillShape)
+            .ragentComposerShadow(shape = AgentoShapes.PillShape)
             .onGloballyPositioned { coords ->
                 val pos = coords.positionInRoot()
                 backdropOffset = IntOffset(
