@@ -12,6 +12,8 @@ if [ "${RAGENT_PROOT_CROSS_ASSEMBLY:-0}" != 1 ]; then
 fi
 VERSION="${RAGENT_PROOT_VERSION:-$(node -p "require('$ROOT/package.json').version")}"
 [[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]] || exit 1
+BUILD_VERSION="${RAGENT_PROOT_BUILD_VERSION:-1.0.0}"
+[[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Invalid RAGENT_PROOT_BUILD_VERSION' >&2; exit 1; }
 NODE_VERSION=v24.12.0
 NODE_DIST="node-${NODE_VERSION}-linux-arm64"
 mkdir -p "$RAGENT_PROOT_OUTPUT_DIR" "$RAGENT_PROOT_CACHE_DIR"
@@ -60,6 +62,7 @@ if [ "${RAGENT_PROOT_OFFLINE:-0}" = 1 ]; then NPM_NETWORK=(--offline); fi
 node -e 'const fs=require("fs"),path=require("path"); function walk(d){for(const x of fs.readdirSync(d,{withFileTypes:true})){let p=path.join(d,x.name);if(x.isDirectory())walk(p);else if(x.isFile()){let fd=fs.openSync(p,"r"),b=Buffer.alloc(20),n=fs.readSync(fd,b,0,20,0);fs.closeSync(fd);if(/\.(exe|dll)$/i.test(p)||(n>=2&&b[0]===77&&b[1]===90))throw Error("Windows executable in dependencies: "+p);if(n>=20&&b[0]===127&&b.toString("ascii",1,4)==="ELF"&&(b[5]!==1||b.readUInt16LE(18)!==183))throw Error("Non-ARM64 ELF in dependencies: "+p);if(/\.node$/i.test(p)&&!(n>=20&&b[0]===127&&b.toString("ascii",1,4)==="ELF"))throw Error("Non-ELF native addon: "+p)}}}walk(process.argv[1])' "$STAGE/app/node_modules"
 rm "$STAGE/app/package-lock.json"
 printf '%s\n' "$VERSION" > "$STAGE/app/.ragent-package-version"
+printf '%s\n' "$BUILD_VERSION" > "$STAGE/app/.ragent-build-version"
 TARBALL="$NODE_DIST.tar.xz"
 BASE="https://nodejs.org/dist/$NODE_VERSION"
 [ -f "$RAGENT_PROOT_CACHE_DIR/$TARBALL" ] || { [ "${RAGENT_PROOT_OFFLINE:-0}" != 1 ] || { echo 'Offline Node archive missing' >&2; exit 1; }; curl -fsSL --retry 3 "$BASE/$TARBALL" -o "$RAGENT_PROOT_CACHE_DIR/$TARBALL"; }
@@ -117,6 +120,7 @@ install -m 0755 "$ROOT/packaging/proot/install.sh" "$STAGE/install.sh"
 install -m 0755 "$ROOT/packaging/proot/termux-ragent" "$STAGE/termux-ragent"
 install -m 0644 "$ROOT/docs/android-proot.md" "$STAGE/README.md"
 printf '%s\n' "$VERSION" > "$STAGE/VERSION"
+printf '%s\n' "$BUILD_VERSION" > "$STAGE/BUILD_VERSION"
 if [ -n "${RAGENT_PROOT_PYTHON:-}" ]; then
   PYTHON="$RAGENT_PROOT_PYTHON"
 elif [ "${RAGENT_PROOT_CROSS_ASSEMBLY:-0}" = 1 ] && command -v cygpath >/dev/null; then

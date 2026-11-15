@@ -11,6 +11,9 @@ root = Path(sys.argv[1]).resolve()
 version = (root / 'VERSION').read_text(encoding='ascii').strip()
 if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.+_-]*', version):
     raise SystemExit('Invalid public VERSION')
+build_version = (root / 'BUILD_VERSION').read_text(encoding='ascii').strip()
+if not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', build_version):
+    raise SystemExit('Invalid BUILD_VERSION')
 excluded = {'RELEASE_ID', 'release-content-manifest.json'}
 files = []
 for directory, dirs, names in os.walk(root, followlinks=False):
@@ -37,7 +40,7 @@ for directory, dirs, names in os.walk(root, followlinks=False):
                 digest.update(chunk)
         files.append({'path': relative, 'size': path.stat().st_size, 'sha256': digest.hexdigest()})
 files.sort(key=lambda item: item['path'])
-content = (json.dumps({'schemaVersion': 1, 'publicVersion': version, 'files': files},
+content = (json.dumps({'schemaVersion': 1, 'publicVersion': version, 'buildVersion': build_version, 'files': files},
                       ensure_ascii=False, separators=(',', ':')) + '\n').encode('utf-8')
 (root / 'release-content-manifest.json').write_bytes(content)
 identity = hashlib.sha256(content).hexdigest()

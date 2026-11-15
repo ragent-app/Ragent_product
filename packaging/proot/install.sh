@@ -20,10 +20,13 @@ if [ -e "$PREFIX/current" ] || [ -L "$PREFIX/current" ]; then
 fi
 VERSION="$(cat "$SOURCE/RELEASE_ID")"
 PUBLIC_VERSION="$(cat "$SOURCE/VERSION")"
+BUILD_VERSION="$(cat "$SOURCE/BUILD_VERSION")"
 # Accept a single trailing CR from an older archive; internal CRs still fail.
 VERSION="${VERSION%$'\r'}"
 PUBLIC_VERSION="${PUBLIC_VERSION%$'\r'}"
+BUILD_VERSION="${BUILD_VERSION%$'\r'}"
 [[ "$PUBLIC_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]] || { echo 'Invalid VERSION in package' >&2; exit 1; }
+[[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Invalid BUILD_VERSION in package' >&2; exit 1; }
 [[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ && "$VERSION" = "$PUBLIC_VERSION-"* ]] || { echo 'Invalid RELEASE_ID in package' >&2; exit 1; }
 DEST="$PREFIX/releases/$VERSION"
 [ ! -e "$DEST" ] || { echo 'Release already exists' >&2; exit 1; }

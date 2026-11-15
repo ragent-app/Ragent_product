@@ -59,5 +59,5 @@
   }
   menu.addEventListener('click', event => { const option = event.target.closest('button[data-language]'); if (!option) return; current = option.dataset.language; try { localStorage.setItem('ragent-site-language', current); } catch (_) {} closeMenu(); apply(); button.focus(); });
   label.textContent = languages[current];
-  fetch('translations.json?v=crossplatform-20261113').then(response => { if (!response.ok) throw Error('translation unavailable'); return response.json(); }).then(data => { dictionary = data; apply(); }).catch(() => { document.documentElement.lang = 'en'; });
+  fetch('translations.json?v=android-proot-20261115').then(response => { if (!response.ok) throw Error('translation unavailable'); return response.json(); }).then(data => { dictionary = data; apply(); }).catch(() => { document.documentElement.lang = 'en'; });
 })();

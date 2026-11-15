@@ -12,7 +12,8 @@
   function classify(asset) {
     const name = asset.name.toLowerCase();
     let platform, format;
-    if (name.endsWith('.msi') || name.endsWith('.exe')) { platform = 'Windows'; format = name.endsWith('.msi') ? 'MSI' : 'EXE'; }
+    if (/^ragent-.+-android-proot-ubuntu24\.04-arm64\.tar\.gz$/.test(name)) { platform = 'Android local runtime'; format = 'TAR.GZ'; }
+    else if (name.endsWith('.msi') || name.endsWith('.exe')) { platform = 'Windows'; format = name.endsWith('.msi') ? 'MSI' : 'EXE'; }
     else if (name.endsWith('.dmg') || name.endsWith('.pkg')) { platform = 'macOS'; format = name.endsWith('.dmg') ? 'DMG' : 'PKG'; }
     else if (name.endsWith('.apk')) { platform = 'Android'; format = 'APK'; }
     else if (name.endsWith('.appimage') || name.endsWith('.deb') || name.endsWith('.rpm')) { platform = 'Linux'; format = name.split('.').pop().toUpperCase(); }
@@ -59,18 +60,30 @@
         const description = el('div'); description.append(el('h3', release.tag_name), el('p', `${new Date(release.published_at).toLocaleDateString(document.documentElement.lang)}${release.prerelease ? ' · ' + t('Preview') : ''}`, 'release-meta'));
         const links = el('div', '', 'release-links');
         const shown = new Set();
-        packages.forEach(asset => { const key = `${asset.platform}/${asset.arch}/${asset.format}`; if (!shown.has(key)) { shown.add(key); links.append(link(`${asset.requirement || asset.platform} · ${asset.arch} · ${asset.format}`, asset.url)); } });
+        packages.forEach(asset => { const key = `${asset.platform}/${asset.arch}/${asset.format}`; if (!shown.has(key)) { shown.add(key); links.append(link(`${asset.platform === 'Android local runtime' ? t('Android local runtime') : asset.requirement || asset.platform} · ${asset.arch} · ${asset.format}`, asset.url)); } });
         const releaseURL = new URL(release.html_url);
         if (releaseURL.origin === 'https://github.com' && releaseURL.pathname.startsWith('/' + repo + '/releases/tag/')) links.append(link(t('Release notes ↗'), releaseURL.href));
         row.append(description, links); history.append(row);
       }
-      for (const platform of ['Windows', 'macOS', 'Linux', 'Android']) {
+      for (const platform of ['Windows', 'macOS', 'Linux', 'Android', 'Android local runtime']) {
         const items = [...latest.values()].filter(a => a.platform === platform);
+        if (!items.length && platform === 'Android local runtime') continue;
         if (!items.length) {
           const card = el('article', '', 'download-item'); card.append(el('h3', platform), el('p', t(platform === 'Android' ? 'The Android app is currently in closed testing.' : 'No public package is available yet.')), el('span', t('Not available'), 'unavailable')); grid.append(card);
         }
         for (const asset of items) {
-          const card = el('article', '', 'download-item'); card.append(el('h3', `${asset.requirement || platform} · ${t(asset.arch)}`), el('p', `${asset.version} · ${asset.format}`), link(`${t('Download')} ${asset.format} ↓`, asset.url, 'button')); grid.append(card);
+          const card = el('article', '', 'download-item');
+          if (platform === 'Android local runtime') {
+            card.append(el('h3', t('Android local runtime · ARM64')),
+              el('p', `${asset.version} · ${asset.format}`),
+              el('p', t('Requires an ARM64 Android device, Termux, proot-distro and Ubuntu 24.04. This is a service archive, not an Android app or Linux desktop installer.')),
+              el('p', t('Start Ragent in Termux before connecting the Android app. Android may suspend the service in the background.')),
+              link(`${t('Download')} ${asset.format} ↓`, asset.url, 'button'),
+              link(t('Installation instructions ↗'), `https://github.com/${repo}/blob/main/docs/android-proot.md`));
+          } else {
+            card.append(el('h3', `${asset.requirement || platform} · ${t(asset.arch)}`), el('p', `${asset.version} · ${asset.format}`), link(`${t('Download')} ${asset.format} ↓`, asset.url, 'button'));
+          }
+          grid.append(card);
         }
       }
       status.textContent = releases.length ? '' : t('No published releases are available yet.');
