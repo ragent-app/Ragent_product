@@ -1,6 +1,10 @@
 # Linux desktop
 
-The Debian package targets Ubuntu 24.04 x86-64 and ARM64. It includes the
+Linux package candidates target Ubuntu 22.04, 24.04 and 26.04 and Debian 12
+and 13 on amd64 and arm64, plus RHEL 9 x86-64 for RPM. These are targets,
+not a declaration that every combination has passed release acceptance. See
+the [Linux acceptance criteria](linux-release-acceptance.md) and the release
+notes for the status of each package and operating system. The package includes the
 local service, desktop manager, Node runtime, P2P host and the pinned Codex and
 Claude runtimes. Availability and validation of a particular package are stated
 in its release notes; a source build alone is not a published release.

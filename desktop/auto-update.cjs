@@ -37,7 +37,7 @@ async function downloadPackage(info, { fetchImpl = fetch, tempRoot = os.tmpdir()
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw Error("invalid-cache-directory");
   const name = cacheName(info.packageSha256, platform, arch);
   const directory = path.join(cacheRoot, name);
-  const packageName = platform === "win32" ? "Ragent-setup.exe" : platform === "darwin" ? "Ragent.dmg" : "Ragent.deb";
+  const packageName = platform === "win32" ? "Ragent-setup.exe" : platform === "darwin" ? "Ragent.dmg" : new URL(info.downloadUrl).pathname.toLowerCase().endsWith(".rpm") ? "Ragent.rpm" : "Ragent.deb";
   const file = path.join(directory, packageName);
   const existing = await fs.lstat(directory).catch(error => { if (error.code === "ENOENT") return null; throw error; });
   if (existing) {
@@ -84,7 +84,7 @@ async function startInstaller({ file, directory, appRoot, executable, resultFile
   let command, args;
   if (platform === "win32") { command = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"); args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", copied, ...common]; }
   else if (platform === "darwin") { command = "/bin/bash"; args = [copied, ...common]; }
-  else if (platform === "linux") { command = "/usr/bin/pkexec"; args = ["/bin/bash", "/opt/ragent/Desktop/resources/app/update-linux.sh", ...common]; }
+  else if (platform === "linux") { command = "/usr/bin/pkexec"; args = ["/opt/ragent/Desktop/resources/app/update-linux.sh", ...common]; }
   else throw Error("unsupported-platform");
   const child = spawnImpl(command, args, { detached: platform !== "linux", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   child.stderr.resume();

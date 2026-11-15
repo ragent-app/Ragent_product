@@ -1,0 +1,591 @@
+#!/bin/sh
+set -eu
+
+# Never traverse a redirected state root while repairing ownership or modes.
+for state_path in /var/lib/ragent /var/lib/ragent/config /var/lib/ragent/config/native-provider-runtime /var/lib/ragent-run /var/lib/ragent-run/provider-homes; do
+  if [ -L "$state_path" ]; then
+    echo "Refusing to modify symlinked Ragent state path: $state_path" >&2
+    exit 1
+  fi
+done
+
+SERVICE_USER_FILE=/etc/ragent/service-user
+RAGENT_ENV_FILE=/etc/ragent/ragent.env
+
+trim_service_user() {
+  printf '%s' "${1:-}" | tr -d '[:space:]'
+}
+
+infer_sudo_service_user() {
+  sudo_user="$(trim_service_user "${SUDO_USER:-}")"
+  case "$sudo_user" in
+    root|''|*[!A-Za-z0-9_.@-]*) return 0 ;;
+  esac
+
+  sudo_passwd="$(getent passwd "$sudo_user" || true)"
+  [ -n "$sudo_passwd" ] || return 0
+  sudo_uid="$(printf '%s\n' "$sudo_passwd" | awk -F: '{ print $3 }')"
+  case "$sudo_uid" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  if ! [ "$sudo_uid" -ge 1000 ] 2>/dev/null; then
+    return 0
+  fi
+  case "${SUDO_UID:-}" in
+    ''|*[!0-9]*) ;;
+    *)
+      [ "$SUDO_UID" = "$sudo_uid" ] || return 0
+      ;;
+  esac
+
+  printf '%s\n' "$sudo_user"
+}
+
+resolve_service_user() {
+  user="$(trim_service_user "${RAGENT_SERVICE_USER:-}")"
+  if [ -z "$user" ] && [ -r "$SERVICE_USER_FILE" ]; then
+    user="$(sed -n '1p' "$SERVICE_USER_FILE" | tr -d '[:space:]')"
+  fi
+  if [ -z "$user" ] && [ ! -f "$SERVICE_USER_FILE" ]; then
+    user="$(infer_sudo_service_user)"
+  fi
+  [ -n "$user" ] || user=ragent
+  case "$user" in
+    root|'')
+      echo "Ragent service user must be a non-root local user." >&2
+      exit 1
+      ;;
+    *[!A-Za-z0-9_.@-]*)
+      echo "Invalid Ragent service user: $user" >&2
+      exit 1
+      ;;
+  esac
+  user_entry="$(getent passwd "$user" || true)"
+  if [ -z "$user_entry" ]; then
+    echo "Ragent service user does not exist: $user" >&2
+    exit 1
+  fi
+  user_uid="$(printf '%s\n' "$user_entry" | awk -F: '{ print $3 }')"
+  case "$user_uid" in
+    ''|*[!0-9]*)
+      echo "Cannot verify Ragent service user identity: $user" >&2
+      exit 1
+      ;;
+    *)
+      if ! [ "$user_uid" -gt 0 ] 2>/dev/null; then
+        echo "Ragent service user must be a non-root local user." >&2
+        exit 1
+      fi
+      ;;
+  esac
+  user_gid="$(printf '%s\n' "$user_entry" | awk -F: '{ print $4 }')"
+  case "$user_gid" in
+    ''|*[!0-9]*) echo "Cannot verify Ragent service user group: $user" >&2; exit 1 ;;
+    *) if ! [ "$user_gid" -gt 0 ] 2>/dev/null; then
+      echo "Ragent service user must not use the root group." >&2
+      exit 1
+    fi ;;
+  esac
+  printf '%s\n' "$user"
+}
+
+user_home() {
+  getent passwd "$1" | awk -F: '{ print $6 }'
+}
+
+# A Run is allowed to use the configured service user's ordinary file and tool
+# reach, but it must not inherit OS privilege channels.  Keep this list in sync
+# with lib/runner-user-groups.mjs; group names are validated before they reach a
+# systemd SupplementaryGroups= property.
+is_runner_denied_group() {
+  case "$1" in
+    adm|ragent-privileged|audio|cdrom|dialout|disk|docker|floppy|incus-admin|input|kmem|kvm|libvirt|lp|lxd|netdev|plugdev|podman|render|root|shadow|sudo|sys|systemd-journal|tape|tty|uucp|video|wheel)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+write_runner_inherited_groups() {
+  raw_groups="$(id -Gn "$service_user")"
+  filtered_groups=""
+  for group in $raw_groups; do
+    case "$group" in
+      ''|*[!A-Za-z0-9_.@-]*) continue ;;
+    esac
+    is_runner_denied_group "$group" && continue
+    case " $filtered_groups " in
+      *" $group "*) ;;
+      *) filtered_groups="${filtered_groups:+$filtered_groups }$group" ;;
+    esac
+  done
+  runner_groups_tmp="/etc/ragent/runner-groups.$$"
+  printf '%s\n' "$filtered_groups" > "$runner_groups_tmp"
+  chown root:root "$runner_groups_tmp"
+  chmod 0644 "$runner_groups_tmp"
+  mv -f "$runner_groups_tmp" /etc/ragent/runner-groups
+}
+
+# P0-B + P0-C runner/control separation: the runner group has NO access to the
+# control-plane config directory.  The runner-accessible subtrees (run spool +
+# provider homes) live under /var/lib/ragent-run, so Runs never need to
+# traverse /var/lib/ragent or /var/lib/ragent/config — the control core
+# (auth.json, chat-sessions.json, chat-history, ...) is fully opaque to them.
+
+env_file_value() {
+  key="$1"
+  [ -r "$RAGENT_ENV_FILE" ] || return 0
+  sed -n "s/^${key}=//p" "$RAGENT_ENV_FILE" | tail -n 1 | tr -d '[:space:]'
+}
+
+# RPM preserves a locally modified configuration file
+# version.  Make the new product default effective on such upgrades too, but
+# never override an explicit operator value (including =0).
+ensure_agent_create_default() {
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
+  if ! grep -q '^RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED=' "$RAGENT_ENV_FILE"; then
+    printf '\nRAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED=1\n' >> "$RAGENT_ENV_FILE"
+  fi
+}
+
+# RPM preserves a locally modified configuration file
+# version. Add the relocated runner-state defaults when upgrading from a
+# package that predates P0-C, but preserve any explicit operator path.
+ensure_runner_state_defaults() {
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
+  for key_value in \
+    RAGENT_RUN_SPOOL_DIR=/var/lib/ragent-run/results \
+    RAGENT_PROVIDER_HOMES_DIR=/var/lib/ragent-run/provider-homes
+  do
+    key="${key_value%%=*}"
+    if ! grep -q "^${key}=" "$RAGENT_ENV_FILE"; then
+      printf '\n%s\n' "$key_value" >> "$RAGENT_ENV_FILE"
+    fi
+  done
+}
+
+# RPM preserves a locally modified configuration file
+# version. Keep the packaged multi-agent collaboration default effective on
+# upgrades too, but never override an explicit operator value (including =0).
+# The source-level config fallback remains off for isolated development/test
+# processes; packaged services receive these values through ragent.env.
+ensure_multi_agent_collaboration_defaults() {
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
+  for key in \
+    RAGENT_ORG_SCHEMA_ENABLED \
+    RAGENT_ORG_SHADOW_PROJECTION \
+    RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED \
+    RAGENT_MANAGED_INPUT_ENFORCEMENT \
+    RAGENT_MANAGED_WRITER_ENABLED \
+    RAGENT_REVIEWER_ENABLED \
+    RAGENT_COLLABORATION_LEADER_ENABLED \
+    RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED \
+    RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED \
+    RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED \
+    RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED \
+    RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED \
+    RAGENT_ORG_DYNAMIC_REPLAN_ENABLED \
+    RAGENT_ORG_STALL_GOVERNOR_ENABLED \
+    RAGENT_ORG_PROJECTION_V1_ENABLED \
+    RAGENT_ORG_PROJECTION_V2_ENABLED \
+    RAGENT_ORG_RECOVERY_V1_ENABLED \
+    RAGENT_CONSULTATION_V1_ENABLED
+  do
+    if ! grep -q "^${key}=" "$RAGENT_ENV_FILE"; then
+      printf '\n%s=1\n' "$key" >> "$RAGENT_ENV_FILE"
+    fi
+  done
+}
+
+# Accounts is an independently deployed service.  Its state directory lives
+# below the shared /var/lib/ragent root for compatibility, but must remain
+# owned by ragent-accounts; a main-package upgrade must not strand the
+# Accounts service by recursively chowning it to the main service user.
+converge_external_accounts_state() {
+  accounts_user=ragent-accounts
+  accounts_group=ragent-accounts
+  accounts_root=/var/lib/ragent/accounts
+  if ! getent passwd "$accounts_user" >/dev/null 2>&1 \
+    || ! getent group "$accounts_group" >/dev/null 2>&1 \
+    || [ ! -d "$accounts_root" ]; then
+    return 0
+  fi
+
+  # The shared root is private to the main service.  Grant Accounts only the
+  # execute bit needed to reach its own child; never make the root readable.
+  setfacl -m u:"$accounts_user":--x /var/lib/ragent
+  chown "$accounts_user:$accounts_group" "$accounts_root"
+  if [ -d "$accounts_root/.config" ]; then
+    chown -R "$accounts_user:$accounts_group" "$accounts_root/.config"
+  fi
+  for state_file in \
+    "$accounts_root/accounts.json" \
+    "$accounts_root/signing-key.json" \
+    "$accounts_root/entitlement-signing.key.json"
+  do
+    if [ -e "$state_file" ]; then
+      chown "$accounts_user:$accounts_group" "$state_file"
+    fi
+  done
+}
+
+# The preinst repairs this state before upgrade checks.  Keep the same
+# convergence in postinst so fresh installs, explicit unpack/configure flows,
+# and upgrades all leave the native registry and secret store readable by the
+# configured control-plane user with their intended private modes.
+converge_provider_runtime_access() {
+  config_root=/var/lib/ragent/config
+  provider_runtime_root="$config_root/native-provider-runtime"
+  chown "$service_user:$service_group" /var/lib/ragent "$config_root"
+  chmod 0750 /var/lib/ragent "$config_root"
+
+  if [ -d "$provider_runtime_root" ]; then
+    chown -R "$service_user:$service_group" "$provider_runtime_root"
+    find "$provider_runtime_root" -type d -exec chmod 0700 {} +
+    find "$provider_runtime_root" -type f -exec chmod 0600 {} +
+  fi
+
+  if [ -f "$config_root/auth.json" ]; then
+    chown "$service_user:$service_group" "$config_root/auth.json"
+    chmod 0600 "$config_root/auth.json"
+  fi
+
+  for state_file in \
+    "$config_root/owner-account-binding.json" \
+    "$config_root/owner-account-transactions.json" \
+    "$config_root/owner-account-native-pending.json" \
+    "$config_root/owner-account-native-journal.json" \
+    "$config_root/instance-identity.json" \
+    "$config_root/instance-signing-key.json" \
+    "$config_root/device-public-keys.json" \
+    "$config_root/sync-handshake-tokens.json"
+  do
+    if [ -f "$state_file" ]; then
+      chown "$service_user:$service_group" "$state_file"
+      chmod 0600 "$state_file"
+    fi
+  done
+}
+
+
+if ! getent group ragent >/dev/null 2>&1; then
+  groupadd --system ragent >/dev/null
+fi
+if ! getent passwd ragent >/dev/null 2>&1; then
+  useradd --system --gid ragent --home-dir /var/lib/ragent --no-create-home --shell /sbin/nologin ragent >/dev/null
+fi
+if ! getent group ragent-privileged >/dev/null 2>&1; then
+  groupadd --system ragent-privileged >/dev/null
+fi
+# P0-B: dedicated low-privilege runner user/group.  Runner processes (transient
+# units from the lifecycle broker and supervisor sidecars) run as ragent-runner;
+# the control-plane core stays owned by the service user and is never readable
+# by the runner group.
+if ! getent group ragent-runners >/dev/null 2>&1; then
+  groupadd --system ragent-runners >/dev/null
+fi
+if ! getent passwd ragent-runner >/dev/null 2>&1; then
+  useradd --system --gid ragent-runners --home-dir /var/lib/ragent-run --no-create-home --shell /sbin/nologin ragent-runner >/dev/null
+fi
+
+install -d -m 0755 -o root -g root /etc/ragent
+
+service_user="$(resolve_service_user)"
+service_group="$(id -gn "$service_user")"
+service_home="$(user_home "$service_user")"
+[ -n "$service_home" ] || service_home=/var/lib/ragent
+gpasswd -d ragent ragent-privileged >/dev/null 2>&1 || true
+if [ "$service_user" != ragent ]; then
+  gpasswd -d "$service_user" ragent-privileged >/dev/null 2>&1 || true
+fi
+
+if [ -n "${RAGENT_SERVICE_USER:-}" ] || [ ! -f "$SERVICE_USER_FILE" ]; then
+  printf '%s\n' "$service_user" > "$SERVICE_USER_FILE"
+  chmod 0644 "$SERVICE_USER_FILE"
+fi
+
+# Snapshot the same filtered service-user groups used by the Supervisor unit.
+# The lifecycle broker resolves groups live for each Run and uses this file
+# only as an NSS-failure fallback; the Supervisor is a long-lived systemd unit,
+# so its drop-in needs a concrete group list at install/upgrade time.
+write_runner_inherited_groups
+
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent/config
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent/workspace
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent/memory
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/log/ragent
+install -d -m 0750 -o root -g ragent-privileged /var/log/ragent-privileged
+# This must happen before any runuser-based auth/config operation below.  A
+# broken existing config directory otherwise makes the postinst exit before
+# reaching the older final ownership convergence block.
+converge_provider_runtime_access
+ensure_agent_create_default
+ensure_runner_state_defaults
+ensure_multi_agent_collaboration_defaults
+
+if [ ! -f /var/lib/ragent/config/auth.json ]; then
+  # owner 凭据来源（按优先级）：
+  #  1) 安装命令环境变量 RAGENT_INITIAL_USERNAME / RAGENT_INITIAL_PASSWORD（无人值守传参）
+  #  2) 交互式终端输入（不回显，两次确认）
+  #  3) 随机密码（非交互安装时保存在 root 专用文件中）
+  # 注意：不从 /etc/ragent/ragent.env 读密码（该文件 0644，本机任何用户可读）
+  RANDOM_PASSWORD=""
+  INITIAL_USERNAME="$(env_file_value RAGENT_INITIAL_USERNAME)"
+  [ -n "$INITIAL_USERNAME" ] || INITIAL_USERNAME="${RAGENT_INITIAL_USERNAME:-}"
+  INITIAL_PASSWORD="${RAGENT_INITIAL_PASSWORD:-}"
+  unset RAGENT_INITIAL_PASSWORD
+
+  if [ -z "$INITIAL_PASSWORD" ] && [ -t 0 ] && [ "${RAGENT_INTERACTIVE_INSTALL:-0}" = 1 ]; then
+    echo "设置 Ragent owner 账号（输入不会回显）" >&2
+    while :; do
+      if [ -z "$INITIAL_USERNAME" ]; then
+        printf "用户名 [owner]: " >&2
+        IFS= read -r typed_username || true
+        [ -n "$typed_username" ] && INITIAL_USERNAME="$typed_username"
+        [ -n "$INITIAL_USERNAME" ] || INITIAL_USERNAME="owner"
+      fi
+      printf "密码: " >&2
+      stty -echo 2>/dev/null; IFS= read -r typed_p1 || true; stty echo 2>/dev/null
+      printf "\n" >&2
+      printf "确认密码: " >&2
+      stty -echo 2>/dev/null; IFS= read -r typed_p2 || true; stty echo 2>/dev/null
+      printf "\n" >&2
+      if [ -z "$typed_p1" ]; then
+        echo "密码不能为空，请重试" >&2
+        continue
+      fi
+      if [ "$typed_p1" != "$typed_p2" ]; then
+        echo "两次输入不一致，请重试" >&2
+        continue
+      fi
+      if [ "${#typed_p1}" -lt 8 ]; then
+        printf "警告：密码少于 8 位。仍继续？[y/N] " >&2
+        IFS= read -r typed_ok || true
+        case "$typed_ok" in
+          y|Y) ;;
+          *) continue ;;
+        esac
+      fi
+      INITIAL_PASSWORD="$typed_p1"
+      break
+    done
+  fi
+
+  # 用户名白名单（安全字符），非法或空回落 owner
+  case "$INITIAL_USERNAME" in
+    ''|*[!A-Za-z0-9_.@-]*) INITIAL_USERNAME="owner" ;;
+  esac
+
+  if [ -z "$INITIAL_PASSWORD" ]; then
+    INITIAL_PASSWORD="$( { openssl rand -base64 24 2>/dev/null || /opt/ragent/runtime/node -e "process.stdout.write(require('crypto').randomBytes(18).toString('base64url'))"; } | tr -d '\n' )"
+    RANDOM_PASSWORD="1"
+  fi
+
+  printf '%s\n' "$INITIAL_PASSWORD" | runuser -u "$service_user" -- env \
+    HOME="$service_home" \
+    RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+    RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+    RAGENT_MEMORY_DIR=/var/lib/ragent/memory \
+    RAGENT_INITIAL_USERNAME="$INITIAL_USERNAME" \
+    /opt/ragent/runtime/node -e '
+      const { randomBytes, scryptSync } = require("crypto");
+      const { mkdirSync, readFileSync, writeFileSync, chmodSync } = require("fs");
+      const username = process.env.RAGENT_INITIAL_USERNAME || "owner";
+      const password = readFileSync(0, "utf8").slice(0, -1);
+      const salt = randomBytes(16);
+      const hash = scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
+      mkdirSync("/var/lib/ragent/config", { recursive: true });
+      writeFileSync("/var/lib/ragent/config/auth.json", JSON.stringify({
+        username,
+        passwordHash: `scrypt$16384$8$1$${salt.toString("hex")}$${hash.toString("hex")}`,
+      }, null, 2));
+      chmodSync("/var/lib/ragent/config/auth.json", 0o600);
+    '
+  if [ "$RANDOM_PASSWORD" = "1" ]; then
+    # Package-manager logs may be retained or readable to other users. Keep the
+    # generated secret in a root-owned directory instead of printing it there.
+    credentials_tmp="$(mktemp /etc/ragent/.initial-credentials.XXXXXX)"
+    chmod 0600 "$credentials_tmp"
+    printf 'username: %s\npassword: %s\n' "$INITIAL_USERNAME" "$INITIAL_PASSWORD" > "$credentials_tmp"
+    mv -f "$credentials_tmp" /etc/ragent/initial-credentials
+    echo 'Initial credentials are in /etc/ragent/initial-credentials (root only). Remove the file after recording them.' >&2
+  fi
+  unset INITIAL_PASSWORD typed_p1 typed_p2
+fi
+
+# 静态 access token 已下线（2026-08-05）：升级时清理 auth.json 的 token 字段
+if [ -f /var/lib/ragent/config/auth.json ]; then
+  runuser -u "$service_user" -- env \
+    HOME="$service_home" \
+    RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+    RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+    RAGENT_MEMORY_DIR=/var/lib/ragent/memory \
+    /opt/ragent/runtime/node -e '
+      const { readFileSync, writeFileSync } = require("fs");
+      const file = "/var/lib/ragent/config/auth.json";
+      try {
+        const auth = JSON.parse(readFileSync(file, "utf8"));
+        if (Object.prototype.hasOwnProperty.call(auth, "token")) {
+          delete auth.token;
+          writeFileSync(file, JSON.stringify(auth, null, 2) + "\n");
+        }
+      } catch {}
+    '
+fi
+
+# /var/lib/ragent/accounts belongs to the separately deployed Accounts
+# service.  Keep it out of the main service's recursive ownership migration.
+chown "$service_user:$service_group" /var/lib/ragent /var/log/ragent
+find /var/lib/ragent -mindepth 1 -maxdepth 1 ! -path /var/lib/ragent/accounts ! -path /var/lib/ragent/retired \
+  -exec chown -R "$service_user:$service_group" {} +
+chown -R root:ragent-privileged /var/log/ragent-privileged
+chmod 0600 /var/lib/ragent/config/auth.json
+converge_external_accounts_state
+
+# Same-user + P0-C: the control-plane core stays service-user:service-group
+# (0750). The runner state root is /var/lib/ragent-run and its spool/provider
+# homes are owned by the same configured service identity, so upgrades do not
+# strand old user-owned data. The units still mask /var/lib/ragent,
+# /etc/ragent, control logs, and privileged executor sockets; same UID is not
+# control-plane authorization.
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent-run
+install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/ragent-run/results
+install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/ragent-run/provider-homes
+# Older lifecycle brokers could replace a Run's private status.json as root.
+# Restore only those known status files so existing Runs become readable after
+# upgrade; leave all other runner and provider data untouched.
+find /var/lib/ragent-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
+  -path '/var/lib/ragent-run/results/run_*/status.json' \
+  -exec chown -h "$service_user:$service_group" {} +
+# The control plane creates Run directories and provider files while detached
+# runners update them, so default ACLs must survive recursive creation.
+if command -v setfacl >/dev/null 2>&1; then
+  for subtree in /var/lib/ragent-run/results /var/lib/ragent-run/provider-homes; do
+    setfacl -m g:"$service_group":rwx,m:rwx "$subtree" || true
+    setfacl -d -m u::rwx,g::rwx,g:"$service_group":rwx,m::rwx,o::--- "$subtree" || true
+  done
+fi
+# Keep the compatibility marker aligned with the active identity. The lifecycle
+# broker ignores a stale value while same-user mode is enabled, but writing the
+# actual service user prevents older binaries from selecting the wrong UID on
+# upgrade.
+if getent passwd "$service_user" >/dev/null 2>&1; then
+  printf '%s\n' "$service_user" > /etc/ragent/runner-user
+  chmod 0644 /etc/ragent/runner-user
+fi
+
+main_service=ragent.service
+if [ -d /run/systemd/system ]; then
+  # Same-user runner mode: both the chat service and supervisor use the
+  # configured service identity. Generate the override instead of relying on
+  # the package fallback (the system account 'ragent').
+  for unit in "$main_service" ragent-storage-gc.service; do
+    install -d -m 0755 "/etc/systemd/system/$unit.d"
+    cat > "/etc/systemd/system/$unit.d/10-service-user.conf" <<EOF
+[Service]
+User=$service_user
+Group=$service_group
+EOF
+  done
+  install -d -m 0755 /etc/systemd/system/ragent-runner-supervisor.service.d
+  cat > /etc/systemd/system/ragent-runner-supervisor.service.d/10-service-user.conf <<EOF
+[Service]
+User=$service_user
+Group=$service_group
+EOF
+  runner_groups="$(tr -d '\n' < /etc/ragent/runner-groups)"
+  if [ -n "$runner_groups" ]; then
+    cat > /etc/systemd/system/ragent-runner-supervisor.service.d/20-runner-inherited-groups.conf <<EOF
+[Service]
+SupplementaryGroups=$runner_groups
+EOF
+  else
+    rm -f /etc/systemd/system/ragent-runner-supervisor.service.d/20-runner-inherited-groups.conf
+  fi
+  for socket in ragent-runner-lifecycle.socket ragent-runner-supervisor.socket; do
+    install -d -m 0755 "/etc/systemd/system/$socket.d"
+    cat > "/etc/systemd/system/$socket.d/10-service-user.conf" <<EOF
+[Socket]
+SocketUser=$service_user
+SocketGroup=$service_group
+EOF
+  done
+  # 会话 cookie HMAC secret（2026-08-05 安全加固）：root 侧生成、0600，
+  # 经 EnvironmentFile 注入服务进程环境（兄弟进程读不到 /proc/<pid>/environ）。
+  if [ ! -s /etc/ragent/auth-secret ] || ! grep -q '^RAGENT_AUTH_SESSION_SECRET=' /etc/ragent/auth-secret; then
+    ( umask 077; { printf 'RAGENT_AUTH_SESSION_SECRET='; openssl rand -hex 32 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex') + '\n')"; } > /etc/ragent/auth-secret )
+  fi
+  chown root:root /etc/ragent/auth-secret
+  chmod 0600 /etc/ragent/auth-secret
+  install -d -m 0755 "/etc/systemd/system/$main_service.d"
+  cat > "/etc/systemd/system/$main_service.d/20-auth-secret.conf" <<EOF
+[Service]
+EnvironmentFile=/etc/ragent/auth-secret
+EOF
+fi
+
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -RF /opt/ragent /etc/ragent /var/lib/ragent /var/lib/ragent-run /var/log/ragent /var/log/ragent-privileged
+fi
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+  # The service's ExecStartPre intentionally uses the quick path so a normal
+  # restart never walks the complete history tree. Do the recursive ownership
+  # and mode convergence once per package configuration instead.
+  RAGENT_STATE_REPAIR_SERVICE_USER="$service_user" \
+    /usr/lib/ragent/repair-state-access --full
+  systemctl enable --now ragent-storage-gc.timer >/dev/null
+  systemctl enable ragent-privileged-executor.service >/dev/null
+  # Executor self-protection: an update may run inside the executor unit.
+  # ragent-privileged-executor.service 的 cgroup 内；此处直接 restart 会让
+  # Restarting that unit synchronously would kill the package transaction.
+  # Defer the restart until the package manager has exited.
+  if grep -q 'ragent-privileged-executor.service' /proc/self/cgroup 2>/dev/null \
+    && command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --on-active=15 \
+      --unit="ragent-executor-deferred-restart-$$" \
+      --property=TimeoutStartSec=10min \
+      /bin/sh -c 'while pgrep -x rpm >/dev/null 2>&1 || pgrep -x dnf >/dev/null 2>&1; do sleep 5; done; sleep 2; systemctl restart ragent-privileged-executor.service' \
+      >/dev/null 2>&1 || true
+  else
+    systemctl restart ragent-privileged-executor.service
+  fi
+  # P2-C: systemd socket activation.  Enable the socket units so the daemons
+  # inherit a systemd-owned listening socket that survives restarts.  On an
+  # upgrade the daemon may already own its socket path, so stop the service
+  # first (its shutdown unlinks the socket it created), then bind via the
+  # socket unit, then let the restart below start the daemon with the inherited
+  # fd.  Socket activation keeps the listening endpoint stable across daemon
+  # restarts while the package applies the unit updates.
+  systemctl enable ragent-runner-lifecycle.socket >/dev/null
+  systemctl stop ragent-runner-lifecycle.service >/dev/null 2>&1 || true
+  systemctl restart ragent-runner-lifecycle.socket
+  systemctl enable ragent-runner-lifecycle.service >/dev/null
+  systemctl restart ragent-runner-lifecycle.service
+  systemctl enable ragent-runner-supervisor.socket >/dev/null
+  systemctl stop ragent-runner-supervisor.service >/dev/null 2>&1 || true
+  systemctl restart ragent-runner-supervisor.socket
+  systemctl enable ragent-runner-supervisor.service >/dev/null
+  systemctl restart ragent-runner-supervisor.service
+  systemctl enable "$main_service" >/dev/null
+  systemctl restart "$main_service"
+fi
+
+# Services may rewrite managed Codex files during startup.  Apply the final
+# runner-home convergence after all restarts so the installed state is
+# immediately usable by ragent-runner.
+if [ -d /var/lib/ragent-run/provider-homes ]; then
+  chown -R "$service_user:$service_group" /var/lib/ragent-run/provider-homes || true
+  find /var/lib/ragent-run/provider-homes -type d -exec chmod 2770 {} + 2>/dev/null || true
+  find /var/lib/ragent-run/provider-homes -type f -exec chmod 0640 {} + 2>/dev/null || true
+fi
+
+# Service startup may create or rewrite registry files during installation;
+# apply the private native-runtime modes once more after all package actions.
+converge_provider_runtime_access
+
+exit 0

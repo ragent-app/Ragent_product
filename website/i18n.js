@@ -7,6 +7,10 @@
     return languages[tag.split('-')[0]] ? tag.split('-')[0] : 'en';
   };
   let current = initial(), dictionary = {};
+  const linuxTranslations = {
+    'zh-CN': {'Linux package targets.': 'Linux 软件包目标。', 'Candidate targets have not completed release validation. Automatic updates are enabled only for targets validated for that release.': '候选目标尚未完成发布验证。自动更新仅针对该版本已验证的目标启用。', 'Validated for this release': '此版本已验证', 'Candidate — validation pending': '候选版本，等待验证', 'Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.': '需要 systemd 和 glibc 2.34 或更高版本。发行版版本支持情况见下方 Linux 目标状态。'},
+    'zh-TW': {'Linux package targets.': 'Linux 套件目標。', 'Candidate targets have not completed release validation. Automatic updates are enabled only for targets validated for that release.': '候選目標尚未完成發行驗證。自動更新僅針對該版本已驗證的目標啟用。', 'Validated for this release': '此版本已驗證', 'Candidate — validation pending': '候選版本，等待驗證', 'Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.': '需要 systemd 和 glibc 2.34 或更新版本。發行版版本支援情況見下方 Linux 目標狀態。'},
+  };
   const originals = new WeakMap();
   const pageTitle = document.title;
   const description = document.querySelector('meta[name="description"]');
@@ -30,7 +34,7 @@
     if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); options[event.key === 'Home' ? 0 : options.length - 1].focus(); }
   });
   document.addEventListener('click', event => { if (!control.contains(event.target)) closeMenu(); });
-  const translate = text => (current === 'en' ? text : dictionary[current]?.[text] || text);
+  const translate = text => (current === 'en' ? text : linuxTranslations[current]?.[text] || dictionary[current]?.[text] || text);
   window.siteT = translate;
   function apply() {
     document.documentElement.lang = current;
@@ -59,5 +63,5 @@
   }
   menu.addEventListener('click', event => { const option = event.target.closest('button[data-language]'); if (!option) return; current = option.dataset.language; try { localStorage.setItem('ragent-site-language', current); } catch (_) {} closeMenu(); apply(); button.focus(); });
   label.textContent = languages[current];
-  fetch('translations.json?v=android-proot-20261115').then(response => { if (!response.ok) throw Error('translation unavailable'); return response.json(); }).then(data => { dictionary = data; apply(); }).catch(() => { document.documentElement.lang = 'en'; });
+  fetch('translations.json?v=linux-targets-20261115').then(response => { if (!response.ok) throw Error('translation unavailable'); return response.json(); }).then(data => { dictionary = data; apply(); }).catch(() => { document.documentElement.lang = 'en'; });
 })();

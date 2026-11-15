@@ -15,7 +15,9 @@ export async function createReleaseBuildinfo(artifact, version, commit, buildVer
       || !buildVersion.split('.').every((part) => Number.isSafeInteger(Number(part)))
       || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)
       || ![`ragent_${version}_amd64.deb`, `ragent_${version}_arm64.deb`, `ragent_${version}-darwin-arm64.dmg`,
-        `Ragent-${version}-ubuntu24.04-x86_64.deb`, `Ragent-${version}-ubuntu24.04-arm64.deb`, `Ragent-${version}-macos13plus-arm64.dmg`].includes(name)) {
+        `Ragent-${version}-ubuntu24.04-x86_64.deb`, `Ragent-${version}-ubuntu24.04-arm64.deb`,
+        `Ragent-${version}-linux-x86_64.deb`, `Ragent-${version}-linux-arm64.deb`,
+        `Ragent-${version}-rhel9-x86_64.rpm`, `Ragent-${version}-macos13plus-arm64.dmg`].includes(name)) {
     throw new Error('Invalid release version, commit or supported artifact name');
   }
   const input = await open(artifact, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));

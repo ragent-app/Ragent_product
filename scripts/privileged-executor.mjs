@@ -730,6 +730,12 @@ export async function handleSemanticRequest(request, context = {}) {
   if (adapter === SEMANTIC_ADAPTER_APT_INSTALL_V1 && !SEMANTIC_APT_ADAPTER_ENABLED) {
     return { ok: false, id: requestId, error: 'Semantic apt adapter is disabled', code: 'SEMANTIC_ADAPTER_DISABLED' };
   }
+  if (adapter === SEMANTIC_ADAPTER_APT_INSTALL_V1) {
+    const osRelease = await readFile('/etc/os-release', 'utf8').catch(() => '');
+    if (!/^ID=(?:ubuntu|debian|"ubuntu"|"debian")$/m.test(osRelease)) {
+      return { ok: false, id: requestId, error: 'Privileged package installation is not supported on this distribution; the available adapter requires Ubuntu or Debian with apt.', code: 'SEMANTIC_ADAPTER_UNSUPPORTED_DISTRIBUTION' };
+    }
+  }
   if (adapter === 'windows-winget-install/v1' || adapter === 'windows-msi-install/v1') {
     // This executor deliberately has no Windows Phase 2B production path yet.
     // Keep the old capability/revalidation implementation unreachable: a

@@ -3,6 +3,7 @@
   const status = document.getElementById('download-status');
   const grid = document.getElementById('download-grid');
   const history = document.getElementById('release-history');
+  const linuxTargets = document.getElementById('linux-targets');
   if (!status || !grid || !history) return;
   const t = text => window.siteT ? window.siteT(text) : text;
   let cached = null;
@@ -20,20 +21,20 @@
     else return null;
     let arch = /(?:^|[-_.])(arm64|aarch64)(?:[-_.]|$)/.test(name) ? 'ARM64' : /(?:^|[-_.])(x64|x86_64|amd64)(?:[-_.]|$)/.test(name) ? 'x64' : /(?:^|[-_.])(universal)(?:[-_.]|$)/.test(name) ? 'Universal' : null;
     if (!arch && platform !== 'Android') return null;
-    if (!arch) arch = 'Android';
+    if (!arch) arch = 'Universal';
     let url;
     try { url = new URL(asset.browser_download_url); } catch (_) { return null; }
     const prefix = '/' + repo + '/releases/download/';
     const parts = url.pathname.slice(prefix.length).split('/');
     if (url.origin !== 'https://github.com' || !url.pathname.startsWith(prefix) || parts.length !== 2 || !parts[0] || parts[1] !== encodeURIComponent(asset.name) || url.search || url.hash || url.username || url.password) return null;
-    const requirement = /-windows11-/.test(name) ? 'Windows 11' : /-ubuntu24\.04-/.test(name) ? 'Ubuntu 24.04' : /-macos13plus-/.test(name) ? 'macOS 13+' : '';
-    return { platform, arch, format, url: url.href, name: asset.name, requirement };
+    const requirement = /-windows11-/.test(name) ? 'Windows 11' : /-ubuntu24\.04-/.test(name) ? 'Ubuntu 24.04' : /-rhel9-/.test(name) ? 'RHEL 9' : /-linux-/.test(name) && format === 'DEB' ? 'Ubuntu / Debian' : /-macos13plus-/.test(name) ? 'macOS 13+' : /-android8plus-/.test(name) ? 'Android 8+' : '';
+    return { platform, arch, format, url: url.href, name: asset.name, requirement, digest: asset.digest };
   }
   function el(tag, text, className) { const node = document.createElement(tag); if (text) node.textContent = text; if (className) node.className = className; return node; }
   function link(text, url, className) { const node = el('a', text, className); node.href = url; return node; }
   async function load() {
     const generation = ++renderGeneration;
-    status.textContent = t('Checking available releases…'); grid.replaceChildren(); history.replaceChildren();
+    status.textContent = t('Checking available releases…'); grid.replaceChildren(); history.replaceChildren(); if (linuxTargets) linuxTargets.replaceChildren();
     try {
       if (!cached && !pending) pending = (async () => {
         const result = [];
@@ -54,13 +55,13 @@
       const latest = new Map();
       for (const release of releases) {
         const packages = (release.assets || []).map(classify).filter(Boolean).sort((a, b) => Number(Boolean(b.requirement)) - Number(Boolean(a.requirement)));
-        if (!release.prerelease) for (const asset of packages) { const key = `${asset.platform}/${asset.arch}/${asset.format}`; if (!latest.has(key)) latest.set(key, { ...asset, version: release.tag_name }); }
+        if (!release.prerelease) for (const asset of packages) { const key = `${asset.platform}/${asset.requirement}/${asset.arch}/${asset.format}`; if (!latest.has(key)) latest.set(key, { ...asset, version: release.tag_name }); }
         if (!packages.length) continue;
         const row = el('article', '', 'release');
         const description = el('div'); description.append(el('h3', release.tag_name), el('p', `${new Date(release.published_at).toLocaleDateString(document.documentElement.lang)}${release.prerelease ? ' · ' + t('Preview') : ''}`, 'release-meta'));
         const links = el('div', '', 'release-links');
         const shown = new Set();
-        packages.forEach(asset => { const key = `${asset.platform}/${asset.arch}/${asset.format}`; if (!shown.has(key)) { shown.add(key); links.append(link(`${asset.platform === 'Android local runtime' ? t('Android local runtime') : asset.requirement || asset.platform} · ${asset.arch} · ${asset.format}`, asset.url)); } });
+        packages.forEach(asset => { const key = `${asset.platform}/${asset.requirement}/${asset.arch}/${asset.format}`; if (!shown.has(key)) { shown.add(key); links.append(link(`${asset.platform === 'Android local runtime' ? t('Android local runtime') : asset.requirement || asset.platform} · ${asset.arch} · ${asset.format}`, asset.url)); } });
         const releaseURL = new URL(release.html_url);
         if (releaseURL.origin === 'https://github.com' && releaseURL.pathname.startsWith('/' + repo + '/releases/tag/')) links.append(link(t('Release notes ↗'), releaseURL.href));
         row.append(description, links); history.append(row);
@@ -82,8 +83,27 @@
               link(t('Installation instructions ↗'), `https://github.com/${repo}/blob/main/docs/android-proot.md`));
           } else {
             card.append(el('h3', `${asset.requirement || platform} · ${t(asset.arch)}`), el('p', `${asset.version} · ${asset.format}`), link(`${t('Download')} ${asset.format} ↓`, asset.url, 'button'));
+            if (asset.requirement === 'Ubuntu / Debian') card.append(el('p', t('Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.')));
+            if (platform === 'Android') card.append(el('p', t('The GitHub APK is signed separately from the Google Play build. Uninstall the other version before switching.')));
           }
           grid.append(card);
+        }
+      }
+      if (linuxTargets) {
+        const targets = [
+          ...['22.04', '24.04', '26.04'].flatMap(version => ['x64', 'arm64'].map(arch => ({ id: 'ubuntu', version, arch, format: 'DEB' }))),
+          ...['12', '13'].flatMap(version => ['x64', 'arm64'].map(arch => ({ id: 'debian', version, arch, format: 'DEB' }))),
+          { id: 'rhel', version: '9', arch: 'x64', format: 'RPM' },
+        ];
+        for (const target of targets) {
+          const asset = [...latest.values()].find(item => item.format === target.format && item.arch.toLowerCase() === target.arch && item.requirement === (target.format === 'DEB' ? 'Ubuntu / Debian' : 'RHEL 9'));
+          const release = asset && releases.find(item => item.tag_name === asset.version && !item.prerelease);
+          const validated = Boolean(release && /^sha256:[a-f0-9]{64}$/.test(asset.digest || '') && String(release.body || '').includes(`<!-- ragent-linux-validated:${asset.name}:${target.id}:${target.version}:${target.arch}:${asset.digest} -->`));
+          const name = { ubuntu: 'Ubuntu', debian: 'Debian', rhel: 'RHEL' }[target.id];
+          const card = el('article', '', 'download-item');
+          card.append(el('h3', `${name} ${target.version} · ${target.arch === 'x64' ? 'x64' : 'ARM64'} · ${target.format}`), el('p', t(validated ? 'Validated for this release' : 'Candidate — validation pending')));
+          if (!asset) card.append(el('span', t('No public package is available yet.'), 'unavailable'));
+          linuxTargets.append(card);
         }
       }
       status.textContent = releases.length ? '' : t('No published releases are available yet.');

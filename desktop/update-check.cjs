@@ -1,5 +1,20 @@
 "use strict";
 
+const fs = require("node:fs");
+function linuxTarget(arch = process.arch) {
+  try {
+    const values = {};
+    for (const line of fs.readFileSync("/etc/os-release", "utf8").split(/\r?\n/)) {
+      const match = /^(ID|VERSION_ID)=(?:"([^"]*)"|([^\s]*))$/.exec(line);
+      if (match) values[match[1]] = match[2] ?? match[3];
+    }
+    if (((values.ID === "ubuntu" && ["22.04", "24.04", "26.04"].includes(values.VERSION_ID)) ||
+        (values.ID === "debian" && ["12", "13"].includes(values.VERSION_ID))) && ["x64", "arm64"].includes(arch)) return `${values.ID}:${values.VERSION_ID}`;
+    if (values.ID === "rhel" && /^9(?:\.\d+)?$/.test(values.VERSION_ID || "") && arch === "x64") return `${values.ID}:9`;
+  } catch {}
+  return null;
+}
+
 const API = "https://api.github.com/repos/ragent-app/Ragent_product/releases?per_page=100";
 const DOWNLOAD_PREFIX = "/ragent-app/Ragent_product/releases/download/";
 function version(value) {
@@ -36,15 +51,17 @@ function assetVersion(asset) {
   const match = /^(?:Ragent-|Ragent-|ragent_|ragent_)([0-9]+(?:\.[0-9]+){2,3})(?=[-_])/i.exec(String(asset?.name || ""));
   return match ? version(match[1]) : null;
 }
-function releaseAsset(asset, platform = process.platform, arch = process.arch) {
+function releaseAsset(asset, platform = process.platform, arch = process.arch, target = platform === "linux" ? linuxTarget(arch) : null) {
   if (!asset || typeof asset.name !== "string") return false;
   const patterns = {
     "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:windows-x64|windows11-x86_64)-setup\.exe|(?:Ragent|Ragent)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
-    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:linux-x64|ubuntu24\.04-x86_64)|(?:ragent|ragent)_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
-    "linux-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-ubuntu24\.04-arm64|ragent_[0-9]+(?:\.[0-9]+){2,3}_arm64)\.deb$/i,
+    "linux-x64-debian-family": /^Ragent-[0-9]+(?:\.[0-9]+){2,3}-linux-x86_64\.deb$/i,
+    "linux-arm64-debian-family": /^Ragent-[0-9]+(?:\.[0-9]+){2,3}-linux-arm64\.deb$/i,
+    "linux-x64-rhel9": /^Ragent-[0-9]+(?:\.[0-9]+){2,3}-rhel9-x86_64\.rpm$/i,
     "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:macos-arm64|macos13plus-arm64)|(?:ragent|ragent)_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
   };
-  const pattern = patterns[`${platform}-${arch}`];
+  const family = /^(?:ubuntu:(?:22\.04|24\.04|26\.04)|debian:(?:12|13))$/.test(target || "") ? "debian-family" : target === "rhel:9" ? "rhel9" : "";
+  const pattern = patterns[`${platform}-${arch}${platform === "linux" ? `-${family}` : ""}`];
   if (!pattern || !pattern.test(asset.name)) return false;
   try {
     const url = new URL(asset.browser_download_url);
@@ -52,16 +69,16 @@ function releaseAsset(asset, platform = process.platform, arch = process.arch) {
     return url.protocol === "https:" && url.hostname === "github.com" && !url.port && !url.username && !url.password && !url.search && !url.hash && url.pathname.startsWith(DOWNLOAD_PREFIX) && suffix.length === 2 && !!suffix[0] && suffix[1] === encodeURIComponent(asset.name);
   } catch { return false; }
 }
-function releaseAssetUrl(value, platform = process.platform, arch = process.arch) {
+function releaseAssetUrl(value, platform = process.platform, arch = process.arch, target = platform === "linux" ? linuxTarget(arch) : null) {
   try {
     const url = new URL(value);
-    return releaseAsset({ name: decodeURIComponent(url.pathname.split("/").pop()), browser_download_url: value }, platform, arch);
+    return releaseAsset({ name: decodeURIComponent(url.pathname.split("/").pop()), browser_download_url: value }, platform, arch, target);
   } catch { return false; }
 }
 const windowsAsset = (asset) => releaseAsset(asset, "win32", "x64");
 const windowsAssetUrl = (value) => releaseAssetUrl(value, "win32", "x64");
 
-async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", currentBuild = "", platform = process.platform, arch = process.arch } = {}) {
+async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", currentBuild = "", platform = process.platform, arch = process.arch, target = platform === "linux" ? linuxTarget(arch) : null } = {}) {
   const installed = version(currentVersion);
   if (!installed) throw new Error("invalid-current-version");
   let newest = null;
@@ -75,7 +92,8 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
       const parsed = version(release.tag_name);
       const asset = parsed && Array.isArray(release.assets) && release.assets.find((candidate) => {
         const candidateVersion = assetVersion(candidate);
-        return candidateVersion && compare(parsed, candidateVersion) === 0 && releaseAsset(candidate, platform, arch);
+        return candidateVersion && compare(parsed, candidateVersion) === 0 && releaseAsset(candidate, platform, arch, target)
+          && (platform !== "linux" || (/^sha256:[a-f0-9]{64}$/.test(candidate.digest || "") && String(release.body || "").includes(`<!-- ragent-linux-validated:${candidate.name}:${target}:${arch}:${candidate.digest} -->`)));
       });
       if (parsed && asset && (!newest || compare(parsed, newest.parsed) > 0)) newest = { parsed, tag: release.tag_name, url: asset.browser_download_url, asset, buildInfo: releaseBuildInfo(release, asset, { allowLegacy: platform === "win32" }) };
     }
@@ -99,4 +117,4 @@ async function check(currentVersion, fetchImpl = fetch, { currentCommit = "", cu
     downloadUrl: newest.url, ...(newest.buildInfo ? { packageSha256: newest.asset.digest.slice(7), packageSize: newest.asset.size || null } : {}), ...(buildChanged ? { buildChanged: true } : {}),
     ...(buildIdentityUnavailable ? { buildIdentityUnavailable: true } : {}) };
 }
-module.exports = { check, version, compare, windowsAsset, windowsAssetUrl, releaseAsset, releaseAssetUrl, sourceCommit, releaseBuildInfo };
+module.exports = { check, version, compare, windowsAsset, windowsAssetUrl, releaseAsset, releaseAssetUrl, sourceCommit, releaseBuildInfo, linuxTarget };

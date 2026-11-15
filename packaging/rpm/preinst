@@ -1,0 +1,258 @@
+#!/bin/sh
+set -eu
+
+# Never traverse a redirected state root while repairing ownership or modes.
+for state_path in /var/lib/ragent /var/lib/ragent/config /var/lib/ragent/config/native-provider-runtime /var/lib/ragent-run /var/lib/ragent-run/provider-homes; do
+  if [ -L "$state_path" ]; then
+    echo "Refusing to modify symlinked Ragent state path: $state_path" >&2
+    exit 1
+  fi
+done
+
+SERVICE_USER_FILE=/etc/ragent/service-user
+
+trim_service_user() {
+  printf '%s' "${1:-}" | tr -d '[:space:]'
+}
+
+resolve_restart_check_user() {
+  user=""
+  if [ -d /run/systemd/system ]; then
+    user="$(systemctl show -p User --value ragent.service 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+  [ -n "$user" ] || user="$(trim_service_user "${RAGENT_SERVICE_USER:-}")"
+  if [ -z "$user" ] && [ -r "$SERVICE_USER_FILE" ]; then
+    user="$(sed -n '1p' "$SERVICE_USER_FILE" | tr -d '[:space:]')"
+  fi
+  [ -n "$user" ] || user=ragent
+  case "$user" in
+    root|''|*[!A-Za-z0-9_.@-]*) user=ragent ;;
+  esac
+  if ! getent passwd "$user" >/dev/null 2>&1; then
+    user=ragent
+  fi
+  printf '%s\n' "$user"
+}
+
+# Repair state permissions before the upgrade check runs.  Older packages can
+# leave the control config (including the native provider registry and secret
+# store) owned by root or mode 000.  The new package must be able to recover
+# that state before invoking any Node code as the service user; otherwise the
+# preinst/postinst sequence can fail before its later ownership convergence.
+repair_provider_runtime_access() {
+  repair_user="$1"
+  repair_group="$2"
+  config_root=/var/lib/ragent/config
+  [ -d "$config_root" ] || return 0
+
+  chown "$repair_user:$repair_group" /var/lib/ragent "$config_root"
+  chmod 0750 /var/lib/ragent "$config_root"
+
+  if [ -d "$config_root/native-provider-runtime" ]; then
+    chown -R "$repair_user:$repair_group" "$config_root/native-provider-runtime"
+    find "$config_root/native-provider-runtime" -type d -exec chmod 0700 {} +
+    find "$config_root/native-provider-runtime" -type f -exec chmod 0600 {} +
+  fi
+
+  if [ -f "$config_root/auth.json" ]; then
+    chown "$repair_user:$repair_group" "$config_root/auth.json"
+    chmod 0600 "$config_root/auth.json"
+  fi
+
+  for state_file in \
+    "$config_root/owner-account-binding.json" \
+    "$config_root/owner-account-transactions.json" \
+    "$config_root/owner-account-native-pending.json" \
+    "$config_root/owner-account-native-journal.json" \
+    "$config_root/instance-identity.json" \
+    "$config_root/instance-signing-key.json" \
+    "$config_root/device-public-keys.json" \
+    "$config_root/sync-handshake-tokens.json"
+  do
+    if [ -f "$state_file" ]; then
+      chown "$repair_user:$repair_group" "$state_file"
+      chmod 0600 "$state_file"
+    fi
+  done
+}
+
+if [ "${1:-0}" -gt 1 ] \
+  && [ "${RAGENT_FORCE_UPGRADE_WITH_ACTIVE_RUNS:-0}" != 1 ] \
+  && [ -x /opt/ragent/runtime/node ] \
+  && [ -f /opt/ragent/app/cli.js ]; then
+  service_user="$(resolve_restart_check_user)"
+  service_group="$(id -gn "$service_user")"
+  repair_provider_runtime_access "$service_user" "$service_group"
+  # Restore the files affected by older root lifecycle brokers before the
+  # unprivileged upgrade safety check attempts to read them.
+  if [ -d /var/lib/ragent-run/results ]; then
+    find /var/lib/ragent-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
+      -path '/var/lib/ragent-run/results/run_*/status.json' \
+      -exec chown -h "$service_user:$service_group" {} +
+  fi
+  service_home="$(getent passwd "$service_user" | awk -F: '{ print $6 }' || true)"
+  [ -n "$service_home" ] || service_home=/var/lib/ragent
+  run_spool_dir=""
+  if [ -r /etc/ragent/ragent.env ]; then
+    run_spool_dir="$(sed -n 's/^RAGENT_RUN_SPOOL_DIR=//p' /etc/ragent/ragent.env | tail -n 1 | tr -d '[:space:]')"
+  fi
+  run_node_as_service() {
+    if [ -n "$run_spool_dir" ]; then
+      runuser -u "$service_user" -- env \
+        HOME="$service_home" \
+        RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+        RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+        RAGENT_RUN_SPOOL_DIR="$run_spool_dir" \
+        /opt/ragent/runtime/node "$@"
+    else
+      runuser -u "$service_user" -- env \
+        HOME="$service_home" \
+        RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+        RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+        /opt/ragent/runtime/node "$@"
+    fi
+  }
+
+  run_upgrade_prepare() {
+    if [ -n "${RAGENT_RESTART_EXCLUDE_SESSION:-}" ]; then
+      run_node_as_service /opt/ragent/app/cli.js upgrade-prepare --json \
+        --exclude-session "$RAGENT_RESTART_EXCLUDE_SESSION"
+      return
+    fi
+    run_node_as_service /opt/ragent/app/cli.js upgrade-prepare --json
+  }
+
+  # The first package containing upgrade-prepare is evaluated by an older
+  # installed CLI. Keep the bootstrap upgrade safe without asking the operator
+  # to force it: this fallback is dependency-free and mirrors the new command's
+  # runner/cgroup proof until the new CLI has been unpacked.
+  run_legacy_upgrade_prepare() {
+    run_node_as_service - "$run_spool_dir" /var/lib/ragent/config "${RAGENT_RESTART_EXCLUDE_SESSION:-}" <<'NODE'
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const [runsDir, configDir, excludedSessionId] = process.argv.slice(2);
+const nonTerminalStates = new Set(['accepted', 'starting', 'running', 'cancelling']);
+const excluded = String(excludedSessionId || '').trim();
+
+function systemctl(scope, args) {
+  const prefix = scope === 'user' ? ['--user'] : [];
+  return execFileSync('systemctl', [...prefix, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+function independentCgroup(runner, controlPlane) {
+  const normalize = (value) => String(value || '').trim().replace(/\/+$/, '');
+  const childOf = (candidate, parent) => candidate === parent
+    || candidate.startsWith(parent === '/' ? '/' : `${parent}/`);
+  const runnerGroup = normalize(runner);
+  const controlGroup = normalize(controlPlane);
+  return Boolean(runnerGroup && controlGroup && runnerGroup !== controlGroup)
+    && !childOf(runnerGroup, controlGroup)
+    && !childOf(controlGroup, runnerGroup);
+}
+
+function fail(id, reason) {
+  return { id, reason };
+}
+
+const blockingRuns = [];
+let entries = [];
+try {
+  entries = readdirSync(runsDir, { withFileTypes: true });
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
+
+for (const entry of entries) {
+  if (!entry.isDirectory() || !entry.name.startsWith('run_')) continue;
+  let run;
+  try {
+    run = JSON.parse(readFileSync(join(runsDir, entry.name, 'status.json'), 'utf8'));
+  } catch {
+    continue;
+  }
+  if (!run || !nonTerminalStates.has(run.state)) continue;
+  if (excluded && String(run.sessionId || '').trim() === excluded) continue;
+
+  const id = String(run.id || entry.name).trim();
+  const mode = String(run.runnerLaunchMode || '').trim();
+  if (!['runner-lifecycle', 'systemd-transient-service'].includes(mode)) {
+    blockingRuns.push(fail(id, 'runner_not_systemd_managed'));
+    continue;
+  }
+  const unitName = String(run.runnerUnitName || `ragent-runner-${id}`).trim();
+  if (!/^ragent-runner-[A-Za-z0-9:_.@-]+$/.test(unitName)) {
+    blockingRuns.push(fail(id, 'runner_unit_invalid'));
+    continue;
+  }
+  const scope = run.runnerUnitScope === 'user' ? 'user' : 'system';
+  const chatUnit = scope === 'user' ? 'ragent-chat.service' : 'ragent.service';
+  try {
+    systemctl(scope, ['is-active', '--quiet', unitName]);
+    const runnerGroup = systemctl(scope, ['show', '--property=ControlGroup', '--value', unitName]);
+    const controlGroup = systemctl(scope, ['show', '--property=ControlGroup', '--value', chatUnit]);
+    if (!independentCgroup(runnerGroup, controlGroup)) {
+      blockingRuns.push(fail(id, 'runner_control_group_not_independent'));
+    }
+  } catch {
+    blockingRuns.push(fail(id, 'runner_unit_inactive_or_uninspectable'));
+  }
+}
+
+if (blockingRuns.length > 0) {
+  console.error(JSON.stringify({ ok: false, blockingRuns }));
+  process.exit(3);
+}
+
+const startedAt = new Date().toISOString();
+const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+mkdirSync(configDir, { recursive: true });
+const drainPath = join(configDir, 'restart-drain.json');
+const temporaryPath = `${drainPath}.${process.pid}.${Date.now()}.tmp`;
+writeFileSync(temporaryPath, `${JSON.stringify({
+  version: 1,
+  mode: 'upgrade',
+  reason: 'package-upgrade',
+  force: false,
+  ownerPid: process.pid,
+  startedAt,
+  expiresAt,
+}, null, 2)}\n`, { mode: 0o600 });
+renameSync(temporaryPath, drainPath);
+console.log(JSON.stringify({ ok: true, activeRuns: entries.length }));
+NODE
+  }
+
+  upgrade_output=""
+  upgrade_status=0
+  upgrade_output="$(run_upgrade_prepare 2>&1)" || upgrade_status=$?
+  if [ "$upgrade_status" -ne 0 ]; then
+    case "$upgrade_output" in
+      *"Unknown command: upgrade-prepare"*)
+        if upgrade_output="$(run_legacy_upgrade_prepare 2>&1)"; then
+          upgrade_status=0
+        else
+          upgrade_status=$?
+        fi
+        ;;
+      *)
+        printf '%s\n' "$upgrade_output" >&2
+        echo "Ragent upgrade paused because active Runs are not proven restart-safe." >&2
+        echo "Wait for unsafe Runs to finish or repair the runner isolation baseline." >&2
+        exit 1
+        ;;
+    esac
+  fi
+  if [ "$upgrade_status" -ne 0 ]; then
+    printf '%s\n' "$upgrade_output" >&2
+    echo "Ragent upgrade paused because active Runs are not proven restart-safe." >&2
+    echo "Wait for unsafe Runs to finish or repair the runner isolation baseline." >&2
+    exit 1
+  fi
+fi
+
+exit 0
